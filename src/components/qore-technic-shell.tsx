@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { cn } from '@/lib/utils';
+import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 import {
   Home,
   ShieldAlert,
@@ -172,6 +173,13 @@ function SidebarNotificationsBell({ collapsed }: { collapsed: boolean }) {
 
 export default function QoreTechnicShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() || '';
+  // Arıza detayı (/ariza-yonetimi/[id]) KENDİ tam-sayfa shell'ine (fault-clay-page +
+  // fault-topbar) sahip. Shell'in mobil üst başlığı çift "QORE technic" yaratıyordu →
+  // bu rotada shell başlığını gizle (alt nav korunur). İstatistik/diğer-firma hariç.
+  const isFaultDetailPage =
+    pathname.startsWith('/ariza-yonetimi/') &&
+    !pathname.startsWith('/ariza-yonetimi/istatistikler') &&
+    !pathname.startsWith('/ariza-yonetimi/diger-firma-gecmisi');
   const router = useRouter();
   const { currentUserProfile, logout } = useAuth();
   const role = currentUserProfile?.role;
@@ -408,10 +416,13 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         </div>
       </aside>
 
-      {/* Mobile top brand */}
-      <header className="qore-technic-mobile-header md:hidden">
-        <QoreTechnicBrand align="center" size="md" />
-      </header>
+      {/* Mobile top brand — arıza detayı kendi başlığına (fault-topbar) sahip olduğundan
+          çift "QORE technic" başlığı olmaması için bu rotada gizlenir. */}
+      {!isFaultDetailPage && (
+        <header className="qore-technic-mobile-header md:hidden">
+          <QoreTechnicBrand align="center" size="md" />
+        </header>
+      )}
 
       {/* Main content area */}
       <main className="qore-technic-main qt-content">
@@ -420,6 +431,9 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
       {/* Mobile bottom nav */}
       <nav className="qore-technic-bottom-nav md:hidden" aria-label="QOREtechnic menü">
+        {/* Apple Liquid Glass yüzeyi — eski düz cam (CSS background) yerine canlı kırılma */}
+        <LiquidGlassSurface radius={18} strength={32} dispersion={0.4} blur={3} bezel={16} zoom={0.18} fallbackBlur={20} shine={false} />
+
         {/* Backdrop for closing popovers */}
         <div 
           className={cn('qt-popover-overlay', expandedMenu && 'qt-popover-overlay--open')}
@@ -429,7 +443,8 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
 
         {/* Popover Container */}
         <div className={cn('qt-mobile-popover', expandedMenu && 'qt-mobile-popover--open')} aria-hidden={!expandedMenu}>
-          {expandedMenu && 
+          <LiquidGlassSurface radius={20} strength={22} dispersion={0.3} blur={4} bezel={14} zoom={0.1} fallbackBlur={26} shine={false} />
+          {expandedMenu &&
             mobileNavItems.find(g => g.key === expandedMenu)?.subItems?.map((sub, idx) => {
               const SubIcon = sub.icon;
               return (

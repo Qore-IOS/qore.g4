@@ -14,6 +14,8 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
 import type { Hospital, Order, ProductCode } from '@/lib/types';
 import {
   ArrowLeft,
@@ -30,6 +32,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LabSelector } from '@/components/common/LabSelector';
 import DeliveryHistory, {
   type PartialDelivery,
 } from '@/components/lojistik-terminal/delivery-history';
@@ -50,8 +53,6 @@ function getStatusInfo(order: Order) {
     return { label: 'Teslim', cls: 'loj-status-badge loj-status-badge--success', Icon: CheckCircle2 };
   if (s === 'toplaniyor')
     return { label: 'Hazırlanıyor', cls: 'loj-status-badge loj-status-badge--info', Icon: Truck };
-  if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s))
-    return { label: 'Yolda', cls: 'loj-status-badge loj-status-badge--accent', Icon: Truck };
   if (s === 'eksik')
     return { label: 'Eksik', cls: 'loj-status-badge loj-status-badge--danger', Icon: AlertCircle };
   if (s === 'pending')
@@ -63,9 +64,12 @@ function getStatusInfo(order: Order) {
 
 export default function LojistikSiparisGecmisPanel() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
-  const [orders, setOrders] = useState<Order[]>([]);
+  // Geçmiş = aktif perifer siparişler (canlı `orders`) + tamamlananlar
+  // (`ordersArchive`). İkisi id'ye göre birleştirilir.
+  const [liveOrders, setLiveOrders] = useState<Order[]>([]);
+  const [archivedOrders, setArchivedOrders] = useState<Order[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [loading, setLoading] = useState(true);
@@ -86,8 +90,8 @@ export default function LojistikSiparisGecmisPanel() {
   useEffect(() => {
     (async () => {
       const [pSnap, hSnap] = await Promise.all([
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
       ]);
       setProductCodes(
         pSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))
@@ -96,30 +100,38 @@ export default function LojistikSiparisGecmisPanel() {
     })();
   }, []);
 
-  // Listen to ALL peripheral orders the user has access to
+  // Listen to ALL peripheral orders the user has access to — aktif siparişler
+  // canlı `orders`'tan, tamamlananlar `ordersArchive`'tan gelir.
   useEffect(() => {
-    const q = query(collection(db, 'orders'), where('isPeripheral', '==', true));
-    const unsub = onSnapshot(q, (snap) => {
-      const list = snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            ...data,
-            id: d.id,
-            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-          } as Order;
-        })
-        .filter((o) => !!o.labId && assignedLabIds.has(o.labId as string))
-        .sort((a, b) => {
-          const at = (a.createdAt as Date)?.getTime?.() ?? 0;
-          const bt = (b.createdAt as Date)?.getTime?.() ?? 0;
-          return bt - at;
-        });
-      setOrders(list);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [assignedLabIds]);
+    const mapDocs = (snap: any): Order[] =>
+      snap.docs.map((d: any) => {
+        const data = d.data();
+        return {
+          ...data,
+          id: d.id,
+          createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
+        } as Order;
+      });
+    const unsubLive = onSnapshot(
+      scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => { setLiveOrders(mapDocs(snap)); setLoading(false); }
+    );
+    const unsubArchive = onSnapshot(
+      scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => { setArchivedOrders(mapDocs(snap)); setLoading(false); }
+    );
+    return () => { unsubLive(); unsubArchive(); };
+  }, [currentCompanyId, isSuperAdmin]);
+
+  const orders = useMemo(() => {
+    return mergeOrdersById(liveOrders, archivedOrders)
+      .filter((o) => !!o.labId && assignedLabIds.has(o.labId as string))
+      .sort((a, b) => {
+        const at = (a.createdAt as Date)?.getTime?.() ?? 0;
+        const bt = (b.createdAt as Date)?.getTime?.() ?? 0;
+        return bt - at;
+      });
+  }, [liveOrders, archivedOrders, assignedLabIds]);
 
   const productNameMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -273,19 +285,15 @@ export default function LojistikSiparisGecmisPanel() {
 
             {visibleHospitals.length > 1 && (
               <div className="px-4 py-2 border-b" style={{ borderColor: 'var(--loj-stroke)' }}>
-                <select
+                <LabSelector
+                  size="sm"
+                  labs={visibleHospitals.map(h => ({ id: h.id, name: h.name || h.ad || h.id, kod: h.kod }))}
                   value={labFilter}
-                  onChange={(e) => setLabFilter(e.target.value)}
-                  className="w-full h-8 rounded-lg text-xs px-2 border-0 outline-none"
-                  style={{ background: 'var(--loj-surface-2)', color: 'var(--loj-text)' }}
-                >
-                  <option value="all">Tüm laboratuvarlar</option>
-                  {visibleHospitals.map((h) => (
-                    <option key={h.id} value={h.id}>
-                      {h.name || h.ad || h.id}
-                    </option>
-                  ))}
-                </select>
+                  onChange={setLabFilter}
+                  placeholder="Tüm laboratuvarlar"
+                  allOption={{ value: 'all', label: 'Tüm laboratuvarlar' }}
+                  icon={false}
+                />
               </div>
             )}
 

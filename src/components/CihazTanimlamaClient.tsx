@@ -1,6 +1,7 @@
 
 'use client';
 import React, { useState, useEffect, useRef } from 'react';
+import Link from 'next/link';
 import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
@@ -25,6 +26,7 @@ import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
 import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { cn, exportDevicesToPdf, exportDataToExcel } from '@/lib/utils';
@@ -34,6 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -160,8 +163,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const fetchDevices = async () => {
     setLoading(true);
     const [deviceSnap, planSnap] = await Promise.all([
-      getDocs(collection(db, 'devices')),
-      getDocs(collection(db, 'maintenancePlans')),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
     ]);
     const scopedDevices = filterByCompanyScope(
       deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
@@ -180,7 +183,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
 
   const fetchModelDefinitions = async () => {
-    const snap = await getDocs(collection(db, 'deviceModelDefinitions'));
+    const snap = await getDocs(scopedQuery('deviceModelDefinitions', currentCompanyId, isSuperAdmin));
     const rows = filterByCompanyScope(
       snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceModelDefinition)),
       currentCompanyId,
@@ -199,7 +202,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const fetchProductCodes = async () => {
       try {
         // Fetch all products and filter for yedek_parca client-side
-        const snap = await getDocs(collection(db, 'productCodes'));
+        const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         // Filter for yedek_parca products - only show products that are explicitly marked as spare parts
         const spareParts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
@@ -229,7 +232,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     const id = current.id
       ?? `${current.brand}-${current.model}-${current.seriNumarasi}`.toLowerCase().replace(/\s+/g, '-');
       
-    await setDoc(doc(db, 'devices', id), withCompanyScope({ 
+    await setDoc(doc(db, 'devices', id), withCompanyScope({
       brand: current.brand,
       model: current.model,
       imageUrl,
@@ -240,7 +243,15 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       mulkiyet: current.mulkiyet || '',
       kurulumTarihi: current.kurulumTarihi || '',
       kurulumPersonelleri: current.kurulumPersonelleri || '',
-      aciklama: current.aciklama || ''
+      aciklama: current.aciklama || '',
+      // Test bazlı maliyet hesabı alanları
+      maliyetCurrency: current.maliyetCurrency || 'TRY',
+      aylikKira: current.aylikKira ?? null,
+      kiraDonemi: current.kiraDonemi ?? 'aylik',
+      satinAlmaTutari: current.satinAlmaTutari ?? null,
+      satinAlmaTarihi: current.satinAlmaTarihi ?? null,
+      amortismanAyi: current.amortismanAyi ?? null,
+      testKapasiteSaatBasi: current.testKapasiteSaatBasi ?? null,
     }, currentUserProfile?.companyId), { merge: true });
 
     toast({ title: 'Kaydedildi', description: 'Cihaz tanımı kaydedildi.' });
@@ -282,8 +293,10 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       setExistingPlans(plans);
 
       // Periyodik parça değişimlerini getir
-      const partsQuery = query(
-        collection(db, 'periodicPartChanges'),
+      const partsQuery = scopedQuery(
+        'periodicPartChanges',
+        currentCompanyId,
+        isSuperAdmin,
         where('deviceId', '==', device.id)
       );
       const partsSnap = await getDocs(partsQuery);
@@ -579,20 +592,6 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     }
   };
 
-  const toggleLabSelection = (labId: string) => {
-    setSelectedLabIds(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-
-  const toggleAllLabs = () => {
-    if (selectedLabIds.length === labsWithDevices.length) {
-      setSelectedLabIds([]);
-    } else {
-      setSelectedLabIds(labsWithDevices.map(l => l.id));
-    }
-  };
-
   const toggleDeviceSelection = (deviceId: string) => {
     setSelectedDeviceIds(prev =>
       prev.includes(deviceId) ? prev.filter(id => id !== deviceId) : [...prev, deviceId]
@@ -705,8 +704,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Fetch all maintenance plans and periodic parts for all devices
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(collection(db, 'periodicPartChanges')),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
@@ -765,8 +764,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     setExportExcelLoading(true);
     try {
       const [allPlansSnap, allPartsSnap] = await Promise.all([
-        getDocs(collection(db, 'maintenancePlans')),
-        getDocs(collection(db, 'periodicPartChanges')),
+        getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('periodicPartChanges', currentCompanyId, isSuperAdmin)),
       ]);
       const allPlans = filterByCompanyScope(
         allPlansSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
@@ -853,7 +852,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         }, currentUserProfile?.companyId));
       }
       if (selectedDefinitionImageUrl) {
-        const deviceSnap = await getDocs(collection(db, 'devices'));
+        const deviceSnap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
         const scopedDevices = filterByCompanyScope(
           deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
           currentCompanyId,
@@ -1128,13 +1127,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
               {Array.from(new Set(devices.map(d => d.brand).filter(Boolean))).map(brand => <SelectItem key={brand} value={brand}>{brand}</SelectItem>)}
             </SelectContent>
           </Select>
-          <Select value={labFilter} onValueChange={setLabFilter}>
-            <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue placeholder="Laboratuvar" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-              {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          <LabSelector
+            labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+            value={labFilter}
+            onChange={setLabFilter}
+            placeholder="Laboratuvar"
+            allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+          />
           <Select value={planFilter} onValueChange={(v) => setPlanFilter(v as 'all' | 'planned' | 'unplanned')}>
             <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -1231,6 +1230,12 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             <Boxes className="h-4 w-4 mr-2" />
             Marka / Model Tanımları
           </Button>
+          <Link href="/cihaz-test-dagilimi">
+            <Button variant="outline" className="bg-[var(--dashboard-surface-2)]">
+              <Boxes className="h-4 w-4 mr-2" />
+              Cihaz Test Dağılımı
+            </Button>
+          </Link>
         </div>
       </div>
 
@@ -1348,7 +1353,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Select value={String(current.mulkiyet || '')} onValueChange={val => setCurrent({ ...current, mulkiyet: val })}>
                     <SelectTrigger><SelectValue placeholder="Mülkiyet seçin" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="kurum">Kurum</SelectItem>
+                      <SelectItem value="kurum">Kurum (Satın Alma)</SelectItem>
                       <SelectItem value="kiralik">Kiralık</SelectItem>
                       <SelectItem value="demirbas">Demirbaş</SelectItem>
                       <SelectItem value="diger">Diğer</SelectItem>
@@ -1358,6 +1363,117 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                 <div className="space-y-1">
                   <Label>Kurulum Tarihi</Label>
                   <Input type="date" value={String(current.kurulumTarihi || '')} onChange={e => setCurrent({ ...current, kurulumTarihi: e.target.value })} />
+                </div>
+              </div>
+
+              {/* Maliyet alanları - test bazlı maliyet hesabı için */}
+              <div className="cihaz-card p-4 space-y-3">
+                <p className="cihaz-section-label">Maliyet Bilgileri (Test Maliyet Hesabı İçin)</p>
+                <div className="grid md:grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label>Para Birimi</Label>
+                    <Select
+                      value={String(current.maliyetCurrency || 'TRY')}
+                      onValueChange={val => setCurrent({ ...current, maliyetCurrency: val as any })}
+                    >
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="TRY">TRY (₺)</SelectItem>
+                        <SelectItem value="EUR">EUR (€)</SelectItem>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' ||
+                    String(current.mulkiyet || '').toLowerCase() === 'kira') && (
+                    <>
+                      <div className="space-y-1">
+                        <Label>Kira Dönemi</Label>
+                        <Select
+                          value={String(current.kiraDonemi || 'aylik')}
+                          onValueChange={val => setCurrent({ ...current, kiraDonemi: val as any })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="aylik">Aylık</SelectItem>
+                            <SelectItem value="yillik">Yıllık</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>
+                          {String(current.kiraDonemi || 'aylik') === 'yillik' ? 'Yıllık Kira Tutarı' : 'Aylık Kira Tutarı'}
+                        </Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="Örn: 45000"
+                          value={current.aylikKira ?? ''}
+                          onChange={e => setCurrent({ ...current, aylikKira: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                    </>
+                  )}
+                  {(String(current.mulkiyet || '').toLowerCase() === 'kurum' ||
+                    String(current.mulkiyet || '').toLowerCase() === 'satin_alma') && (
+                    <>
+                      <div className="space-y-1">
+                        <Label>Satın Alma Tutarı</Label>
+                        <Input
+                          type="number"
+                          inputMode="decimal"
+                          placeholder="Örn: 600000"
+                          value={current.satinAlmaTutari ?? ''}
+                          onChange={e => setCurrent({ ...current, satinAlmaTutari: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Amortisman (Ay)</Label>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          placeholder="Örn: 60 (5 yıl)"
+                          value={current.amortismanAyi ?? ''}
+                          onChange={e => setCurrent({ ...current, amortismanAyi: e.target.value === '' ? undefined : Number(e.target.value) })}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+                {(String(current.mulkiyet || '').toLowerCase() === 'kiralik' || String(current.mulkiyet || '').toLowerCase() === 'kira') &&
+                  Number(current.aylikKira) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {String(current.kiraDonemi || 'aylik') === 'yillik'
+                        ? `Aylık karşılık: ₺${(Number(current.aylikKira) / 12).toLocaleString('tr-TR', { maximumFractionDigits: 2 })} (yıllık ${Number(current.aylikKira).toLocaleString('tr-TR')})`
+                        : `Aylık maliyet: ₺${Number(current.aylikKira).toLocaleString('tr-TR')}`}
+                    </p>
+                  )}
+                {(String(current.mulkiyet || '').toLowerCase() === 'kurum' || String(current.mulkiyet || '').toLowerCase() === 'satin_alma') &&
+                  Number(current.satinAlmaTutari) > 0 &&
+                  Number(current.amortismanAyi) > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Aylık amortisman: ₺
+                      {(Number(current.satinAlmaTutari) / Number(current.amortismanAyi)).toLocaleString('tr-TR', {
+                        maximumFractionDigits: 2,
+                      })}
+                    </p>
+                  )}
+
+                {/* Saat başına test kapasitesi (TPH) */}
+                <div className="grid md:grid-cols-2 gap-3 pt-2 border-t border-dashed border-muted/40">
+                  <div className="space-y-1">
+                    <Label>Saat Başına Test Kapasitesi</Label>
+                    <Input
+                      type="number"
+                      inputMode="decimal"
+                      placeholder="Örn: 100"
+                      value={current.testKapasiteSaatBasi ?? ''}
+                      onChange={e => setCurrent({ ...current, testKapasiteSaatBasi: e.target.value === '' ? undefined : Number(e.target.value) })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Teorik maksimum (test/saat). Kapasite ve atıl maliyet hesabında kullanılır.
+                    </p>
+                  </div>
                 </div>
               </div>
               <div className="space-y-1">
@@ -2265,47 +2381,20 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
           {selectionMode === 'lab' ? (
             <>
-              <p className="text-sm text-muted-foreground">
-                Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir.
-              </p>
-
-              <div className="flex items-center gap-2 border-b pb-3 mb-3">
-                <Checkbox
-                  id="select-all-labs"
-                  checked={selectedLabIds.length === labsWithDevices.length && labsWithDevices.length > 0}
-                  onCheckedChange={toggleAllLabs}
-                />
-                <Label htmlFor="select-all-labs" className="text-sm font-medium cursor-pointer">
-                  Tümünü Seç ({labsWithDevices.length} laboratuvar)
-                </Label>
-              </div>
-
-              <ScrollArea className="max-h-[40vh]">
-                <div className="space-y-2">
-                  {labsWithDevices.map(lab => {
-                    const deviceCount = devices.filter(d => d.hospitalId === lab.id).length;
-                    return (
-                      <div
-                        key={lab.id}
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
-                          selectedLabIds.includes(lab.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
-                        )}
-                        onClick={() => toggleLabSelection(lab.id)}
-                      >
-                        <Checkbox
-                          checked={selectedLabIds.includes(lab.id)}
-                          onCheckedChange={() => toggleLabSelection(lab.id)}
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{lab.name}</p>
-                          <p className="text-xs text-muted-foreground">{deviceCount} cihaz</p>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </ScrollArea>
+              <LabSelector
+                mode="multi"
+                helperText="Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir."
+                labs={labsWithDevices.map(lab => ({
+                  id: lab.id,
+                  name: lab.name,
+                  kod: lab.kod,
+                  meta: `${devices.filter(d => d.hospitalId === lab.id).length} cihaz`,
+                }))}
+                values={selectedLabIds}
+                onValuesChange={setSelectedLabIds}
+                placeholder="Laboratuvar seçin"
+                showChips
+              />
 
               {selectedLabIds.length > 0 && (
                 <div className="bg-muted/50 rounded-md p-3 text-sm">

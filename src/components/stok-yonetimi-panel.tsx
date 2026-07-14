@@ -29,18 +29,19 @@ import { db } from '@/lib/firebase';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
   SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
-  ChevronLeft, ChevronRight, MoreHorizontal, Eye,
+  ChevronLeft, ChevronRight, Eye,
   FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
-  AlertTriangle, FlaskConical, ShieldCheck, TrendingUp, ArrowRight,
-  CheckCircle2, XCircle, Send,
+  AlertTriangle, FlaskConical, ShieldCheck, ArrowRight,
+  CheckCircle2, XCircle, Send, ClipboardPlus, History,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
-import { Badge } from './ui/badge';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
+import { C, AC, PAL, ClayPage, useMode } from '@/components/cihaz-yonetimi/clay-kit';
 import { ScrollArea } from './ui/scroll-area';
 import NfcStockQueryModal from './NfcStockQueryModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
@@ -138,7 +139,7 @@ const FiltreDialog: React.FC<{
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent className="max-w-3xl border-[rgba(90,72,40,0.10)] bg-gradient-to-b from-[#FCFAF5] to-[#F5F1E8] rounded-[28px] shadow-[0_44px_90px_-30px_rgba(90,72,40,0.55)]">
         <DialogHeader>
           <DialogTitle className="text-xl font-headline">Stoğu Filtrele</DialogTitle>
           <DialogDescription>Filtrelemek istediğiniz değerleri sağdaki alandan soldaki kutusuna sürükleyin.</DialogDescription>
@@ -186,6 +187,8 @@ const FiltreDialog: React.FC<{
 /* ────────────────────────────────────────────
    Excel-Like Column Filter Popover
    ──────────────────────────────────────────── */
+type ColumnFilterOption = { value: string; secondary?: string };
+
 function ColumnFilterPopover({
   column,
   label,
@@ -195,15 +198,23 @@ function ColumnFilterPopover({
   sortField,
   sortDirection,
   onSort,
+  searchPlaceholder,
+  triggerStyle = 'header',
 }: {
   column: string;
   label: string;
-  uniqueValues: string[];
+  /** Accepts plain strings or `{value, secondary}` objects. The `secondary`
+   *  field (e.g. stok kodu) is rendered beside the value and is searchable. */
+  uniqueValues: ReadonlyArray<string | ColumnFilterOption>;
   selectedValues: string[];
   onApply: (column: string, values: string[]) => void;
   sortField: string;
   sortDirection: 'asc' | 'desc';
   onSort: (field: string) => void;
+  searchPlaceholder?: string;
+  /** `header` renders the trigger as an uppercase column header with sort
+   *  indicators (default). `pill` renders a small toolbar button. */
+  triggerStyle?: 'header' | 'pill';
 }) {
   const [open, setOpen] = useState(false);
   const [localSelected, setLocalSelected] = useState<string[]>(selectedValues);
@@ -212,91 +223,365 @@ function ColumnFilterPopover({
   const isSorted = sortField === column;
 
   useEffect(() => {
-    if (open) setLocalSelected(selectedValues);
+    if (open) {
+      setLocalSelected(selectedValues);
+      setFilterText('');
+    }
   }, [open, selectedValues]);
 
-  const filteredValues = filterText
-    ? uniqueValues.filter(v => v.toLowerCase().includes(filterText.toLowerCase()))
-    : uniqueValues;
+  // Normalize the incoming options to a uniform shape so the rest of the
+  // component does not need to branch on the input type.
+  const options = useMemo<ColumnFilterOption[]>(
+    () =>
+      uniqueValues.map((v) =>
+        typeof v === 'string' ? { value: v } : { value: v.value, secondary: v.secondary },
+      ),
+    [uniqueValues],
+  );
+
+  const normalizedFilter = filterText.trim().toLocaleLowerCase('tr');
+  const filteredOptions = normalizedFilter
+    ? options.filter((o) => {
+        const inValue = o.value.toLocaleLowerCase('tr').includes(normalizedFilter);
+        const inSecondary = o.secondary
+          ? o.secondary.toLocaleLowerCase('tr').includes(normalizedFilter)
+          : false;
+        return inValue || inSecondary;
+      })
+    : options;
+
+  // Excel-like behavior: "Select All" / "Clear" affect only the currently
+  // visible (filtered) items, preserving selections outside the filter.
+  const filteredValuesSet = useMemo(
+    () => new Set(filteredOptions.map((o) => o.value)),
+    [filteredOptions],
+  );
+  const selectAllFiltered = () => {
+    setLocalSelected((prev) => {
+      const next = new Set(prev);
+      filteredOptions.forEach((o) => next.add(o.value));
+      return Array.from(next);
+    });
+  };
+  const clearFiltered = () => {
+    setLocalSelected((prev) => prev.filter((v) => !filteredValuesSet.has(v)));
+  };
+
+  const filteredSelectedCount = filteredOptions.reduce(
+    (acc, o) => acc + (localSelected.includes(o.value) ? 1 : 0),
+    0,
+  );
+  const allFilteredSelected =
+    filteredOptions.length > 0 && filteredSelectedCount === filteredOptions.length;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className={cn(
-          "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
-          isActive ? "text-orange-600" : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-        )}>
-          {label}
-          <span className="flex flex-col items-center ml-0.5">
-            {isSorted ? (
-              sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-            ) : (
-              <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+        {triggerStyle === 'pill' ? (
+          <button
+            type="button"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+              isActive
+                ? "bg-orange-500/15 border-orange-500/40 text-orange-600 hover:bg-orange-500/25"
+                : "bg-[#F5F1E8] border-[rgba(90,72,40,0.10)] text-[#BBB2A0] hover:text-[#3D382F] hover:bg-[#FCFAF5]",
             )}
-          </span>
-          {isActive && (
-            <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">{selectedValues.length}</span>
-          )}
-        </button>
+          >
+            <Filter className="h-3 w-3" />
+            {label}
+            {isActive && (
+              <span className="flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-orange-500 px-1 text-[9px] text-white font-bold">
+                {selectedValues.length}
+              </span>
+            )}
+          </button>
+        ) : (
+          <button className={cn(
+            "flex items-center gap-1 text-left text-xs font-semibold uppercase tracking-wider transition-colors group",
+            isActive ? "text-orange-600" : "text-[#BBB2A0] hover:text-[#3D382F]"
+          )}>
+            {label}
+            <span className="flex flex-col items-center ml-0.5">
+              {isSorted ? (
+                sortDirection === 'asc' ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
+              ) : (
+                <ChevronsUpDown className="h-3 w-3 opacity-40 group-hover:opacity-100" />
+              )}
+            </span>
+            {isActive && (
+              <span className="ml-1 flex h-4 w-4 items-center justify-center rounded-full bg-orange-500 text-[9px] text-white font-bold">{selectedValues.length}</span>
+            )}
+          </button>
+        )}
       </PopoverTrigger>
-      <PopoverContent className="w-56 p-0" align="start">
-        {/* Sort buttons */}
-        <div className="flex border-b">
-          <button
-            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'asc' && "bg-[var(--dashboard-surface-2)] font-bold")}
-            onClick={() => { onSort(column); setOpen(false); }}
-          >
-            <ChevronUp className="h-3 w-3" /> A→Z
-          </button>
-          <button
-            className={cn("flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs hover:bg-[var(--dashboard-surface-2)]", isSorted && sortDirection === 'desc' && "bg-[var(--dashboard-surface-2)] font-bold")}
-            onClick={() => { onSort(column); setOpen(false); }}
-          >
-            <ChevronDown className="h-3 w-3" /> Z→A
-          </button>
-        </div>
+      <PopoverContent
+        className="w-64 p-0 bg-[#FCFAF5] border border-[rgba(90,72,40,0.10)] text-[#3D382F] shadow-[0_16px_38px_-10px_rgba(90,72,40,0.28)] rounded-2xl overflow-hidden"
+        align="start"
+        onWheel={(e) => e.stopPropagation()}
+      >
+        {/* Sort buttons (omitted when the filter is not bound to a sortable column) */}
+        {triggerStyle === 'header' && (
+          <div className="flex border-b border-[rgba(90,72,40,0.10)]">
+            <button
+              type="button"
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[#F5F1E8]",
+                isSorted && sortDirection === 'asc' && "bg-[#F5F1E8] font-semibold text-orange-600",
+              )}
+              onClick={() => { onSort(column); setOpen(false); }}
+            >
+              <ChevronUp className="h-3 w-3" /> A→Z
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[rgba(90,72,40,0.10)] hover:bg-[#F5F1E8]",
+                isSorted && sortDirection === 'desc' && "bg-[#F5F1E8] font-semibold text-orange-600",
+              )}
+              onClick={() => { onSort(column); setOpen(false); }}
+            >
+              <ChevronDown className="h-3 w-3" /> Z→A
+            </button>
+          </div>
+        )}
         {/* Filter search */}
-        <div className="p-2 border-b">
+        <div className="p-2 border-b border-[rgba(90,72,40,0.10)]">
           <Input
-            placeholder="Filtrele..."
+            placeholder={searchPlaceholder ?? 'Filtrele...'}
             value={filterText}
-            onChange={e => setFilterText(e.target.value)}
-            className="h-7 text-xs"
+            onChange={(e) => setFilterText(e.target.value)}
+            className="h-7 text-xs bg-[#F5F1E8] border-[rgba(90,72,40,0.10)]"
           />
         </div>
-        {/* Select all / Clear */}
-        <div className="flex items-center justify-between px-3 py-1.5 border-b">
-          <button className="text-[10px] text-blue-600 hover:underline" onClick={() => setLocalSelected(uniqueValues)}>Tümünü Seç</button>
-          <button className="text-[10px] text-red-500 hover:underline" onClick={() => setLocalSelected([])}>Temizle</button>
+        {/* Select all / Clear (applies to the filtered subset) */}
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-[rgba(90,72,40,0.10)]">
+          <label
+            className={cn(
+              "flex items-center gap-2 text-[10px] font-medium cursor-pointer select-none",
+              filteredOptions.length === 0
+                ? "text-[#BBB2A0] opacity-50 cursor-not-allowed"
+                : "text-[#3D382F]",
+            )}
+          >
+            <Checkbox
+              checked={
+                allFilteredSelected
+                  ? true
+                  : filteredSelectedCount > 0
+                    ? 'indeterminate'
+                    : false
+              }
+              onCheckedChange={(checked) => {
+                if (filteredOptions.length === 0) return;
+                if (checked) selectAllFiltered();
+                else clearFiltered();
+              }}
+              disabled={filteredOptions.length === 0}
+              className="h-3.5 w-3.5"
+            />
+            Tümünü Seç
+            {normalizedFilter && filteredOptions.length > 0 && (
+              <span className="text-[#BBB2A0]">({filteredOptions.length})</span>
+            )}
+          </label>
+          <button
+            type="button"
+            className="text-[10px] text-red-500 hover:underline disabled:opacity-50 disabled:no-underline"
+            onClick={clearFiltered}
+            disabled={filteredSelectedCount === 0}
+          >
+            Temizle
+          </button>
         </div>
-        {/* Values list */}
-        <ScrollArea className="max-h-48">
+        {/* Values list — native scroll for reliable wheel events inside the Popover */}
+        <div
+          className="max-h-56 overflow-y-auto overscroll-contain"
+          onWheel={(e) => e.stopPropagation()}
+        >
           <div className="p-1">
-            {filteredValues.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-muted-foreground">Sonuç yok</p>
+            {filteredOptions.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-[#BBB2A0] text-center">Sonuç yok</p>
             ) : (
-              filteredValues.map(val => (
-                <label key={val} className="flex items-center gap-2 px-2 py-1 text-xs rounded hover:bg-[var(--dashboard-surface-2)] cursor-pointer">
+              filteredOptions.map((opt) => (
+                <label
+                  key={opt.value}
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg hover:bg-[#F5F1E8] cursor-pointer"
+                >
                   <Checkbox
-                    checked={localSelected.includes(val)}
+                    checked={localSelected.includes(opt.value)}
                     onCheckedChange={(checked) => {
-                      setLocalSelected(prev => checked ? [...prev, val] : prev.filter(v => v !== val));
+                      setLocalSelected((prev) =>
+                        checked ? [...prev, opt.value] : prev.filter((v) => v !== opt.value),
+                      );
                     }}
                     className="h-3.5 w-3.5"
                   />
-                  <span className="truncate">{val || '(Boş)'}</span>
+                  <div className="min-w-0 flex-1 leading-tight">
+                    <div className="truncate text-[#3D382F]">
+                      {opt.value || '(Boş)'}
+                    </div>
+                    {opt.secondary && (
+                      <div className="truncate font-mono text-[9px] text-[#BBB2A0]">
+                        {opt.secondary}
+                      </div>
+                    )}
+                  </div>
                 </label>
               ))
             )}
           </div>
-        </ScrollArea>
+        </div>
         {/* Apply */}
-        <div className="border-t p-2 flex gap-2">
-          <Button size="sm" variant="outline" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, []); setOpen(false); }}>Sıfırla</Button>
-          <Button size="sm" className="flex-1 h-7 text-xs" onClick={() => { onApply(column, localSelected); setOpen(false); }}>Uygula</Button>
+        <div className="border-t border-[rgba(90,72,40,0.10)] p-2 flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            className="flex-1 h-7 text-xs"
+            onClick={() => { onApply(column, []); setOpen(false); }}
+          >
+            Sıfırla
+          </Button>
+          <Button
+            size="sm"
+            className="flex-1 h-7 text-xs"
+            onClick={() => { onApply(column, localSelected); setOpen(false); }}
+          >
+            Uygula
+          </Button>
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/* ────────────────────────────────────────────
+   Active filter chip labels
+   The active filter row consumes `columnFilters` directly. Most keys hold
+   plain values that are fine to show as-is, but `miadSeverity` and
+   `belowMin` carry technical strings (e.g. "expired", "true") that need
+   friendly Turkish labels and a clearable group chip.
+   ──────────────────────────────────────────── */
+const MIAD_SEVERITY_CHIP_LABEL: Record<string, string> = {
+  expired: 'Süresi Geçmiş',
+  critical: 'Kritik (≤3 gün)',
+  warning: 'Uyarı (≤10 gün)',
+  caution: 'Dikkat (<45 gün)',
+  notice: 'Bilgi (<60 gün)',
+};
+
+function renderActiveFilterChips(
+  col: string,
+  vals: string[],
+  handleColumnFilter: (col: string, values: string[]) => void,
+) {
+  // belowMin renders as a single boolean chip rather than per-value chips.
+  if (col === 'belowMin') {
+    if (!vals.includes('true')) return null;
+    return (
+      <span
+        key="belowMin"
+        className="inline-flex items-center gap-1 rounded-full bg-slate-200 text-slate-700 px-2.5 py-0.5 text-[11px] font-medium"
+      >
+        Min. Stok
+        <button
+          onClick={() => handleColumnFilter('belowMin', [])}
+          className="hover:bg-slate-300 rounded-full p-0.5"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    );
+  }
+
+  return vals.map((v: string) => {
+    const label =
+      col === 'miadSeverity' ? (MIAD_SEVERITY_CHIP_LABEL[v] ?? v) : v;
+    return (
+      <span
+        key={`${col}-${v}`}
+        className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-[11px] font-medium"
+      >
+        {label}
+        <button
+          onClick={() =>
+            handleColumnFilter(
+              col,
+              vals.filter((x: string) => x !== v),
+            )
+          }
+          className="hover:bg-orange-200 rounded-full p-0.5"
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    );
+  });
+}
+
+/* ────────────────────────────────────────────
+   Clay design helpers (cream claymorphism)
+   Shared inline tokens + small presentational primitives so the panel matches
+   the Cihaz/Stok demo design language without pulling in a second kit.
+   ──────────────────────────────────────────── */
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
+
+const claySurfaceBtn: React.CSSProperties = {
+  boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+  height: 44, padding: '0 15px', borderRadius: C.radiusSm, border: 'none',
+  background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay,
+  color: C.ink1, fontSize: 13.5, fontWeight: 700, whiteSpace: 'nowrap', cursor: 'pointer',
+  transition: `transform 180ms ${EASE}`,
+};
+const clayPillBtn: React.CSSProperties = {
+  boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', gap: 7, height: 38, padding: '0 14px',
+  borderRadius: C.radiusPill, border: 'none', background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+  boxShadow: C.clay, color: C.ink1, fontSize: 13, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap',
+};
+
+const clayMenuClass =
+  'rounded-2xl border border-[rgba(90,72,40,0.10)] bg-[#FCFAF5] p-1.5 shadow-[0_26px_54px_-18px_rgba(90,72,40,0.45),inset_0_1px_1px_rgba(255,255,255,0.9)]';
+const clayMenuLabelClass = 'px-2.5 pt-2 pb-1 text-[10.5px] font-bold uppercase tracking-wider text-[#BBB2A0]';
+const clayMenuItemClass =
+  'gap-2.5 rounded-xl px-2.5 py-2.5 text-[13.5px] font-semibold text-[#3D382F] focus:bg-[#C98A57]/[0.12] focus:text-[#3D382F] cursor-pointer [&_svg]:text-[#C98A57]';
+const clayDialogClass =
+  'border-[rgba(90,72,40,0.10)] bg-gradient-to-b from-[#FCFAF5] to-[#F5F1E8] rounded-[28px] shadow-[0_44px_90px_-30px_rgba(90,72,40,0.55)]';
+
+/** Miad severity → clay stripe + badge colours. */
+function sevClay(sev: MiadSeverity): { bar: string; badgeBg: string; badgeC: string } {
+  switch (sev) {
+    case 'expired':
+    case 'critical': return { bar: C.danger, badgeBg: 'rgba(192,121,106,0.16)', badgeC: '#B03A28' };
+    case 'warning':
+    case 'caution':  return { bar: C.amber, badgeBg: C.amberSoft, badgeC: '#9A6F1E' };
+    case 'notice':   return { bar: C.accent2, badgeBg: 'rgba(224,163,62,0.10)', badgeC: '#9A6F1E' };
+    default:         return { bar: 'transparent', badgeBg: 'transparent', badgeC: C.ink3 };
+  }
+}
+/** Coverage severity → clay badge colours. */
+function covClay(sev: 'good' | 'warning' | 'critical' | 'unknown'): { bg: string; c: string } {
+  switch (sev) {
+    case 'good':     return { bg: 'rgba(111,181,133,0.16)', c: C.waterDeep };
+    case 'warning':  return { bg: C.amberSoft, c: '#9A6F1E' };
+    case 'critical': return { bg: 'rgba(192,121,106,0.16)', c: '#B03A28' };
+    default:         return { bg: 'rgba(124,168,222,0.16)', c: PAL.sky };
+  }
+}
+
+/** Clay severity quick-filter chip — doubles as a colour legend. */
+function ClaySevChip({ dot, label, active, onClick }: { dot: string; label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button" onClick={onClick} aria-pressed={active}
+      style={{
+        display: 'inline-flex', alignItems: 'center', gap: 7, height: 32, padding: '0 12px', borderRadius: C.radiusPill,
+        border: 'none', cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 12, fontWeight: 700,
+        background: active ? `${AC.primary}16` : `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+        boxShadow: active ? `inset 0 0 0 1.5px ${AC.primary}66` : C.clay,
+        color: active ? C.ink1 : C.ink2, transition: `all 180ms ${EASE}`,
+      }}
+    >
+      <span style={{ width: 8, height: 8, borderRadius: '50%', background: dot, flexShrink: 0 }} />{label}
+    </button>
   );
 }
 
@@ -307,6 +592,8 @@ export default function StokYonetimiPanel() {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
 
   // Master data — TanStack Query backed (cache shared across panels & navigations)
   const depotsQuery = useDepots();
@@ -404,7 +691,7 @@ export default function StokYonetimiPanel() {
   const paginatedTotalRows = paginatedQuery.data?.totalRows ?? 0;
   const paginatedTotalPages = paginatedQuery.data?.totalPages ?? 1;
   const paginatedColumnValues: PaginatedStockResult['columnValues'] =
-    paginatedQuery.data?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] };
+    paginatedQuery.data?.columnValues ?? { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [], marka: [] };
   const riskyRowsCount = paginatedQuery.data?.riskyRowsCount ?? 0;
 
   // ─── Lazy full-stock fetch (on-demand) ───
@@ -461,6 +748,14 @@ export default function StokYonetimiPanel() {
   const totalPages = paginatedTotalPages;
   const colValues = paginatedColumnValues;
 
+  // Adapt the server's {value, code} payload to the ColumnFilterPopover's
+  // {value, secondary} option shape. The stok kodu is rendered beside the
+  // product name and is included in the search match.
+  const stokAdiOptionsForFilter = useMemo(
+    () => colValues.stokAdi.map((o) => ({ value: o.value, secondary: o.code })),
+    [colValues.stokAdi],
+  );
+
   // Filter out pool warehouses for the depot selector
   const availableDepots = useMemo(
     () => filterOperationalSourceDepots(depots, currentUserProfile),
@@ -500,6 +795,51 @@ export default function StokYonetimiPanel() {
   };
 
   const hasActiveColumnFilters = Object.values(columnFilters).some((v: string[]) => v.length > 0);
+
+  /* ─── Severity chip filters (legend → clickable filters) ───
+     Each chip toggles a coherent group of `miadSeverity` values (or the
+     `belowMin` flag) in the column filter state, so chips compose with the
+     existing column-header filters and the active-filter chip row. */
+  const SEVERITY_GROUPS = {
+    expired: ['expired'] as const,
+    urgent: ['critical', 'warning', 'caution'] as const, // < 45 days (excluding already expired)
+    soon: ['notice'] as const,                            // 45–60 days
+  };
+
+  const toggleMiadSeverityGroup = (group: keyof typeof SEVERITY_GROUPS) => {
+    const severities = SEVERITY_GROUPS[group] as readonly string[];
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      const current = next['miadSeverity'] ?? [];
+      const allActive = severities.every((s) => current.includes(s));
+      const remaining = current.filter((s) => !severities.includes(s));
+      const merged = allActive
+        ? remaining
+        : Array.from(new Set([...remaining, ...severities]));
+      if (merged.length === 0) delete next['miadSeverity'];
+      else next['miadSeverity'] = merged;
+      return next;
+    });
+    setCurrentPage(1);
+  };
+
+  const toggleBelowMin = () => {
+    setColumnFilters((prev) => {
+      const next = { ...prev };
+      const isOn = (next['belowMin'] ?? []).includes('true');
+      if (isOn) delete next['belowMin'];
+      else next['belowMin'] = ['true'];
+      return next;
+    });
+    setCurrentPage(1);
+  };
+
+  const isMiadSeverityGroupActive = (group: keyof typeof SEVERITY_GROUPS) => {
+    const severities = SEVERITY_GROUPS[group] as readonly string[];
+    const current = columnFilters['miadSeverity'] ?? [];
+    return severities.every((s) => current.includes(s));
+  };
+  const isBelowMinActive = (columnFilters['belowMin'] ?? []).includes('true');
 
   /* ─── Risk metadata accessors ───
      Prefer server-computed metadata on the row; fall back to client-side
@@ -542,17 +882,6 @@ export default function StokYonetimiPanel() {
   /** True when at least one grouped row in the depot has riskyBoxes > 0.
    *  Sourced from the server action so we don't need the full dataset client-side. */
   const hasRiskyRows = riskyRowsCount > 0;
-
-  /* ─── Row color strip ─── */
-  const getRowStripeColor = (row: GroupedStockRow): string => {
-    const miadInfo = getMiadInfo(row);
-    if (miadInfo.severity === 'expired' || miadInfo.severity === 'critical') return 'bg-red-500';
-    if (miadInfo.severity === 'warning' || miadInfo.severity === 'caution') return 'bg-amber-500';
-    if (miadInfo.severity === 'notice') return 'bg-yellow-400';
-    const rule = minMaxRules[row.stokKodu];
-    if (rule && rule.min !== undefined && row.quantity <= rule.min) return 'bg-slate-400';
-    return 'bg-transparent';
-  };
 
   /* ─── Available filter groups for marka/urunGrubu ─── */
   const availableFilterGroups = useMemo(() => {
@@ -968,13 +1297,49 @@ export default function StokYonetimiPanel() {
     }
     const labNames = hospitals.filter(h => h.id && selectedLabsForReport.includes(h.id)).map(h => h.name).filter((n): n is string => !!n);
     try {
-      const shippedQuery = query(collection(db, 'depoStok'), where('isShipped', '==', true));
-      const shippedSnap = await getDocs(shippedQuery);
-      const stockForSelectedLabs = filterByCompanyScope(
-        shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-        currentCompanyId,
-        isSuperAdmin,
-      ).filter(item => item.hedefKurum && labNames.includes(item.hedefKurum));
+      // Sadece seçili labların stoğunu çek — Firestore `in` query (max 30 lab/seferinde).
+      // Composite index: (companyId, isShipped, hedefKurumId).
+      const labIdChunks: string[][] = [];
+      for (let i = 0; i < selectedLabsForReport.length; i += 30) {
+        labIdChunks.push(selectedLabsForReport.slice(i, i + 30));
+      }
+      const stockForSelectedLabsRaw: DepoStokItem[] = [];
+      for (const chunk of labIdChunks) {
+        const q = scopedQuery(
+          'depoStok',
+          currentCompanyId,
+          isSuperAdmin,
+          where('isShipped', '==', true),
+          where('hedefKurumId', 'in', chunk),
+        );
+        const snap = await getDocs(q);
+        snap.docs.forEach(d => stockForSelectedLabsRaw.push({ id: d.id, ...d.data() } as DepoStokItem));
+      }
+      // Legacy (hedefKurumId yoksa hedefKurum adı ile eşleşenler).
+      if (labNames.length > 0) {
+        const nameChunks: string[][] = [];
+        for (let i = 0; i < labNames.length; i += 30) {
+          nameChunks.push(labNames.slice(i, i + 30));
+        }
+        for (const chunk of nameChunks) {
+          const q = scopedQuery(
+            'depoStok',
+            currentCompanyId,
+            isSuperAdmin,
+            where('isShipped', '==', true),
+            where('hedefKurum', 'in', chunk),
+          );
+          const snap = await getDocs(q);
+          snap.docs.forEach(d => {
+            const data = d.data() as DepoStokItem;
+            // hedefKurumId varsa zaten ilk chunk'tan geldi; sadece legacy doc'ları dahil et.
+            if (!data.hedefKurumId) {
+              stockForSelectedLabsRaw.push({ id: d.id, ...data });
+            }
+          });
+        }
+      }
+      const stockForSelectedLabs = filterByCompanyScope(stockForSelectedLabsRaw, currentCompanyId, isSuperAdmin);
       const stockSummary: Record<string, { stokAdi: string; quantity: number }> = {};
       stockForSelectedLabs.forEach(item => {
         if (!item.stokKodu) return;
@@ -1157,7 +1522,7 @@ export default function StokYonetimiPanel() {
         });
       }
 
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: selectedDepotId,
@@ -1170,7 +1535,7 @@ export default function StokYonetimiPanel() {
         createdByUid: currentUserProfile.uid ?? '',
         createdByName: currentUserProfile.name ?? '',
         rescueTransfer: true,
-      });
+      }, currentCompanyId));
 
       await batch.commit();
       await touchStockMetadata();
@@ -1266,21 +1631,27 @@ export default function StokYonetimiPanel() {
 
   /* ═════════════════════════ RENDER ═════════════════════════ */
   return (
-    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 min-h-screen">
+    <ClayPage>
+      <h1 className="sr-only">Depo Stoğu</h1>
       {/* ── HEADER ── */}
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
-            <PackageSearch className="h-5 w-5 text-orange-500" />
-            Depo Stoğu
-          </h1>
-          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: C.ink2, marginBottom: 8 }}>
             {depotName || 'Depo seçin'} · Depodaki tüm sevk edilmemiş ürünler
-          </p>
-          {availableDepots.length > 1 && (
+          </div>
+          {availableDepots.length > 1 ? (
             <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
-              <SelectTrigger className="w-48 h-8 text-xs mt-1 bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]">
-                <Warehouse className="h-3.5 w-3.5 mr-1.5 text-orange-500 shrink-0" />
+              <SelectTrigger
+                className="justify-start gap-2.5"
+                style={{
+                  width: 'min(280px, 100%)', height: 50, padding: '0 16px', border: 'none',
+                  borderRadius: C.radiusSm, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+                  boxShadow: C.clay, color: C.ink1, fontSize: 15, fontWeight: 700,
+                }}
+              >
+                <span style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 10, display: 'grid', placeItems: 'center', color: AC.primary, background: `${AC.primary}16` }}>
+                  <Warehouse className="h-4 w-4" />
+                </span>
                 <SelectValue placeholder="Depo seçin" />
               </SelectTrigger>
               <SelectContent>
@@ -1289,55 +1660,80 @@ export default function StokYonetimiPanel() {
                 ))}
               </SelectContent>
             </Select>
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 11, height: 50, padding: '0 16px', borderRadius: C.radiusSm, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay, color: C.ink1, fontSize: 15, fontWeight: 700, maxWidth: '100%' }}>
+              <span style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 10, display: 'grid', placeItems: 'center', color: AC.primary, background: `${AC.primary}16` }}>
+                <Warehouse className="h-4 w-4" />
+              </span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{depotName || 'Depo'}</span>
+            </div>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 26 }}>
           {/* Rapor İndir - quick action */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="cihaz-tool-item flex items-center justify-center gap-1.5 px-3 h-9 sm:h-10 text-xs font-medium text-[var(--dashboard-muted)]">
-                <FileDown className="h-4 w-4" /> <span className="hidden sm:inline">Rapor</span>
+              <button type="button" style={claySurfaceBtn}>
+                <FileDown className="h-[18px] w-[18px]" /> Rapor
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuContent align="end" className={cn('w-64', clayMenuClass)}>
               {showOnlyRiskyStock ? (
                 <>
-                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Riskli Stok Raporu</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={handleRiskyExcelExport} disabled={!hasRiskyRows}>
-                    <FileSpreadsheet className="h-4 w-4 mr-2" /> Riskli Stok Excel
+                  <DropdownMenuLabel className={clayMenuLabelClass}>Riskli Stok Raporu</DropdownMenuLabel>
+                  <DropdownMenuItem className={clayMenuItemClass} onSelect={handleRiskyExcelExport} disabled={!hasRiskyRows}>
+                    <FileSpreadsheet className="h-[18px] w-[18px]" /> Riskli Stok Excel
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={handleRiskyPdfExport} disabled={!hasRiskyRows}>
-                    <FileText className="h-4 w-4 mr-2" /> Riskli Stok PDF (Yatay)
+                  <DropdownMenuItem className={clayMenuItemClass} onSelect={handleRiskyPdfExport} disabled={!hasRiskyRows}>
+                    <FileText className="h-[18px] w-[18px]" /> Riskli Stok PDF (Yatay)
                   </DropdownMenuItem>
                 </>
               ) : (
                 <>
-                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Genel Raporlar</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={() => handleExport(false)}>
-                    <BarChart3 className="h-4 w-4 mr-2" /> Özet Rapor
+                  <DropdownMenuLabel className={clayMenuLabelClass}>Genel Raporlar</DropdownMenuLabel>
+                  <DropdownMenuItem className={clayMenuItemClass} onSelect={() => handleExport(false)}>
+                    <BarChart3 className="h-[18px] w-[18px]" /> Özet Rapor
                   </DropdownMenuItem>
-                  <DropdownMenuItem onSelect={() => handleExport(true)}>
-                    <FileSpreadsheet className="h-4 w-4 mr-2" /> Detaylı (Seri No) Rapor
+                  <DropdownMenuItem className={clayMenuItemClass} onSelect={() => handleExport(true)}>
+                    <FileSpreadsheet className="h-[18px] w-[18px]" /> Detaylı (Seri No) Rapor
                   </DropdownMenuItem>
                 </>
               )}
             </DropdownMenuContent>
           </DropdownMenu>
 
+          {/* Ürün Talep - quick action */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" style={{ ...claySurfaceBtn, opacity: selectedDepotId ? 1 : 0.5, cursor: selectedDepotId ? 'pointer' : 'not-allowed' }} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-[18px] w-[18px]" /> Ürün Talep
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className={cn('w-52', clayMenuClass)}>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-[18px] w-[18px]" /> Talep Oluştur
+              </DropdownMenuItem>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}/gecmis`)} disabled={!selectedDepotId}>
+                <History className="h-[18px] w-[18px]" /> Talep Geçmişi
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
           {/* İşlemler menu - grouped */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button className="cihaz-tool-item flex items-center justify-center gap-1.5 px-3 h-9 sm:h-10 text-xs font-medium text-[var(--dashboard-muted)]">
-                <SlidersHorizontal className="h-4 w-4" /> <span className="hidden sm:inline">İşlemler</span>
+              <button type="button" style={claySurfaceBtn}>
+                <SlidersHorizontal className="h-[18px] w-[18px]" /> İşlemler
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Filtre</DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => setIsFilterDialogOpen(true)}>
-                <Filter className="h-4 w-4 mr-2" /> Marka / Ürün Grubu Filtrele
+            <DropdownMenuContent align="end" className={cn('w-64', clayMenuClass)}>
+              <DropdownMenuLabel className={clayMenuLabelClass}>Filtre</DropdownMenuLabel>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => setIsFilterDialogOpen(true)}>
+                <Filter className="h-[18px] w-[18px]" /> Marka / Ürün Grubu Filtrele
               </DropdownMenuItem>
               <DropdownMenuItem
+                className={clayMenuItemClass}
                 onSelect={() => {
                   if (!hasRiskyRows) return;
                   setShowOnlyRiskyStock(prev => !prev);
@@ -1345,28 +1741,32 @@ export default function StokYonetimiPanel() {
                 }}
                 disabled={!hasRiskyRows}
               >
-                <BarChart3 className="h-4 w-4 mr-2" />
+                <BarChart3 className="h-[18px] w-[18px]" />
                 {showOnlyRiskyStock ? 'Riskli Stok Gösterimini Kapat' : 'Riskli Stoğu Göster'}
               </DropdownMenuItem>
               <DropdownMenuItem
+                className={clayMenuItemClass}
                 onSelect={handleBulkRescuePlan}
                 disabled={!hasRiskyRows}
               >
-                <ShieldCheck className="h-4 w-4 mr-2" />
+                <ShieldCheck className="h-[18px] w-[18px]" />
                 Kurtarma Planı Oluştur
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Operasyon / Sayım</DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => router.push('/depo-sayim')}>
-                <ListChecks className="h-4 w-4 mr-2" /> Marka Sayımı Başlat
+              <DropdownMenuLabel className={clayMenuLabelClass}>Operasyon / Sayım</DropdownMenuLabel>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => router.push(`/urun-talep/depo/${selectedDepotId}`)} disabled={!selectedDepotId}>
+                <ClipboardPlus className="h-[18px] w-[18px]" /> Ürün Talep
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setIsLabCountModalOpen(true)}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" /> Laboratuvar Sayım Raporu İndir
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => router.push('/depo-sayim')}>
+                <ListChecks className="h-[18px] w-[18px]" /> Marka Sayımı Başlat
+              </DropdownMenuItem>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => setIsLabCountModalOpen(true)}>
+                <FileSpreadsheet className="h-[18px] w-[18px]" /> Laboratuvar Sayım Raporu İndir
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-[var(--dashboard-muted)]">Araçlar</DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => setIsNfcQueryModalOpen(true)}>
-                <Nfc className="h-4 w-4 mr-2" /> NFC Stok Sorgula
+              <DropdownMenuLabel className={clayMenuLabelClass}>Araçlar</DropdownMenuLabel>
+              <DropdownMenuItem className={clayMenuItemClass} onSelect={() => setIsNfcQueryModalOpen(true)}>
+                <Nfc className="h-[18px] w-[18px]" /> NFC Stok Sorgula
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1375,14 +1775,9 @@ export default function StokYonetimiPanel() {
 
       {/* ── ACTIVE FILTER CHIPS ── */}
       {(hasActiveColumnFilters || activeFilters.length > 0 || showOnlyRiskyStock) && (
-        <div className="cihaz-card flex flex-wrap items-center gap-2 px-3 py-2">
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, padding: '12px 16px', borderRadius: C.radius, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clayInset, marginBottom: 12 }}>
           {Object.entries(columnFilters).map(([col, vals]: [string, string[]]) =>
-            vals.map((v: string) => (
-              <span key={`${col}-${v}`} className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-[11px] font-medium">
-                {v}
-                <button onClick={() => handleColumnFilter(col, vals.filter((x: string) => x !== v))} className="hover:bg-orange-200 rounded-full p-0.5"><X className="h-3 w-3" /></button>
-              </span>
-            ))
+            renderActiveFilterChips(col, vals, handleColumnFilter)
           )}
           {activeFilters.map(f => (
             <span key={`${f.group}-${f.value}`} className="inline-flex items-center gap-1 rounded-full bg-blue-100 text-blue-700 px-2.5 py-0.5 text-[11px] font-medium">
@@ -1390,69 +1785,135 @@ export default function StokYonetimiPanel() {
             </span>
           ))}
           {showOnlyRiskyStock && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 px-2.5 py-0.5 text-[11px] font-medium">
-              ⚠ Riskli stoklar
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 11px', borderRadius: C.radiusPill, background: C.amberSoft, color: '#9A6F1E', fontSize: 11.5, fontWeight: 700 }}>
+              <AlertTriangle className="h-3 w-3" /> Riskli stoklar
             </span>
           )}
-          <button onClick={() => { clearAllFilters(); setShowOnlyRiskyStock(false); }} className="text-[11px] text-red-500 hover:underline ml-auto">Temizle ✕</button>
+          <button onClick={() => { clearAllFilters(); setShowOnlyRiskyStock(false); }} style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: AC.primary, fontSize: 13, fontWeight: 700 }}>Temizle ✕</button>
         </div>
       )}
 
       {/* ── TABLE CARD ── */}
-      <div className="cihaz-card-strong overflow-hidden">
+      <div style={{ position: 'relative', borderRadius: C.radiusLg, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clay, overflow: 'hidden', animation: `cyRise 480ms ${EASE} both` }}>
         {/* Sticky toolbar with summary */}
-        <div className="sticky top-0 z-20 bg-[var(--dashboard-surface)] border-b border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3 text-xs text-[var(--dashboard-muted)]">
-            <span className="font-medium">Toplam: <span className="text-[var(--dashboard-text)] font-bold">{totalRows}</span> kayıt</span>
-            {totalPages > 1 && <span>Sayfa <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span>/{totalPages}</span>}
+        <div style={{ position: 'sticky', top: 0, zIndex: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '13px 18px', borderBottom: `1px solid ${C.line}`, background: C.surface }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+            <span style={{ fontSize: 14.5, fontWeight: 700, color: C.ink1 }}>Toplam <strong style={{ color: AC.primary }}>{totalRows}</strong> kayıt</span>
+            {totalPages > 1 && <span style={{ fontSize: 13, fontWeight: 600, color: C.ink3 }}>Sayfa {currentPage}/{totalPages}</span>}
           </div>
-          <div className="flex items-center gap-3">
-            {/* Miad legend */}
-            <div className="hidden sm:flex items-center gap-3 text-[10px] text-[var(--dashboard-muted)]">
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> &lt;45 gün</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-500" /> &lt;60 gün</span>
-              <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-slate-400" /> Min. Stok</span>
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            {/* Severity quick-filter chips — clicking toggles a server-side miad
+                severity filter for matching rows. Doubles as a colour legend. */}
+            <ClaySevChip dot="#9A2E22" label="Süresi Geçmiş" active={isMiadSeverityGroupActive('expired')} onClick={() => toggleMiadSeverityGroup('expired')} />
+            <ClaySevChip dot={C.danger} label="<45 gün" active={isMiadSeverityGroupActive('urgent')} onClick={() => toggleMiadSeverityGroup('urgent')} />
+            <ClaySevChip dot={C.amber} label="<60 gün" active={isMiadSeverityGroupActive('soon')} onClick={() => toggleMiadSeverityGroup('soon')} />
+            <ClaySevChip dot={C.ink3} label="Min. Stok" active={isBelowMinActive} onClick={toggleBelowMin} />
+            {/* Marka filter (Excel-style popover) */}
+            {colValues.marka.length > 0 && (
+              <ColumnFilterPopover
+                column="marka"
+                label="Marka"
+                triggerStyle="pill"
+                uniqueValues={colValues.marka}
+                selectedValues={columnFilters['marka'] ?? []}
+                onApply={handleColumnFilter}
+                sortField={sortField}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+                searchPlaceholder="Marka filtrele..."
+              />
+            )}
           </div>
         </div>
 
         {/* Table */}
         {(isLoading || isPending) ? (
-          <div className="flex flex-col items-center justify-center py-16 text-[var(--dashboard-muted)]">
-            <Loader2 className="h-8 w-8 animate-spin mb-3 text-orange-400" />
-            <p className="text-sm">{isLoading ? 'Veriler yükleniyor...' : 'Stok yükleniyor...'}</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: '64px 0', color: C.ink2 }}>
+            <span style={{ width: 40, height: 40, borderRadius: '50%', border: `3px solid ${C.surface2}`, borderTopColor: AC.primary, animation: 'cySpin 800ms linear infinite' }} />
+            <p style={{ fontSize: 13.5, fontWeight: 700, margin: 0 }}>{isLoading ? 'Veriler yükleniyor…' : 'Stok yükleniyor…'}</p>
+          </div>
+        ) : rows.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '64px 0', color: C.ink3 }}>
+            <PackageSearch className="h-10 w-10 mx-auto mb-3 opacity-40" />
+            <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>Sonuç bulunamadı.</p>
+          </div>
+        ) : mobile ? (
+          /* ── MOBILE: stacked clay cards ── */
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 12 }}>
+            {rows.map((row, i) => {
+              const miadInfo = getMiadInfo(row.miad);
+              const coverageInfo = getCoverageInfo(row);
+              const sev = sevClay(miadInfo.severity);
+              const cov = covClay(coverageInfo.severity);
+              const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
+              return (
+                <div key={row.key} style={{ position: 'relative', padding: '14px 16px 14px 18px', borderRadius: C.radius, background: i % 2 === 1 ? '#F6F1E7' : C.surfaceHi, boxShadow: C.clayFlat, animation: `cyPopIn ${240 + Math.min(i, 12) * 30}ms ${EASE} both` }}>
+                  <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 4, borderRadius: 99, background: sev.bar === 'transparent' ? C.ink3 : sev.bar }} />
+                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: C.ink1, lineHeight: 1.25 }}>{row.stokAdi}</div>
+                      <div style={{ fontSize: 11.5, color: C.ink3, fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>({row.stokKodu}) · Lot {row.lotNumarasi}</div>
+                    </div>
+                    <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', padding: '6px 11px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 12.5, fontWeight: 800, color: C.ink1 }}>{row.quantity} {row.anaBirim}</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>{row.miad}</span>
+                    {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
+                      <span style={{ padding: '3px 9px', borderRadius: C.radiusPill, background: sev.badgeBg, color: sev.badgeC, fontSize: 11.5, fontWeight: 700 }}>{miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}</span>
+                    )}
+                    {row.rafAdresi && <span style={{ fontSize: 12, fontWeight: 600, color: C.ink3 }}>· {row.rafAdresi}</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                    <span style={{ padding: '5px 11px', borderRadius: C.radiusPill, background: cov.bg, color: cov.c, fontSize: 11.5, fontWeight: 700 }}>{coverageInfo.label}</span>
+                    {riskyBoxes > 0 && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); handleOpenRescueModal(row.stokKodu, row.stokAdi, riskyBoxes, miadInfo.days, row.miad); }}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: C.radiusPill, border: 'none', cursor: 'pointer', background: C.amberSoft, color: '#9A6F1E', fontSize: 11.5, fontWeight: 700 }}>
+                        <AlertTriangle className="h-3 w-3" /> {riskyBoxes} kutu riskli
+                      </button>
+                    )}
+                    <button type="button" onClick={() => router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(row.stokKodu)}/${encodeURIComponent(row.lotNumarasi || '')}`)}
+                      style={{ ...clayPillBtn, marginLeft: 'auto', height: 36 }}>
+                      <Eye className="h-[15px] w-[15px]" /> Detay
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
+          /* ── DESKTOP: clay zebra table ── */
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="z-10">
-                <tr className="bg-[var(--dashboard-surface-2)]">
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14, minWidth: mode === 'tablet' ? 880 : undefined }}>
+              <thead>
+                <tr style={{ background: C.surface2 }}>
                   {/* Color strip spacer */}
-                  <th className="w-1.5" />
-                  <th className="text-left px-3 py-2.5 sticky left-0 z-20 bg-[var(--dashboard-surface-2)]">
+                  <th style={{ width: 6, padding: 0 }} />
+                  <th style={{ textAlign: 'left', padding: '14px 12px', position: 'sticky', left: 0, zIndex: 2, background: C.surface2 }}>
                     <ColumnFilterPopover
-                      column="stokAdi" label="Stok Adı" uniqueValues={colValues.stokAdi}
+                      column="stokAdi" label="Stok Adı"
+                      uniqueValues={stokAdiOptionsForFilter}
                       selectedValues={columnFilters['stokAdi'] ?? []} onApply={handleColumnFilter}
                       sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
+                      searchPlaceholder="Ad veya stok kodu ile filtrele..."
                     />
                   </th>
-                  <th className="text-left px-3 py-2.5">
+                  <th style={{ textAlign: 'left', padding: '14px 12px' }}>
                     <ColumnFilterPopover
                       column="lotNumarasi" label="Lot" uniqueValues={colValues.lotNumarasi}
                       selectedValues={columnFilters['lotNumarasi'] ?? []} onApply={handleColumnFilter}
                       sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
                     />
                   </th>
-                  <th className="text-left px-3 py-2.5">
+                  <th style={{ textAlign: 'left', padding: '14px 12px' }}>
                     <ColumnFilterPopover
                       column="miad" label="Miad" uniqueValues={colValues.miad}
                       selectedValues={columnFilters['miad'] ?? []} onApply={handleColumnFilter}
                       sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
                     />
                   </th>
-                  <th className="text-center px-3 py-2.5">
+                  <th style={{ textAlign: 'center', padding: '14px 12px' }}>
                     <button
-                      className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-1 mx-auto"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, margin: '0 auto', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: sortField === 'quantity' ? AC.primary : C.ink3 }}
                       onClick={() => handleSort('quantity')}
                     >
                       Adet
@@ -1463,132 +1924,104 @@ export default function StokYonetimiPanel() {
                       )}
                     </button>
                   </th>
-                  <th className="text-left px-3 py-2.5">
+                  <th style={{ textAlign: 'left', padding: '14px 12px' }}>
                     <ColumnFilterPopover
                       column="rafAdresi" label="Raf" uniqueValues={colValues.rafAdresi}
                       selectedValues={columnFilters['rafAdresi'] ?? []} onApply={handleColumnFilter}
                       sortField={sortField} sortDirection={sortDirection} onSort={handleSort}
                     />
                   </th>
-                  <th className="text-left px-3 py-2.5">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Yeterlilik</span>
+                  <th style={{ textAlign: 'left', padding: '14px 12px' }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: C.ink3 }}>Yeterlilik</span>
                   </th>
-                  <th className="text-right px-3 py-2.5 sticky right-0 z-20 bg-[var(--dashboard-surface-2)]">
-                    <span className="text-xs font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">İşlem</span>
+                  <th style={{ textAlign: 'right', padding: '14px 12px', position: 'sticky', right: 0, zIndex: 2, background: C.surface2 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', color: C.ink3 }}>İşlem</span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} className="text-center py-16 text-[var(--dashboard-muted)]">
-                      <PackageSearch className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                      <p>Sonuç bulunamadı.</p>
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => {
-                    const miadInfo = getMiadInfo(row.miad);
-                    const coverageInfo = getCoverageInfo(row);
-                    const stripeColor = getRowStripeColor(row);
+                {rows.map((row, i) => {
+                  const miadInfo = getMiadInfo(row.miad);
+                  const coverageInfo = getCoverageInfo(row);
+                  const sev = sevClay(miadInfo.severity);
+                  const cov = covClay(coverageInfo.severity);
+                  const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
+                  const rowBg = i % 2 === 1 ? '#F6F1E7' : C.surface;
+                  return (
+                    <tr
+                      key={row.key}
+                      className="cy-row-hover"
+                      style={{ background: rowBg, borderBottom: `1px solid ${C.line}`, transition: 'background 160ms', animation: `cyPopIn ${240 + Math.min(i, 12) * 26}ms ${EASE} both` }}
+                    >
+                      {/* Color strip */}
+                      <td style={{ width: 6, padding: 0, position: 'relative' }}>
+                        <span style={{ position: 'absolute', left: 0, top: 6, bottom: 6, width: 4, borderRadius: 99, background: sev.bar }} />
+                      </td>
 
-                    return (
-                      <tr
-                        key={row.key}
-                        className={cn(
-                          "border-b border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50 transition-colors",
-                          miadInfo.severity === 'critical' || miadInfo.severity === 'expired' ? 'bg-red-500/[0.04]' : '',
-                          miadInfo.severity === 'caution' ? 'bg-amber-500/[0.04]' : '',
-                        )}
-                      >
-                        {/* Color strip */}
-                        <td className="w-1.5 p-0">
-                          <div className={cn("w-1 h-full min-h-[56px] rounded-r", stripeColor)} />
-                        </td>
+                      {/* Stok Adı - primary (sticky) */}
+                      <td style={{ padding: '13px 12px', position: 'sticky', left: 0, zIndex: 1, background: 'inherit' }}>
+                        <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink1, lineHeight: 1.25 }}>{row.stokAdi}</div>
+                        <span style={{ fontSize: 11.5, color: C.ink3, fontFamily: 'ui-monospace, monospace' }}>({row.stokKodu})</span>
+                      </td>
 
-                        {/* Stok Adı - primary */}
-                        <td className="px-3 py-3 sticky left-0 bg-inherit z-10">
-                          <div className="font-medium text-[var(--dashboard-text)] leading-tight">{row.stokAdi}</div>
-                          <span className="text-[10px] text-[var(--dashboard-muted)] font-mono">({row.stokKodu})</span>
-                        </td>
+                      {/* Lot */}
+                      <td style={{ padding: '13px 12px', fontSize: 12.5, fontWeight: 600, color: C.ink2, fontFamily: 'ui-monospace, monospace' }}>{row.lotNumarasi}</td>
 
-                        {/* Lot - secondary */}
-                        <td className="px-3 py-3 text-[var(--dashboard-muted)] text-xs">{row.lotNumarasi}</td>
-
-                        {/* Miad with badge */}
-                        <td className="px-3 py-3">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs text-[var(--dashboard-text)]">{row.miad}</span>
-                            {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
-                              <span className={cn(
-                                "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold w-fit",
-                                miadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
-                                miadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                                miadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                                miadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
-                                miadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
-                              )}>
-                                {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Adet - chip/badge */}
-                        <td className="px-3 py-3 text-center">
-                          <span className="inline-flex items-center justify-center min-w-[48px] px-2 py-1 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] shadow-sm text-xs font-bold text-[var(--dashboard-text)]">
-                            {row.quantity} {row.anaBirim}
+                      {/* Miad with badge */}
+                      <td style={{ padding: '13px 12px' }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: C.ink1 }}>{row.miad}</div>
+                        {miadInfo.severity !== 'normal' && miadInfo.days !== Infinity && (
+                          <span style={{ display: 'inline-flex', marginTop: 4, padding: '3px 9px', borderRadius: C.radiusPill, background: sev.badgeBg, color: sev.badgeC, fontSize: 11, fontWeight: 700 }}>
+                            {miadInfo.days < 0 ? 'Süresi dolmuş' : `${miadInfo.days} gün kaldı`}
                           </span>
-                        </td>
+                        )}
+                      </td>
 
-                        {/* Raf */}
-                        <td className="px-3 py-3 text-xs text-[var(--dashboard-muted)]">{row.rafAdresi}</td>
+                      {/* Adet - chip */}
+                      <td style={{ padding: '13px 12px', textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 48, padding: '6px 12px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 800, color: C.ink1, whiteSpace: 'nowrap' }}>
+                          {row.quantity} {row.anaBirim}
+                        </span>
+                      </td>
 
-                        {/* Stok Yeterlilik - colored badge + risky box count */}
-                        <td className="px-3 py-3">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className={cn(
-                              "inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold",
-                              coverageInfo.severity === 'good' && 'bg-emerald-100 text-emerald-700',
-                              coverageInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                              coverageInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                              coverageInfo.severity === 'unknown' && 'bg-slate-100 text-slate-500',
-                            )}>
-                              {coverageInfo.label}
-                            </span>
-                            {(() => {
-                              const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
-                              if (riskyBoxes <= 0) return null;
-                              const riskyDays = coverageInfo.coverageDays - miadInfo.days;
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleOpenRescueModal(row.stokKodu, row.stokAdi, riskyBoxes, miadInfo.days, row.miad); }}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 hover:bg-amber-200 hover:shadow-sm active:scale-95 transition-all cursor-pointer"
-                                  title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında — Laboratuvar detayı için tıklayın`}
-                                >
-                                  <AlertTriangle className="h-3 w-3" />
-                                  {riskyBoxes} kutu riskli
-                                </button>
-                              );
-                            })()}
-                          </div>
-                        </td>
+                      {/* Raf */}
+                      <td style={{ padding: '13px 12px', fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>{row.rafAdresi}</td>
 
-                        {/* İşlemler - sticky right */}
-                        <td className="px-3 py-3 text-right sticky right-0 bg-inherit z-10">
-                          <button
-                            className="cihaz-tool-item inline-flex items-center justify-center gap-1 px-2.5 h-8 text-[11px] font-medium text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-                            onClick={() => router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(row.stokKodu)}/${encodeURIComponent(row.lotNumarasi || '')}`)}
-                          >
-                            <Eye className="h-3.5 w-3.5" />
-                            <span className="hidden md:inline">Detay</span>
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
+                      {/* Yeterlilik - badge + risky */}
+                      <td style={{ padding: '13px 12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', padding: '5px 11px', borderRadius: C.radiusPill, background: cov.bg, color: cov.c, fontSize: 11.5, fontWeight: 700 }}>
+                            {coverageInfo.label}
+                          </span>
+                          {riskyBoxes > 0 && (() => {
+                            const riskyDays = coverageInfo.coverageDays - miadInfo.days;
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); handleOpenRescueModal(row.stokKodu, row.stokAdi, riskyBoxes, miadInfo.days, row.miad); }}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: C.radiusPill, border: 'none', cursor: 'pointer', background: C.amberSoft, color: '#9A6F1E', fontSize: 11.5, fontWeight: 700 }}
+                                title={`Miad ${miadInfo.days} gün sonra dolacak, ${riskyDays} günlük stok (${riskyBoxes} kutu) risk altında — Laboratuvar detayı için tıklayın`}
+                              >
+                                <AlertTriangle className="h-3 w-3" /> {riskyBoxes} kutu riskli
+                              </button>
+                            );
+                          })()}
+                        </div>
+                      </td>
+
+                      {/* İşlem - sticky right */}
+                      <td style={{ padding: '13px 12px', textAlign: 'right', position: 'sticky', right: 0, zIndex: 1, background: 'inherit' }}>
+                        <button
+                          type="button"
+                          style={{ ...clayPillBtn, height: 36 }}
+                          onClick={() => router.push(`/stok-yonetimi/${selectedDepotId}/${encodeURIComponent(row.stokKodu)}/${encodeURIComponent(row.lotNumarasi || '')}`)}
+                        >
+                          <Eye className="h-[15px] w-[15px]" /> Detay
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1596,27 +2029,29 @@ export default function StokYonetimiPanel() {
 
         {/* ── PAGINATION BAR ── */}
         {totalRows > 0 && (
-          <div className="sticky bottom-0 bg-[var(--dashboard-surface)] border-t border-[var(--dashboard-stroke)] px-4 py-2.5 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs text-[var(--dashboard-muted)]">
+          <div style={{ position: 'sticky', bottom: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '12px 18px', borderTop: `1px solid ${C.line}`, background: C.surface }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
               <span>Sayfa başına:</span>
               <Select value={String(rowsPerPage)} onValueChange={v => { setRowsPerPage(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-16 h-7 text-xs bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
+                <SelectTrigger style={{ width: 72, height: 36, border: 'none', borderRadius: C.radiusSm, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay, color: C.ink1, fontSize: 13, fontWeight: 700 }}><SelectValue /></SelectTrigger>
                 <SelectContent>{rowsPerPageOptions.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}</SelectContent>
               </Select>
             </div>
-            <div className="flex items-center gap-1.5">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <button
-                className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
+                type="button"
+                style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', border: 'none', cursor: currentPage <= 1 || isPending ? 'not-allowed' : 'pointer', color: C.ink2, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay, opacity: currentPage <= 1 || isPending ? 0.4 : 1 }}
                 onClick={() => setCurrentPage(p => p - 1)}
                 disabled={currentPage <= 1 || isPending}
               >
                 <ChevronLeft className="h-4 w-4" />
               </button>
-              <span className="text-xs text-[var(--dashboard-muted)] px-2">
-                <span className="text-[var(--dashboard-text)] font-bold">{currentPage}</span> / {totalPages}
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2, padding: '0 6px' }}>
+                <strong style={{ color: C.ink1, fontWeight: 800 }}>{currentPage}</strong> / {totalPages}
               </span>
               <button
-                className="cihaz-tool-item flex items-center justify-center w-8 h-8 disabled:opacity-40"
+                type="button"
+                style={{ width: 40, height: 40, borderRadius: 12, display: 'grid', placeItems: 'center', border: 'none', cursor: currentPage >= totalPages || isPending ? 'not-allowed' : 'pointer', color: C.ink2, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: C.clay, opacity: currentPage >= totalPages || isPending ? 0.4 : 1 }}
                 onClick={() => setCurrentPage(p => p + 1)}
                 disabled={currentPage >= totalPages || isPending}
               >
@@ -1642,7 +2077,7 @@ export default function StokYonetimiPanel() {
         allStock={rawDepotStock}
       />
       <Dialog open={isLabCountModalOpen} onOpenChange={setIsLabCountModalOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={cn('max-w-md', clayDialogClass)}>
           <DialogHeader>
             <DialogTitle>Laboratuvar Sayım Raporu</DialogTitle>
             <DialogDescription>Stoklarını birleşik olarak görmek istediğiniz laboratuvarları seçin.</DialogDescription>
@@ -1673,22 +2108,22 @@ export default function StokYonetimiPanel() {
 
       {/* ── RESCUE TRANSFER MODAL ── */}
       <Dialog open={isRescueModalOpen} onOpenChange={setIsRescueModalOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className={cn('max-w-3xl max-h-[90vh] flex flex-col', clayDialogClass)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <ShieldCheck className="h-4 w-4 text-[#4E9E6B]" />
               İmhadan Kurtarma — Transfer Önerileri
             </DialogTitle>
             {rescueProduct && (
               <DialogDescription asChild>
                 <div className="flex flex-wrap items-center gap-2 mt-1">
-                  <span className="font-semibold text-[var(--dashboard-text)]">{rescueProduct.stokAdi}</span>
-                  <span className="text-[var(--dashboard-muted)]">({rescueProduct.stokKodu})</span>
-                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                  <span className="font-semibold text-[#3D382F]">{rescueProduct.stokAdi}</span>
+                  <span className="text-[#BBB2A0]">({rescueProduct.stokKodu})</span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]">
                     <AlertTriangle className="h-3 w-3" />
                     {rescueProduct.riskyBoxes} kutu riskli
                   </span>
-                  <span className="text-[10px] text-[var(--dashboard-muted)]">
+                  <span className="text-[10px] text-[#BBB2A0]">
                     Miad: {rescueProduct.miad} ({rescueProduct.miadDays} gün)
                   </span>
                 </div>
@@ -1698,12 +2133,12 @@ export default function StokYonetimiPanel() {
 
           <div className="flex-1 overflow-auto py-3 space-y-3">
             {rescueLoading ? (
-              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+              <div className="flex items-center justify-center py-12 text-[#BBB2A0]">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Laboratuvar stokları analiz ediliyor...
               </div>
             ) : rescueSuggestions.length === 0 ? (
-              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+              <div className="text-center py-12 text-[#BBB2A0]">
                 <FlaskConical className="h-8 w-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">Bu ürün herhangi bir laboratuvara tanımlı değil veya uygun lab bulunamadı.</p>
               </div>
@@ -1715,10 +2150,10 @@ export default function StokYonetimiPanel() {
                   const unrescuable = (rescueProduct?.riskyBoxes ?? 0) - totalRescuable;
                   return (
                     <div className={cn(
-                      "flex items-center gap-3 px-3 py-2 rounded-lg border text-xs",
+                      "flex items-center gap-3 px-3 py-2 rounded-xl border text-xs",
                       unrescuable > 0
-                        ? "border-amber-200 bg-amber-50 text-amber-800"
-                        : "border-emerald-200 bg-emerald-50 text-emerald-800"
+                        ? "border-[rgba(224,163,62,0.35)] bg-[rgba(224,163,62,0.10)] text-[#9A6F1E]"
+                        : "border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)] text-[#2D6B4A]"
                     )}>
                       {unrescuable > 0 ? (
                         <>
@@ -1743,38 +2178,38 @@ export default function StokYonetimiPanel() {
                 {/* Suggestions */}
                 {rescueSuggestions.map((s) => (
                   <div key={s.labId} className={cn(
-                    "rounded-lg border overflow-hidden",
-                    s.status === 'recommended' && "border-emerald-200",
-                    s.status === 'possible' && "border-amber-200",
-                    s.status === 'not_suitable' && "border-[var(--dashboard-stroke)] opacity-60",
+                    "rounded-xl border overflow-hidden",
+                    s.status === 'recommended' && "border-[rgba(78,158,107,0.30)]",
+                    s.status === 'possible' && "border-[rgba(224,163,62,0.35)]",
+                    s.status === 'not_suitable' && "border-[rgba(90,72,40,0.10)] opacity-60",
                   )}>
                     {/* Lab header */}
                     <div className={cn(
                       "flex items-center justify-between px-3 py-2",
-                      s.status === 'recommended' && "bg-emerald-50",
-                      s.status === 'possible' && "bg-amber-50",
-                      s.status === 'not_suitable' && "bg-[var(--dashboard-surface-2)]",
+                      s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)]",
+                      s.status === 'possible' && "bg-[rgba(224,163,62,0.10)]",
+                      s.status === 'not_suitable' && "bg-[#F5F1E8]",
                     )}>
                       <div className="flex items-center gap-2">
-                        {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />}
-                        {s.status === 'possible' && <AlertTriangle className="h-3.5 w-3.5 text-amber-600" />}
-                        {s.status === 'not_suitable' && <XCircle className="h-3.5 w-3.5 text-slate-400" />}
-                        <span className="text-sm font-semibold text-[var(--dashboard-text)]">{s.labName}</span>
+                        {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-[#4E9E6B]" />}
+                        {s.status === 'possible' && <AlertTriangle className="h-3.5 w-3.5 text-[#E0A33E]" />}
+                        {s.status === 'not_suitable' && <XCircle className="h-3.5 w-3.5 text-[#BBB2A0]" />}
+                        <span className="text-sm font-semibold text-[#3D382F]">{s.labName}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         {/* Confidence bar */}
                         {s.status !== 'not_suitable' && (
                           <div className="flex items-center gap-1.5">
-                            <div className="w-16 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                            <div className="w-16 h-1.5 bg-[rgba(90,72,40,0.12)] rounded-full overflow-hidden">
                               <div
                                 className={cn(
                                   "h-full rounded-full transition-all",
-                                  s.confidenceScore >= 70 ? "bg-emerald-500" : s.confidenceScore >= 40 ? "bg-amber-500" : "bg-red-500"
+                                  s.confidenceScore >= 70 ? "bg-[#4E9E6B]" : s.confidenceScore >= 40 ? "bg-[#E0A33E]" : "bg-[#C0796A]"
                                 )}
                                 style={{ width: `${s.confidenceScore}%` }}
                               />
                             </div>
-                            <span className="text-[10px] font-bold text-[var(--dashboard-muted)]">%{s.confidenceScore}</span>
+                            <span className="text-[10px] font-bold text-[#BBB2A0]">%{s.confidenceScore}</span>
                           </div>
                         )}
                         {s.safeTransfer > 0 && (
@@ -1797,35 +2232,35 @@ export default function StokYonetimiPanel() {
                       {/* Metrics row */}
                       <div className={cn("grid gap-2 text-[10px]", s.avgConsumptionDays ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4")}>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Mevcut / Max</span>
-                          <span className="font-bold text-[var(--dashboard-text)]">{s.currentStock} / {s.maxStock}
-                            <span className="text-[var(--dashboard-muted)] font-normal ml-1">({s.deficit} açık)</span>
+                          <span className="text-[#BBB2A0]">Mevcut / Max</span>
+                          <span className="font-bold text-[#3D382F]">{s.currentStock} / {s.maxStock}
+                            <span className="text-[#BBB2A0] font-normal ml-1">({s.deficit} açık)</span>
                           </span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Günlük Tüketim</span>
-                          <span className="font-bold text-[var(--dashboard-text)]">{s.dailyNeed.toFixed(1)} kutu/gün</span>
+                          <span className="text-[#BBB2A0]">Günlük Tüketim</span>
+                          <span className="font-bold text-[#3D382F]">{s.dailyNeed.toFixed(1)} kutu/gün</span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">Tüketim Süresi</span>
+                          <span className="text-[#BBB2A0]">Tüketim Süresi</span>
                           <span className={cn(
                             "font-bold",
-                            s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-700" : "text-red-700"
+                            s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) ? "text-[#2D6B4A]" : "text-[#C0796A]"
                           )}>
                             {s.daysToConsume === Infinity ? 'Hesaplanamadı' : `${s.daysToConsume} gün`}
                             {s.daysToConsume !== Infinity && s.daysToConsume <= (rescueProduct?.miadDays ?? 0) && ' ✓'}
                           </span>
                         </div>
                         <div className="flex flex-col">
-                          <span className="text-[var(--dashboard-muted)]">FEFO Uyumu</span>
-                          <span className={cn("font-bold", s.fefoCompatible ? "text-emerald-700" : "text-amber-700")}>
+                          <span className="text-[#BBB2A0]">FEFO Uyumu</span>
+                          <span className={cn("font-bold", s.fefoCompatible ? "text-[#2D6B4A]" : "text-[#9A6F1E]")}>
                             {s.fefoCompatible ? 'Uyumlu ✓' : 'Uyarı ⚠'}
                           </span>
                         </div>
                         {s.avgConsumptionDays != null && s.avgConsumptionDays > 0 && (
                           <div className="flex flex-col">
-                            <span className="text-[var(--dashboard-muted)]">Ort. Tüketim</span>
-                            <span className="font-bold text-blue-700">
+                            <span className="text-[#BBB2A0]">Ort. Tüketim</span>
+                            <span className="font-bold text-[#4A7ABE]">
                               {s.avgConsumptionDays < 1
                                 ? `${Math.round(s.avgConsumptionDays * 24)} saat/kutu`
                                 : `${s.avgConsumptionDays} gün/kutu`}
@@ -1833,7 +2268,7 @@ export default function StokYonetimiPanel() {
                             {s.estimatedConsumptionDays != null && s.safeTransfer > 0 && (
                               <span className={cn(
                                 "text-[9px] mt-0.5",
-                                s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? "text-emerald-600" : "text-red-600"
+                                s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? "text-[#4E9E6B]" : "text-[#C0796A]"
                               )}>
                                 {s.safeTransfer} kutu → ~{s.estimatedConsumptionDays} günde tüketilir
                                 {s.estimatedConsumptionDays <= (rescueProduct?.miadDays ?? 0) ? ' ✓' : ' ✗'}
@@ -1845,10 +2280,10 @@ export default function StokYonetimiPanel() {
 
                       {/* Status reason */}
                       <div className={cn(
-                        "text-[10px] px-2 py-1 rounded",
-                        s.status === 'recommended' && "bg-emerald-50 text-emerald-700",
-                        s.status === 'possible' && "bg-amber-50 text-amber-700",
-                        s.status === 'not_suitable' && "bg-slate-50 text-slate-500",
+                        "text-[10px] px-2 py-1 rounded-lg",
+                        s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)] text-[#2D6B4A]",
+                        s.status === 'possible' && "bg-[rgba(224,163,62,0.10)] text-[#9A6F1E]",
+                        s.status === 'not_suitable' && "bg-[#F5F1E8] text-[#BBB2A0]",
                       )}>
                         {s.statusReason}
                       </div>
@@ -1856,12 +2291,12 @@ export default function StokYonetimiPanel() {
                       {/* Lab stock table */}
                       {s.labItems.length > 0 && (
                         <details className="text-xs">
-                          <summary className="cursor-pointer text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] text-[10px]">
+                          <summary className="cursor-pointer text-[#BBB2A0] hover:text-[#3D382F] text-[10px]">
                             Labdaki mevcut stok ({s.labItems.reduce((sum, i) => sum + i.quantity, 0)} kutu)
                           </summary>
                           <table className="w-full mt-1">
                             <thead>
-                              <tr className="border-b border-[var(--dashboard-stroke)] text-[var(--dashboard-muted)]">
+                              <tr className="border-b border-[rgba(90,72,40,0.10)] text-[#BBB2A0]">
                                 <th className="px-2 py-1 text-left font-medium text-[10px]">Lot</th>
                                 <th className="px-2 py-1 text-left font-medium text-[10px]">Miad</th>
                                 <th className="px-2 py-1 text-center font-medium text-[10px]">Adet</th>
@@ -1872,19 +2307,19 @@ export default function StokYonetimiPanel() {
                               {s.labItems.map((item, idx) => {
                                 const itemMiadInfo = getMiadInfoFromString(item.miad);
                                 return (
-                                  <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[var(--dashboard-stroke)] last:border-0">
-                                    <td className="px-2 py-1 font-mono text-[var(--dashboard-muted)]">{item.lotNumarasi}</td>
-                                    <td className="px-2 py-1 text-[var(--dashboard-text)]">{item.miad || '-'}</td>
+                                  <tr key={`${item.lotNumarasi}-${item.miad}-${idx}`} className="border-b border-[rgba(90,72,40,0.10)] last:border-0">
+                                    <td className="px-2 py-1 font-mono text-[#BBB2A0]">{item.lotNumarasi}</td>
+                                    <td className="px-2 py-1 text-[#3D382F]">{item.miad || '-'}</td>
                                     <td className="px-2 py-1 text-center font-bold">{item.quantity}</td>
                                     <td className="px-2 py-1 text-right">
                                       <span className={cn(
                                         "inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold",
-                                        itemMiadInfo.severity === 'expired' && 'bg-red-100 text-red-700',
-                                        itemMiadInfo.severity === 'critical' && 'bg-red-100 text-red-700',
-                                        itemMiadInfo.severity === 'warning' && 'bg-orange-100 text-orange-700',
-                                        itemMiadInfo.severity === 'caution' && 'bg-amber-100 text-amber-700',
-                                        itemMiadInfo.severity === 'notice' && 'bg-yellow-100 text-yellow-700',
-                                        itemMiadInfo.severity === 'normal' && 'bg-emerald-100 text-emerald-700',
+                                        itemMiadInfo.severity === 'expired' && 'bg-[rgba(192,121,106,0.18)] text-[#C0796A]',
+                                        itemMiadInfo.severity === 'critical' && 'bg-[rgba(192,121,106,0.18)] text-[#C0796A]',
+                                        itemMiadInfo.severity === 'warning' && 'bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]',
+                                        itemMiadInfo.severity === 'caution' && 'bg-[rgba(224,163,62,0.14)] text-[#9A6F1E]',
+                                        itemMiadInfo.severity === 'notice' && 'bg-[rgba(224,163,62,0.10)] text-[#B08728]',
+                                        itemMiadInfo.severity === 'normal' && 'bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]',
                                       )}>
                                         {itemMiadInfo.days < 0 ? 'Süresi dolmuş' : itemMiadInfo.days === Infinity ? '-' : `${itemMiadInfo.days} gün`}
                                       </span>
@@ -1911,10 +2346,10 @@ export default function StokYonetimiPanel() {
 
       {/* ── BULK RESCUE PLAN MODAL ── */}
       <Dialog open={isBulkRescueModalOpen} onOpenChange={setIsBulkRescueModalOpen}>
-        <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col">
+        <DialogContent className={cn('max-w-3xl max-h-[90vh] flex flex-col', clayDialogClass)}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-4 w-4 text-emerald-600" />
+              <ShieldCheck className="h-4 w-4 text-[#4E9E6B]" />
               Toplu Kurtarma Planı
             </DialogTitle>
             <DialogDescription>
@@ -1924,12 +2359,12 @@ export default function StokYonetimiPanel() {
 
           <div className="flex-1 overflow-auto py-3 space-y-3">
             {bulkRescueLoading ? (
-              <div className="flex items-center justify-center py-12 text-[var(--dashboard-muted)]">
+              <div className="flex items-center justify-center py-12 text-[#BBB2A0]">
                 <Loader2 className="h-5 w-5 animate-spin mr-2" />
                 Tüm riskli ürünler analiz ediliyor...
               </div>
             ) : bulkRescuePlans.length === 0 ? (
-              <div className="text-center py-12 text-[var(--dashboard-muted)]">
+              <div className="text-center py-12 text-[#BBB2A0]">
                 <CheckCircle2 className="h-8 w-8 mx-auto mb-2 opacity-30" />
                 <p className="text-sm">Riskli stok bulunamadı — tüm stoklar güvende!</p>
               </div>
@@ -1942,20 +2377,20 @@ export default function StokYonetimiPanel() {
                   const totalUnrescuable = totalRisky - totalRescuable;
                   return (
                     <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-center">
-                        <div className="text-lg font-bold text-amber-800">{totalRisky}</div>
-                        <div className="text-[10px] text-amber-600">Toplam Riskli Kutu</div>
+                      <div className="rounded-xl border border-[rgba(224,163,62,0.35)] bg-[rgba(224,163,62,0.10)] px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-[#9A6F1E]">{totalRisky}</div>
+                        <div className="text-[10px] text-[#B08728]">Toplam Riskli Kutu</div>
                       </div>
-                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-center">
-                        <div className="text-lg font-bold text-emerald-800">{totalRescuable}</div>
-                        <div className="text-[10px] text-emerald-600">Kurtarılabilir</div>
+                      <div className="rounded-xl border border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)] px-3 py-2 text-center">
+                        <div className="text-lg font-bold text-[#2D6B4A]">{totalRescuable}</div>
+                        <div className="text-[10px] text-[#4E9E6B]">Kurtarılabilir</div>
                       </div>
                       <div className={cn(
-                        "rounded-lg border px-3 py-2 text-center",
-                        totalUnrescuable > 0 ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50"
+                        "rounded-xl border px-3 py-2 text-center",
+                        totalUnrescuable > 0 ? "border-[rgba(192,121,106,0.35)] bg-[rgba(192,121,106,0.10)]" : "border-[rgba(78,158,107,0.30)] bg-[rgba(78,158,107,0.10)]"
                       )}>
-                        <div className={cn("text-lg font-bold", totalUnrescuable > 0 ? "text-red-800" : "text-emerald-800")}>{totalUnrescuable}</div>
-                        <div className={cn("text-[10px]", totalUnrescuable > 0 ? "text-red-600" : "text-emerald-600")}>İmha Riski</div>
+                        <div className={cn("text-lg font-bold", totalUnrescuable > 0 ? "text-[#C0796A]" : "text-[#2D6B4A]")}>{totalUnrescuable}</div>
+                        <div className={cn("text-[10px]", totalUnrescuable > 0 ? "text-[#C0796A]" : "text-[#4E9E6B]")}>İmha Riski</div>
                       </div>
                     </div>
                   );
@@ -1963,19 +2398,19 @@ export default function StokYonetimiPanel() {
 
                 {/* Per-product plans */}
                 {bulkRescuePlans.map((plan) => (
-                  <div key={plan.stokKodu} className="rounded-lg border border-[var(--dashboard-stroke)] overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--dashboard-surface-2)]">
+                  <div key={plan.stokKodu} className="rounded-xl border border-[rgba(90,72,40,0.10)] overflow-hidden">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[#F5F1E8]">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{plan.stokAdi}</div>
-                        <div className="text-[10px] text-[var(--dashboard-muted)] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>
+                        <div className="text-sm font-semibold text-[#3D382F] truncate">{plan.stokAdi}</div>
+                        <div className="text-[10px] text-[#BBB2A0] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>
                       </div>
                       <div className="flex items-center gap-2 ml-2 flex-shrink-0">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(224,163,62,0.18)] text-[#9A6F1E]">
                           <AlertTriangle className="h-3 w-3" />
                           {plan.riskyBoxes} riskli
                         </span>
                         {plan.rescuable > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-700">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]">
                             <CheckCircle2 className="h-3 w-3" />
                             {plan.rescuable} kurtarılabilir
                           </span>
@@ -2001,27 +2436,27 @@ export default function StokYonetimiPanel() {
                         {plan.suggestions.filter(s => s.safeTransfer > 0).map(s => (
                           <div key={s.labId} className="flex items-center justify-between text-[10px]">
                             <div className="flex items-center gap-1.5">
-                              {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-emerald-600" /> : <AlertTriangle className="h-3 w-3 text-amber-600" />}
-                              <span className="text-[var(--dashboard-text)]">{s.labName}</span>
+                              {s.status === 'recommended' ? <CheckCircle2 className="h-3 w-3 text-[#4E9E6B]" /> : <AlertTriangle className="h-3 w-3 text-[#E0A33E]" />}
+                              <span className="text-[#3D382F]">{s.labName}</span>
                               {s.estimatedConsumptionDays != null && (
                                 <span className={cn(
                                   "px-1 py-0.5 rounded text-[9px]",
-                                  s.estimatedConsumptionDays <= plan.miadDays ? "bg-blue-50 text-blue-700" : "bg-red-50 text-red-700"
+                                  s.estimatedConsumptionDays <= plan.miadDays ? "bg-[rgba(78,158,107,0.15)] text-[#2D6B4A]" : "bg-[rgba(192,121,106,0.15)] text-[#C0796A]"
                                 )}>
                                   ~{s.estimatedConsumptionDays}g tüketim
                                 </span>
                               )}
                             </div>
                             <div className="flex items-center gap-2">
-                              <span className="text-[var(--dashboard-muted)]">{s.currentStock}/{s.maxStock}</span>
-                              <span className="font-bold text-[var(--dashboard-text)]">→ {s.safeTransfer} kutu</span>
-                              <div className="w-10 h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                              <span className="text-[#BBB2A0]">{s.currentStock}/{s.maxStock}</span>
+                              <span className="font-bold text-[#3D382F]">→ {s.safeTransfer} kutu</span>
+                              <div className="w-10 h-1.5 bg-[rgba(90,72,40,0.12)] rounded-full overflow-hidden">
                                 <div
-                                  className={cn("h-full rounded-full", s.confidenceScore >= 70 ? "bg-emerald-500" : "bg-amber-500")}
+                                  className={cn("h-full rounded-full", s.confidenceScore >= 70 ? "bg-[#4E9E6B]" : "bg-[#E0A33E]")}
                                   style={{ width: `${s.confidenceScore}%` }}
                                 />
                               </div>
-                              <span className="text-[var(--dashboard-muted)] w-6 text-right">%{s.confidenceScore}</span>
+                              <span className="text-[#BBB2A0] w-6 text-right">%{s.confidenceScore}</span>
                             </div>
                           </div>
                         ))}
@@ -2029,7 +2464,7 @@ export default function StokYonetimiPanel() {
                     )}
 
                     {plan.suggestions.filter(s => s.safeTransfer > 0).length === 0 && (
-                      <div className="px-3 py-2 text-[10px] text-red-600">
+                      <div className="px-3 py-2 text-[10px] text-[#C0796A]">
                         <XCircle className="h-3 w-3 inline mr-1" />
                         Uygun laboratuvar bulunamadı — {plan.riskyBoxes} kutu imha riski altında
                       </div>
@@ -2045,6 +2480,6 @@ export default function StokYonetimiPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </ClayPage>
   );
 }

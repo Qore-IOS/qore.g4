@@ -13,6 +13,7 @@ import { useDock } from "@/hooks/use-dock";
 import PresenceManager from "./PresenceManager";
 import PersistentNotificationToast from "./notifications/PersistentNotificationToast";
 import PageShell from "./responsive/PageShell";
+
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { ThemeToggleDock } from "./ui/theme-toggle-dock";
 import {
@@ -28,6 +29,8 @@ import {
   SidebarTrigger,
 } from "./ui/sidebar";
 import Image from "next/image";
+import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
+import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers, useHospitals } from "@/hooks/useFirebaseQueries";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,13 +40,15 @@ import {
   DropdownMenuPortal,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Sun, Moon, Laptop, Eye, EyeOff, Star, Columns } from "lucide-react";
+import { Sun, Moon, Laptop, Eye, EyeOff, Star, Columns, Calendar } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { AnimatePresence } from "framer-motion";
+import { CalendarDockPanel } from "./dock/CalendarDockPanel";
 import { PushNotificationsErrorBoundary } from "./PushNotificationsErrorBoundary";
 import dynamic from 'next/dynamic';
 
@@ -66,7 +71,21 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleOrbAnimation,
     toggleNavMode,
   } = useAuth();
+
+  // Prefetch static master-data in the background to speed up panel loading (cached for 30m-1h)
+  useProductCodes();
+  useBarcodeFormatsQuery();
+  useDepots();
+  useAddressDefinitions();
+  useUsers();
+  useHospitals(); // Siparisler paneli ve LojistikSiparisView için
+
   const pathname = usePathname();
+  const [calendarOpen, setCalendarOpen] = useState(false);
+
+  useEffect(() => {
+    setCalendarOpen(false);
+  }, [pathname]);
 
   // Check if user is a teknisyen - hide dock for them
   const isTeknisyen = currentUserProfile?.role === 'teknisyen';
@@ -74,6 +93,8 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isQoreTechnicRole =
     currentUserProfile?.role === 'teknik_servis' ||
     currentUserProfile?.role === 'aplikasyon';
+  // Sarf dağıtım personeli: tek ekran (QR ile teslim al / teslim et) — dock yok.
+  const isSarfDagitimPersonel = currentUserProfile?.role === 'sarf_dagitim_personeli';
   // Lojistik terminal: lojistik_sorumlusu gets a dedicated work terminal
   // shell (its own collapsible sidebar, no global dock).
   const isLojistikTerminalRole = currentUserProfile?.role === 'lojistik_sorumlusu';
@@ -90,6 +111,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
+  const isEdgeToEdgeRoute =
+    pathname?.startsWith("/maliyet-gozlem") ||
+    pathname?.startsWith("/cihaz-test-dagilimi") ||
+    pathname?.startsWith("/satin-alma") ||
+    pathname?.startsWith("/cari-odeme") ||
+    pathname?.startsWith("/sarf-dagitim") ||
+    pathname?.startsWith("/sarf-teslimat") ||
+    // Yönetim ve alt panelleri (envanter yönetimi hariç) yeni tasarım dilinde
+    (pathname?.startsWith("/yonetim") && !pathname?.startsWith("/yonetim/envanter-yonetimi")) ||
+    pathname === "/dashboard" ||
+    pathname?.startsWith("/dashboard/");
 
   const {
     dockItems,
@@ -101,6 +133,11 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     handleMouseEnter,
     handleMouseLeave,
   } = useDock();
+
+  const iconData = useIconMappings();
+  const dockIcons = iconData?.mappings?.dock || {};
+
+
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
@@ -116,6 +153,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (isLoadingAuth || !currentUser) {
     return null;
+  }
+
+
+
+  // Sarf dağıtım personeli — tek ekranlık teslimat arayüzü.
+  // Dock / sidebar yok; sayfa kendi başlığını ve çıkışını barındırır.
+  if (isSarfDagitimPersonel) {
+    return (
+      <>
+        <PushNotificationsErrorBoundary>
+          <PushNotificationsClient />
+        </PushNotificationsErrorBoundary>
+        <PresenceManager />
+        <AutoRedirectOnLogin />
+        <PersistentNotificationToast />
+        {children}
+      </>
+    );
   }
 
   // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
@@ -200,6 +255,26 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             </SidebarMenu>
           </SidebarContent>
           <SidebarFooter>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                tooltip="Takvim"
+                onClick={() => setCalendarOpen(prev => !prev)}
+                className="w-full justify-start h-8 text-sm gap-2"
+              >
+                {dockIcons['calendar'] ? (
+                  <Image
+                    src={getIconSrc(dockIcons['calendar'])}
+                    alt="Takvim"
+                    width={20}
+                    height={20}
+                    className="w-5 h-5 object-contain"
+                  />
+                ) : (
+                  <Calendar className="w-5 h-5" />
+                )}
+                <span className="group-data-[collapsible=icon]:hidden">Takvim</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             {notificationItem && (
               <SidebarMenuItem>
                 <NotificationsBell
@@ -208,6 +283,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   unreadCount={notificationItem.unreadCount || 0}
                   loading={notificationItem.loading || false}
                   triggerClassName="w-full justify-start h-8 text-sm gap-2"
+                  customIcon={dockIcons['notifications']}
                 />
               </SidebarMenuItem>
             )}
@@ -237,6 +313,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
           {children}
         </main>
+        <AnimatePresence>
+          {calendarOpen && <CalendarDockPanel key="cal" onClose={() => setCalendarOpen(false)} />}
+        </AnimatePresence>
         <TaskPlannerPanel
           open={isPlannerPanelOpen}
           onClose={() => setIsPlannerPanelOpen(false)}
@@ -256,21 +335,33 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">
         <PersistentNotificationToast />
-        <PageShell className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""}`}>{children}</PageShell>
+        <PageShell
+          edgeToEdge={isEdgeToEdgeRoute}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""}`}
+        >
+          {children}
+        </PageShell>
 
         {!isMobile && !isTeknisyen && (
+          /* Ortalanma flex ile (mobil dock deseni). Not: dock camını bozan
+             gerçek neden sheen'deki mix-blend-mode idi; flex ortalama yine
+             de translate'e eşdeğer ve daha sade olduğu için korunuyor. */
           <div
-             className="fixed left-1/2 -translate-x-1/2"
+             className="fixed left-0 right-0 flex justify-center pointer-events-none"
              style={{ bottom: 'var(--dock-gap)', zIndex: 'var(--z-dock)' } as React.CSSProperties}
-             onMouseEnter={handleMouseEnter}
-             onMouseLeave={handleMouseLeave}
           >
-            <Dock
-                items={dockItems}
-                currentView={currentViewKey}
-                setTheme={setTheme}
-                isVisible={isVisible}
-            />
+            <div
+              className="pointer-events-auto"
+              onMouseEnter={handleMouseEnter}
+              onMouseLeave={handleMouseLeave}
+            >
+              <Dock
+                  items={dockItems}
+                  currentView={currentViewKey}
+                  setTheme={setTheme}
+                  isVisible={isVisible}
+              />
+            </div>
           </div>
         )}
 

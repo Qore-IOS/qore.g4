@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { LabSelector } from '@/components/common/LabSelector';
 import { ArrowLeft, Plus, Trash2, Wrench, FlaskConical, User, Building2, CalendarDays, Save, Loader2, Check, ChevronDown, Users } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -16,6 +17,7 @@ import { tr } from 'date-fns/locale';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import MultiDateRangePicker from './MultiDateRangePicker';
 import type { Hospital, User as UserType, ShiftScheduleRow, ShiftDateRange, ShiftPersonnelType } from '@/lib/types';
@@ -51,7 +53,7 @@ export default function CreateShiftPanel({
   onBack,
   onSuccess
 }: CreateShiftPanelProps) {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId } = useAuth();
   const { toast } = useToast();
 
   // Separate rows for each type
@@ -64,7 +66,6 @@ export default function CreateShiftPanel({
 
   // Modal states
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  const [isLabSelectorOpen, setIsLabSelectorOpen] = useState(false);
   const [isCompanionSelectorOpen, setIsCompanionSelectorOpen] = useState(false);
 
   // Saving state
@@ -137,9 +138,7 @@ export default function CreateShiftPanel({
   };
 
   // Update active row laboratories
-  const updateActiveRowLabs = (labIds: string[]) => {
-    if (!activeRowId || !activeType) return;
-
+  const updateRowLabs = (type: ShiftPersonnelType, rowId: string, labIds: string[]) => {
     const labNames = labIds.map(id => {
       const hospital = hospitals.find(h => h.id === id);
       return hospital?.name || 'Bilinmeyen';
@@ -147,12 +146,12 @@ export default function CreateShiftPanel({
 
     const updateFn = (prev: ShiftRow[]) =>
       prev.map(row =>
-        row.id === activeRowId
+        row.id === rowId
           ? { ...row, laboratoryIds: labIds, laboratoryNames: labNames }
           : row
       );
 
-    if (activeType === 'teknik_servis') {
+    if (type === 'teknik_servis') {
       setTeknikRows(updateFn);
     } else {
       setAplikasyonRows(updateFn);
@@ -175,13 +174,6 @@ export default function CreateShiftPanel({
     } else {
       setAplikasyonRows(updateFn);
     }
-  };
-
-  // Open lab selector for a row
-  const openLabSelector = (type: ShiftPersonnelType, rowId: string) => {
-    setActiveType(type);
-    setActiveRowId(rowId);
-    setIsLabSelectorOpen(true);
   };
 
   // Open calendar for a row
@@ -278,7 +270,7 @@ export default function CreateShiftPanel({
 
       for (const row of allRows) {
         // Ana personel için vardiya oluştur
-        await addDoc(shiftsCollection, {
+        await addDoc(shiftsCollection, withCompanyScope({
           personnelUid: row.personnelUid,
           personnelName: row.personnelName,
           personnelType: row.type,
@@ -289,12 +281,12 @@ export default function CreateShiftPanel({
           createdByUid: currentUserProfile.uid,
           createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
           isActive: true
-        });
+        }, currentCompanyId));
         totalCreated++;
 
         // Eşlik eden personeller için vardiya oluştur
         for (const companion of row.companions) {
-          await addDoc(shiftsCollection, {
+          await addDoc(shiftsCollection, withCompanyScope({
             personnelUid: companion.uid,
             personnelName: companion.name,
             personnelType: companion.type,
@@ -305,7 +297,7 @@ export default function CreateShiftPanel({
             createdByUid: currentUserProfile.uid,
             createdByName: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen',
             isActive: true
-          });
+          }, currentCompanyId));
           totalCreated++;
         }
       }
@@ -374,38 +366,16 @@ export default function CreateShiftPanel({
 
           {/* Laboratory Selection */}
           {row.personnelUid && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Laboratuvarlar</span>
-              </div>
-              <Button
-                variant="outline"
-                className="w-full justify-between"
-                onClick={() => openLabSelector(type, row.id)}
-              >
-                <span className="truncate">
-                  {row.laboratoryIds.length > 0
-                    ? `${row.laboratoryIds.length} laboratuvar seçildi`
-                    : 'Laboratuvar seçin...'}
-                </span>
-                <ChevronDown className="h-4 w-4 ml-2 shrink-0" />
-              </Button>
-              {row.laboratoryNames.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                  {row.laboratoryNames.slice(0, 3).map((name, i) => (
-                    <Badge key={i} variant="secondary" className="text-xs">
-                      {name.length > 15 ? name.slice(0, 15) + '...' : name}
-                    </Badge>
-                  ))}
-                  {row.laboratoryNames.length > 3 && (
-                    <Badge variant="outline" className="text-xs">
-                      +{row.laboratoryNames.length - 3} daha
-                    </Badge>
-                  )}
-                </div>
-              )}
-            </div>
+            <LabSelector
+              mode="multi"
+              label="Laboratuvarlar"
+              labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+              values={row.laboratoryIds}
+              onValuesChange={(ids) => updateRowLabs(type, row.id, ids)}
+              placeholder="Laboratuvar seçin..."
+              showChips
+              icon={<Building2 className="h-4 w-4" />}
+            />
           )}
 
           {/* Date Range Selection */}
@@ -597,56 +567,6 @@ export default function CreateShiftPanel({
           'text-blue-600'
         )}
       </div>
-
-      {/* Laboratory Selector Dialog */}
-      <Dialog open={isLabSelectorOpen} onOpenChange={setIsLabSelectorOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              Laboratuvar Seçimi
-            </DialogTitle>
-            <DialogDescription>
-              Bu nöbet vardiyasının geçerli olacağı laboratuvarları seçin.
-            </DialogDescription>
-          </DialogHeader>
-          <ScrollArea className="max-h-[400px] pr-4">
-            <div className="space-y-2">
-              {hospitals.map(hospital => {
-                const isSelected = activeRow?.laboratoryIds.includes(hospital.id) || false;
-                return (
-                  <label
-                    key={hospital.id}
-                    className={cn(
-                      "flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
-                      isSelected
-                        ? "border-primary bg-primary/5"
-                        : "border-border hover:bg-accent/50"
-                    )}
-                  >
-                    <Checkbox
-                      checked={isSelected}
-                      onCheckedChange={(checked) => {
-                        if (!activeRow) return;
-                        const newIds = checked
-                          ? [...activeRow.laboratoryIds, hospital.id]
-                          : activeRow.laboratoryIds.filter(id => id !== hospital.id);
-                        updateActiveRowLabs(newIds);
-                      }}
-                    />
-                    <span className="flex-1">{hospital.name}</span>
-                  </label>
-                );
-              })}
-            </div>
-          </ScrollArea>
-          <DialogFooter>
-            <Button onClick={() => setIsLabSelectorOpen(false)}>
-              Tamam ({activeRow?.laboratoryIds.length || 0} seçili)
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Calendar Dialog */}
       <Dialog open={isCalendarOpen} onOpenChange={setIsCalendarOpen}>

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { collection, getDocs, Timestamp } from 'firebase/firestore';
@@ -28,7 +29,7 @@ const formatDate = (value?: Date) => {
 export default function YedekParcaSiparisGecmisPage() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentCompanyId } = useAuth();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<SparePartOrderHistoryRow[]>([]);
@@ -42,7 +43,7 @@ export default function YedekParcaSiparisGecmisPage() {
 
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, 'yedekParcaSiparisler'));
+      const snap = await getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin));
       const scoped = filterByCompanyScope(
         snap.docs.map((doc) => ({ id: doc.id, ...doc.data() } as any)),
         currentCompanyId,

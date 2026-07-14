@@ -13,6 +13,7 @@ import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin, Eye, 
 import RouteProgressView from './route-progress-view';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   collection, doc, getDocs, onSnapshot, query,
   serverTimestamp, Timestamp, updateDoc, where
@@ -103,7 +104,7 @@ const cloneStops = (stops: RouteStop[]) => stops.map(s => ({ ...s }));
 
 export default function RoutePlanlayiciPage() {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [myUid, setMyUid] = useState<string>('');
   const [myRole, setMyRole] = useState<string>('');
@@ -150,14 +151,14 @@ export default function RoutePlanlayiciPage() {
 
     (async () => {
       try {
-        const uSnap = await getDocs(collection(db, 'users'));
+        const uSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const ds = uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)).filter(u => (u as any).role === 'driver');
         setDrivers(ds);
       } catch {
         toast({ title: 'Veri Hatası', description: 'Sürücüler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast, canManageRoutes]);
+  }, [toast, canManageRoutes, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     if (!activeRouteId) {
@@ -178,7 +179,7 @@ export default function RoutePlanlayiciPage() {
   const fetchRoute = useCallback(async (driverId: string, day: Date) => {
     if (!driverId) { setActiveRoute(null); setActiveRouteId(null); return; }
     const dayKey = toDayKey(day);
-    const qy = query(collection(db, 'routes'), where('driverId', '==', driverId), where('date', '==', dayKey));
+    const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, where('driverId', '==', driverId), where('date', '==', dayKey));
     const snap = await getDocs(qy);
     if (snap.empty) { setActiveRoute(null); setActiveRouteId(null); return; }
     const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as RouteDoc[];
@@ -486,8 +487,10 @@ export default function RoutePlanlayiciPage() {
     if (!myUid) return;
     setLoadingRoutes(true);
     try {
-      const qy = query(
-        collection(db, 'routes'),
+      const qy = scopedQuery(
+        'routes',
+        currentCompanyId,
+        isSuperAdmin,
         where('driverId', '==', myUid),
         where('status', 'in', ['open', 'in_progress'])
       );

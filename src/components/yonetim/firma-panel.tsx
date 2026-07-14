@@ -2,6 +2,7 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -11,7 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Building2, UserCog } from 'lucide-react';
 import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
+import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import type { Company, User } from '@/lib/types';
@@ -31,6 +33,12 @@ export default function FirmaPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Firestore Security Rules isSuperAdmin custom claim'ini kontrol eder.
+      // Token'ı zorla yenileyerek claim'lerin güncel olduğundan emin oluyoruz.
+      const auth = getAuth(app);
+      if (auth.currentUser) {
+        await auth.currentUser.getIdToken(true);
+      }
       const [companySnap, userSnap] = await Promise.all([
         getDocs(collection(db, 'companies')),
         getDocs(collection(db, 'users')),
@@ -61,17 +69,12 @@ export default function FirmaPanel() {
 
   if (!isSuperAdmin) {
     return (
-      <div className="p-4 space-y-4">
-        <BackButton fallback="/yonetim/tanimlar" />
-        <Card className="shadow-lg">
-          <CardHeader>
-            <CardTitle className="text-xl font-headline">Yetkisiz Erişim</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p>Firma yönetimi sadece Süper Admin tarafından yapılabilir.</p>
-          </CardContent>
-        </Card>
-      </div>
+      <YonetimShell>
+        <YonetimHeader title="Firma Yönetimi" backHref="/yonetim/tanimlar" />
+        <YonetimCard title="Yetkisiz Erişim" description="Firma yönetimi sadece Süper Admin tarafından yapılabilir.">
+          <div />
+        </YonetimCard>
+      </YonetimShell>
     );
   }
 
@@ -141,31 +144,27 @@ export default function FirmaPanel() {
   };
 
   return (
-    <>
-      <div className="p-4 space-y-4">
-        <BackButton fallback="/yonetim/tanimlar" />
-        <Card className="shadow-lg">
-          <CardHeader className="flex flex-row justify-between items-center">
-            <div>
-              <CardTitle className="text-xl font-headline flex items-center">
-                <Building2 className="mr-2 h-6 w-6 text-indigo-500" />
-                Firma Yönetimi
-              </CardTitle>
-              <CardDescription>Sisteme bağlı firmaları yönetin. Sadece Süper Admin firma oluşturabilir.</CardDescription>
-            </div>
-            <Button onClick={() => openModal()} size="sm" disabled={isLoading}>
-              <PlusCircle className="mr-2 h-4 w-4" />Yeni Firma
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {/* Legacy firma bilgisi */}
-            <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-md">
-              <p className="text-sm text-amber-800 dark:text-amber-300">
-                <strong>Legacy Firma:</strong> Şirketi tanımlanmamış tüm kullanıcılar ve veriler otomatik olarak legacy firmaya aittir.
-              </p>
-            </div>
+    <YonetimShell>
+      <YonetimHeader
+        title="Firma Yönetimi"
+        description="Sisteme bağlı firmaları yönetin. Sadece Süper Admin firma oluşturabilir."
+        backHref="/yonetim/tanimlar"
+        rightAction={
+          <Button onClick={() => openModal()} size="sm" disabled={isLoading} style={{ background: 'var(--mg-accent)', color: '#0a0a0c', border: 'none', fontWeight: 700 }}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Yeni Firma
+          </Button>
+        }
+      />
 
-            {isLoading ? (
+      <YonetimCard>
+        <div style={{ padding: '10px 14px', background: 'rgba(251,146,60,0.08)', border: '1px solid rgba(251,146,60,0.25)', borderRadius: 10 }}>
+          <p style={{ fontSize: 12, color: 'var(--mg-text-2)', margin: 0 }}>
+            <strong>Legacy Firma:</strong> Şirketi tanımlanmamış tüm kullanıcılar ve veriler otomatik olarak legacy firmaya aittir.
+          </p>
+        </div>
+
+        {isLoading ? (
               <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
             ) : (
               <ScrollArea className="h-[300px] border rounded-md">
@@ -217,9 +216,7 @@ export default function FirmaPanel() {
                 </Table>
               </ScrollArea>
             )}
-          </CardContent>
-        </Card>
-      </div>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="max-w-md">
@@ -283,6 +280,6 @@ export default function FirmaPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </YonetimShell>
   );
 }

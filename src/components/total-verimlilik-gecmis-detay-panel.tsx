@@ -20,9 +20,11 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { loadTotalEfficiencyRows } from '@/lib/total-efficiency-record-storage';
 import { useToast } from '@/hooks/use-toast';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -33,7 +35,9 @@ import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { exportDataToExcel } from '@/lib/utils';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
 interface TableRowData {
   id: string;
@@ -73,6 +77,11 @@ interface EfficiencyMetrics {
   stokDogrulukSkoru: number;
   kitVerimlilikSkoru: number;
   genelVerimlilik: number;
+  toplamEtkiDegeri?: number;
+  maliyetAgirlikli?: boolean;
+  hesaplananSatirSayisi?: number;
+  hakEdisVerisiGirildi?: boolean;
+  algoritma?: 'value-impact-efficiency-index';
 }
 
 interface TotalEfficiencyRecord {
@@ -85,6 +94,7 @@ interface TotalEfficiencyRecord {
   createdAt: { seconds: number; nanoseconds: number } | null;
   createdByName: string;
   efficiencyMetrics?: EfficiencyMetrics;
+  isAraKayit?: boolean;
 }
 
 const MONTHS = [
@@ -102,6 +112,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
   const [isLoading, setIsLoading] = useState(true);
   const [showResultsOnly, setShowResultsOnly] = useState(false);
   const [column22Mode, setColumn22Mode] = useState<'kumulatif' | 'hakedis'>('kumulatif');
+  const [showStockAlgorithmModal, setShowStockAlgorithmModal] = useState(false);
 
   useEffect(() => {
     const fetchRecord = async () => {
@@ -111,16 +122,20 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
 
         if (docSnap.exists()) {
           const data = docSnap.data();
+          const rows = await loadTotalEfficiencyRows<TotalEfficiencyRecord['rows'][number]>(docSnap.id, data);
           setRecord({
             id: docSnap.id,
             poolId: data.poolId || '',
             poolName: data.poolName || '',
             month: data.month ?? 0,
             year: data.year ?? 0,
-            rows: data.rows || [],
+            rows,
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
-            efficiencyMetrics: data.efficiencyMetrics || undefined,
+            efficiencyMetrics: rows.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+              ? calculateEfficiencyMetrics(rows)
+              : data.efficiencyMetrics || (rows.length ? calculateEfficiencyMetrics(rows) : undefined),
+            isAraKayit: data.isAraKayit === true,
           });
         } else {
           toast({
@@ -180,6 +195,37 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
     exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
   };
 
+  const stockAlgorithmRows = useMemo(() => {
+    if (!record?.rows.length) return [];
+
+    return record.rows.map(row => {
+      const expectedConsumption = row.sevkiyatlarSonrasiTotalTest - row.donemSonuToplamTest;
+      const volume = Math.max(0, row.kumulatifTotal || 0);
+      const stockScore = volume > 0
+        ? Math.max(0, Math.min(100, 100 - (Math.abs(row.stokDogrulukFark) / volume) * 100))
+        : 100;
+
+      return {
+        id: row.id,
+        labName: row.labName,
+        stokAdi: row.stokAdi,
+        expectedConsumption,
+        volume,
+        stockDiff: row.stokDogrulukFark,
+        stockScore,
+        impact: volume,
+      };
+    });
+  }, [record]);
+
+  const stockAlgorithmTotals = useMemo(() => {
+    const hakEdisVerisiGirildi = record?.efficiencyMetrics?.hakEdisVerisiGirildi
+      ?? record?.rows.some(row => Number(row.hakEdis || 0) > 0)
+      ?? false;
+
+    return { hakEdisVerisiGirildi };
+  }, [record]);
+
   if (isLoading) {
     return (
       <div className="p-4">
@@ -202,6 +248,11 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
       </div>
     );
   }
+
+  const firstLabId = record.rows[0]?.labId;
+  const calculationDetailHref = firstLabId
+    ? `/total-verimlilik/gecmis/${record.id}/hesap-detay/${encodeURIComponent(firstLabId)}`
+    : null;
 
   return (
     <div className="p-4 space-y-6" role="main" aria-label="Total Verimlilik Geçmiş Detayı">
@@ -264,13 +315,28 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     />
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center">
-                    <span className={`text-2xl font-bold ${
-                      record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
-                      record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
-                      record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
-                    }`}>
-                      %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
-                    </span>
+                    {calculationDetailHref ? (
+                      <Link
+                        href={calculationDetailHref}
+                        className={`text-2xl font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${
+                          record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                          record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                          record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                        }`}
+                        aria-label="Laboratuvar dönem hesap detay panelini aç"
+                        title="Hesap detay panelini aç"
+                      >
+                        %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                      </Link>
+                    ) : (
+                      <span className={`text-2xl font-bold ${
+                        record.efficiencyMetrics.genelVerimlilik >= 90 ? 'text-green-600' :
+                        record.efficiencyMetrics.genelVerimlilik >= 70 ? 'text-yellow-600' :
+                        record.efficiencyMetrics.genelVerimlilik >= 50 ? 'text-orange-600' : 'text-red-600'
+                      }`}>
+                        %{record.efficiencyMetrics.genelVerimlilik.toFixed(1)}
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground">Genel</span>
                   </div>
                 </div>
@@ -293,9 +359,20 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">Stok Doğruluk</span>
-                      <span className={`text-lg font-bold ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
-                        %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
-                      </span>
+                      {calculationDetailHref ? (
+                        <Link
+                          href={calculationDetailHref}
+                          className={`w-fit text-left text-lg font-bold underline-offset-4 hover:underline focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}
+                          aria-label="Laboratuvar dönem hesap detay panelini aç"
+                          title="Hesap detay panelini aç"
+                        >
+                          %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                        </Link>
+                      ) : (
+                        <span className={`text-lg font-bold ${record.efficiencyMetrics.stokDogrulukSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.stokDogrulukSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                          %{record.efficiencyMetrics.stokDogrulukSkoru.toFixed(1)}
+                        </span>
+                      )}
                       <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.stokSapmaYuzde.toFixed(2)}</span>
                     </div>
                   </div>
@@ -308,18 +385,27 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                         <circle
                           cx="24" cy="24" r="20"
                           stroke="currentColor" strokeWidth="4" fill="none"
-                          strokeDasharray={`${(record.efficiencyMetrics.kitVerimlilikSkoru / 100) * 125.7} 125.7`}
+                          strokeDasharray={`${record.efficiencyMetrics.hakEdisVerisiGirildi === false ? 0 : (record.efficiencyMetrics.kitVerimlilikSkoru / 100) * 125.7} 125.7`}
                           strokeLinecap="round"
-                          className={record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
+                          className={record.efficiencyMetrics.hakEdisVerisiGirildi === false ? 'text-muted-foreground' : record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-500' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-500' : 'text-red-500'}
                         />
                       </svg>
                     </div>
                     <div className="flex flex-col">
                       <span className="text-sm font-medium">Kit Verimlilik</span>
-                      <span className={`text-lg font-bold ${record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
-                        %{record.efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
-                      </span>
-                      <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</span>
+                      {record.efficiencyMetrics.hakEdisVerisiGirildi === false ? (
+                        <>
+                          <span className="text-lg font-bold text-muted-foreground">Dahil değil</span>
+                          <span className="text-xs text-muted-foreground">Hak ediş girilmedi</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className={`text-lg font-bold ${record.efficiencyMetrics.kitVerimlilikSkoru >= 90 ? 'text-green-600' : record.efficiencyMetrics.kitVerimlilikSkoru >= 70 ? 'text-yellow-600' : 'text-red-600'}`}>
+                            %{record.efficiencyMetrics.kitVerimlilikSkoru.toFixed(1)}
+                          </span>
+                          <span className="text-xs text-muted-foreground">Sapma: %{record.efficiencyMetrics.kitSapmaYuzde.toFixed(2)}</span>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -481,13 +567,22 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                     {record.rows.map((row) => (
                       <TableRow key={row.id} className="text-sm">
                         <TableCell className="font-medium bg-muted/30 sticky left-0 z-10">
-                          <div>
-                            <span>{row.labName}</span>
-                            {row.labKod && (
-                              <span className="ml-1 text-xs font-mono text-muted-foreground">
-                                ({row.labKod})
-                              </span>
-                            )}
+                          <div className="space-y-1">
+                            <div>
+                              <span>{row.labName}</span>
+                              {row.labKod && (
+                                <span className="ml-1 text-xs font-mono text-muted-foreground">
+                                  ({row.labKod})
+                                </span>
+                              )}
+                            </div>
+                            <Link
+                              href={`/total-verimlilik/gecmis/${record.id}/hesap-detay/${encodeURIComponent(row.labId)}`}
+                              className="text-xs font-medium text-primary underline-offset-4 hover:underline"
+                              title="Hesap detay panelini aç"
+                            >
+                              Hesap Detayı
+                            </Link>
                           </div>
                         </TableCell>
                         <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
@@ -626,6 +721,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
           )}
         </CardContent>
       </Card>
+
     </div>
   );
 }

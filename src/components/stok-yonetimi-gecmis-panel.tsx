@@ -1,11 +1,12 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, Timestamp, where, orderBy, limit as fsLimit } from 'firebase/firestore';
 import type { Depot, DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -66,34 +67,55 @@ export default function StokYonetimiGecmisPanel() {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
-  const fetchData = useCallback(async () => {
+  // Sadece depo listesini yükle — stok analizi sorgulama anında çekilir.
+  const fetchDepots = useCallback(async () => {
     setLoading(true);
     try {
-      const [depotsSnap, stockSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'depoStok')),
-      ]);
+      const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
       setDepots(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-      
-      const processItems = (snap: any) => snap.docs.map((d: any) => {
-        const data = d.data();
-        Object.keys(data).forEach(key => {
-            if (data[key] instanceof Timestamp) data[key] = data[key].toDate();
-        });
-        return { id: d.id, ...data };
-      });
-      setAllStock(filterByCompanyScope(processItems(stockSnap), currentCompanyId, isSuperAdmin));
-
     } catch (error) {
-      toast({ title: 'Hata', description: 'Gerekli ana veriler yüklenemedi.', variant: 'destructive' });
+      toast({ title: 'Hata', description: 'Depo listesi yüklenemedi.', variant: 'destructive' });
     } finally {
       setLoading(false);
     }
   }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+    fetchDepots();
+  }, [fetchDepots]);
+
+  /**
+   * Sorgulama anında SADECE seçili depo + tarih aralığını ilgilendiren
+   * stokları çeker. Eski sürüm tüm depoStok'u baştan indiriyordu.
+   */
+  const fetchStockForQuery = useCallback(async (depotId: string, range: DateRange) => {
+    if (!range.from || !range.to) return [];
+    // Dönem başı stoğu da yakalayabilmek için aralığın başından 1 yıl geriye git.
+    const lookbackStart = startOfDay(addDays(range.from, -365));
+    const lookbackTs = Timestamp.fromDate(lookbackStart);
+    const endTs = Timestamp.fromDate(endOfDay(range.to));
+
+    // Depo + tarih aralığı + hard cap. Composite index gerektirir:
+    // (companyId, depotId, eklenmeTarihi).
+    const q = scopedQuery(
+      'depoStok',
+      currentCompanyId,
+      isSuperAdmin,
+      where('depotId', '==', depotId),
+      where('eklenmeTarihi', '>=', lookbackTs),
+      where('eklenmeTarihi', '<=', endTs),
+      orderBy('eklenmeTarihi', 'desc'),
+      fsLimit(20000),
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => {
+      const data = d.data();
+      Object.keys(data).forEach(key => {
+        if (data[key] instanceof Timestamp) data[key] = data[key].toDate();
+      });
+      return { id: d.id, ...data } as DepoStokItem;
+    });
+  }, [currentCompanyId, isSuperAdmin]);
 
   const handleQuery = async () => {
     if (!selectedLocationId || !dateRange?.from || !dateRange?.to) {
@@ -106,8 +128,12 @@ export default function StokYonetimiGecmisPanel() {
     const to = endOfDay(dateRange.to);
   
     try {
+        // Server'dan sadece bu depo + tarih aralığı için stok çek.
+        const stockForDepot = await fetchStockForQuery(selectedLocationId, dateRange);
+        setAllStock(stockForDepot);
+
         const reportMap = new Map<string, ReportRow>();
-  
+
         const initializeRowIfNeeded = (item: DepoStokItem) => {
             const key = `${item.stokKodu}-${item.lotNumarasi || ''}`;
             if (!reportMap.has(key)) {
@@ -118,8 +144,6 @@ export default function StokYonetimiGecmisPanel() {
             }
             return reportMap.get(key)!;
         };
-
-        const stockForDepot = allStock.filter(item => item.depotId === selectedLocationId);
 
         stockForDepot.forEach(item => {
             const row = initializeRowIfNeeded(item);
@@ -141,9 +165,8 @@ export default function StokYonetimiGecmisPanel() {
         reportMap.forEach(row => {
             row.fark = (row.donemBasiStok + row.donemIciGiris) - row.donemSonuStok;
             if (row.fark > 0) {
-                row.detaySeriNumaralari = allStock
+                row.detaySeriNumaralari = stockForDepot
                     .filter(s => {
-                        if (s.depotId !== selectedLocationId) return false;
                         if (s.stokKodu !== row.stokKodu) return false;
                         if ((s.lotNumarasi || '') !== row.lotNumarasi) return false;
                         if (!s.isShipped) return false;

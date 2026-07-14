@@ -7,11 +7,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Loader2, Users, FlaskConical, Trash2, Edit3, Plus, ArrowLeft, Server } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, Timestamp, query, orderBy, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, Device, DeviceLabPool } from '@/lib/types';
 
 interface DeviceLabPoolModalProps {
@@ -25,7 +27,7 @@ type ModalView = 'list' | 'create' | 'edit' | 'details';
 
 export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devices }: DeviceLabPoolModalProps) {
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [pools, setPools] = useState<DeviceLabPool[]>([]);
@@ -45,7 +47,7 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
   const fetchPools = useCallback(async () => {
     setIsLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc')));
+      const snap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc')));
       setPools(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)));
     } catch (error) {
       console.error('Error fetching device lab pools:', error);
@@ -260,59 +262,29 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
         </div>
 
         <div>
-          <Label>Laboratuvar Seçimi</Label>
-          <p className="text-xs text-muted-foreground mb-2">
-            Gruba dahil edilecek laboratuvarları seçin. Sadece cihaz atanmış laboratuvarlar listelenir.
-          </p>
-
-          {labsWithDevices.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground border rounded-md">
-              <p className="text-sm">Cihaz atanmış laboratuvar bulunamadı.</p>
-            </div>
-          ) : (
-            <ScrollArea className="h-64 border rounded-md p-2">
-              <div className="space-y-1">
-                {labsWithDevices.map(lab => {
-                  const deviceCount = getDeviceCountForLab(lab.id);
-                  return (
-                    <div
-                      key={lab.id}
-                      className={`flex items-center justify-between p-2 rounded-md hover:bg-muted/50 ${
-                        selectedLabIds.has(lab.id) ? 'bg-primary/10' : ''
-                      }`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <Checkbox
-                          checked={selectedLabIds.has(lab.id)}
-                          onCheckedChange={(checked) => handleLabSelect(lab.id, !!checked)}
-                        />
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium text-sm">{lab.name}</span>
-                            {lab.kod && (
-                              <span className="text-xs font-mono text-muted-foreground">
-                                ({lab.kod})
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            {deviceCount} cihaz
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </ScrollArea>
-          )}
+          <LabSelector
+            mode="multi"
+            label="Laboratuvar Seçimi"
+            helperText="Gruba dahil edilecek laboratuvarları seçin. Sadece cihaz atanmış laboratuvarlar listelenir."
+            labs={labsWithDevices.map(l => ({
+              id: l.id,
+              name: l.name,
+              kod: l.kod,
+              meta: `${getDeviceCountForLab(l.id)} cihaz`,
+            }))}
+            values={Array.from(selectedLabIds)}
+            onValuesChange={(ids) => setSelectedLabIds(new Set(ids))}
+            placeholder={
+              labsWithDevices.length === 0
+                ? 'Cihaz atanmış laboratuvar bulunamadı.'
+                : 'Laboratuvar seçin'
+            }
+            disabled={labsWithDevices.length === 0}
+            showChips
+            popoverModal
+            contentClassName="z-[10000]"
+          />
         </div>
-
-        {selectedLabIds.size > 0 && (
-          <p className="text-sm text-muted-foreground">
-            {selectedLabIds.size} laboratuvar seçildi
-          </p>
-        )}
       </div>
 
       <DialogFooter>

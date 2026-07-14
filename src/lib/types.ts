@@ -24,6 +24,7 @@ export interface ProductCode {
   currency?: 'EUR' | 'USD' | 'TRY';
   marka?: string;
   laboratuvarGrubu?: string;
+  laboratuvarGruplari?: string[]; // Çoklu lab grubu ataması - lojistik sorumlusu eşleştirmesi için
   testGrubu?: string;
   cihazGrubu?: string;
   testAdi?: string; // Ürünün çalıştığı testin adı (Total Verimlilik paneli için)
@@ -71,10 +72,28 @@ export interface Hospital {
   fefoEnabled?: boolean;
   customProductOrder?: string[]; // Özel ürün sıralama - sipariş toplama ekranında kullanılır
   perifer?: boolean; // Perifer laboratuvar statüsü - ofis tarafından yönetilen, lojistik paneli açan siparişler
+  defaultDepotId?: string; // Varsayılan depo ID'si (otomatik yönlendirme için)
+  defaultDepotName?: string; // Varsayılan depo adı
+  orderLimitEnabled?: boolean; // Manuel ürün talebinde max stok üstü siparişi engeller
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
+  mahalKodu?: string; // Hastane Sarf kategorisindeki lablar için mahal kodu (örn. 152.06.A.001) — QR teslimat doğrulamasında kullanılır
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
   sevkAdresi?: string; // Ceomed irsaliyesindeki sevk adresi ile eşleştirme için (ek hizmet yönlendirmesi)
   [k: string]: any;
+}
+
+/**
+ * Laboratuvar çalışma saatleri.
+ * - haftaIciGunleri / haftaSonuGunleri: hangi günler çalışıyor (her ikisi için varsayılan dolu kabul edilir)
+ * - Boş bir aralık (start = end) o periyodun kapalı olduğu anlamına gelir
+ */
+export interface LabCalismaSaatleri {
+  haftaIciStart?: string;  // "08:00"
+  haftaIciEnd?: string;    // "17:00"
+  haftaSonuStart?: string; // "00:00"
+  haftaSonuEnd?: string;   // "00:00" (kapalı)
+  haftaIciGunleri?: ('pzt' | 'sal' | 'cars' | 'pers' | 'cum')[];
+  haftaSonuGunleri?: ('cmt' | 'pzr')[];
 }
 
 export interface RackHeader {
@@ -139,6 +158,49 @@ export interface MinMaxRule {
   ortalamaTuketimSuresi?: number;
   /** Tüketim süresi birimi: 'gun' (gün) veya 'saat' */
   tuketimSuresiBirimi?: 'gun' | 'saat';
+  /** Hastane Sarf labları için: transfer ekranında otomatik gelen transfer adedi */
+  otomatikTransferAdedi?: number;
+  counterEnabled?: boolean;
+  counterPlusEnabled?: boolean;
+}
+
+/* ——— Sarf Dağıtım (Hastane Sarf) transfer akışı ——— */
+
+export interface SarfTransferItem {
+  stokKodu: string;
+  stokAdi: string;
+  adet: number;
+}
+
+/**
+ * Hastane Sarf transferi. Oluşturulduğunda 'pending' (kabul bekliyor);
+ * paket QR'ı (transferId + mahal kodu) ve ardından mahal QR'ı okutulup
+ * doğrulandığında 'delivered' olur — depo stoğu düşülür, mahal stoğuna eklenir.
+ */
+export interface SarfTransfer {
+  id: string;
+  /** Kısa transfer kodu, örn. TRF-9K2P7 — paket etiketinde basılır */
+  code: string;
+  hospitalId: string;
+  kurumAdi: string;
+  /** Hedef labın mahal kodu (hospitals.mahalKodu) */
+  mahalKodu: string;
+  items: SarfTransferItem[];
+  total: number;
+  status: 'pending' | 'delivered';
+  depotId?: string | null;
+  depotName?: string | null;
+  createdAt: TimestampLike;
+  createdBy?: string;
+  createdById?: string;
+  /** Sarf dağıtım personeli paketi üzerine aldığında dolar */
+  receivedAt?: TimestampLike;
+  receivedBy?: string;
+  receivedById?: string;
+  deliveredAt?: TimestampLike;
+  deliveredBy?: string;
+  deliveredById?: string;
+  companyId?: string;
 }
 
 // Şirket bazlı veri yönetimi
@@ -160,7 +222,7 @@ export interface Company {
 export interface User {
   uid: string;
   email: string | null;
-  role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | string;
+  role: 'super_admin' | 'admin' | 'admin_developer' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen' | 'teknik_lojistik' | 'satin_alma' | 'sarf_dagitim_personeli' | string;
   name?: string;
   companyId?: string; // Şirket ID - boş veya undefined ise legacy şirkete ait
   nfcId?: string; // Optional field for NFC card ID
@@ -175,6 +237,7 @@ export interface User {
   notificationPreferences?: string[]; // Array of notification types
   themePreference?: 'light' | 'dark' | 'system'; // User's theme preference stored in Firestore
   lastSelectedLabId?: string; // Last selected laboratory ID for teknisyen users (persisted in Firestore)
+  assignedLabGroups?: string[]; // NEW: Assigned laboratory groups for logistics responsible
 }
 
 export interface ScannedItem {
@@ -238,6 +301,8 @@ export interface PeripheralFulfillment {
   updatedBy?: string;
 }
 
+export type OrderUrgency = 'normal' | 'acil' | 'cok_acil';
+
 export interface Order {
   id: string; // Firestore document ID
   depotId?: string; // The depot that should fulfill this.
@@ -245,7 +310,7 @@ export interface Order {
   kurumAdi: string;
   items: OrderItem[];
   createdAt: TimestampLike;
-  status: 'pending' | 'toplaniyor' | 'completed' | 'eksik' | string;
+  status: 'pending' | 'toplaniyor' | 'completed' | 'eksik' | 'kismi' | string;
   transferredAt?: TimestampLike | null;
   olusturmaTarihi?: TimestampLike;
   depotName?: string;
@@ -255,6 +320,8 @@ export interface Order {
   transferredBy?: string;
   isPeripheral?: boolean; // True when the target lab is perifer; orders routed to office logistics flow
   peripheralFulfillment?: PeripheralFulfillment; // Office-managed fulfillment state for perifer orders
+  urgency?: OrderUrgency; // Peripheral talep aciliyeti — normal | acil | cok_acil
+  note?: string;          // Talep açıklaması (opsiyonel, perifer akışta girilir)
 }
 
 
@@ -326,12 +393,29 @@ export interface LaboratoryStockCountSession { // New session type for labs
 }
 
 
+export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+export type KiraDonemi = 'aylik' | 'yillik';
+
 export interface Device {
   id: string;
   brand: string;
   model: string;
   imageUrl: string;
-  mulkiyet?: string;
+  mulkiyet?: DeviceMulkiyetTipi | string;
+  /** Sahiplik 'kira' ise tutar (kiraDonemi'ne göre aylık/yıllık) */
+  aylikKira?: number;
+  /** Kira dönemi (varsayılan 'aylik'). 'yillik' ise hesapta ÷12 yapılır. */
+  kiraDonemi?: KiraDonemi;
+  /** Sahiplik 'satin_alma' ise toplam satın alma tutarı */
+  satinAlmaTutari?: number;
+  /** Sahiplik 'satin_alma' ise satın alma tarihi (dd.MM.yyyy) */
+  satinAlmaTarihi?: string;
+  /** Sahiplik 'satin_alma' ise amortisman süresi (ay cinsinden) — aylık karşılık = satinAlmaTutari / amortismanAyi */
+  amortismanAyi?: number;
+  /** Maliyet alanlarının para birimi (varsayılan TRY) */
+  maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
+  /** Saat başına teorik test çalışma kapasitesi (örn 100 test/saat) — kapasite bazlı maliyet hesabında kullanılır */
+  testKapasiteSaatBasi?: number;
   kurulumTarihi?: string;
   kurulumPersonelleri?: string;
   aciklama?: string;
@@ -358,6 +442,9 @@ export interface AssignedDevice {
   openedBy?: string;
   subPointId?: string;
   subPointName?: string;
+  /** Bu cihaza atanmış ürün stok kodları — bir kit birden fazla cihaza atanabilir.
+   *  Test bazlı maliyette CAWC algoritmasının girdisi olur. */
+  assignedStokKodlari?: string[];
 }
 
 export interface DeviceGroup {
@@ -482,6 +569,8 @@ export interface DeviceFaultReport {
   description: string;
   status: DeviceFaultStatus;
   faultType: 'teknik_servis' | 'aplikasyon';
+  affectsAllDevices?: boolean;
+  affectedDeviceIds?: string[];
   openedAt: Date | null;
   openedBy: string;
   openedByName: string;
@@ -546,8 +635,7 @@ export type AppView =
   | 'sarf-dagitim'
   | 'tuketim-istatistikleri'
   | 'cihaz-yonetimi-ana'
-  | 'cihaz-ustu-ekle'
-  | 'cihaz-ustu-gecmisi'
+  | 'cihaz-ustu-hesaplama'
   | 'direkt-transfer'
   | 'urun-talep'
   | 'verimlilik-hesaplama'
@@ -556,7 +644,6 @@ export type AppView =
   | 'aplikasyon-paneli'
   | 'transfer-gecmis'
   | 'siparis-gecmis'
-  | 'kumulatif-gecmis'
   | 'kumulatif-hesaplama'
   | 'arama'
   | 'cihaz-ariza-gecmis'
@@ -574,6 +661,15 @@ export type AppView =
   | 'satin-alma'
   | 'kullanici-talepleri'
   | 'maliyet-sayim'
+  | 'cari-odeme'
+  | 'cari-odeme-onay'
+  // Qore Finance Module — Faz 1+
+  | 'finans-faturalar'
+  | 'finans-tahsilat'
+  | 'finans-cari-ekstre'
+  | 'finans-banka'
+  | 'finans-nakit-akis'
+  | 'finans-karlilik'
   ;
 
 export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikServis';
@@ -777,6 +873,8 @@ export interface SparePartTransferLog {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
+  removedHucreNumarasi?: string; // Hücre değişiminde cihazdan çıkan hücre
   fromUid?: string;            // Kimden
   fromName?: string;
   toUid?: string;              // Kime
@@ -804,6 +902,7 @@ export interface PendingReturn {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   source: PersonalStockSource; // Orijinal kaynak
   sourceDeviceId?: string;
   sourceDeviceName?: string;
@@ -818,7 +917,6 @@ export interface PendingReturn {
   confirmedByUid?: string;
   confirmedByName?: string;
   imageUrl?: string;           // Cihazdan çıkan parça fotoğrafı URL
-  returnCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
   returnConditionNote?: string;
 }
 
@@ -1003,6 +1101,133 @@ export interface TestDefinition {
   id: string;
   name: string;
   linkedProductCode: string; // stokKodu
+}
+
+/**
+ * Envanter (zimmet edilebilen demirbaş) — bilgisayar, barkod okuyucu,
+ * dolap, klima vb. Maliyet hesabında lab'ın "envanter maliyeti" kalemine girer.
+ */
+export interface Asset {
+  id: string;
+  category: string;
+  demirbasNo: string;
+  urunKodu?: string;
+  urunAdi: string;
+  marka?: string;
+  model?: string;
+  seriNumarasi?: string;
+  durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü';
+  konum: string;
+  bolum?: string;
+  manuelKonum?: string;
+  alimFiyatiTl?: number;
+  satinAlmaTarihi?: string;
+  garantiBitisTarihi?: string;
+  planliKullanimOmruYil?: number;
+  amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
+  amortismanBaslangicTarihi?: string;
+  /** Mülkiyet tipi: satın alma (varsayılan, alimFiyatiTl + planliKullanimOmruYil) veya kira */
+  mulkiyet?: 'satin_alma' | 'kira';
+  /** Kira tutarı (mulkiyet='kira' ise) */
+  kiraTutari?: number;
+  /** Kira dönemi (mulkiyet='kira' ise; varsayılan 'aylik') */
+  kiraDonemi?: 'aylik' | 'yillik';
+  /** Kira bitiş tarihi (mulkiyet='kira' ise) */
+  kiraBitisTarihi?: string;
+  /** Maliyet para birimi (varsayılan TRY) */
+  maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
+  hurdaTarihi?: string;
+  imhaTarihi?: string;
+  satisTarihi?: string;
+  sonBakimTarihi?: string;
+  sonrakiBakimTarihi?: string;
+  sonKalibrasyonTarihi?: string;
+  sonrakiKalibrasyonTarihi?: string;
+  bakimMaliyetiTl?: number;
+  zimmetliKisi?: string;
+  checkOutTarihi?: string;
+  checkInTarihi?: string;
+  dijitalImza?: string;
+  zimmetFisNo?: string;
+  teslimEdilenPersonel?: string;
+  aciklama?: string;
+  companyId?: string;
+}
+
+/**
+ * Global test/hak ediş tanımı.
+ *
+ * Eski model: her laboratuvarın subcollection'ı `hospitals/{labId}/hakEdisDefinitions`
+ * altında ayrı SUT tanımları vardı. Yeni model bu tanımları sistem geneline taşır
+ * (tek bir koleksiyon: `testDefinitions`) ve aynı testi birden fazla ürüne
+ * (kit + sarf gibi) bağlayabilmek için `linkedStokKodlari` array'ini kullanır.
+ */
+export interface TestDefinitionGlobal {
+  id: string;
+  /** SUT kodu (örn: "900.010") */
+  sutKodu: string;
+  /** SUT test adı (örn: "Glikoz Tayini") */
+  sutTestAdi: string;
+  /** Bu teste bağlı bir veya birden çok ürün stok kodu */
+  linkedStokKodlari: string[];
+  /** Test counter başlangıç/güncel değeri */
+  counterValue?: number;
+  /** SUT karşılığı hak ediş tutarı (TL) */
+  hakEdisMiktari: number;
+  /** Hak ediş tutarının para birimi (varsayılan TRY) */
+  currency?: 'EUR' | 'USD' | 'TRY';
+  aktif: boolean;
+  createdAt: TimestampLike;
+  createdByUid?: string;
+  createdByName?: string;
+  updatedAt?: TimestampLike;
+  companyId?: string;
+}
+
+/**
+ * Basitleştirilmiş personel gider modeli: tek bir kişi başı aylık gider (TL)
+ * ve lab başına personel sayısı. Ortak stok havuzlarında sayı yalnızca ana
+ * laba girilir; toplam gider havuz üyesi lablara test hacmine göre dağıtılır.
+ * Şirket başına tek doküman (personnelCostConfig koleksiyonu).
+ */
+export interface PersonnelCostConfig {
+  id?: string;
+  /** Personel başına aylık gider (TL) */
+  costPerPersonTL: number;
+  /** labId → personel sayısı (havuzlu lablarda yalnızca ana laba girilir) */
+  labCounts: Record<string, number>;
+  companyId?: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
+}
+
+/**
+ * Personel (laboratuvarda çalışan) modeli.
+ *
+ * Sisteme login olan kullanıcı `User` ile karıştırılmamalıdır; bir personel
+ * istenirse bir `User` ile eşleştirilebilir (`userId`).
+ */
+export interface Personnel {
+  id: string;
+  adSoyad: string;
+  pozisyon?: string;
+  /** Personelin görev yaptığı laboratuvarların id listesi */
+  assignedLabIds: string[];
+  /** Ana sorumluluk laboratuvarı (raporlamada ağırlıklandırma için) */
+  primaryLabId?: string;
+  /** Aylık brüt maaş */
+  aylikBrutMaas: number;
+  /** Aylık yan haklar (yemek, yol, sigorta vb.) */
+  aylikYanHaklar?: number;
+  currency: 'EUR' | 'USD' | 'TRY';
+  aktif: boolean;
+  baslamaTarihi?: string;
+  /** Varsa bağlı kullanıcı UID'si */
+  userId?: string;
+  companyId?: string;
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
 }
 
 export interface LabPool {
@@ -1494,4 +1719,74 @@ export interface UserRequest {
   reopenReason?: string;
   comments?: UserRequestComment[];
   unreadByUser: boolean;
+}
+
+/**
+ * Bekleyen İrsaliye — Dosya yönetiminde OCR ile taranıp onaylanmış,
+ * lab stoğuna aktarılmayı bekleyen irsaliye kaydı.
+ */
+export type BekleyenIrsaliyeStatus = 'pending' | 'transferred' | 'cancelled';
+
+export interface BekleyenIrsaliyeItem {
+  stokKodu: string;
+  stokAdi: string;
+  marka?: string;
+  lot?: string;
+  miad?: string; // dd.MM.yyyy
+  rawLine?: string;
+  /** Faturada yazan ham miktar (örn. 750). */
+  sourceQuantity: number;
+  /** Faturada yazan birim (ADET, KUTU, PAKET, ...). */
+  sourceUnit?: string;
+  /** Sistem ana birimine dönüştürülmüş miktar (örn. 30 kutu). */
+  convertedQuantity: number;
+  /** Sistem ana birimi (örn. "Kutu"). */
+  convertedUnit?: string;
+  /** Sistem tarafında tanımlı ana birim. */
+  anaBirim?: string;
+  /** Sistem tarafında tanımlı ambalaj değeri. */
+  ambalajDegeri?: number;
+  /** Birim dönüşümü gerçekten uygulandı mı? */
+  conversionApplied?: boolean;
+  conversionReasoning?: string;
+  /** Eşleşmenin gücü. */
+  matchConfidence: 'high' | 'medium' | 'low';
+  /** stokKodu üzerinden mi yoksa stokAdı üzerinden mi eşleşti? */
+  matchedBy?: 'stok_kodu' | 'stok_adi' | 'none';
+}
+
+export interface BekleyenIrsaliye {
+  id: string;
+  companyId?: string;
+  /** irsaliyeDosyalari koleksiyonundaki kaynağa referans. */
+  dosyaId: string;
+  dosyaName: string;
+  storagePath?: string;
+  downloadURL?: string;
+  locationType: 'hospital' | 'depot';
+  locationId: string;
+  locationName: string;
+  /** Faturadan tespit edilen irsaliye numarası (varsa). */
+  irsaliyeNumber?: string;
+  /** Faturadan tespit edilen irsaliye tarihi (dd.MM.yyyy). */
+  irsaliyeDate?: string;
+  /** Faturadaki satıcı/firma adı. */
+  supplierName?: string;
+  /** Faturada tespit edilen markaların listesi. */
+  brands: string[];
+  /** Faturadaki toplam satır sayısı (ürün çeşit sayısı). */
+  itemCount: number;
+  /** Sistem ana birimine dönüştürülmüş toplam adet (genel özet için). */
+  totalConvertedQuantity: number;
+  items: BekleyenIrsaliyeItem[];
+  status: BekleyenIrsaliyeStatus;
+  scannedAt: TimestampLike;
+  scannedByUid?: string;
+  scannedByName?: string;
+  transferredAt?: TimestampLike;
+  transferredByUid?: string;
+  transferredByName?: string;
+  /** Genel AI yorumu (örn. okuyamadığı yerler). */
+  aiNotes?: string;
+  scanModel?: string;
 }

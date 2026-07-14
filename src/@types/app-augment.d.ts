@@ -17,8 +17,7 @@ declare module "@/lib/types" {
     | "sarf-dagitim"
     | "tuketim-istatistikleri"
     | "cihaz-yonetimi-ana"
-    | "cihaz-ustu-ekle"
-    | "cihaz-ustu-gecmisi"
+    | "cihaz-ustu-hesaplama"
     | "direkt-transfer"
     | "urun-talep"
     | "verimlilik-hesaplama"
@@ -26,7 +25,6 @@ declare module "@/lib/types" {
     | "teknik-servis"
     | "transfer-gecmis"
     | "siparis-gecmis"
-    | "kumulatif-gecmis"
     | "kumulatif-hesaplama"
     | "arama"
     | "cihaz-ariza-gecmis"
@@ -39,7 +37,9 @@ declare module "@/lib/types" {
     | "cihaz-yonetimi"
     | "miad-uyarilari"
     | "verimlilik"
-    | "numune-arsivi";
+    | "numune-arsivi"
+    | "cari-odeme"
+    | "cari-odeme-onay";
 
   export interface User {
     id: ID;
@@ -53,14 +53,18 @@ declare module "@/lib/types" {
     accessibleViews?: AppView[];
     name?: string;
     nfcId?: string;
+    companyId?: string;
     assignedLaboratories?: string[];
+    primaryLaboratories?: string[];
     assignedDepots?: string[];
     assignedBrands?: string[];
+    assignedLabGroups?: string[];
     phoneNumber?: string;
     createdAt?: TimestampLike;
     notificationsEnabled?: boolean;
     notificationPreferences?: string[];
     themePreference?: 'light' | 'dark' | 'system';
+    lastSelectedLabId?: string;
   }
 
   // ---------- Master Data ----------
@@ -105,6 +109,11 @@ declare module "@/lib/types" {
     planliKullanimOmruYil?: number;
     amortismanYontemi?: 'dogrusal' | 'azalan_bakiye';
     amortismanBaslangicTarihi?: string;
+    mulkiyet?: 'satin_alma' | 'kira';
+    kiraTutari?: number;
+    kiraDonemi?: 'aylik' | 'yillik';
+    kiraBitisTarihi?: string;
+    maliyetCurrency?: 'EUR' | 'USD' | 'TRY';
     hurdaTarihi?: string;
     imhaTarihi?: string;
     satisTarihi?: string;
@@ -148,6 +157,11 @@ declare module "@/lib/types" {
     visualDeductionEnabled?: boolean;
     fefoEnabled?: boolean;
     perifer?: boolean;
+    isConsumablesHospital?: boolean;
+    mahalKodu?: string;
+    ceomedCariKodu?: string;
+    defaultDepotId?: string;
+    defaultDepotName?: string;
     address?: string;
     lat?: number;
     lng?: number;
@@ -598,7 +612,41 @@ declare module "@/lib/types" {
     aylikTuketimLimiti?: number;
     ortalamaTuketimSuresi?: number;
     tuketimSuresiBirimi?: 'gun' | 'saat';
+    /** Hastane Sarf labları: transfer ekranında otomatik gelen adet */
+    otomatikTransferAdedi?: number;
     [k: string]: unknown;
+  }
+
+  // ---------- Sarf Dağıtım (Hastane Sarf) transfer akışı ----------
+  export interface SarfTransferItem {
+    stokKodu: string;
+    stokAdi: string;
+    adet: number;
+  }
+
+  export interface SarfTransfer {
+    id: string;
+    /** Kısa transfer kodu, örn. TRF-9K2P7 — paket etiketinde basılır */
+    code: string;
+    hospitalId: string;
+    kurumAdi: string;
+    /** Hedef labın mahal kodu (hospitals.mahalKodu) */
+    mahalKodu: string;
+    items: SarfTransferItem[];
+    total: number;
+    status: 'pending' | 'delivered';
+    depotId?: string | null;
+    depotName?: string | null;
+    createdAt: TimestampLike;
+    createdBy?: string;
+    createdById?: string;
+    receivedAt?: TimestampLike;
+    receivedBy?: string;
+    receivedById?: string;
+    deliveredAt?: TimestampLike;
+    deliveredBy?: string;
+    deliveredById?: string;
+    companyId?: string;
   }
 
   export interface UploadedReport {
@@ -707,6 +755,41 @@ declare module "@/lib/types" {
     id: string;
     name: string;
     linkedProductCode: string; // stokKodu
+  }
+
+  export type DeviceMulkiyetTipi = 'kira' | 'satin_alma' | 'demobaz';
+
+  export interface TestDefinitionGlobal {
+    id: string;
+    sutKodu: string;
+    sutTestAdi: string;
+    linkedStokKodlari: string[];
+    counterValue?: number;
+    hakEdisMiktari: number;
+    currency?: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    createdAt: TimestampLike;
+    createdByUid?: string;
+    createdByName?: string;
+    updatedAt?: TimestampLike;
+    companyId?: string;
+  }
+
+  export interface Personnel {
+    id: string;
+    adSoyad: string;
+    pozisyon?: string;
+    assignedLabIds: string[];
+    primaryLabId?: string;
+    aylikBrutMaas: number;
+    aylikYanHaklar?: number;
+    currency: 'EUR' | 'USD' | 'TRY';
+    aktif: boolean;
+    baslamaTarihi?: string;
+    userId?: string;
+    companyId?: string;
+    createdAt?: TimestampLike;
+    updatedAt?: TimestampLike;
   }
 
   export interface LabPool {
@@ -1026,5 +1109,55 @@ declare module "@/lib/types" {
     laboratoryIds: string[];
     laboratoryNames: string[];
     dateRanges: ShiftDateRange[];
+  }
+
+  // ---------- Bekleyen İrsaliye (file management → lab stock pipeline) ----------
+  export type BekleyenIrsaliyeStatus = "pending" | "transferred" | "cancelled";
+
+  export interface BekleyenIrsaliyeItem {
+    stokKodu: string;
+    stokAdi: string;
+    marka?: string;
+    lot?: string;
+    miad?: string;
+    rawLine?: string;
+    sourceQuantity: number;
+    sourceUnit?: string;
+    convertedQuantity: number;
+    convertedUnit?: string;
+    anaBirim?: string;
+    ambalajDegeri?: number;
+    conversionApplied?: boolean;
+    conversionReasoning?: string;
+    matchConfidence: "high" | "medium" | "low";
+    matchedBy?: "stok_kodu" | "stok_adi" | "none";
+  }
+
+  export interface BekleyenIrsaliye {
+    id: string;
+    companyId?: string;
+    dosyaId: string;
+    dosyaName: string;
+    storagePath?: string;
+    downloadURL?: string;
+    locationType: "hospital" | "depot";
+    locationId: string;
+    locationName: string;
+    irsaliyeNumber?: string;
+    irsaliyeDate?: string;
+    supplierName?: string;
+    brands: string[];
+    itemCount: number;
+    totalConvertedQuantity: number;
+    items: BekleyenIrsaliyeItem[];
+    status: BekleyenIrsaliyeStatus;
+    scannedAt: TimestampLike;
+    scannedByUid?: string;
+    scannedByName?: string;
+    transferredAt?: TimestampLike;
+    transferredByUid?: string;
+    transferredByName?: string;
+    aiNotes?: string;
+    scanModel?: string;
   }
 }

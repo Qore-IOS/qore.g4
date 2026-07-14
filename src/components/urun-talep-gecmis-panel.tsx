@@ -1,10 +1,10 @@
 'use client';
 
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Loader2, History } from 'lucide-react';
+import { Loader2, History, Trash2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,20 +18,54 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { cn } from '@/lib/utils';
+import { 
+  AlertDialog, 
+  AlertDialogAction, 
+  AlertDialogCancel, 
+  AlertDialogContent, 
+  AlertDialogDescription, 
+  AlertDialogFooter, 
+  AlertDialogHeader, 
+  AlertDialogTitle 
+} from '@/components/ui/alert-dialog';
 
 type RequestHistoryItem = {
   id: string;
   itemCount: number;
   createdBy: string;
   createdAt: string | null;
+  status: string;
+  urgency: string;
 };
 
 const DEFAULT_PAGE_SIZE = 20;
 
-export default function UrunTalepGecmisPanel() {
+function getStatusBadge(status: string) {
+  switch (status) {
+    case 'pending':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">Beklemede</span>;
+    case 'toplaniyor':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">Hazırlanıyor</span>;
+    case 'completed':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Teslim</span>;
+    case 'eksik':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">Eksik</span>;
+    case 'cancelled':
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400">İptal</span>;
+    default:
+      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400">{status}</span>;
+  }
+}
+
+export default function UrunTalepGecmisPanel({ depotId }: { depotId?: string } = {}) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentUserProfile } = useAuth();
+
+  const urlLabId = searchParams.get('labId');
+  const urlDepotId = depotId || searchParams.get('depotId') || '';
 
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState<RequestHistoryItem[]>([]);
@@ -41,20 +75,32 @@ export default function UrunTalepGecmisPanel() {
   const [page, setPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(DEFAULT_PAGE_SIZE);
 
+  // Deletion state
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // Cursor stack: cursorStack[i] = lastDocId for page (i+1)
   const cursorStackRef = useRef<(string | null)[]>([]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
+  // Determine location filter from URL/profile. Depot-origin history must stay
+  // scoped to the selected depot instead of falling back to all lab requests.
+  const labFilter = urlDepotId ? '' : (urlLabId || (currentUserProfile?.assignedLaboratories || []).join(','));
+  const depotFilter = urlDepotId || '';
+
   /**
-   * Fetch total count from the server (uses Firestore count aggregation)
+   * Fetch total count from the server
    */
-  const fetchTotalCount = useCallback(async (uid: string, signal: AbortSignal) => {
+  const fetchTotalCount = useCallback(async (uid: string, filter: string, depotId: string, signal: AbortSignal) => {
     try {
-      const response = await fetch(
-        `/api/urun-talep-gecmis?createdById=${uid}&countOnly=true`,
-        { signal, cache: 'no-store' }
-      );
+      let url = `/api/urun-talep-gecmis?countOnly=true`;
+      if (depotId) url += `&depotId=${depotId}`;
+      else if (filter.includes(',')) url += `&labIds=${filter}`;
+      else if (filter) url += `&labId=${filter}`;
+      else url += `&createdById=${uid}`;
+
+      const response = await fetch(url, { signal, cache: 'no-store' });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload?.error || 'Sayım alınamadı.');
       setTotalCount(payload.totalCount ?? 0);
@@ -65,10 +111,12 @@ export default function UrunTalepGecmisPanel() {
   }, []);
 
   /**
-   * Fetch a page of data from the server (cursor-based pagination)
+   * Fetch a page of data from the server
    */
   const fetchPage = useCallback(async (
     uid: string,
+    filter: string,
+    depotId: string,
     pageNum: number,
     pageSize: number,
     cursors: (string | null)[],
@@ -76,10 +124,14 @@ export default function UrunTalepGecmisPanel() {
   ) => {
     setLoading(true);
     try {
-      // For page 1, no cursor. For page N, use cursor from page N-1.
       const startAfterId = pageNum > 1 ? cursors[pageNum - 2] : null;
 
-      let url = `/api/urun-talep-gecmis?createdById=${uid}&pageSize=${pageSize}`;
+      let url = `/api/urun-talep-gecmis?pageSize=${pageSize}`;
+      if (depotId) url += `&depotId=${depotId}`;
+      else if (filter.includes(',')) url += `&labIds=${filter}`;
+      else if (filter) url += `&labId=${filter}`;
+      else url += `&createdById=${uid}`;
+
       if (startAfterId) {
         url += `&startAfterId=${startAfterId}`;
       }
@@ -93,7 +145,6 @@ export default function UrunTalepGecmisPanel() {
 
       setOrders(payload.data || []);
 
-      // Store cursor (lastDocId) for this page
       if (payload.lastDocId) {
         const newCursors = [...cursors];
         newCursors[pageNum - 1] = payload.lastDocId;
@@ -116,15 +167,15 @@ export default function UrunTalepGecmisPanel() {
   useEffect(() => {
     setPage(1);
     cursorStackRef.current = [];
-  }, [rowsPerPage]);
+  }, [rowsPerPage, labFilter, depotFilter]);
 
-  // Fetch total count on mount and when page size changes (to refresh)
+  // Fetch total count on mount and when labs change
   useEffect(() => {
     if (!currentUser?.uid) return;
     const controller = new AbortController();
-    fetchTotalCount(currentUser.uid, controller.signal);
+    fetchTotalCount(currentUser.uid, labFilter, depotFilter, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, fetchTotalCount]);
+  }, [currentUser?.uid, labFilter, depotFilter, fetchTotalCount]);
 
   // Fetch current page data
   useEffect(() => {
@@ -133,13 +184,44 @@ export default function UrunTalepGecmisPanel() {
       return;
     }
     const controller = new AbortController();
-    fetchPage(currentUser.uid, page, rowsPerPage, cursorStackRef.current, controller.signal);
+    fetchPage(currentUser.uid, labFilter, depotFilter, page, rowsPerPage, cursorStackRef.current, controller.signal);
     return () => controller.abort();
-  }, [currentUser?.uid, page, rowsPerPage, fetchPage]);
+  }, [currentUser?.uid, labFilter, depotFilter, page, rowsPerPage, fetchPage]);
+
+  const handleDelete = async (orderId: string) => {
+    setIsDeleting(true);
+    try {
+      const response = await fetch(`/api/urun-talep-gecmis/${orderId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const payload = await response.json();
+        throw new Error(payload?.error || 'Sipariş silinemedi.');
+      }
+
+      toast({ title: 'Başarılı', description: 'Sipariş silindi.' });
+      
+      // Refresh current page
+      if (currentUser?.uid) {
+        fetchTotalCount(currentUser.uid, labFilter, depotFilter, new AbortController().signal);
+        fetchPage(currentUser.uid, labFilter, depotFilter, page, rowsPerPage, cursorStackRef.current, new AbortController().signal);
+      }
+    } catch (error) {
+      toast({
+        title: 'Hata',
+        description: (error as Error).message,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+      setDeleteConfirmId(null);
+    }
+  };
 
   return (
     <div className="p-4 space-y-4">
-      <BackButton fallback="/urun-talep" />
+      <BackButton fallback={depotFilter ? `/urun-talep/depo/${depotFilter}` : '/urun-talep'} />
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -147,7 +229,7 @@ export default function UrunTalepGecmisPanel() {
             Ürün Talep Geçmişi
           </CardTitle>
           <CardDescription>
-            Önceki taleplerinizi görüntüleyin. Satıra tıklayarak sipariş detayını açabilirsiniz.
+            {depotFilter ? 'Seçili depoya ait talepleri görüntüleyin.' : labFilter ? 'Laboratuvarınıza ait talepleri görüntüleyin.' : 'Önceki taleplerinizi görüntüleyin.'} Satıra tıklayarak sipariş detayını açabilirsiniz.
             {totalCount > 0 && (
               <span className="ml-2 font-medium">({totalCount} kayıt)</span>
             )}
@@ -164,15 +246,17 @@ export default function UrunTalepGecmisPanel() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Sipariş ID</TableHead>
+                  <TableHead>Durum</TableHead>
                   <TableHead>Kalem Sayısı</TableHead>
                   <TableHead>Açan Kişi</TableHead>
                   <TableHead>Tarih & Saat</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {orders.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={6} className="text-center text-muted-foreground">
                       Geçmiş sipariş bulunamadı.
                     </TableCell>
                   </TableRow>
@@ -180,16 +264,42 @@ export default function UrunTalepGecmisPanel() {
                   orders.map((order) => (
                     <TableRow
                       key={order.id}
-                      className="cursor-pointer"
+                      className="cursor-pointer hover:bg-muted/50 transition-colors"
                       onClick={() => router.push(`/urun-talep/gecmis/${order.id}`)}
                     >
-                      <TableCell className="font-mono text-xs">{order.id}</TableCell>
-                      <TableCell>{order.itemCount}</TableCell>
+                      <TableCell className="font-mono text-xs font-semibold">{order.id.slice(-8).toUpperCase()}</TableCell>
+                      <TableCell>
+                        <div className="flex flex-col gap-1">
+                          {getStatusBadge(order.status)}
+                          {order.urgency && order.urgency !== 'normal' && (
+                            <span className={cn(
+                              "text-[9px] font-bold uppercase px-1 py-0.5 rounded border self-start",
+                              order.urgency === 'cok_acil' ? "border-red-500 text-red-500 bg-red-50" : "border-amber-500 text-amber-500 bg-amber-50"
+                            )}>
+                              {order.urgency === 'cok_acil' ? 'ÇOK ACİL' : 'ACİL'}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="font-medium">{order.itemCount} kalem</TableCell>
                       <TableCell>{order.createdBy || '-'}</TableCell>
                       <TableCell>
                         {order.createdAt
                           ? format(new Date(order.createdAt), 'dd MMM yyyy, HH:mm', { locale: tr })
                           : '-'}
+                      </TableCell>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        {order.status === 'pending' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => setDeleteConfirmId(order.id)}
+                            disabled={isDeleting}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))
@@ -198,6 +308,28 @@ export default function UrunTalepGecmisPanel() {
             </Table>
           )}
         </CardContent>
+
+        <AlertDialog open={!!deleteConfirmId} onOpenChange={(open) => !open && setDeleteConfirmId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Siparişi Sil</AlertDialogTitle>
+              <AlertDialogDescription>
+                Bu talebi silmek istediğinize emin misiniz? Bu işlem geri alınamaz ve siparişler panelinden de kaldırılacaktır.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeleting}>Vazgeç</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                onClick={() => deleteConfirmId && handleDelete(deleteConfirmId)}
+                disabled={isDeleting}
+              >
+                {isDeleting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                Sil
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
         {totalPages > 1 && (
           <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t">
             <div className="flex items-center space-x-2 text-sm">
@@ -230,7 +362,7 @@ export default function UrunTalepGecmisPanel() {
               >
                 Önceki
               </Button>
-              <span className="text-sm">
+              <span className="text-sm font-medium">
                 Sayfa {page} / {totalPages}
               </span>
               <Button

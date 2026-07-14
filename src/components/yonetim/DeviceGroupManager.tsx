@@ -6,6 +6,8 @@ import { Input } from '@/components/ui/input';
 import { Plus, Edit, Trash2, Loader2, Server } from 'lucide-react';
 import { collection, getDocs, addDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
@@ -20,8 +22,9 @@ interface DeviceGroup {
   imageUrl?: string;
 }
 
-export default function DeviceGroupManager() {
+export default function DeviceGroupManager({ refreshKey }: { refreshKey?: number }) {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [items, setItems] = useState<DeviceGroup[]>([]);
   const [availableImages, setAvailableImages] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,7 +35,7 @@ export default function DeviceGroupManager() {
     setLoading(true);
     try {
       const [snap, images] = await Promise.all([
-          getDocs(collection(db, 'def_deviceGroups')),
+          getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin)),
           getDeviceImages()
       ]);
       setItems(snap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup)).sort((a, b) => a.name.localeCompare(b.name)));
@@ -42,13 +45,13 @@ export default function DeviceGroupManager() {
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin, refreshKey]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
-  const handleOpenModal = (item?: DeviceGroup) => {
+  const handleOpenModal = (item?: Partial<DeviceGroup>) => {
     setCurrentItem(item || {});
     setIsModalOpen(true);
   };
@@ -60,8 +63,16 @@ export default function DeviceGroupManager() {
     }
     setLoading(true);
     try {
+      const cleanName = currentItem.name.trim();
+      const alreadyExists = items.some(item =>
+        item.id !== currentItem.id && item.name.trim().localeCompare(cleanName, 'tr-TR', { sensitivity: 'accent' }) === 0
+      );
+      if (alreadyExists) {
+        toast({ title: 'Bilgi', description: `${cleanName} zaten ortak tanımlarda mevcut.` });
+        return;
+      }
       const dataToSave = {
-        name: currentItem.name.trim(),
+        name: cleanName,
         imageUrl: currentItem.imageUrl || null,
       };
       if (currentItem.id) {

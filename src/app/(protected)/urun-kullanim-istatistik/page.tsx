@@ -14,6 +14,9 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 
 // Types from your app schema
 import type {
@@ -33,6 +36,12 @@ export default function UrunKullanimIstatistikPage() {
   const [hospitalStockItems, setHospitalStockItems] = useState<DepoStokItem[]>([]);
   const [tuketimKayitlari, setTuketimKayitlari] = useState<ConsumptionRecord[]>([]);
 
+  // İstatistik penceresi — varsayılan son 180 gün. Tüketim her gün artar.
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 180,
+    storageKey: 'urun-kullanim-istatistik:range',
+  });
+
   const fetchAll = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -42,15 +51,20 @@ export default function UrunKullanimIstatistikPage() {
         hospitalStockSnap,
         consumptionSnap
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         // Hospitals' on-hand stock (items shipped to hospitals)
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'tuketimKayitlari'))
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocs(scopedQuery(
+          'tuketimKayitlari',
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateFilter.constraints('consumptionTimestamp'),
+        ))
       ]);
 
-      setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(productCodesSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setHospitals(filterByCompanyScope(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
+      setProductCodes(filterByCompanyScope(productCodesSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)), currentCompanyId, isSuperAdmin));
 
       setHospitalStockItems(
         filterByCompanyScope(
@@ -68,7 +82,7 @@ export default function UrunKullanimIstatistikPage() {
         }
         return { id: d.id, ...raw } as ConsumptionRecord;
       });
-      setTuketimKayitlari(normalizedConsumption);
+      setTuketimKayitlari(filterByCompanyScope(normalizedConsumption, currentCompanyId, isSuperAdmin));
     } catch (err) {
       console.error('UrunKullanimIstatistikPage fetch error:', err);
       toast({
@@ -79,7 +93,7 @@ export default function UrunKullanimIstatistikPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   useEffect(() => {
     fetchAll();
@@ -127,11 +141,18 @@ export default function UrunKullanimIstatistikPage() {
   }
 
   return (
-    <UrunKullanimIstatistikPanel
-      hospitals={hospitals}
-      urunKullanimKayitlari={tuketimKayitlari}
-      productCodes={productCodes}
-      toast={(opts: any) => toast(opts)}
-    />
+    <div className="space-y-4 p-4">
+      <DateRangeFilterBar
+        range={dateFilter.range}
+        setRange={dateFilter.setRange}
+        label="Tüketim penceresi"
+      />
+      <UrunKullanimIstatistikPanel
+        hospitals={hospitals}
+        urunKullanimKayitlari={tuketimKayitlari}
+        productCodes={productCodes}
+        toast={(opts: any) => toast(opts)}
+      />
+    </div>
   );
 }

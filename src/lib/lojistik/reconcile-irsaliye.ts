@@ -25,7 +25,9 @@ import {
   Timestamp,
   updateDoc,
   where,
+  writeBatch,
 } from "firebase/firestore";
+import { archiveCompletedOrderInBatch } from "@/lib/orders-archive";
 import type { Order } from "@/lib/types";
 import { emitOrderReconciled } from "@/lib/notifications";
 import {
@@ -216,23 +218,31 @@ export async function reconcileIrsaliyeAcceptance(
       options.irsaliye
     );
 
-    const update: Record<string, any> = {
-      peripheralFulfillment: fulfillment,
-    };
-
     if (fullyDelivered) {
-      update.status = "completed";
-      update.transferredAt = serverTimestamp();
-      update.transferredById = options.actor.uid || null;
-      update.transferredBy = options.actor.name || null;
+      // Tamamen teslim edilen sipariş `ordersArchive`'a taşınır (kopyala + sil).
+      const batch = writeBatch(db);
+      archiveCompletedOrderInBatch(
+        batch,
+        plan.orderId,
+        orderDoc as unknown as Record<string, unknown>,
+        {
+          peripheralFulfillment: fulfillment,
+          transferredAt: serverTimestamp(),
+          transferredById: options.actor.uid || null,
+          transferredBy: options.actor.name || null,
+          completedAt: serverTimestamp(),
+        },
+      );
+      await batch.commit();
       closedOrderIds.push(plan.orderId);
     } else {
       // Stays in 'toplaniyor' (Hazırlanan) per spec — only delivery state
       // is updated.
       partialOrderIds.push(plan.orderId);
+      await updateDoc(doc(db, "orders", plan.orderId), {
+        peripheralFulfillment: fulfillment,
+      });
     }
-
-    await updateDoc(doc(db, "orders", plan.orderId), update);
   }
 
   // Fire notification (in-app bell + cloud-function fan-out for push).

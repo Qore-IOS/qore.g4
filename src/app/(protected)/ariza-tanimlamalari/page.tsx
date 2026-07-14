@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,7 +43,7 @@ export default function ArizaTanimlamalariPage() {
 
     const fetchFaults = async () => {
       try {
-        const snap = await getDocs(collection(db, 'faultDefinitions'));
+        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const faults = filterByCompanyScope(
           snap.docs.map(d => ({
             id: d.id,

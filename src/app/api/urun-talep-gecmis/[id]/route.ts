@@ -19,7 +19,7 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
 
     const order = snapshot.data();
 
-    if (order?.requestSource !== 'lab_to_depot') {
+    if (order?.requestSource && order.requestSource !== 'lab_to_depot' && order.requestSource !== 'lab_to_office') {
       return NextResponse.json({ error: 'Bu kayıt ürün talep geçmişine ait değil.' }, { status: 400 });
     }
 
@@ -31,9 +31,35 @@ export async function GET(_: Request, { params }: { params: { id: string } }) {
         depotName: order.depotName || '-',
         createdAt: toIsoString(order.createdAt),
         items: Array.isArray(order.items) ? order.items : [],
+        status: order.status || 'pending',
+        urgency: order.urgency || 'normal',
       },
     });
   } catch (error: any) {
     return NextResponse.json({ error: error?.message || 'Sipariş detayı alınamadı.' }, { status: 500 });
+  }
+}
+
+export async function DELETE(_: Request, { params }: { params: { id: string } }) {
+  try {
+    const ref = adminDb.collection('orders').doc(params.id);
+    const snapshot = await ref.get();
+
+    if (!snapshot.exists) {
+      return NextResponse.json({ error: 'Sipariş bulunamadı.' }, { status: 404 });
+    }
+
+    const order = snapshot.data();
+
+    // Only allow deletion if pending
+    if (order?.status !== 'pending') {
+      return NextResponse.json({ error: 'Sadece beklemedeki siparişler silinebilir.' }, { status: 400 });
+    }
+
+    await ref.delete();
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: error?.message || 'Sipariş silinemedi.' }, { status: 500 });
   }
 }

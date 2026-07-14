@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { collection, doc, getDoc, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useToast } from '@/hooks/use-toast';
 
 import { Button } from '@/components/ui/button';
@@ -55,8 +56,8 @@ export default function SiparisGecmisDetailPage() {
             }
         }
       } else {
-        // If not a shipment, try to fetch as an order
-        const orderSnap = await getDoc(doc(db, 'orders', id));
+        // If not a shipment, try to fetch as an order (tamamlanmışsa arşivde).
+        const orderSnap = await getOrderDocWithArchiveFallback(id);
         if (orderSnap.exists()) {
             const orderData = orderSnap.data();
             setOrder({ id: orderSnap.id, ...orderData } as Order);

@@ -18,6 +18,7 @@ import { tr } from 'date-fns/locale';
 import { collection, query, getDocs, doc, updateDoc, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { toDateFromAny } from '@/lib/time';
 import type { Hospital, User as UserType, ShiftSchedule, ShiftDateRange } from '@/lib/types';
@@ -53,7 +54,7 @@ export default function ActiveShiftsPanel({
   users,
   onBack
 }: ActiveShiftsPanelProps) {
-  const { isAdmin } = useAuth();
+  const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [shifts, setShifts] = useState<ShiftSchedule[]>([]);
@@ -69,8 +70,10 @@ export default function ActiveShiftsPanel({
     const fetchShifts = async () => {
       setIsLoading(true);
       try {
-        const shiftsQuery = query(
-          collection(db, 'shiftSchedules'),
+        const shiftsQuery = scopedQuery(
+          'shiftSchedules',
+          currentCompanyId,
+          isSuperAdmin,
           where('isActive', '==', true)
         );
         const snapshot = await getDocs(shiftsQuery);

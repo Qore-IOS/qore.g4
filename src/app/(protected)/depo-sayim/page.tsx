@@ -26,6 +26,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 
 import { TrackingMode, resolveDefaultTrackingMode } from '@/lib/tracking';
@@ -150,9 +151,9 @@ export default function DepoSayimPage() {
         setIsLoading(true);
         try {
             const [depotsSnap, productsSnap, stockSnap] = await Promise.all([
-                getDocs(collection(db, 'depots')),
-                getDocs(collection(db, 'productCodes')),
-                getDocs(collection(db, 'depoStok')),
+                getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)),
             ]);
             const depotList = depotsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Depot));
             const filteredDepots = filterOperationalSourceDepots(depotList, currentUserProfile);
@@ -624,7 +625,7 @@ Devam edilsin mi?`;
                 brands: [...new Set(newFoundItems.map(() => brandForCount))],
                 mode: 'unverified',
             };
-            operations.push((batch) => batch.set(malKabulRef, malKabulHeader));
+            operations.push((batch) => batch.set(malKabulRef, withCompanyScope(malKabulHeader, currentCompanyId)));
 
             for (const group of newFoundItems) {
                 const adet = group.trackingMode === 'serial' ? group.scannedSerials.size : group.scannedAdet;
@@ -708,7 +709,7 @@ Devam edilsin mi?`;
             extraCount,
             newFoundCount,
         };
-        operations.push((batch) => batch.set(sessionRef, sessionData));
+        operations.push((batch) => batch.set(sessionRef, withCompanyScope(sessionData, currentCompanyId)));
 
         try {
             const chunkSize = 450;
@@ -748,7 +749,7 @@ Devam edilsin mi?`;
                 .map(([key, expected]) => ({ key, expected, actual: actualByGroup.get(key) || 0 }))
                 .filter(m => m.expected !== m.actual);
 
-            await addDoc(collection(db, 'depotBrandCountValidationLogs'), {
+            await addDoc(collection(db, 'depotBrandCountValidationLogs'), withCompanyScope({
                 sessionId: sessionRef.id,
                 depotId: selectedDepotId,
                 brand: brandForCount,
@@ -760,7 +761,7 @@ Devam edilsin mi?`;
                 operationCount: operations.length,
                 createdAt: serverTimestamp(),
                 createdBy: currentUserProfile.uid,
-            });
+            }, currentCompanyId));
 
             if (mismatches.length > 0) {
                 toast({ title: 'Uyarı', description: `Sayım kaydedildi fakat ${mismatches.length} satırda doğrulama farkı var. Loglara işlendi.`, variant: 'destructive' });

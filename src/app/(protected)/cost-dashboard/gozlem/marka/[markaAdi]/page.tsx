@@ -1,15 +1,16 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
+import { getDocs, orderBy } from 'firebase/firestore';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { getExchangeRates } from '@/lib/exchange-rates';
 import type { Currency, ProductCode } from '@/lib/types';
-import { getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
+import { getLatestByLocation, getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';
 import TrendChart from '@/components/cost-observation/TrendChart';
 import { useToast } from '@/hooks/use-toast';
 
@@ -18,39 +19,82 @@ const CURRENCY_SYMBOLS: Record<Currency, string> = { EUR: '€', USD: '$', TRY: 
 export default function BrandObservationPage() {
   const params = useParams<{ markaAdi: string }>();
   const brand = decodeURIComponent(params?.markaAdi || '');
+  const searchParams = useSearchParams();
+  /** Gözlem panelinden seçili dönemle gelindiyse (YYYY-MM) yalnızca o ay analiz edilir. */
+  const period = /^\d{4}-\d{2}$/.test(searchParams?.get('period') || '') ? searchParams!.get('period')! : null;
   const router = useRouter();
   const { toast } = useToast();
-  const productsQuery = useProductCodes();
   const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [currency, setCurrency] = useState<Currency>('TRY');
-  const [rates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
+  // Gözlem paneliyle birebir aynı olsun diye kurlar da canlı çekilir; önceden
+  // sabit {EUR:1,USD:1.08,TRY:38.5} idi ve TRY dışı ürünlerde toplam sapıyordu.
+  const [rates, setRates] = useState<Record<Currency, number>>({ EUR: 1, USD: 1.08, TRY: 38.5 });
   const [sessions, setSessions] = useState<SayimSession[]>([]);
+  const [productMap, setProductMap] = useState<Map<string, ProductCode>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
     const run = async () => {
-      const snap = await getDocs(query(collection(db, 'maliyetSayimSessions'), orderBy('createdAt', 'desc')));
+      // Gözlem paneli (StokTab) ile AYNI kaynaklar: oturumlar + legacy-aware
+      // ürün kodları + canlı kurlar. useProductCodes strict scope + 1 saatlik
+      // önbellek kullandığından güncellenen/legacy ürün maliyetlerini yansıtmıyor,
+      // bu da marka toplamının gözlem panelinden sapmasına yol açıyordu.
+      const [snap, productDocs, ratesValue] = await Promise.all([
+        getDocs(scopedQuery('maliyetSayimSessions', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
+      ]);
+      if (cancelled) return;
       const all = snap.docs.map((d) => ({ id: d.id, ...d.data() } as SayimSession));
       setSessions(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));
+      const pMap = new Map<string, ProductCode>();
+      productDocs.forEach((d) => {
+        const p = { id: d.id, ...d.data() } as ProductCode;
+        pMap.set(p.stokKodu, p);
+      });
+      setProductMap(pMap);
+      setRates(ratesValue as Record<Currency, number>);
       setLoading(false);
     };
     run();
+    return () => { cancelled = true; };
   }, [currentCompanyId, isSuperAdmin]);
-
-  const productMap = useMemo(() => {
-    const m = new Map<string, ProductCode>();
-    (productsQuery.data || []).forEach((p) => m.set(p.stokKodu, p));
-    return m;
-  }, [productsQuery.data]);
 
   const sym = CURRENCY_SYMBOLS[currency];
 
+  // Dönem seçiliyse yalnızca o ayın oturumları; en güncel oturum önce gelecek
+  // şekilde analitik tarihe (dönem > createdAt) göre sıralanır — aşağıdaki
+  // latestRows dedup'ı ilk görüneni aldığı için sıralama kritik.
+  const periodSessions = useMemo(() => {
+    const monthKey = (s: SayimSession) => {
+      const d = getSessionDate(s);
+      return d ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` : null;
+    };
+    const list = period ? sessions.filter((s) => monthKey(s) === period) : sessions;
+    const createdAtMs = (s: SayimSession) => {
+      const c: any = s.createdAt;
+      if (!c) return 0;
+      if (c.toDate) return c.toDate().getTime();
+      if (c.seconds) return c.seconds * 1000;
+      const d = new Date(c);
+      return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+    };
+    return [...list].sort((a, b) => {
+      const ad = getSessionDate(a)?.getTime() ?? 0;
+      const bd = getSessionDate(b)?.getTime() ?? 0;
+      if (bd !== ad) return bd - ad;
+      return createdAtMs(b) - createdAtMs(a);
+    });
+  }, [sessions, period]);
+
   const rows = useMemo(() => {
-    return sessions.flatMap((s) => s.items
+    return Array.from(getLatestByLocation(periodSessions).values()).flatMap((s) => s.items
       .filter((i) => (i.marka || 'Diğer') === brand)
       .map((i) => ({
         sessionId: s.id,
+        locationId: s.locationId,
         locationName: s.locationName,
         locationType: s.locationType,
         date: getSessionDate(s),
@@ -58,29 +102,28 @@ export default function BrandObservationPage() {
         stokAdi: i.stokAdi,
         stokAdedi: i.stokAdedi,
         cihazUstuAdedi: i.cihazUstuAdedi,
-        totalCost: getProductCostInCurrency(i.stokKodu, i.stokAdedi, i.cihazUstuAdedi, productMap, rates, currency),
+        totalCost: getProductCostInCurrency(i.stokKodu, i.stokAdedi, i.cihazUstuAdedi, productMap, rates, currency, i),
       })));
-  }, [sessions, brand, productMap, rates, currency]);
+  }, [periodSessions, brand, productMap, rates, currency]);
 
-  const latestRows = useMemo(() => {
-    const seen = new Set<string>();
-    return rows.filter((r) => {
-      const key = `${r.locationType}-${r.locationName}-${r.stokKodu}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-  }, [rows]);
+  // Gözlem panelindeki marka toplamı (getBrandCostBreakdown) her lokasyonun EN
+  // GÜNCEL oturumundaki tüm kalemleri toplar; ekstra bir stok-kodu tekilleştirmesi
+  // yapmaz. Marka detayı da aynı davranmalı — aksi halde aynı stoğun birden çok
+  // satırı (farklı lot/ambalaj) veya aynı isimli iki lokasyon yanlışlıkla elenip
+  // toplam düşük çıkıyordu (gözlem ₺40,6M vs detay ₺39,1M). getLatestByLocation
+  // zaten lokasyon başına tek oturum bıraktığı için burada dedup gerekmez.
+  const latestRows = rows;
 
   const total = latestRows.reduce((s, r) => s + r.totalCost, 0);
 
   const locationSummary = useMemo(() => {
     const m = new Map<string, { locationName: string; cost: number; count: number }>();
     latestRows.forEach((r) => {
-      const row = m.get(r.locationName) || { locationName: r.locationName, cost: 0, count: 0 };
+      const key = `${r.locationType}-${r.locationId || r.locationName}`;
+      const row = m.get(key) || { locationName: r.locationName, cost: 0, count: 0 };
       row.cost += r.totalCost;
       row.count += 1;
-      m.set(r.locationName, row);
+      m.set(key, row);
     });
     return Array.from(m.values()).sort((a, b) => b.cost - a.cost);
   }, [latestRows]);
@@ -295,7 +338,7 @@ export default function BrandObservationPage() {
     }
   }, [brand, createPieChartDataUrl, currency, latestRows, loadLogoDataUrl, locationSummary, monthly, pareto.share, sanitizePdfText, sym, toast, total, unitCostAvg]);
 
-  if (loading || productsQuery.isLoading) {
+  if (loading) {
     return <div className="min-h-screen flex items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" /></div>;
   }
 
@@ -311,7 +354,14 @@ export default function BrandObservationPage() {
           </div>
         </div>
 
-        <h1 className="text-2xl font-bold text-[var(--dashboard-text)]">{brand} — Marka Gözlem Paneli</h1>
+        <h1 className="text-2xl font-bold text-[var(--dashboard-text)]">
+          {brand} — Marka Gözlem Paneli
+          {period && (
+            <span className="ml-3 align-middle inline-block px-2.5 py-1 rounded-lg text-sm font-semibold bg-[var(--dashboard-accent)]/10 text-[var(--dashboard-accent)]">
+              {new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)) - 1, 1).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' })} dönemi
+            </span>
+          )}
+        </h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
           <div className="cihaz-card-strong p-5">
@@ -353,8 +403,8 @@ export default function BrandObservationPage() {
               </tr>
             </thead>
             <tbody>
-              {latestRows.slice(0, 500).map((r) => (
-                <tr key={`${r.sessionId}-${r.stokKodu}-${r.locationName}`} className="border-b border-[var(--dashboard-stroke)]/50">
+              {latestRows.slice(0, 500).map((r, idx) => (
+                <tr key={`${r.sessionId}-${r.stokKodu}-${idx}`} className="border-b border-[var(--dashboard-stroke)]/50">
                   <td className="py-2 pr-3">{r.stokAdi}<div className="text-xs text-[var(--dashboard-muted)]">{r.stokKodu}</div></td>
                   <td className="py-2 pr-3">{r.locationName}</td>
                   <td className="py-2 pr-3">{r.stokAdedi}</td>

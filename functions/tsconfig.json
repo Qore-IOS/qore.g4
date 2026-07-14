@@ -5,12 +5,14 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "outDir": "lib",
+    "rootDir": "src",
     "sourceMap": true,
     "strict": false,
     "target": "es2017",
     "skipLibCheck": true,
     "moduleResolution": "node",
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "ignoreDeprecations": "5.0"
   },
   "compileOnSave": true,
   "include": [

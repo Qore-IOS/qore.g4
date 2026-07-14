@@ -20,6 +20,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 
 type Vehicle = {
@@ -95,7 +96,7 @@ type LabRouteStatus = {
 };
 
 export default function SoforIzlemPage() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [driversWithRoutes, setDriversWithRoutes] = useState<DriverWithRoute[]>([]);
@@ -126,7 +127,7 @@ export default function SoforIzlemPage() {
   useEffect(() => {
     const fetchHospitals = async () => {
       try {
-        const hospitalsSnap = await getDocs(collection(db, 'hospitals'));
+        const hospitalsSnap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
         const hospitalsList = hospitalsSnap.docs
           .map(d => ({ id: d.id, ...d.data() } as Hospital))
           .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr'));
@@ -136,7 +137,7 @@ export default function SoforIzlemPage() {
       }
     };
     fetchHospitals();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Şoförleri ve aktif rotalarını getir
   useEffect(() => {
@@ -144,8 +145,8 @@ export default function SoforIzlemPage() {
       try {
         // Tüm şoförleri ve araçları getir
         const [usersSnap, vehiclesSnap] = await Promise.all([
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'vehicles')),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('vehicles', currentCompanyId, isSuperAdmin)),
         ]);
 
         // Debug: Tüm kullanıcıları ve rollerini logla
@@ -182,8 +183,10 @@ export default function SoforIzlemPage() {
           const driverId = driver.id || (driver as any).uid;
 
           // Şoföre ait tüm rotaları tek sorguda getir (index gerektirmez)
-          const allRoutesQuery = query(
-            collection(db, 'routes'),
+          const allRoutesQuery = scopedQuery(
+            'routes',
+            currentCompanyId,
+            isSuperAdmin,
             where('driverId', '==', driverId)
           );
           const allRoutesSnap = await getDocs(allRoutesQuery);
@@ -244,8 +247,10 @@ export default function SoforIzlemPage() {
 
     // Real-time güncellemeler için routes koleksiyonunu dinle
     const today = toDayKey(new Date());
-    const routesQuery = query(
-      collection(db, 'routes'),
+    const routesQuery = scopedQuery(
+      'routes',
+      currentCompanyId,
+      isSuperAdmin,
       where('date', '==', today),
       where('status', 'in', ['open', 'in_progress'])
     );
@@ -354,8 +359,10 @@ export default function SoforIzlemPage() {
   // Tüm açık rotaları getir (talep modal'ları için)
   useEffect(() => {
     const today = toDayKey(new Date());
-    const routesQuery = query(
-      collection(db, 'routes'),
+    const routesQuery = scopedQuery(
+      'routes',
+      currentCompanyId,
+      isSuperAdmin,
       where('status', 'in', ['open', 'in_progress'])
     );
 

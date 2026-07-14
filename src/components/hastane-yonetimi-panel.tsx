@@ -6,13 +6,14 @@ import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -25,8 +26,8 @@ import { formatMiad, normalizeMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
-import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
-import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
+import { withCompanyScope } from '@/lib/company-scope';
 
 function normalizeKey(key: string): string {
   return key
@@ -184,9 +185,6 @@ export default function LaboratuvarYonetimiPanel() {
   const [isParsingExcel, setIsParsingExcel] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
-  const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
-  const [isOcrProcessing, setIsOcrProcessing] = useState(false);
-  const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use TanStack Query hooks for data fetching
@@ -232,13 +230,17 @@ export default function LaboratuvarYonetimiPanel() {
     }
   }, [laboratories, selectedLabId, isLoading]);
 
-  // Compute pool member IDs and names for lab stock query
+  // Hastane yönetimi paneli her laboratuvarın KENDİ stoğunu yönetmek içindir.
+  // Önceden seçili lab bir havuzda yer alıyorsa havuzun tüm üyelerinin stoğu
+  // çekiliyor ve seçili lab'a aitmiş gibi gösteriliyordu — yanıltıcıydı. Burada
+  // sadece seçili lab'ın hedefKurumId/hedefKurum eşleşmelerini istiyoruz; havuz
+  // çapraz-tüketim semantiği yalnızca urun-kullanim-panel için geçerlidir.
   const { poolMemberIds, poolMemberNames } = useMemo(() => {
-    const pool = labPools.find(p => p.memberIds.includes(selectedLabId));
-    const ids = pool?.memberIds || (selectedLabId ? [selectedLabId] : []);
+    if (!selectedLabId) return { poolMemberIds: [], poolMemberNames: [] as string[] };
+    const ids = [selectedLabId];
     const names = ids.map(id => allLaboratories.find(l => l.id === id)?.name).filter((n): n is string => !!n);
     return { poolMemberIds: ids, poolMemberNames: names };
-  }, [labPools, selectedLabId, allLaboratories]);
+  }, [selectedLabId, allLaboratories]);
 
   // Use targeted lab stock query instead of broad depoStok fetch
   const { data: labStocks = [] } = useLabStock(poolMemberIds, poolMemberNames, {
@@ -270,28 +272,6 @@ export default function LaboratuvarYonetimiPanel() {
     return laboratories.find(l => l.id === selectedLabId)?.name || '';
   }, [laboratories, selectedLabId]);
 
-  useEffect(() => {
-    if (!selectedLabId) {
-      setPendingIrsaliyeCount(0);
-      return;
-    }
-    const unsub = onSnapshot(
-      query(collection(db, 'irsaliyeDosyalari'), orderBy('uploadedAt', 'desc')),
-      (snapshot) => {
-        let count = 0;
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data() as any;
-          const inScope = matchesCompanyScope(data, currentCompanyId, isSuperAdmin);
-          const notExpired = data?.expiresAt?.toMillis?.() > Date.now();
-          const labMatch = data?.locationType === 'hospital' && data?.locationId === selectedLabId;
-          if (inScope && notExpired && labMatch) count += 1;
-        });
-        setPendingIrsaliyeCount(count);
-      },
-      () => setPendingIrsaliyeCount(0)
-    );
-    return () => unsub();
-  }, [selectedLabId, currentCompanyId, isSuperAdmin]);
 
   const groupedMap = useMemo(() => {
     const map: Record<string, {
@@ -315,13 +295,20 @@ export default function LaboratuvarYonetimiPanel() {
   const summaryList: GroupedStockItem[] = useMemo(
     () => Object.entries(groupedMap).map(([groupKey, grp]) => {
       const firstValidId = grp.items.find(it => typeof it.id === 'string' && it.id.length > 0)?.id ?? '';
+      // Lot dokümanları tek satırda `adet: N` taşıyor (direkt-transfer hedef
+      // dokümanı `adet: transferQty` ile yazıyor). Doküman sayısı yerine
+      // `adet` toplamı alınmalı.
+      const quantity = grp.items.reduce((sum, it) => {
+        const raw = Number((it as any).quantity ?? (it as any).adet ?? 1);
+        return sum + (Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.ceil(raw)) : 1);
+      }, 0);
       return {
         groupKey,
         stokKodu: grp.stokKodu,
         stokAdi: grp.stokAdi,
         lot: grp.lot,
         miad: grp.miad,
-        quantity: grp.items.length,
+        quantity,
         anaBirim: productMeta[grp.stokKodu]?.anaBirim || 'Kutu',
         firstId: firstValidId
       };
@@ -638,7 +625,13 @@ export default function LaboratuvarYonetimiPanel() {
     const group = groupedMap[groupKey];
     if (!group || !selectedLabId) return;
 
-    const currentQty = group.items.length;
+    // Lot dokümanları tek satırda `adet: N` tutar — gerçek mevcut adet
+    // doküman sayısı değil, `adet` toplamıdır.
+    const docAdetOf = (item: DepoStokItem): number => {
+      const raw = Number((item as any).quantity ?? (item as any).adet ?? 1);
+      return Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.ceil(raw)) : 1;
+    };
+    const currentQty = group.items.reduce((sum, it) => sum + docAdetOf(it), 0);
     const newQty = editQuantity;
 
     if (newQty < 0 || !Number.isInteger(newQty)) {
@@ -655,60 +648,70 @@ export default function LaboratuvarYonetimiPanel() {
 
     try {
       if (newQty > currentQty) {
-        // Add new documents
+        // Add a single doc carrying the delta as `adet`, matching depo→lab
+        // transfer storage format (one doc per lot batch with adet: N).
         const toAdd = newQty - currentQty;
         const referenceItem = group.items[0];
-        const BATCH_SIZE = 450;
-
-        for (let i = 0; i < toAdd; i += BATCH_SIZE) {
-          const batch = writeBatch(db);
-          const chunkSize = Math.min(BATCH_SIZE, toAdd - i);
-
-          for (let j = 0; j < chunkSize; j++) {
-            const docRef = doc(collection(db, 'depoStok'));
-            batch.set(docRef, withCompanyScope({
-              stokKodu: referenceItem.stokKodu ?? group.stokKodu,
-              stokAdi: referenceItem.stokAdi ?? group.stokAdi,
-              lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
-              miad: referenceItem.miad ?? null,
-              seriNumarasi: null,
-              isShipped: true,
-              hedefKurumId: selectedLabId,
-              hedefKurum: selectedLabName,
-              eklenmeTarihi: Timestamp.now(),
-              sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
-              kaynak: 'admin_quantity_edit',
-            }, currentCompanyId));
-          }
-          await batch.commit();
-        }
+        const batch = writeBatch(db);
+        const docRef = doc(collection(db, 'depoStok'));
+        batch.set(docRef, withCompanyScope({
+          stokKodu: referenceItem.stokKodu ?? group.stokKodu,
+          stokAdi: referenceItem.stokAdi ?? group.stokAdi,
+          lotNumarasi: referenceItem.lotNumarasi ?? group.lot ?? null,
+          miad: referenceItem.miad ?? null,
+          seriNumarasi: null,
+          adet: toAdd,
+          isShipped: true,
+          hedefKurumId: selectedLabId,
+          hedefKurum: selectedLabName,
+          eklenmeTarihi: Timestamp.now(),
+          sevkTarihi: referenceItem.sevkTarihi ?? Timestamp.now(),
+          kaynak: 'admin_quantity_edit',
+        }, currentCompanyId));
+        await batch.commit();
 
         await touchStockMetadata();
         await invalidateDepoStok();
         toast({ title: 'Adet Güncellendi', description: `${toAdd} adet eklendi. Yeni toplam: ${newQty}` });
       } else {
-        // Delete excess documents
-        const toRemove = currentQty - newQty;
-        const itemsToDelete = group.items.slice(0, toRemove).filter(item => item.id);
+        // Walk docs and decrement `adet` (or delete fully-consumed docs).
+        // Eski mantık her birim için ayrı doküman sayıyordu; `adet: 50` olan bir
+        // dokümanın yarısını silmek isteyince tüm 50 birim siliniyordu.
+        let toRemove = currentQty - newQty;
+        const updates: Array<{ id: string; newAdet: number | null }> = [];
+        const itemsWithId = group.items.filter(it => typeof it.id === 'string' && it.id.length > 0);
+        for (const item of itemsWithId) {
+          if (toRemove <= 0) break;
+          const docAdet = docAdetOf(item);
+          if (toRemove >= docAdet) {
+            updates.push({ id: item.id!, newAdet: null }); // delete
+            toRemove -= docAdet;
+          } else {
+            updates.push({ id: item.id!, newAdet: docAdet - toRemove });
+            toRemove = 0;
+          }
+        }
 
-        if (itemsToDelete.length === 0) {
+        if (updates.length === 0) {
           toast({ title: 'Hata', description: 'Silinecek kayıt bulunamadı.', variant: 'destructive' });
           return;
         }
 
         const BATCH_SIZE = 450;
-        for (let i = 0; i < itemsToDelete.length; i += BATCH_SIZE) {
+        for (let i = 0; i < updates.length; i += BATCH_SIZE) {
           const batch = writeBatch(db);
-          const chunk = itemsToDelete.slice(i, i + BATCH_SIZE);
-          for (const item of chunk) {
-            batch.delete(doc(db, 'depoStok', item.id!));
+          const chunk = updates.slice(i, i + BATCH_SIZE);
+          for (const u of chunk) {
+            const ref = doc(db, 'depoStok', u.id);
+            if (u.newAdet === null) batch.delete(ref);
+            else batch.update(ref, { adet: u.newAdet });
           }
           await batch.commit();
         }
 
         await touchStockMetadata();
         await invalidateDepoStok();
-        toast({ title: 'Adet Güncellendi', description: `${toRemove} adet silindi. Yeni toplam: ${newQty}` });
+        toast({ title: 'Adet Güncellendi', description: `${currentQty - newQty} adet silindi. Yeni toplam: ${newQty}` });
       }
 
       handleCancelEdit();
@@ -770,11 +773,13 @@ export default function LaboratuvarYonetimiPanel() {
       const headerKeys = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
       const colMap = detectExcelColumns(headerKeys);
 
-      // Positional fallback when the file has unrecognizable headers.
-      // Default column order: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot.
+      // Use positional fallback only when none of the headers are recognizable.
+      // This prevents a headered LOT column in B from being interpreted as Seri No.
+      // Legacy headerless order remains: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      const hasRecognizedHeaders = Object.keys(colMap).length > 0;
       const positional = headerKeys;
       const positionalRole = (role: ColumnRole, index: number): string | undefined =>
-        colMap[role] ?? positional[index];
+        colMap[role] ?? (hasRecognizedHeaders ? undefined : positional[index]);
 
       const rows: ParsedExcelRow[] = [];
 
@@ -783,7 +788,7 @@ export default function LaboratuvarYonetimiPanel() {
         const seriHeader = positionalRole('seri', 1);
         const miadHeader = positionalRole('miad', 2);
         const lotHeader = positionalRole('lot', 3);
-        const adetHeader = colMap.adet;
+        const adetHeader = positionalRole('adet', 4);
         const stokAdiHeader = colMap.stokAdi;
 
         const stokKodu = String((stokKoduHeader && rawRow[stokKoduHeader]) || '').trim();
@@ -904,113 +909,6 @@ export default function LaboratuvarYonetimiPanel() {
       setImportProgress('');
     }
   }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
-
-  const handleOcrResults = useCallback(async (
-    results: LabOcrResult[],
-    file: { id: string; storagePath: string; fileName: string }
-  ) => {
-    if (!selectedLabId || results.length === 0) return;
-    setIsOcrProcessing(true);
-    try {
-      const aiPayload = results.map((item) => {
-        const product = products.find(p => p.stokKodu === item.stokKodu);
-        return {
-          stokKodu: item.stokKodu,
-          stokAdi: product?.stokAdi || '',
-          parsedQuantity: Math.max(1, item.quantity || 1),
-          rawLine: item.rawLine || '',
-          anaBirim: product?.anaBirim || '',
-          ambalajDegeri: Number(product?.ambalajDegeri || 0),
-        };
-      });
-
-      let aiConvertedMap = new Map<string, number>();
-      try {
-        const aiRes = await fetch('/api/ai/irsaliye-unit-convert', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ items: aiPayload }),
-        });
-        const aiData = await aiRes.json().catch(() => ({}));
-        const convertedList = Array.isArray(aiData?.converted) ? aiData.converted : [];
-        aiConvertedMap = new Map(
-          convertedList.map((item: any) => [
-            String(item?.stokKodu || ''),
-            Math.max(1, Number(item?.convertedQuantity || 1)),
-          ])
-        );
-      } catch (aiError) {
-        console.warn('AI quantity conversion skipped, using fallback:', aiError);
-      }
-
-      const batch = writeBatch(db);
-      let totalDocs = 0;
-
-      for (const item of results) {
-        const product = products.find(p => p.stokKodu === item.stokKodu);
-        if (!product) continue;
-
-        const parsedQty = Math.max(1, item.quantity || 1);
-        const fallbackQty = (() => {
-          const ambalaj = Number(product.ambalajDegeri || 0);
-          const anaBirim = String(product.anaBirim || '').toLowerCase();
-          const raw = String(item.rawLine || '').toLowerCase();
-          const usesPackLikeUnit = anaBirim.includes('paket') || anaBirim.includes('kutu');
-          const invoiceLooksAdet = raw.includes(' adet') || raw.endsWith('adet');
-          if (usesPackLikeUnit && invoiceLooksAdet && ambalaj > 0) {
-            return Math.max(1, Math.round(parsedQty / ambalaj));
-          }
-          return parsedQty;
-        })();
-        const qty = aiConvertedMap.get(item.stokKodu) || fallbackQty;
-        for (let i = 0; i < qty; i++) {
-          const ref = doc(collection(db, 'depoStok'));
-          batch.set(ref, withCompanyScope({
-            stokKodu: item.stokKodu,
-            stokAdi: product.stokAdi || item.stokKodu,
-            lotNumarasi: item.lot || '',
-            miad: item.miad ? normalizeMiad(item.miad) : '',
-            seriNumarasi: '',
-            isShipped: true,
-            hedefKurumId: selectedLabId,
-            hedefKurum: selectedLabName,
-            eklenmeTarihi: Timestamp.now(),
-            sevkTarihi: Timestamp.now(),
-            kaynak: 'irsaliye_ocr',
-            createdByName: currentUserProfile?.name || currentUserProfile?.email || 'Unknown',
-            createdByUid: currentUserProfile?.uid || null,
-          }, currentCompanyId));
-          totalDocs++;
-        }
-      }
-
-      await batch.commit();
-      await touchStockMetadata();
-      await invalidateDepoStok();
-
-      // Optional cleanup of consumed file
-      await deleteDoc(doc(db, 'irsaliyeDosyalari', file.id));
-      await fetch('/api/storage/delete-file', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storagePath: file.storagePath }),
-      });
-
-      toast({
-        title: 'Stok girişi tamamlandı',
-        description: `${totalDocs} birim ürün laboratuvar stoğuna eklendi.`,
-      });
-    } catch (error: any) {
-      console.error('Lab OCR stock entry error:', error);
-      toast({
-        title: 'Hata',
-        description: error?.message || 'İrsaliye işlenirken hata oluştu.',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsOcrProcessing(false);
-    }
-  }, [selectedLabId, selectedLabName, products, currentUserProfile, currentCompanyId, toast, invalidateDepoStok]);
 
   return (
     <div className="space-y-6">
@@ -1163,19 +1061,14 @@ export default function LaboratuvarYonetimiPanel() {
 
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-grow">
-              <label className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={isLoading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Bir laboratuvar seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map(l => (
-                    <SelectItem key={l.id ?? String(l.name)} value={l.id ?? ''}>
-                      {l.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <LabSelector
+                label="Laboratuvar Seçin"
+                labs={laboratories.map(l => ({ id: l.id ?? '', name: l.name, kod: l.kod }))}
+                value={selectedLabId}
+                onChange={setSelectedLabId}
+                placeholder="Bir laboratuvar seçin"
+                disabled={isLoading}
+              />
             </div>
             {selectedLabId && (
                 <div className="flex items-end gap-2">
@@ -1203,23 +1096,6 @@ export default function LaboratuvarYonetimiPanel() {
                         {isParsingExcel ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Upload className="mr-2 h-5 w-5" />}
                         Excel ile Stok Ekle
                     </Button>
-                    <Button
-                        onClick={() => setIsOcrModalOpen(true)}
-                        disabled={!selectedLabId || isOcrProcessing}
-                        variant="outline"
-                        className="w-full sm:w-auto relative"
-                        >
-                        {isOcrProcessing
-                          ? <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                          : <FileSpreadsheet className="mr-2 h-5 w-5" />
-                        }
-                        İrsaliye Seç
-                        {pendingIrsaliyeCount > 0 && (
-                          <span className="absolute -top-2 -right-2 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                            {pendingIrsaliyeCount}
-                          </span>
-                        )}
-                    </Button>
                     <input
                       ref={fileInputRef}
                       type="file"
@@ -1242,6 +1118,14 @@ export default function LaboratuvarYonetimiPanel() {
               </div>
             </div>
           </div>
+
+          {selectedLabId && (
+            <BekleyenIrsaliyelerPanel
+              locationType="hospital"
+              locationId={selectedLabId}
+              locationName={selectedLabName}
+            />
+          )}
 
           {selectedLabId && (
             <div className="cihaz-card-strong overflow-hidden mt-4">
@@ -1516,8 +1400,9 @@ export default function LaboratuvarYonetimiPanel() {
 
             <div className="text-xs text-muted-foreground bg-muted/50 rounded-md px-3 py-2">
               Beklenen sütunlar: <strong>Stok Kodu</strong> (zorunlu), Lot / Lot Numarası, Miad / Miat / SKT,
-              Seri Numarası / Barkod Seri, Adet. Başlık satırı yoksa kolon sırası A=Stok Kodu, B=Barkod Seri,
-              C=Miat, D=Lot olarak okunur.
+              Seri Numarası / Barkod Seri, Adet. Başlıklı dosyalarda Lot kolonu seri numarası gibi okunmaz;
+              hem <strong>Stok Kodu + Seri No + Adet=1</strong> hem de <strong>Stok Kodu + Lot + Miad + Adet</strong> formatı desteklenir.
+              Başlık satırı yoksa kolon sırası A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet olarak okunur.
             </div>
 
             <ScrollArea className="h-[350px] border rounded-md">
@@ -1573,15 +1458,6 @@ export default function LaboratuvarYonetimiPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      <LabIrsaliyeOcrModal
-        isOpen={isOcrModalOpen}
-        onClose={() => setIsOcrModalOpen(false)}
-        productCodes={products}
-        onResults={handleOcrResults}
-        locationType="hospital"
-        locationId={selectedLabId}
-      />
     </div>
   );
 }

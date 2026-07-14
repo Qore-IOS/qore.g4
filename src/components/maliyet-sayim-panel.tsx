@@ -38,8 +38,11 @@ import {
   Mail,
   ShieldCheck,
   Bell,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
@@ -52,6 +55,8 @@ import {
   type MaliyetSayimOturum, type SessionParticipant, type PresenceData,
 } from '@/lib/maliyet-session';
 import { emitMaliyetSayimInvitation } from '@/lib/notifications';
+import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
+import TopluMaliyetSayimPanel from '@/components/toplu-maliyet-sayim-panel';
 import { normalizeCompanyId, filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -170,10 +175,13 @@ function formatCosts(costs: CostByCurrency): string {
 
 function getBrandsFromRules(
   minMaxRules: MinMaxRule[],
-  productCodes: ProductCode[]
+  productCodes: ProductCode[],
+  // Şablon dışı (min-max tanımsız) ama sayıma eklenmiş — Excel'den gelen — stok kodları
+  extraStokKodlari?: Set<string>
 ): string[] {
-  if (minMaxRules.length === 0) return [];
   const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  if (extraStokKodlari) extraStokKodlari.forEach(k => stokKoduSet.add(k));
+  if (stokKoduSet.size === 0) return [];
   const brands = new Set<string>();
   productCodes.forEach(p => {
     if (stokKoduSet.has(p.stokKodu) && p.marka) {
@@ -186,13 +194,25 @@ function getBrandsFromRules(
 function getProductsForBrandFromRules(
   brand: string,
   minMaxRules: MinMaxRule[],
-  productCodes: ProductCode[]
+  productCodes: ProductCode[],
+  extraStokKodlari?: Set<string>
 ): ProductCode[] {
-  if (minMaxRules.length === 0) return [];
   const stokKoduSet = new Set(minMaxRules.map(r => r.stokKodu));
+  if (extraStokKodlari) extraStokKodlari.forEach(k => stokKoduSet.add(k));
+  if (stokKoduSet.size === 0) return [];
   return productCodes
     .filter(p => p.marka === brand && stokKoduSet.has(p.stokKodu))
     .sort((a, b) => a.stokAdi.localeCompare(b.stokAdi, 'tr'));
+}
+
+
+function parsePeriodParam(period: string | null): { month: number; year: number } | null {
+  const match = period?.match(/^(\d{4})-(\d{2})$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]) - 1;
+  if (!Number.isFinite(year) || month < 0 || month > 11) return null;
+  return { month, year };
 }
 
 function normalizeText(value: string): string {
@@ -627,6 +647,33 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
 
+  // Excel-based count entry
+  const [isExcelBusy, setIsExcelBusy] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
+  /** Excel aktarım raporu — başarıyla aktarılan ve stok kartı bulunamayan kodlar */
+  const [importReport, setImportReport] = useState<{
+    ok: { stokKodu: string; stokAdi: string; scope: boolean }[];
+    failed: string[];
+  } | null>(null);
+
+  // Toplu (bulk) sayım girişi
+  const [bulkMode, setBulkMode] = useState(false);
+
+  // Tekil lab/depo sayım dönemi
+  const initialPeriod = useMemo(() => parsePeriodParam(searchParams.get('period')), [searchParams]);
+  const [countMonth, setCountMonth] = useState(() => initialPeriod?.month ?? new Date().getMonth());
+  const [countYear, setCountYear] = useState(() => initialPeriod?.year ?? new Date().getFullYear());
+  const countMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
+    value: i,
+    label: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' }),
+  })), []);
+  const countYearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 7 }, (_, i) => y - 3 + i);
+  }, []);
+  const selectedPeriod = useMemo(() => `${countYear}-${String(countMonth + 1).padStart(2, '0')}`, [countMonth, countYear]);
+  const selectedPeriodLabel = useMemo(() => `${countMonthOptions[countMonth]?.label ?? ''} ${countYear}`, [countMonth, countYear, countMonthOptions]);
+
   // Voice counting
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState('');
@@ -773,8 +820,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         if (locationType === 'depot') {
           // Depot: unshipped items in this depot
           const snap = await getDocs(
-            query(
-              collection(db, 'depoStok'),
+            scopedQuery(
+              'depoStok',
+              currentCompanyId,
+              isSuperAdmin,
               where('depotId', '==', selectedLocationId),
               where('isShipped', '==', false)
             )
@@ -785,8 +834,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           // Lab: shipped items targeted to this lab
           const labName = hospitals.find(h => h.id === selectedLocationId)?.name;
           const snap = await getDocs(
-            query(
-              collection(db, 'depoStok'),
+            scopedQuery(
+              'depoStok',
+              currentCompanyId,
+              isSuperAdmin,
               where('isShipped', '==', true)
             )
           );
@@ -823,23 +874,49 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     return depots.find(d => d.id === selectedLocationId)?.name ?? '';
   }, [selectedLocationId, locationType, hospitals, depots]);
 
+  // Şablon dışı ama sayıma eklenmiş (Excel/barkod ile) stok kodları — min-max
+  // kapsamında olmayıp countData'da yer alan, stok kartı bulunan ürünler. Marka
+  // sekmeleri ve ürün listeleri bunları da göstersin ki kullanıcı kaydetmeden
+  // önce inceleyebilsin.
+  const productCodeSet = useMemo(() => new Set(productCodes.map(p => p.stokKodu)), [productCodes]);
+  // İçerik-kararlı imza: countData her değiştiğinde yeniden hesaplanır ama DEĞER
+  // aynı kaldıkça extraScopeCodes referansı değişmez → brands/brandProducts
+  // gereksiz yere yeniden üretilmez (döngü ve gereksiz render önlenir).
+  const extraScopeSignature = useMemo(() => {
+    const minMaxSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+    return Object.keys(countData)
+      .filter(code => !minMaxSet.has(code) && productCodeSet.has(code))
+      .sort()
+      .join('|');
+  }, [countData, locationMinMaxRules, productCodeSet]);
+  const extraScopeCodes = useMemo(
+    () => new Set(extraScopeSignature ? extraScopeSignature.split('|') : []),
+    [extraScopeSignature],
+  );
+
   const brands = useMemo(() => {
     if (!selectedLocationId || !locationType) return [];
-    return getBrandsFromRules(locationMinMaxRules, productCodes);
-  }, [selectedLocationId, locationType, locationMinMaxRules, productCodes]);
+    return getBrandsFromRules(locationMinMaxRules, productCodes, extraScopeCodes);
+  }, [selectedLocationId, locationType, locationMinMaxRules, productCodes, extraScopeCodes]);
 
   const brandProducts = useMemo(() => {
     if (!activeBrand || !selectedLocationId || !locationType) return [];
-    return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes);
-  }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes]);
+    return getProductsForBrandFromRules(activeBrand, locationMinMaxRules, productCodes, extraScopeCodes);
+  }, [activeBrand, selectedLocationId, locationType, locationMinMaxRules, productCodes, extraScopeCodes]);
 
-  // Initialize count data when brand products change
+  // Initialize count data when brand products change.
+  // ÖNEMLİ: Yalnızca gerçekten yeni ürün eklendiğinde YENİ nesne döndür; aksi
+  // halde `prev` referansını koru. countData referansı her seferinde değişirse
+  // extraScopeCodes → brands → brandProducts → bu effect zinciri sonsuz döngüye
+  // girip "Maximum update depth exceeded" hatası veriyordu.
   useEffect(() => {
     if (brandProducts.length === 0) return;
     setCountData(prev => {
+      let changed = false;
       const next = { ...prev };
       brandProducts.forEach(p => {
         if (!next[p.stokKodu]) {
+          changed = true;
           next[p.stokKodu] = {
             stokKodu: p.stokKodu,
             stokAdi: p.stokAdi,
@@ -853,14 +930,14 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           };
         }
       });
-      return next;
+      return changed ? next : prev;
     });
   }, [brandProducts]);
 
   // Brand progress
   const brandProgressList = useMemo((): BrandProgress[] => {
     return brands.map(brand => {
-      const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes);
+      const products = getProductsForBrandFromRules(brand, locationMinMaxRules, productCodes, extraScopeCodes);
       const completed = products.filter(p => countData[p.stokKodu]?.counted).length;
       let status: BrandProgress['status'] = 'idle';
       if (completed > 0 && completed < products.length) status = 'in_progress';
@@ -873,7 +950,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       });
       return { brand, total: products.length, completed, status, costs };
     });
-  }, [brands, countData, locationMinMaxRules, productCodes]);
+  }, [brands, countData, locationMinMaxRules, productCodes, extraScopeCodes]);
 
   const totalBrands = brandProgressList.length;
   const completedBrands = brandProgressList.filter(b => b.status === 'completed').length;
@@ -1002,6 +1079,123 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     }
   }, [brandProgressList, activeBrand]);
 
+  // ------------------------------------------------------------------
+  // Excel-based count entry (template download + upload)
+  // ------------------------------------------------------------------
+  const handleDownloadExcelTemplate = useCallback(async () => {
+    const stokKoduSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+    const scopeProducts = productCodes.filter(p => stokKoduSet.has(p.stokKodu));
+    // Min-max tanımlı ürün yoksa bile boş (yalnız başlıklı) şablon indirilir;
+    // kullanıcı "Stok Kodu" sütununa stok kartı olan herhangi bir ürünü ekleyebilir.
+    setIsExcelBusy(true);
+    try {
+      const rows = scopeProducts
+        .map(p => ({
+          marka: p.marka || '',
+          stokKodu: p.stokKodu,
+          stokAdi: p.stokAdi,
+          mevcutStok: locationStock[p.stokKodu] ?? 0,
+        }))
+        .sort((a, b) => {
+          const byMarka = (a.marka || '').localeCompare(b.marka || '', 'tr');
+          if (byMarka !== 0) return byMarka;
+          return a.stokAdi.localeCompare(b.stokAdi, 'tr');
+        });
+      const safeName = (locationName || 'Lokasyon').replace(/[^\p{L}\p{N}]+/gu, '_');
+      await downloadMaliyetSayimTemplate(rows, `Maliyet_Sayim_Sablonu_${safeName}.xlsx`);
+      toast({
+        title: 'Şablon indirildi',
+        description: rows.length > 0
+          ? `${rows.length} tanımlı ürün eklendi. Stok kartı olan başka ürünleri "Stok Kodu" sütununa ekleyebilirsiniz.`
+          : 'Bu lokasyonda tanımlı ürün yok — boş şablon indirildi. "Stok Kodu" sütununa stok kartı olan ürünleri ekleyebilirsiniz.',
+      });
+    } catch (err: any) {
+      console.error('Maliyet sayım template download error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Şablon oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+    }
+  }, [locationMinMaxRules, productCodes, locationStock, locationName, toast]);
+
+  const handleExcelFileSelected = useCallback(async (file: File | null | undefined) => {
+    if (!file) return;
+    setIsExcelBusy(true);
+    try {
+      const parsed = await parseMaliyetSayimExcel(file);
+      if (parsed.length === 0) {
+        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli "Stok Adedi" / "Cihaz Üstü Test" girişi bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      // Min-max kapsamı ARTIK sınırlayıcı değil — stok kartı (productCodes) olan
+      // her ürün aktarılabilir. Yalnızca stok kartı bulunmayan kodlar eklenemez.
+      const minMaxSet = new Set(locationMinMaxRules.map(r => r.stokKodu));
+      const productByCode = new Map(productCodes.map(p => [p.stokKodu, p]));
+
+      const next: Record<string, ProductCountEntry> = { ...countData };
+      const appliedEntries: ProductCountEntry[] = [];
+      const okList: { stokKodu: string; stokAdi: string; scope: boolean }[] = [];
+      const failList: string[] = [];
+
+      parsed.forEach(({ stokKodu, stokAdedi, cihazUstuAdedi }) => {
+        const product = productByCode.get(stokKodu);
+        if (!product) {
+          // Stok kartı yok — aktarılamadı
+          failList.push(stokKodu);
+          return;
+        }
+        const base: ProductCountEntry = next[stokKodu] ?? {
+          stokKodu,
+          stokAdi: product.stokAdi || stokKodu,
+          marka: product.marka || '',
+          stokAdedi: '',
+          cihazUstuAdedi: '',
+          counted: false,
+          lots: [],
+          serials: [],
+          expiryWarnings: [],
+        };
+        const updated: ProductCountEntry = {
+          ...base,
+          stokAdedi: stokAdedi !== null ? String(stokAdedi) : base.stokAdedi,
+          cihazUstuAdedi: cihazUstuAdedi !== null ? String(cihazUstuAdedi) : base.cihazUstuAdedi,
+          counted: true,
+        };
+        next[stokKodu] = updated;
+        appliedEntries.push(updated);
+        okList.push({ stokKodu, stokAdi: product.stokAdi || stokKodu, scope: minMaxSet.has(stokKodu) });
+      });
+
+      const applied = appliedEntries.length;
+      if (applied > 0) setCountData(next);
+
+      // Propagate to collaborative session participants, if any.
+      if (applied > 0 && sessionMode === 'collaborative' && activeSessionId && currentUserProfile?.uid) {
+        appliedEntries.forEach(entry => {
+          syncToSession(entry.stokKodu, 'counted', true, entry);
+        });
+      }
+
+      const extraCount = okList.filter(o => !o.scope).length;
+      // Detaylı aktarım raporu — hangi ürünler geldi, hangi stok kodları eklenemedi
+      setImportReport({ ok: okList, failed: failList });
+      const parts: string[] = [`${applied} ürün aktarıldı`];
+      if (extraCount > 0) parts.push(`${extraCount} tanımsız ürün eklendi`);
+      if (failList.length > 0) parts.push(`${failList.length} stok kodu bulunamadı`);
+      toast({
+        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Aktarılabilecek ürün yok',
+        description: parts.join(' · '),
+        variant: applied > 0 ? 'default' : 'destructive',
+      });
+    } catch (err: any) {
+      console.error('Maliyet sayım Excel import error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Excel dosyası okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  }, [locationMinMaxRules, productCodes, countData, sessionMode, activeSessionId, currentUserProfile, syncToSession, toast]);
+
   const resetToLocationSelection = useCallback(() => {
     // Stop voice recognition if active
     if (recognitionRef.current) {
@@ -1068,6 +1262,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                 marka: entry.marka,
                 stokAdedi: parseInt(entry.stokAdedi) || 0,
                 cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+                cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
+                currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
+                ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
                 countedByUid: sessionItem?.countedByUid || currentUserProfile?.uid || '',
                 countedByName: sessionItem?.countedByName || currentUserProfile?.name || '',
                 updates: sessionItem?.updates || [],
@@ -1083,6 +1280,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               totalBrands,
               participants: activeSession.participants,
               companyId: currentCompanyId,
+              period: activeSession.period || selectedPeriod,
+              month: typeof activeSession.month === 'number' ? activeSession.month : countMonth,
+              year: typeof activeSession.year === 'number' ? activeSession.year : countYear,
             });
           } else {
             // Solo mode: legacy save
@@ -1092,6 +1292,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               marka: entry.marka,
               stokAdedi: parseInt(entry.stokAdedi) || 0,
               cihazUstuAdedi: parseInt(entry.cihazUstuAdedi) || 0,
+              cost: productCodes.find(p => p.stokKodu === entry.stokKodu)?.cost ?? 0,
+              currency: productCodes.find(p => p.stokKodu === entry.stokKodu)?.currency || 'TRY',
+              ambalajDegeri: Number(productCodes.find(p => p.stokKodu === entry.stokKodu)?.ambalajDegeri) || 1,
             }));
 
             await addDoc(collection(db, 'maliyetSayimSessions'), {
@@ -1105,6 +1308,10 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               totalBrands,
               totalProducts: items.length,
               companyId: normalizeCompanyId(currentCompanyId),
+              period: selectedPeriod,
+              month: countMonth,
+              year: countYear,
+              entryMethod: 'tekil',
             });
           }
 
@@ -1127,7 +1334,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       setIsSaving(false);
       return false;
     }
-  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId]);
+  }, [locationType, selectedLocationId, locationName, countData, currentUserProfile, totalBrands, isSaving, toast, sessionMode, activeSessionId, activeSession, resetToLocationSelection, currentCompanyId, selectedPeriod, countMonth, countYear]);
 
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
     if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
@@ -1488,7 +1695,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     setShowParticipantSelection(true);
     setIsLoadingUsers(true);
     try {
-      const users = await getUsersForLocation(type, id);
+      const users = await getUsersForLocation(type, id, currentCompanyId, isSuperAdmin);
       // Exclude current user from the list
       setLocationUsers(users.filter(u => u.uid !== currentUserProfile?.uid));
     } catch (err) {
@@ -1502,8 +1709,8 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const handleStartSolo = useCallback(() => {
     setShowParticipantSelection(false);
     setSessionMode('solo');
-    router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}`, { scroll: false });
-  }, [router, locationType, selectedLocationId]);
+    router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&period=${selectedPeriod}`, { scroll: false });
+  }, [router, locationType, selectedLocationId, selectedPeriod]);
 
   const handleStartCollaborative = useCallback(async () => {
     if (!locationType || !selectedLocationId || !currentUserProfile?.uid) return;
@@ -1525,6 +1732,9 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
         creatorName: currentUserProfile.name || '',
         invitedUsers,
         companyId: currentCompanyId,
+        period: selectedPeriod,
+        month: countMonth,
+        year: countYear,
       });
 
       // Send notifications to invited users
@@ -1540,7 +1750,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       setActiveSessionId(sessionId);
       setSessionMode('collaborative');
       setShowParticipantSelection(false);
-      router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&session=${sessionId}`, { scroll: false });
+      router.replace(`/maliyet-sayim?type=${locationType}&id=${selectedLocationId}&session=${sessionId}&period=${selectedPeriod}`, { scroll: false });
 
       toast({ title: 'Oturum oluşturuldu', description: `${invitedUsers.length} kişiye davet gönderildi.` });
     } catch (err) {
@@ -1549,7 +1759,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     } finally {
       setIsCreatingSession(false);
     }
-  }, [locationType, selectedLocationId, currentUserProfile, locationUsers, selectedParticipants, hospitals, depots, router, toast]);
+  }, [locationType, selectedLocationId, currentUserProfile, locationUsers, selectedParticipants, hospitals, depots, router, toast, selectedPeriod, countMonth, countYear]);
 
   const handleJoinInvitation = useCallback(async (session: MaliyetSayimOturum) => {
     if (!currentUserProfile?.uid) return;
@@ -1590,7 +1800,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       : depots.find(d => d.id === selectedLocationId)?.name ?? '';
 
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-2xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
@@ -1604,6 +1814,42 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               <h1 className="text-xl font-bold text-[var(--dashboard-text)]">Katılımcı Seçimi</h1>
               <p className="text-xs text-[var(--dashboard-muted)]">{selectedLocName} — Sayıma davet edeceğiniz kişileri seçin</p>
             </div>
+          </div>
+
+          {/* Period selection */}
+          <div className="cihaz-card-strong rounded-2xl p-4 mb-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarDays className="w-4 h-4 text-[var(--dashboard-accent)]" />
+              <span className="text-xs font-semibold text-[var(--dashboard-text)]">Sayım Dönemi</span>
+              <span className="ml-auto text-[11px] font-medium text-[var(--dashboard-accent)]">{selectedPeriodLabel}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-[11px] text-[var(--dashboard-muted)]">Ay</span>
+                <select
+                  value={countMonth}
+                  onChange={(e) => setCountMonth(Number(e.target.value))}
+                  className="w-full h-10 rounded-xl bg-[var(--dashboard-surface-2)] px-3 text-sm text-[var(--dashboard-text)] outline-none shadow-[var(--dashboard-pressed)]"
+                >
+                  {countMonthOptions.map(m => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1">
+                <span className="text-[11px] text-[var(--dashboard-muted)]">Yıl</span>
+                <select
+                  value={countYear}
+                  onChange={(e) => setCountYear(Number(e.target.value))}
+                  className="w-full h-10 rounded-xl bg-[var(--dashboard-surface-2)] px-3 text-sm text-[var(--dashboard-text)] outline-none shadow-[var(--dashboard-pressed)]"
+                >
+                  {countYearOptions.map(y => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <p className="mt-2 text-[11px] text-[var(--dashboard-muted)]">Solo veya eşlik edecek personel ile başlatılan sayım bu döneme kaydedilir.</p>
           </div>
 
           {/* User list */}
@@ -1707,6 +1953,18 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     );
   }
 
+  // ---- RENDER: Toplu (bulk) sayım girişi ----
+  if (bulkMode && locationType && !selectedLocationId) {
+    return (
+      <TopluMaliyetSayimPanel
+        locationType={locationType}
+        locations={(locationType === 'lab' ? hospitals : depots).map(l => ({ id: l.id, name: l.name }))}
+        productCodes={productCodes}
+        onClose={() => setBulkMode(false)}
+      />
+    );
+  }
+
   // ---- RENDER: Location Selection (with tabs for invitations) ----
   if (!locationType || !selectedLocationId) {
     const myPendingInvitations = pendingInvitations.filter(s =>
@@ -1714,7 +1972,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     );
 
     return (
-      <div className="cihaz-shell min-h-screen">
+      <div className="cihaz-shell maliyet-clay min-h-screen">
         <div className="max-w-3xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
           {/* Header */}
           <div className="flex items-center gap-3 mb-6 px-1">
@@ -1800,6 +2058,23 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                   : allLocations;
                 return (
                 <div className="space-y-2">
+                  {/* Toplu sayım girişi */}
+                  <button
+                    onClick={() => setBulkMode(true)}
+                    className="w-full flex items-center gap-3 px-4 py-3.5 rounded-xl bg-[var(--dashboard-accent)]/10 hover:bg-[var(--dashboard-accent)]/20 transition-colors mb-3 text-left"
+                  >
+                    <span className="flex items-center justify-center w-9 h-9 rounded-xl bg-[var(--dashboard-accent)] shadow-md shrink-0">
+                      <ClipboardCheck className="h-4 w-4 text-white" />
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-[var(--dashboard-text)] block">Toplu Sayım Gir</span>
+                      <span className="text-[11px] text-[var(--dashboard-muted)]">
+                        Birden fazla {locationType === 'lab' ? 'laboratuvar' : 'depo'} için Excel ile döneme bağlı toplu sayım girin
+                      </span>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-[var(--dashboard-accent)] shrink-0" />
+                  </button>
+
                   <p className="text-xs font-medium text-[var(--dashboard-muted)] uppercase tracking-wider px-1 mb-3">
                     {locationType === 'lab' ? 'Laboratuvar Seçin' : 'Depo Seçin'}
                   </p>
@@ -1963,7 +2238,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     : 0;
 
   return (
-    <div className="cihaz-shell min-h-screen flex flex-col">
+    <div className="cihaz-shell maliyet-clay min-h-screen flex flex-col">
       {/* ===== TOP STATUS BAR ===== */}
       <div className="sticky top-0 z-[var(--z-sticky)] bg-[var(--dashboard-bg)]/95 backdrop-blur-md border-b border-[var(--dashboard-stroke)]">
         <div className="px-4 sm:px-6 py-3 flex items-center gap-4 flex-wrap">
@@ -2008,6 +2283,33 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
             >
               {voiceActive ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               {voiceActive ? 'Mikrofon Aktif' : 'Sesli Sayım'}
+            </button>
+
+            {/* Excel ile sayım */}
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="sr-only"
+              onChange={(e) => handleExcelFileSelected(e.target.files?.[0])}
+            />
+            <button
+              onClick={handleDownloadExcelTemplate}
+              disabled={isExcelBusy}
+              title="Maliyet sayım şablonunu Excel olarak indir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span className="hidden md:inline">Şablon İndir</span>
+            </button>
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isExcelBusy}
+              title="Doldurulmuş Excel şablonunu yükleyerek sayım gir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              <span className="hidden md:inline">Excel ile Sayım</span>
             </button>
 
             {/* Voice transcript live preview */}
@@ -2327,6 +2629,65 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
           )}
         </main>
       </div>
+
+      {/* ===== EXCEL AKTARIM RAPORU ===== */}
+      <Dialog open={!!importReport} onOpenChange={(o) => { if (!o) setImportReport(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Excel Aktarım Raporu</DialogTitle>
+          </DialogHeader>
+          {importReport && (
+            <div className="space-y-4 py-1">
+              <div className="flex gap-3">
+                <div className="flex-1 cihaz-card p-3 text-center">
+                  <div className="text-2xl font-bold text-emerald-500">{importReport.ok.length}</div>
+                  <div className="text-xs text-[var(--dashboard-muted)]">aktarıldı</div>
+                </div>
+                <div className="flex-1 cihaz-card p-3 text-center">
+                  <div className={cn('text-2xl font-bold', importReport.failed.length > 0 ? 'text-red-500' : 'text-[var(--dashboard-muted)]')}>{importReport.failed.length}</div>
+                  <div className="text-xs text-[var(--dashboard-muted)]">aktarılamadı</div>
+                </div>
+              </div>
+
+              {importReport.failed.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-red-500 mb-1.5">Stok kartı bulunamadı — aktarılamayan kodlar</div>
+                  <div className="max-h-40 overflow-y-auto rounded-lg border border-red-500/20 bg-red-500/5 p-2 space-y-1">
+                    {importReport.failed.map((code) => (
+                      <div key={code} className="text-xs font-mono text-[var(--dashboard-text)]">{code}</div>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-[var(--dashboard-muted)] mt-1">Bu kodlar ürün kataloğunda (stok kartı) yok. Doğru stok kodunu girin ya da önce stok kartını oluşturun.</div>
+                </div>
+              )}
+
+              {importReport.ok.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-emerald-600 mb-1.5">Aktarılan ürünler</div>
+                  <div className="max-h-52 overflow-y-auto rounded-lg border border-[var(--dashboard-stroke)] divide-y divide-[var(--dashboard-stroke)]/60">
+                    {importReport.ok.map((o) => (
+                      <div key={o.stokKodu} className="flex items-center justify-between gap-2 px-2.5 py-1.5">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-[var(--dashboard-text)] truncate">{o.stokAdi}</div>
+                          <div className="text-[11px] font-mono text-[var(--dashboard-muted)]">{o.stokKodu}</div>
+                        </div>
+                        {!o.scope && (
+                          <span className="shrink-0 text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-600">tanımsız</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-[var(--dashboard-muted)] mt-1">"tanımsız" etiketi min-max kapsamında olmayan ama stok kartı bulunan ürünleri gösterir; ilgili marka sekmesinde görünür.</div>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button size="sm" onClick={() => setImportReport(null)}>Kapat</Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* ===== FINISH MODAL ===== */}
       <Dialog open={showFinishModal} onOpenChange={setShowFinishModal}>

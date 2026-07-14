@@ -15,6 +15,9 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
+import { useHospitals, useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
@@ -54,8 +57,9 @@ import { toDateFromAny } from '@/lib/date';
 import OrderConfirmAnimation from '@/components/lojistik-terminal/order-confirm-animation';
 import DeliveryHistory, { type PartialDelivery } from '@/components/lojistik-terminal/delivery-history';
 import { exportOrdersToExcel } from '@/lib/lojistik/export-orders';
+import { sumStockItemQuantities } from '@/lib/stock-quantity';
 
-type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'teslim_bekliyor' | 'eksik';
+type LojFilter = 'all' | 'pending' | 'toplaniyor' | 'eksik';
 
 type RowState = {
   itemId: string;
@@ -93,20 +97,100 @@ function safeParseMiad(value: unknown): Date | null {
   return toDateFromAny(value as any) ?? null;
 }
 
+const MemoizedLojOrderCard = React.memo(function LojOrderCard({
+  order,
+  isSelected,
+  productNameMap,
+  onSelect,
+}: {
+  order: Order;
+  isSelected: boolean;
+  productNameMap: Map<string, string>;
+  onSelect: () => void;
+}) {
+  const s = order.status;
+  const status = s === 'pending'
+    ? { label: 'Beklemede', cls: 'loj-status-badge loj-status-badge--warning', Icon: Hourglass }
+    : s === 'eksik'
+      ? { label: 'Eksik', cls: 'loj-status-badge loj-status-badge--danger', Icon: AlertCircle }
+      : s === 'toplaniyor'
+        ? { label: 'Hazırlanıyor', cls: 'loj-status-badge loj-status-badge--info', Icon: Truck }
+        : s === 'completed'
+          ? { label: 'Teslim', cls: 'loj-status-badge loj-status-badge--success', Icon: CheckCircle2 }
+          : s === 'cancelled'
+            ? { label: 'İptal', cls: 'loj-status-badge loj-status-badge--danger', Icon: XCircle }
+            : { label: 'İşlemde', cls: 'loj-status-badge loj-status-badge--info', Icon: Clock3 };
+
+  const StatusIcon = status.Icon;
+  const totalAdet = (order.items ?? []).reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+  const firstItem = order.items?.[0];
+
+  return (
+    <button
+      key={order.id}
+      onClick={onSelect}
+      className={cn('loj-order-item', isSelected && 'loj-selected')}
+    >
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--loj-text)' }}>
+          <Building2 className="h-3.5 w-3.5 opacity-70 shrink-0" />
+          <span className="truncate">{order.kurumAdi}</span>
+        </p>
+        <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--loj-muted)' }}>
+          {firstItem
+            ? productNameMap.get(firstItem.stokKodu ?? '') ??
+              firstItem.stokAdi ??
+              firstItem.stokKodu
+            : '-'}
+          {(order.items?.length ?? 0) > 1 &&
+            ` +${(order.items?.length ?? 1) - 1}`}
+        </p>
+        <span className={cn(status.cls, 'mt-1.5')}>
+          <StatusIcon className="h-3 w-3" />
+          {status.label}
+        </span>
+      </div>
+      <div className="text-right shrink-0 w-14 sm:w-16">
+        <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
+          {totalAdet}
+        </p>
+        <p
+          className="text-[10px] uppercase tracking-wide whitespace-nowrap"
+          style={{ color: 'var(--loj-muted)' }}
+        >
+          adet
+        </p>
+      </div>
+    </button>
+  );
+}, (prevProps, nextProps) => {
+  return prevProps.order.id === nextProps.order.id &&
+         prevProps.order.status === nextProps.order.status &&
+         prevProps.isSelected === nextProps.isSelected &&
+         (prevProps.order.items?.length ?? 0) === (nextProps.order.items?.length ?? 0);
+});
+
 export default function LojistikSiparisView() {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
-  const [completedOrders, setCompletedOrders] = useState<Order[]>([]);
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [depots, setDepots] = useState<Depot[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
+  // Tamamlananlar `ordersArchive`'tan (+ backfill öncesi canlı kalanlar) gelir.
+  const [liveCompleted, setLiveCompleted] = useState<Order[]>([]);
+  const [archivedCompleted, setArchivedCompleted] = useState<Order[]>([]);
+  const completedOrders = useMemo(
+    () => mergeOrdersById(archivedCompleted, liveCompleted),
+    [archivedCompleted, liveCompleted],
+  );
+  // TanStack Query — AppLayout prefetch sayesinde anında cache'den gelir, 0ms bekleme
+  const { data: hospitals = [] } = useHospitals();
+  const { data: productCodes = [] } = useProductCodes();
+  const { data: depots = [] } = useDepots();
+
   const [maxByStokKodu, setMaxByStokKodu] = useState<Map<string, { max: number; maxGun?: number }>>(new Map());
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [filter, setFilter] = useState<LojFilter>('all');
   const [search, setSearch] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   const [rows, setRows] = useState<RowState[]>([]);
@@ -126,53 +210,116 @@ export default function LojistikSiparisView() {
     return s;
   }, [currentUserProfile?.assignedLaboratories]);
 
-  // Fetch hospitals & products
-  useEffect(() => {
-    (async () => {
-      const [hSnap, pSnap, dSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depots')),
-      ]);
-      setHospitals(hSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(pSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
-      setDepots(dSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot)));
-    })();
-  }, []);
+  const [labGroupNamesById, setLabGroupNamesById] = useState<Map<string, string>>(new Map());
 
-  // Listen peripheral orders
-  useEffect(() => {
-    const q = query(collection(db, 'orders'), where('isPeripheral', '==', true));
-    const unsub = onSnapshot(q, (snap) => {
-      const rowsData = snap.docs.map((d) => {
-        const data = d.data();
-        return {
-          ...data,
-          id: d.id,
-          createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-        } as Order;
-      });
-      const active: Order[] = [];
-      const completed: Order[] = [];
-      rowsData.forEach((o) => {
-        if (!o.labId || !assignedLabIds.has(o.labId)) return;
-        if (o.status === 'completed') completed.push(o);
-        else active.push(o);
-      });
-      active.sort(
-        (a, b) =>
-          ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-      );
-      completed.sort(
-        (a, b) =>
-          ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0)
-      );
-      setPeripheralOrders(active);
-      setCompletedOrders(completed);
-      setIsLoading(false);
+  // Build the set of group names the current user (lojistik sorumlusu) is responsible for.
+  // assignedLabGroups can contain either definition document IDs or legacy group names.
+  const userGroupNames = useMemo(() => {
+    const out = new Set<string>();
+    const ids = currentUserProfile?.assignedLabGroups ?? [];
+    if (!ids.length) return out;
+    for (const entry of ids) {
+      const trimmed = String(entry || '').trim();
+      if (!trimmed) continue;
+      const byId = labGroupNamesById.get(trimmed);
+      out.add(byId || trimmed);
+    }
+    return out;
+  }, [currentUserProfile?.assignedLabGroups, labGroupNamesById]);
+
+  // stokKodu -> laboratuvarGrubu (name) lookup from productCodes
+  const stokKoduToGrup = useMemo(() => {
+    const m = new Map<string, string>();
+    productCodes.forEach((p) => {
+      const code = (p.stokKodu || '').trim();
+      const grup = (p as any).laboratuvarGrubu;
+      if (code && grup) m.set(code, String(grup).trim());
     });
-    return () => unsub();
-  }, [assignedLabIds]);
+    return m;
+  }, [productCodes]);
+
+  // True when the current user has at least one assigned lab group; if so, list/detail
+  // views are scoped to items whose product group is in `userGroupNames`.
+  const groupFilteringActive = (currentUserProfile?.assignedLabGroups?.length ?? 0) > 0 && userGroupNames.size > 0;
+
+  const itemBelongsToUserGroup = useCallback(
+    (stokKodu: string | undefined | null): boolean => {
+      if (!groupFilteringActive) return true;
+      const code = (stokKodu || '').trim();
+      if (!code) return false;
+      const grup = stokKoduToGrup.get(code);
+      if (!grup) return false;
+      return userGroupNames.has(grup);
+    },
+    [groupFilteringActive, stokKoduToGrup, userGroupNames]
+  );
+
+  // def_labGroups: sadece lab grup isimleri için hâlâ manuel çekme (TanStack Query'de yok)
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const lgResult = await getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin).catch(() => null);
+      if (cancelled || !lgResult) return;
+      const lgMap = new Map<string, string>();
+      lgResult.forEach((d) => {
+        const name = (d.data() as any)?.name;
+        if (name) lgMap.set(d.id, String(name).trim());
+      });
+      setLabGroupNamesById(lgMap);
+    })();
+    return () => { cancelled = true; };
+  }, [currentCompanyId, isSuperAdmin]);
+
+  // Listen peripheral orders. Aktif siparişler canlı `orders`'tan; tamamlananlar
+  // `ordersArchive`'tan (+ backfill öncesi canlı kalanlar) okunur.
+  useEffect(() => {
+    // Visibility rules:
+    // - Lojistik users with assignedLabGroups: show orders that contain at least
+    //   one item whose product is in one of their groups.
+    // - Otherwise fall back to legacy lab-ID-based filtering.
+    const isVisible = (o: Order): boolean => {
+      if (groupFilteringActive) {
+        const items = Array.isArray(o.items) ? o.items : [];
+        return items.some((it: any) => itemBelongsToUserGroup(it?.stokKodu));
+      }
+      return !!o.labId && assignedLabIds.has(o.labId);
+    };
+    const byCreatedDesc = (a: Order, b: Order) =>
+      ((b.createdAt as Date)?.getTime?.() ?? 0) - ((a.createdAt as Date)?.getTime?.() ?? 0);
+    const mapDocs = (snap: any): Order[] =>
+      snap.docs.map((d: any) => {
+        const data = d.data();
+        return { ...data, id: d.id, createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date() } as Order;
+      });
+    const onError = (error: unknown) => {
+      console.error('Lojistik sipariş dinleyici hatası:', error);
+      toast({
+        title: 'Siparişler yüklenemedi',
+        description: 'Yetki veya bağlantı nedeniyle sipariş verileri alınamadı.',
+        variant: 'destructive',
+      });
+    };
+
+    // Canlı `orders`: aktif (+ backfill öncesi kalan completed) ayrıştırılır.
+    const unsubLive = onSnapshot(
+      scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => {
+        const visible = mapDocs(snap).filter(isVisible);
+        setPeripheralOrders(visible.filter((o) => o.status !== 'completed').sort(byCreatedDesc));
+        setLiveCompleted(visible.filter((o) => o.status === 'completed').sort(byCreatedDesc));
+      },
+      onError,
+    );
+    // Arşiv: tüm tamamlananlar.
+    const unsubArchive = onSnapshot(
+      scopedQuery(ORDERS_ARCHIVE_COLLECTION, currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true)),
+      (snap) => {
+        setArchivedCompleted(mapDocs(snap).filter(isVisible).sort(byCreatedDesc));
+      },
+      onError,
+    );
+    return () => { unsubLive(); unsubArchive(); };
+  }, [assignedLabIds, currentCompanyId, groupFilteringActive, isSuperAdmin, itemBelongsToUserGroup, toast]);
 
   const selectedOrder = useMemo(() => {
     if (!selectedOrderId) return null;
@@ -194,17 +341,21 @@ export default function LojistikSiparisView() {
       existingByItemId.set(it.itemId, it);
     });
 
-    const newRows: RowState[] = (selectedOrder.items || []).map((it) => {
-      const existing = existingByItemId.get(it.id);
-      return {
-        itemId: it.id,
-        stokKodu: it.stokKodu,
-        stokAdi: it.stokAdi,
-        requestedAdet: Number(it.adet) || 0,
-        sentAdet: existing ? Number(existing.sentAdet) : Number(it.adet) || 0,
-        fulfilled: existing ? !!existing.fulfilled : false,
-      };
-    });
+    // Only display rows whose product is in the current lojistik user's groups.
+    // When the user has no group assignment, fall back to the legacy "all items" view.
+    const newRows: RowState[] = (selectedOrder.items || [])
+      .filter((it) => itemBelongsToUserGroup(it.stokKodu))
+      .map((it) => {
+        const existing = existingByItemId.get(it.id);
+        return {
+          itemId: it.id,
+          stokKodu: it.stokKodu,
+          stokAdi: it.stokAdi,
+          requestedAdet: Number(it.adet) || 0,
+          sentAdet: existing ? Number(existing.sentAdet) : Number(it.adet) || 0,
+          fulfilled: existing ? !!existing.fulfilled : false,
+        };
+      });
     setRows(newRows);
 
     // Fetch lab stock (shipped items to this hospital)
@@ -224,18 +375,43 @@ export default function LojistikSiparisView() {
       }
 
       try {
-        const q = query(
-          collection(db, 'depoStok'),
-          where('isShipped', '==', true)
+        // Use indexed queries instead of scanning the entire depoStok collection.
+        // Primary key: hedefKurumId. Fallback for legacy docs missing that field:
+        // match by hedefKurum (hospital name or 'ad' alias). isShipped filter is
+        // applied client-side so no composite index is required.
+        const queryPromises: Array<Promise<FirebaseFirestore.QuerySnapshot> | null> = [];
+        queryPromises.push(
+          getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurumId', '==', hospital.id))) as any
         );
-        const snap = await getDocs(q);
-        const allShipped = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem));
-        const filtered = allShipped.filter(st => {
-          if (st.hedefKurumId && st.hedefKurumId === hospital.id) return true;
-          if (!st.hedefKurumId && st.hedefKurum && (hospital.name === st.hedefKurum || hospital.ad === st.hedefKurum)) return true;
-          return false;
+        if (hospital.name) {
+          queryPromises.push(
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.name))) as any
+          );
+        }
+        if (hospital.ad && hospital.ad !== hospital.name) {
+          queryPromises.push(
+            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurum', '==', hospital.ad))) as any
+          );
+        }
+        const snaps = await Promise.all(queryPromises as any[]);
+        const deduped = new Map<string, DepoStokItem>();
+        snaps.forEach((snap: any) => {
+          snap.docs.forEach((d: any) => {
+            const item = { id: d.id, ...d.data() } as DepoStokItem;
+            if (!item.isShipped) return;
+            // Honour the legacy fallback rules so we don't surface stock for a
+            // different hospital that happens to share an id/name field.
+            if (item.hedefKurumId) {
+              if (item.hedefKurumId !== hospital.id) return;
+            } else if (item.hedefKurum) {
+              if (item.hedefKurum !== hospital.name && item.hedefKurum !== hospital.ad) return;
+            } else {
+              return;
+            }
+            deduped.set(d.id, item);
+          });
         });
-        if (!cancelled) setLabStock(filtered);
+        if (!cancelled) setLabStock(Array.from(deduped.values()));
       } finally {
         if (!cancelled) setIsLabStockLoading(false);
       }
@@ -243,7 +419,8 @@ export default function LojistikSiparisView() {
     return () => {
       cancelled = true;
     };
-  }, [selectedOrderId, hospitals]); // Only depend on selectedOrderId and hospitals list
+    // itemBelongsToUserGroup also influences which rows we render.
+  }, [selectedOrderId, hospitals, itemBelongsToUserGroup]);
 
   useEffect(() => {
     if (!selectedOrder?.labId) {
@@ -314,7 +491,7 @@ export default function LojistikSiparisView() {
   const computeLabInfo = useCallback(
     (stokKodu: string): LabStockInfo => {
       const items = labStockByStokKodu.get(stokKodu) || [];
-      const totalAdet = items.length;
+      const totalAdet = sumStockItemQuantities(items);
 
       let closestLot: LabStockInfo['closestLot'] = null;
       if (items.length > 0) {
@@ -332,14 +509,14 @@ export default function LojistikSiparisView() {
           first.miad instanceof Timestamp
             ? formatDate(first.miad.toDate(), 'dd.MM.yyyy')
             : String(first.miad || '-');
-        const lotCount = items.filter(
+        const lotItems = items.filter(
           (x) =>
             (x.lotNumarasi ?? '') === firstLot &&
             (x.miad instanceof Timestamp
               ? formatDate(x.miad.toDate(), 'dd.MM.yyyy')
               : String(x.miad || '-')) === firstMiad
-        ).length;
-        closestLot = { lotNumarasi: firstLot || '-', miad: firstMiad, adet: lotCount };
+        );
+        closestLot = { lotNumarasi: firstLot || '-', miad: firstMiad, adet: sumStockItemQuantities(lotItems) };
       }
 
       let lastTransfer: LabStockInfo['lastTransfer'] = null;
@@ -361,11 +538,6 @@ export default function LojistikSiparisView() {
     let list = peripheralOrders;
     if (filter === 'pending') list = list.filter((o) => o.status === 'pending');
     else if (filter === 'toplaniyor') list = list.filter((o) => o.status === 'toplaniyor');
-    else if (filter === 'teslim_bekliyor') {
-      list = list.filter((o) =>
-        ['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(o.status || ''))
-      );
-    }
     else if (filter === 'eksik') list = list.filter((o) => o.status === 'eksik');
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -400,29 +572,65 @@ export default function LojistikSiparisView() {
     if (rows.length === 0) {
       toast({
         title: 'Eksik Kalem',
-        description: 'Siparişte en az bir kalem olmalıdır.',
+        description: 'Siparişte size atanmış bir kalem yok.',
         variant: 'destructive',
       });
       return;
     }
     setIsSaving(true);
     try {
-      const updatedOrderItems = rows.map((r) => ({
-        id: r.itemId,
-        stokKodu: r.stokKodu,
-        stokAdi: r.stokAdi,
-        adet: r.sentAdet,
-      }));
+      // Per-group approval: the lojistik user can only modify rows belonging to
+      // their assigned lab groups. Items outside those groups must be preserved
+      // verbatim so that the other group's lojistik responsible can later approve
+      // them. The displayed `rows` is already filtered to user's groups.
+      const rowsByItemId = new Map(rows.map((r) => [r.itemId, r] as const));
+      const existingFulfillmentByItemId = new Map<string, any>();
+      (selectedOrder.peripheralFulfillment?.items || []).forEach((it: any) => {
+        existingFulfillmentByItemId.set(it.itemId, it);
+      });
 
-      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
-        itemId: r.itemId,
-        stokKodu: r.stokKodu,
-        requestedAdet: r.sentAdet,
-        sentAdet: r.sentAdet,
-        fulfilled: r.fulfilled,
-      }));
+      const updatedOrderItems = (selectedOrder.items || []).map((it: any) => {
+        const row = rowsByItemId.get(it.id);
+        if (row) {
+          return {
+            id: row.itemId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            adet: row.sentAdet,
+          };
+        }
+        return it;
+      });
 
-      const isFullyApproved = fulfillmentItems.length > 0 && fulfillmentItems.every((it) => it.fulfilled);
+      const allItemIds = new Set<string>();
+      (selectedOrder.items || []).forEach((it: any) => { if (it?.id) allItemIds.add(it.id); });
+      existingFulfillmentByItemId.forEach((_, k) => allItemIds.add(k));
+
+      const fulfillmentItems: PeripheralFulfillmentItem[] = Array.from(allItemIds).map((itemId) => {
+        const row = rowsByItemId.get(itemId);
+        if (row) {
+          return {
+            itemId: row.itemId,
+            stokKodu: row.stokKodu,
+            requestedAdet: row.sentAdet,
+            sentAdet: row.sentAdet,
+            fulfilled: row.fulfilled,
+          } as PeripheralFulfillmentItem;
+        }
+        const existing = existingFulfillmentByItemId.get(itemId);
+        if (existing) return existing as PeripheralFulfillmentItem;
+        // Items the user can't see (other groups) but no prior fulfillment record:
+        // seed a defaults row from the order item so the order keeps full coverage.
+        const item = (selectedOrder.items || []).find((it: any) => it.id === itemId);
+        return {
+          itemId,
+          stokKodu: item?.stokKodu || '',
+          requestedAdet: Number(item?.adet) || 0,
+          sentAdet: Number(item?.adet) || 0,
+          fulfilled: false,
+        } as PeripheralFulfillmentItem;
+      });
+
       const payload: Record<string, any> = {
         peripheralFulfillment: {
           items: fulfillmentItems,
@@ -431,11 +639,11 @@ export default function LojistikSiparisView() {
           updatedBy: currentUserProfile?.name || currentUser?.email || null,
         },
         items: updatedOrderItems,
-        // Approval is *preparation*, not delivery. Fully approved orders
-        // move into "Hazırlanan" (toplaniyor); they only graduate to
-        // "completed" when an irsaliye-based lab acceptance reconciles
-        // the items. Partially approved orders are flagged "eksik".
-        status: isFullyApproved ? 'toplaniyor' : 'eksik',
+        // Saving an order always moves it to "Hazırlanıyor" (toplaniyor).
+        // "completed" is only set when a stock-arrival (irsaliye / depoStok)
+        // reconciliation confirms the items were delivered.
+        // "eksik" is set only by that reconciliation when items are missing.
+        status: 'toplaniyor',
         approvedAt: serverTimestamp(),
         approvedById: currentUser?.uid || null,
         approvedBy: currentUserProfile?.name || currentUser?.email || null,
@@ -445,12 +653,9 @@ export default function LojistikSiparisView() {
       setShowSaveFx(true);
 
       toast({
-        title: isFullyApproved ? 'Sipariş Hazırlanıyor' : 'Sipariş Eksik Onaylandı',
-        description: isFullyApproved
-          ? 'Sipariş hazırlanan listesine taşındı; irsaliye kabulü ile tamamlanacak.'
-          : 'Sipariş eksik kalemler ile bekleyen listede güncellendi.',
+        title: 'Sipariş Hazırlanıyor',
+        description: 'Sipariş hazırlanan listesine taşındı; teslimat irsaliye/stok girişi ile tamamlanacak.',
       });
-      if (isFullyApproved) setSelectedOrderId(null);
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Sipariş kaydedilemedi.', variant: 'destructive' });
@@ -465,20 +670,51 @@ export default function LojistikSiparisView() {
     if (!depot) return;
     setIsRouting(true);
     try {
-      const updatedOrderItems = rows.map((r) => ({
-        id: r.itemId,
-        stokKodu: r.stokKodu,
-        stokAdi: r.stokAdi,
-        adet: r.sentAdet,
-      }));
+      // Preserve items belonging to other lab groups; only update the user's rows.
+      const rowsByItemId = new Map(rows.map((r) => [r.itemId, r] as const));
+      const existingFulfillmentByItemId = new Map<string, any>();
+      (selectedOrder.peripheralFulfillment?.items || []).forEach((it: any) => {
+        existingFulfillmentByItemId.set(it.itemId, it);
+      });
 
-      const fulfillmentItems: PeripheralFulfillmentItem[] = rows.map((r) => ({
-        itemId: r.itemId,
-        stokKodu: r.stokKodu,
-        requestedAdet: r.sentAdet,
-        sentAdet: r.sentAdet,
-        fulfilled: r.fulfilled,
-      }));
+      const updatedOrderItems = (selectedOrder.items || []).map((it: any) => {
+        const row = rowsByItemId.get(it.id);
+        if (row) {
+          return {
+            id: row.itemId,
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            adet: row.sentAdet,
+          };
+        }
+        return it;
+      });
+
+      const allItemIds = new Set<string>();
+      (selectedOrder.items || []).forEach((it: any) => { if (it?.id) allItemIds.add(it.id); });
+      existingFulfillmentByItemId.forEach((_, k) => allItemIds.add(k));
+      const fulfillmentItems: PeripheralFulfillmentItem[] = Array.from(allItemIds).map((itemId) => {
+        const row = rowsByItemId.get(itemId);
+        if (row) {
+          return {
+            itemId: row.itemId,
+            stokKodu: row.stokKodu,
+            requestedAdet: row.sentAdet,
+            sentAdet: row.sentAdet,
+            fulfilled: row.fulfilled,
+          } as PeripheralFulfillmentItem;
+        }
+        const existing = existingFulfillmentByItemId.get(itemId);
+        if (existing) return existing as PeripheralFulfillmentItem;
+        const item = (selectedOrder.items || []).find((it: any) => it.id === itemId);
+        return {
+          itemId,
+          stokKodu: item?.stokKodu || '',
+          requestedAdet: Number(item?.adet) || 0,
+          sentAdet: Number(item?.adet) || 0,
+          fulfilled: false,
+        } as PeripheralFulfillmentItem;
+      });
 
       await updateDoc(doc(db, 'orders', selectedOrder.id), {
         depotId: depot.id,
@@ -569,12 +805,6 @@ export default function LojistikSiparisView() {
         cls: 'loj-status-badge loj-status-badge--info',
         Icon: Truck,
       };
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(String(s)))
-      return {
-        label: 'Yolda',
-        cls: 'loj-status-badge loj-status-badge--accent',
-        Icon: Truck,
-      };
     if (s === 'completed')
       return {
         label: 'Teslim',
@@ -597,8 +827,7 @@ export default function LojistikSiparisView() {
   const getOrderStage = (order: Order | null): number => {
     if (!order) return 0;
     const s = String(order.status || '');
-    if (s === 'completed') return 4;
-    if (['shipped', 'transfer_pending', 'teslim_bekliyor', 'yolda'].includes(s)) return 3;
+    if (s === 'completed') return 3;
     if (s === 'toplaniyor') return 2;
     if (s === 'eksik') return 2;
     if (s === 'pending') return 1;
@@ -617,13 +846,8 @@ export default function LojistikSiparisView() {
     return (fulfilled / rows.length) * 100;
   }, [rows]);
 
-  if (isLoading) {
-    return (
-      <div className="loj-shell flex items-center justify-center" style={{ minHeight: '100dvh' }}>
-        <Loader2 className="h-8 w-8 animate-spin" style={{ color: 'var(--loj-accent)' }} />
-      </div>
-    );
-  }
+  // isLoading spinner kaldırıldı — artık TanStack Query cache'den anında geliyor.
+  // Siparişler listesi onSnapshot ile birkaç 100ms içinde dolar; bekleme ekranı yok.
 
   return (
     <div className="loj-shell min-h-screen">
@@ -801,7 +1025,6 @@ export default function LojistikSiparisView() {
               ['all', 'Tümü'],
               ['pending', 'Bekleyen'],
               ['toplaniyor', 'Hazırlanan'],
-              ['teslim_bekliyor', 'Yolda'],
               ['eksik', 'Eksik'],
             ] as [LojFilter, string][]).map(([key, label]) => (
               <button
@@ -842,54 +1065,15 @@ export default function LojistikSiparisView() {
                 </p>
               </div>
             ) : (
-              filteredOrders.map((order) => {
-                const status = getStatusInfo(order);
-                const StatusIcon = status.Icon;
-                const totalAdet = (order.items ?? []).reduce(
-                  (s, i) => s + (Number(i.adet) || 0),
-                  0
-                );
-                const isSelected = selectedOrderId === order.id;
-                const firstItem = order.items?.[0];
-                return (
-                  <button
-                    key={order.id}
-                    onClick={() => setSelectedOrderId(order.id ?? null)}
-                    className={cn('loj-order-item', isSelected && 'loj-selected')}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-bold truncate flex items-center gap-1.5" style={{ color: 'var(--loj-text)' }}>
-                        <Building2 className="h-3.5 w-3.5 opacity-70 shrink-0" />
-                        <span className="truncate">{order.kurumAdi}</span>
-                      </p>
-                      <p className="text-[11px] truncate mt-0.5" style={{ color: 'var(--loj-muted)' }}>
-                        {firstItem
-                          ? productNameMap.get(firstItem.stokKodu ?? '') ??
-                            firstItem.stokAdi ??
-                            firstItem.stokKodu
-                          : '-'}
-                        {(order.items?.length ?? 0) > 1 &&
-                          ` +${(order.items?.length ?? 1) - 1}`}
-                      </p>
-                      <span className={cn(status.cls, 'mt-1.5')}>
-                        <StatusIcon className="h-3 w-3" />
-                        {status.label}
-                      </span>
-                    </div>
-                    <div className="text-right shrink-0 w-14 sm:w-16">
-                      <p className="text-base font-extrabold" style={{ color: 'var(--loj-accent)' }}>
-                        {totalAdet}
-                      </p>
-                      <p
-                        className="text-[10px] uppercase tracking-wide whitespace-nowrap"
-                        style={{ color: 'var(--loj-muted)' }}
-                      >
-                        adet
-                      </p>
-                    </div>
-                  </button>
-                );
-              })
+              filteredOrders.map((order) => (
+                <MemoizedLojOrderCard
+                  key={order.id}
+                  order={order}
+                  isSelected={selectedOrderId === order.id}
+                  productNameMap={productNameMap}
+                  onSelect={() => setSelectedOrderId(order.id ?? null)}
+                />
+              ))
             )}
           </ScrollArea>
         </div>
@@ -922,7 +1106,7 @@ export default function LojistikSiparisView() {
             const stage = getOrderStage(order);
             const headerStatus = getStatusInfo(order);
             const HeaderStatusIcon = headerStatus.Icon;
-            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Yolda', 'Teslim Edildi'];
+            const stageNames = ['Beklemede', 'Hazırlanıyor', 'Teslim Edildi'];
 
             return (
               <div className="flex flex-col h-full">
@@ -1004,8 +1188,8 @@ export default function LojistikSiparisView() {
                   <div className="loj-stepper-track">
                     {stageNames.map((name, idx) => {
                       const stepIdx = idx + 1;
-                      const isDone = stepIdx < stage || (stepIdx === stage && stage === 4);
-                      const isActive = stepIdx === stage && stage !== 4;
+                      const isDone = stepIdx < stage || (stepIdx === stage && stage === 3);
+                      const isActive = stepIdx === stage && stage !== 3;
                       const stepCls = isDone ? 'done' : isActive ? 'active' : 'pending';
                       return (
                         <React.Fragment key={name}>

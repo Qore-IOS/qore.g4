@@ -3,11 +3,13 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { db } from '@/lib/firebase';
 import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
+import { LabSelector } from '@/components/common/LabSelector';
 import { useToast } from '@/hooks/use-toast';
 import type { Laboratory } from '@/lib/types';
 
@@ -17,7 +19,7 @@ type Props = {
 };
 
 export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [labs, setLabs] = useState<Laboratory[]>([]);
@@ -26,7 +28,7 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
 
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(collection(db, 'hospitals'));
+      const snap = await getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin));
       setLabs(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     })();
   }, []);
@@ -78,22 +80,16 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
             <Input value={name} onChange={e => setName(e.target.value)} placeholder="Örn: Kadıköy Bölge Havuzu" />
           </div>
 
-          <ScrollArea className="h-72 border rounded-md p-3">
-            <ul className="space-y-2">
-              {labs
-                .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-                .map(l => (
-                <li key={l.id} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Checkbox id={`lab-${l.id}`} checked={selected.has(l.id)} onCheckedChange={() => toggle(l.id)} />
-                    <label htmlFor={`lab-${l.id}`} className="cursor-pointer">{l.name}</label>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{l.address || ''}</span>
-                </li>
-              ))}
-            </ul>
-          </ScrollArea>
-          <p className="text-xs text-muted-foreground">* En az iki laboratuvar seçin. Bu havuz sadece Kullanım ekranında geçerlidir.</p>
+          <LabSelector
+            mode="multi"
+            label="Laboratuvarlar"
+            labs={labs.map(l => ({ id: l.id, name: l.name, kod: l.kod, meta: l.address || undefined }))}
+            values={Array.from(selected)}
+            onValuesChange={(ids) => setSelected(new Set(ids))}
+            placeholder="Laboratuvar seçin"
+            helperText="* En az iki laboratuvar seçin. Bu havuz sadece Kullanım ekranında geçerlidir."
+            showChips
+          />
         </div>
 
         <DialogFooter>

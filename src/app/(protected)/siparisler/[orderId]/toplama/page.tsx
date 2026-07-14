@@ -27,11 +27,13 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot, ConsumptionRecord } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc, limit } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { archiveCompletedOrderInBatch, getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -46,6 +48,13 @@ import { resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { siparisToplamaLogger } from '@/lib/logger';
+import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
+import {
+  aggregateOrderItemsByProduct,
+  decodeLotPickingIdentifier,
+  encodeLotPickingIdentifier,
+  findAvailableStockForQuantityScan,
+} from '@/lib/siparisler/picking';
 
 
 function LastTransferLine({
@@ -172,8 +181,9 @@ export default function ToplamaPage() {
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // 1. Fetch Order First to get depotId
-        const orderSnap = await getDoc(doc(db, 'orders', orderId));
+        // 1. Fetch Order — canlı `orders`'ta yoksa `ordersArchive`'a düş.
+        // Tamamlanan siparişler arşive taşındığından `orders`'ta artık yoktur.
+        const orderSnap = await getOrderDocWithArchiveFallback(orderId);
 
         if (!orderSnap.exists()) {
           toast({ title: 'Hata', description: 'Sipariş bulunamadı.', variant: 'destructive' });
@@ -188,23 +198,25 @@ export default function ToplamaPage() {
             throw new Error("Order is missing depotId.");
         }
 
-        // 2. Fetch Dependent Data (Depot specific stock, etc.)
-        const [productsSnap, depoStokSnap, deviceGroupsSnap, hospitalsSnap, depotSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(query(collection(db, 'depoStok'), where('depotId', '==', orderData.depotId), where('isShipped', '==', false))),
-          getDocs(collection(db, 'def_deviceGroups')),
-          getDocs(collection(db, 'hospitals')),
+        // 2. Fetch Dependent Data via Admin SDK server action.
+        // Replaces 4× getScopedDocs (≈10 Firestore reads through IndexedDB) with
+        // 4–6 parallel Admin SDK queries — no IndexedDB, ~1–2 s vs 10–15 s.
+        // Sadece siparişteki stok kodlarına ait depo stoğunu çek — tüm depo
+        // stoğunu taşımak açılışı 20 sn+ yavaşlatıyordu.
+        const orderStokKodlari = Array.from(
+          new Set((orderData.items || []).map(i => i.stokKodu).filter(Boolean) as string[])
+        );
+        const [bootstrapData, depotSnap] = await Promise.all([
+          import('@/actions/stokActions').then(m =>
+            m.getToplamaBootstrapData(orderData.depotId, currentCompanyId, isSuperAdmin, orderStokKodlari)
+          ),
           getDoc(doc(db, 'depots', orderData.depotId)),
         ]);
 
-        const productsData = productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
-        const depoStokData = filterByCompanyScope(
-          depoStokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-          currentCompanyId,
-          isSuperAdmin,
-        );
-        const deviceGroupsData = deviceGroupsSnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup));
-        const hospitalsData = hospitalsSnap.docs.map(d => ({id: d.id, ...d.data()} as Hospital));
+        const productsData = bootstrapData.productCodes as ProductCode[];
+        const depoStokData = bootstrapData.depoStok;
+        const deviceGroupsData = bootstrapData.deviceGroups as DeviceGroup[];
+        const hospitalsData = bootstrapData.hospitals as Hospital[];
 
         // Determine effective labId - try order.labId first, then find by kurumAdi
         let effectiveLabId = orderData.labId;
@@ -277,9 +289,10 @@ export default function ToplamaPage() {
         const pickingListItems: PickingListItemType[] = [];
         const availableWarehouseStock = depoStokData;
 
-        for (const orderItem of (orderData.items || [])) {
+        const requestedByProduct = aggregateOrderItemsByProduct(orderData.items || []);
+
+        for (const orderItem of requestedByProduct) {
           const productInfo = productsData.find(p => p.stokKodu === orderItem.stokKodu);
-          let neededForThisOrderItem = orderItem.adet ?? 0;
           const availableItemsForProduct = availableWarehouseStock
             .filter(ds => ds.stokKodu === orderItem.stokKodu)
             .sort((a,b) => {
@@ -287,44 +300,22 @@ export default function ToplamaPage() {
                   return compareAsc(parseDate(a.miad as string, 'dd.MM.yyyy', new Date()), parseDate(b.miad as string, 'dd.MM.yyyy', new Date()))
               } catch { return 0; }
             });
-          
-          if (availableItemsForProduct.length === 0) {
-            const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
-            pickingListItems.push({
-              id: generateId(), orderId: orderData.id, stokKodu: orderItem.stokKodu || '', stokAdi: orderItem.stokAdi || '', lotNumarasi: 'STOK YOK', miad: '-', rafAdresiOnerilen: '-', adetIstenen: orderItem.adet ?? 0, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
-            } as any);
-            continue;
-          }
-          
-          const stockGroups = availableItemsForProduct.reduce((acc, item) => {
-            const key = `${item.lotNumarasi || ''}-${item.miad || ''}`;
-            if (!acc[key]) acc[key] = [];
-            acc[key].push(item);
-            return acc;
-          }, {} as Record<string, DepoStokItem[]>);
+          const suggestedStock = availableItemsForProduct[0];
+          const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
 
-          const sortedGroupKeys = Object.keys(stockGroups).sort((a, b) => {
-            const miadA = a.split('-')[1];
-            const miadB = b.split('-')[1];
-            try {
-              return compareAsc(parseDate(miadA, 'dd.MM.yyyy', new Date()), parseDate(miadB, 'dd.MM.yyyy', new Date()));
-            } catch { return 0; }
-          });
-            
-          for (const groupKey of sortedGroupKeys) {
-            if ((neededForThisOrderItem ?? 0) <= 0) break;
-            const itemsInGroup = stockGroups[groupKey];
-            const itemsToTakeCount = Math.min(neededForThisOrderItem ?? 0, itemsInGroup.length);
-
-            if (itemsToTakeCount > 0) {
-              const firstItem = itemsInGroup[0];
-              const dgMatch = deviceGroupsData.find(dg => dg.name === productInfo?.cihazGrubu);
-              pickingListItems.push({
-                id: generateId(), orderId: orderData.id, stokKodu: firstItem.stokKodu || '', stokAdi: productInfo?.stokAdi || firstItem.stokAdi || '', lotNumarasi: firstItem.lotNumarasi || '', miad: (firstItem.miad as string) || '', rafAdresiOnerilen: firstItem.rafAdresi || '', adetIstenen: itemsToTakeCount, toplananSeriNumaralari: [], cihazGrubu: productInfo?.cihazGrubu || 'Diğer', cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
-              } as any);
-              neededForThisOrderItem = (neededForThisOrderItem ?? 0) - itemsToTakeCount;
-            }
-          }
+          pickingListItems.push({
+            id: generateId(),
+            orderId: orderData.id,
+            stokKodu: orderItem.stokKodu || '',
+            stokAdi: productInfo?.stokAdi || orderItem.stokAdi || suggestedStock?.stokAdi || '',
+            lotNumarasi: suggestedStock ? (suggestedStock.lotNumarasi || '') : 'STOK YOK',
+            miad: (suggestedStock?.miad as string) || '-',
+            rafAdresiOnerilen: suggestedStock?.rafAdresi || '-',
+            adetIstenen: orderItem.adet ?? 0,
+            toplananSeriNumaralari: [],
+            cihazGrubu: productInfo?.cihazGrubu || 'Diğer',
+            cihazGrubuImageUrl: (dgMatch as any)?.imageUrl,
+          } as any);
         }
         
         // Get target hospital for custom sorting
@@ -408,6 +399,10 @@ export default function ToplamaPage() {
               const pickItem = pickingList.find(it => it.stokKodu === stockItem.stokKodu);
               if (!pickItem) {
                    pushScanEvent(false, `${stockItem.stokAdi || code} – listede değil`);
+                   return;
+              }
+              if (Object.values(scannedSerials).flat().includes(code)) {
+                   pushScanEvent(false, `Seri ${code} – zaten okutulmuş`);
                    return;
               }
               siparisToplamaLogger.info('Ham barkod seri eşleşmesi ile ürün okutuldu', {
@@ -499,26 +494,43 @@ export default function ToplamaPage() {
             return;
           }
 
-          const groupToIncrement = pickingList.find(pl =>
-              pl.stokKodu === stokKodu &&
-              currentScannedForProduct.filter(s => s.startsWith(`${pl.lotNumarasi}-`)).length < (pl.adetIstenen ?? 0)
+          const availableStockForProduct = depoStok
+            .filter(item =>
+              item.stokKodu === stokKodu &&
+              item.depotId === order?.depotId &&
+              !item.isShipped &&
+              (!lotNumarasi || item.lotNumarasi === lotNumarasi)
+            )
+            .sort((a, b) => {
+              try {
+                return compareAsc(parseDate(a.miad as string, 'dd.MM.yyyy', new Date()), parseDate(b.miad as string, 'dd.MM.yyyy', new Date()));
+              } catch { return 0; }
+            });
+          const stockToPick = findAvailableStockForQuantityScan(
+            availableStockForProduct,
+            currentScannedForProduct,
+            lotNumarasi,
           );
 
-          if (!groupToIncrement) {
-              pushScanEvent(false, `${product.stokAdi} – uygun toplama grubu yok`);
+          if (!stockToPick) {
+              pushScanEvent(false, lotNumarasi
+                ? `${product.stokAdi} – ${lotNumarasi} lotunda yeterli stok yok`
+                : `${product.stokAdi} – depoda yeterli stok yok`);
               return;
           }
 
-          const scannedCount = currentScannedForProduct.filter(s => s.startsWith(`${groupToIncrement.lotNumarasi}-`)).length;
+          const actualLot = stockToPick.lotNumarasi || '';
+          const scannedCountForLot = currentScannedForProduct.filter(identifier => decodeLotPickingIdentifier(identifier) === actualLot).length;
           siparisToplamaLogger.info('Lot/adet takipli ürün okutuldu', {
             orderId: order?.id,
             stokKodu,
             stokAdi: product.stokAdi,
-            lotNumarasi: groupToIncrement.lotNumarasi,
-            okutulanAdet: scannedCount + 1,
+            lotNumarasi: actualLot,
+            suggestedLot: pickItemForProduct.lotNumarasi,
+            okutulanAdet: scannedCountForLot + 1,
             trackingMode: mode,
           });
-          addScannedSerial(stokKodu, `${groupToIncrement.lotNumarasi}-${scannedCount + 1}`);
+          addScannedSerial(stokKodu, encodeLotPickingIdentifier(actualLot, scannedCountForLot + 1));
       }
     } finally {
       scanLockRef.current = false;
@@ -530,14 +542,14 @@ export default function ToplamaPage() {
     onScan: ({raw}) => handleScan(raw)
   });
 
-  const deletePickingItem = (itemStokKodu: string, itemLot: string) => {
-    setPickingList(prev => prev.filter(item => !(item.stokKodu === itemStokKodu && item.lotNumarasi === itemLot)));
+  const deletePickingItem = (itemStokKodu: string) => {
+    setPickingList(prev => prev.filter(item => item.stokKodu !== itemStokKodu));
     setScannedSerials(prev => {
         const newScanned = { ...prev };
         delete newScanned[itemStokKodu];
         return newScanned;
     });
-    toast({ title: 'Ürün Kaldırıldı', description: `${itemStokKodu} (${itemLot}) toplama listesinden çıkarıldı.` });
+    toast({ title: 'Ürün Kaldırıldı', description: `${itemStokKodu} toplama listesinden çıkarıldı.` });
   };
 
   const commitTransfer = async () => {
@@ -581,9 +593,21 @@ export default function ToplamaPage() {
       // Create transfer record (like direkt-transfer-panel)
       const transferRef = doc(collection(db, 'transfers'));
 
-      const itemsToShip: DepoStokItem[] = [];
+      const itemsToShipByStockId = new Map<string, DepoStokItem & { transferAdet: number }>();
       const createdConsumptionDocIds: string[] = [];
-      const usedStockIds = new Set<string>();
+      const allocatedQuantitiesByStockId = new Map<string, number>();
+      const getAllocatedQuantity = (stockId?: string) => stockId ? (allocatedQuantitiesByStockId.get(stockId) || 0) : 0;
+      const getRemainingQuantity = (item: DepoStokItem) => getStockItemQuantity(item) - getAllocatedQuantity(item.id);
+      const addTransferAllocation = (item: DepoStokItem, qty: number) => {
+        if (!item.id || qty <= 0) return;
+        const existing = itemsToShipByStockId.get(item.id);
+        if (existing) {
+          existing.transferAdet += qty;
+        } else {
+          itemsToShipByStockId.set(item.id, { ...item, transferAdet: qty });
+        }
+        allocatedQuantitiesByStockId.set(item.id, getAllocatedQuantity(item.id) + qty);
+      };
       const scannedMatrix = Object.entries(scannedSerials);
 
       siparisToplamaLogger.info('Transfer hazırlığı başlatıldı', {
@@ -607,26 +631,24 @@ export default function ToplamaPage() {
               item.stokKodu === stokKodu &&
               item.depotId === order.depotId &&
               !item.isShipped &&
-              !usedStockIds.has(item.id)
+              getRemainingQuantity(item) > 0
             );
           } else if (trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') {
-            const lastDashIdx = serialOrIdentifier.lastIndexOf('-');
-            const lot = lastDashIdx > 0 ? serialOrIdentifier.substring(0, lastDashIdx) : serialOrIdentifier;
+            const lot = decodeLotPickingIdentifier(serialOrIdentifier);
             stockItem = depoStok.find(item =>
               item.lotNumarasi === lot &&
               item.stokKodu === stokKodu &&
               item.depotId === order.depotId &&
               !item.isShipped &&
-              !usedStockIds.has(item.id)
+              getRemainingQuantity(item) > 0
             );
           } else {
-            const lastDashIdx = serialOrIdentifier.lastIndexOf('-');
-            const lotFromScan = lastDashIdx > 0 ? serialOrIdentifier.substring(0, lastDashIdx) : null;
+            const lotFromScan = decodeLotPickingIdentifier(serialOrIdentifier);
             stockItem = depoStok.find(item =>
               item.stokKodu === stokKodu &&
               item.depotId === order.depotId &&
               !item.isShipped &&
-              !usedStockIds.has(item.id) &&
+              getRemainingQuantity(item) > 0 &&
               (!!lotFromScan ? item.lotNumarasi === lotFromScan : true)
             );
             if (!stockItem) {
@@ -634,14 +656,13 @@ export default function ToplamaPage() {
                 item.stokKodu === stokKodu &&
                 item.depotId === order.depotId &&
                 !item.isShipped &&
-                !usedStockIds.has(item.id)
+                getRemainingQuantity(item) > 0
               );
             }
           }
 
           if (stockItem) {
-            usedStockIds.add(stockItem.id);
-            itemsToShip.push(stockItem);
+            addTransferAllocation(stockItem, 1);
             siparisToplamaLogger.info('Okutulan ürün transfer adayına eşlendi', {
               orderId: order.id,
               stokKodu,
@@ -662,6 +683,8 @@ export default function ToplamaPage() {
         }
       }
 
+      const itemsToShip = Array.from(itemsToShipByStockId.values());
+
       if (itemsToShip.length === 0) {
         toast({ title: 'Hata', description: 'Transfer edilecek geçerli stok kalemi bulunamadı.', variant: 'destructive' });
         setIsProcessing(false);
@@ -673,8 +696,10 @@ export default function ToplamaPage() {
 
       itemsToShip.filter(item => item.stokKodu).forEach(item => {
           const key = item.stokKodu!;
-          shippedQuantities[key] = (shippedQuantities[key] || 0) + 1;
+          shippedQuantities[key] = (shippedQuantities[key] || 0) + item.transferAdet;
       });
+
+      const totalShippedAdet = Object.values(shippedQuantities).reduce((sum, qty) => sum + qty, 0);
 
       Object.keys(shippedQuantities).forEach(stokKodu => {
           const productInfo = itemsToShip.find(i => i.stokKodu === stokKodu);
@@ -705,7 +730,7 @@ export default function ToplamaPage() {
       batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
 
       // Create transfers record (like direkt-transfer-panel for consistency)
-      batch.set(transferRef, {
+      batch.set(transferRef, withCompanyScope({
         id: transferRef.id,
         timestamp: serverTimestamp(),
         sourceDepotId: order.depotId,
@@ -714,16 +739,27 @@ export default function ToplamaPage() {
         targetHospitalId: effectiveLabId,
         mode: 'order_picking',
         orderId: order.id,
-        itemCount: itemsToShip.length,
+        itemCount: totalShippedAdet,
         createdByUid: currentUser.uid ?? '',
         createdByName: currentUserProfile.name ?? currentUser?.email ?? '',
-      });
+      }, currentCompanyId));
 
-      // Update depoStok items: mark as shipped with full metadata (like direkt-transfer-panel)
+      // Update depoStok items: full documents are marked shipped; partial lot/qty picks
+      // decrement the source document and create a shipped target document for the picked quantity.
       itemsToShip.filter(item => item.id).forEach(item => {
+          const transferQty = item.transferAdet;
+          const originalQty = getStockItemQuantity(item);
+          const isPartial = transferQty < originalQty;
           const stokRef = doc(db, 'depoStok', item.id!);
+          const targetRef = isPartial ? doc(collection(db, 'depoStok')) : stokRef;
+          const targetDocId = targetRef.id;
+
           if (trackingDisabled && effectiveLabId) {
-            batch.delete(stokRef);
+            if (isPartial) {
+              batch.update(stokRef, { adet: originalQty - transferQty });
+            } else {
+              batch.delete(stokRef);
+            }
             const consumptionRef = doc(collection(db, 'tuketimKayitlari'));
             const consumptionRecord: Omit<ConsumptionRecord, 'id'> & {
               transferId: string;
@@ -731,11 +767,12 @@ export default function ToplamaPage() {
               sourceDepotId?: string;
               sourceDepotName?: string;
               stockDocId?: string;
+              adet?: number;
             } = {
               stokKodu: item.stokKodu,
               stokAdi: item.stokAdi,
               lotNumarasi: item.lotNumarasi || '',
-              miad: item.miad || '',
+              miad: String(item.miad || ''),
               seriNumarasi: item.seriNumarasi || '',
               laboratoryId: effectiveLabId,
               laboratoryName: targetName,
@@ -748,9 +785,26 @@ export default function ToplamaPage() {
               sourceDepotId: order.depotId,
               sourceDepotName: depotName,
               stockDocId: item.id,
+              adet: transferQty,
             };
             batch.set(consumptionRef, consumptionRecord);
             createdConsumptionDocIds.push(consumptionRef.id);
+          } else if (isPartial) {
+            batch.update(stokRef, { adet: originalQty - transferQty });
+            const targetData = {
+              ...item,
+              id: targetDocId,
+              adet: transferQty,
+              isShipped: true,
+              hedefKurum: targetName,
+              hedefKurumId: effectiveLabId,
+              sevkTarihi: serverTimestamp(),
+              transferId: transferRef.id,
+              sourceDepotId: order.depotId,
+              sourceDepotName: depotName,
+            };
+            delete (targetData as any).transferAdet;
+            batch.set(targetRef, targetData);
           } else {
             batch.update(stokRef, {
                 isShipped: true,
@@ -779,19 +833,21 @@ export default function ToplamaPage() {
                 stokAdi: item.stokAdi,
                 lotNumarasi: item.lotNumarasi,
                 miad: item.miad,
+                adet: transferQty,
               },
               timestamp: Timestamp.now(),
             });
           }
 
           // Create transfer item record
-          const itemRef = doc(db, 'transfers', transferRef.id, 'items', item.id!);
+          const itemRef = doc(db, 'transfers', transferRef.id, 'items', targetDocId);
           batch.set(itemRef, {
             stokKodu: item.stokKodu,
             stokAdi: item.stokAdi,
             lotNumarasi: item.lotNumarasi || '',
             miad: item.miad || '',
             seriNumarasi: item.seriNumarasi || '',
+            adet: transferQty,
           });
       });
 
@@ -819,21 +875,26 @@ export default function ToplamaPage() {
       });
 
       if (remainingItems.length === 0 && order.id) {
-          batch.update(doc(db, 'orders', order.id), {
-              status: 'completed',
+          // Tamamlanan sipariş canlı `orders`'ta bırakılmaz; aynı batch içinde
+          // `ordersArchive`'a taşınır (kopyala + sil). `orders` yalnızca aktif
+          // siparişleri tutar, süresiz büyümez.
+          archiveCompletedOrderInBatch(batch, order.id, order as unknown as Record<string, unknown>, {
               transferredAt: serverTimestamp(),
               transferredById: currentUser?.uid,
-              transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı'
+              transferredBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı',
+              completedAt: serverTimestamp(),
           });
       } else if (order.id) {
+          // Partial transfer: mark as 'kismi' so the Kısmi Tamamlanan tab picks it up
           batch.update(doc(db, 'orders', order.id), {
               items: remainingItems,
-              status: 'toplaniyor'
+              status: 'kismi',
+              partialTransferAt: serverTimestamp(),
           });
       }
 
       await batch.commit();
-      itemsShippedCount = itemsToShip.length;
+      itemsShippedCount = totalShippedAdet;
 
       // ── 2-Step Verification ──
       // Step 1: Verify source depot stock was properly deducted (isShipped = true)
@@ -855,29 +916,37 @@ export default function ToplamaPage() {
           verificationErrors.push(`Kapsam dışı stok kaydı: ${item.stokKodu} (${item.seriNumarasi || item.lotNumarasi || item.id})`);
           return;
         }
-        if (!verifyData.isShipped) {
-          verificationErrors.push(`Kaynak depodan düşülmedi: ${item.stokAdi} (${item.seriNumarasi || item.lotNumarasi || ''})`);
-        }
-        if (verifyData.hedefKurumId !== effectiveLabId) {
-          verificationErrors.push(`Hedef kurum eşleşmedi: ${item.stokAdi} - beklenen: ${effectiveLabId}, bulunan: ${verifyData.hedefKurumId}`);
+        const originalQty = getStockItemQuantity(item);
+        const transferQty = item.transferAdet;
+        const isPartial = transferQty < originalQty;
+        if (isPartial) {
+          const expectedRemainingQty = originalQty - transferQty;
+          const actualRemainingQty = getStockItemQuantity(verifyData as any);
+          if (actualRemainingQty !== expectedRemainingQty || verifyData.isShipped) {
+            verificationErrors.push(`Kaynak depoda kalan adet uyuşmadı: ${item.stokAdi} - beklenen: ${expectedRemainingQty}, bulunan: ${actualRemainingQty}`);
+          }
+        } else {
+          if (!verifyData.isShipped) {
+            verificationErrors.push(`Kaynak depodan düşülmedi: ${item.stokAdi} (${item.seriNumarasi || item.lotNumarasi || ''})`);
+          }
+          if (verifyData.hedefKurumId !== effectiveLabId) {
+            verificationErrors.push(`Hedef kurum eşleşmedi: ${item.stokAdi} - beklenen: ${effectiveLabId}, bulunan: ${verifyData.hedefKurumId}`);
+          }
         }
       });
       await Promise.all(verifySourcePromises);
 
       // Step 1b: Verify target stock/consumption reflection
-      const transferDocItemsSnap = await getDocs(query(collection(db, 'depoStok'), where('transferId', '==', transferRef.id)));
+      const transferDocItemsSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('transferId', '==', transferRef.id)));
       if (!trackingDisabled) {
-        const matchedTargetStockCount = transferDocItemsSnap.docs
+        const matchedTargetStockCount = sumStockItemQuantities(transferDocItemsSnap.docs
           .filter(d => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin))
-          .filter(d => (d.data().hedefKurumId || null) === effectiveLabId).length;
-        if (matchedTargetStockCount !== itemsToShip.length) {
-          verificationErrors.push(`Hedef laboratuvar stoğuna yansıyan ürün sayısı uyuşmuyor: beklenen ${itemsToShip.length}, bulunan ${matchedTargetStockCount}`);
+          .filter(d => (d.data().hedefKurumId || null) === effectiveLabId)
+          .map(d => d.data() as any));
+        if (matchedTargetStockCount !== totalShippedAdet) {
+          verificationErrors.push(`Hedef laboratuvar stoğuna yansıyan ürün adedi uyuşmuyor: beklenen ${totalShippedAdet}, bulunan ${matchedTargetStockCount}`);
         }
       } else {
-        if (createdConsumptionDocIds.length !== itemsToShip.length) {
-          verificationErrors.push(`Tüketim kaydı oluşturma sayısı uyuşmuyor: beklenen ${itemsToShip.length}, oluşturulan ${createdConsumptionDocIds.length}`);
-        }
-
         const consumptionDocs = await Promise.all(
           createdConsumptionDocIds.map(async (id) => {
             const snap = await getDoc(doc(db, 'tuketimKayitlari', id));
@@ -891,7 +960,7 @@ export default function ToplamaPage() {
 
         const expectedConsumptionKeyCounts = itemsToShip.reduce<Record<string, number>>((acc, item) => {
           const key = `${item.stokKodu}|${item.seriNumarasi || ''}|${item.lotNumarasi || ''}`;
-          acc[key] = (acc[key] || 0) + 1;
+          acc[key] = (acc[key] || 0) + item.transferAdet;
           return acc;
         }, {});
 
@@ -910,7 +979,7 @@ export default function ToplamaPage() {
 
           const key = `${data.stokKodu || ''}|${data.seriNumarasi || ''}|${data.lotNumarasi || ''}`;
           if (expectedConsumptionKeyCounts[key]) {
-            acc[key] = (acc[key] || 0) + 1;
+            acc[key] = (acc[key] || 0) + getStockItemQuantity(data as any);
           }
           return acc;
         }, {});
@@ -927,9 +996,10 @@ export default function ToplamaPage() {
         }
       }
 
-      // Step 2: Verify order was properly updated
+      // Step 2: Verify order was properly updated. Tamamlanmışsa sipariş artık
+      // `ordersArchive`'tadır; fallback okuyucu canlı→arşiv sırasıyla bulur.
       if (order.id) {
-        const orderVerifySnap = await getDoc(doc(db, 'orders', order.id));
+        const orderVerifySnap = await getOrderDocWithArchiveFallback(order.id);
         if (orderVerifySnap.exists()) {
           const orderVerifyData = orderVerifySnap.data();
           if (remainingItems.length === 0 && orderVerifyData.status !== 'completed') {
@@ -1042,19 +1112,29 @@ export default function ToplamaPage() {
   const totalScanned = useMemo(() => Object.values(scannedSerials).flat().length, [scannedSerials]);
   const overallPct = totalNeeded > 0 ? Math.round((totalScanned / totalNeeded) * 100) : 0;
 
+  // Stok yeterliliği lot önerisinden bağımsız olarak ürünün depodaki toplam miktarıdır.
+  const depotStockQtyByProduct = useMemo(() => {
+    const byStok = new Map<string, number>();
+    const depotId = order?.depotId;
+    for (const stockItem of depoStok) {
+      if (stockItem.isShipped || !stockItem.stokKodu || stockItem.depotId !== depotId) continue;
+      byStok.set(stockItem.stokKodu, (byStok.get(stockItem.stokKodu) ?? 0) + getStockItemQuantity(stockItem));
+    }
+    return byStok;
+  }, [depoStok, order?.depotId]);
+
   const enrichedList = useMemo(() => pickingList.map(item => {
     const scannedForProduct = scannedSerials[item.stokKodu] || [];
     const scannedCount = scannedForProduct.length;
     const needed = item.adetIstenen ?? 0;
     const isComplete = scannedCount >= needed;
     const isOutOfStock = item.lotNumarasi === 'STOK YOK';
-    const availableInLot = depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu && s.lotNumarasi === item.lotNumarasi).length;
-    const totalInDepot = depoStok.filter(s => s.depotId === order?.depotId && !s.isShipped && s.stokKodu === item.stokKodu).length;
-    const isInsufficient = !isOutOfStock && availableInLot < needed;
+    const totalInDepot = depotStockQtyByProduct.get(item.stokKodu) ?? 0;
+    const isInsufficient = !isOutOfStock && totalInDepot < needed;
     const status: 'done' | 'blocked' | 'active' | 'idle' = isComplete ? 'done' : isOutOfStock ? 'blocked' : scannedCount > 0 ? 'active' : 'idle';
     const pct = needed > 0 ? Math.round((scannedCount / needed) * 100) : 0;
-    return { ...item, scannedCount, needed, isComplete, isOutOfStock, availableInLot, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
-  }), [pickingList, scannedSerials, depoStok, order?.depotId]);
+    return { ...item, scannedCount, needed, isComplete, isOutOfStock, totalInDepot, isInsufficient, status, pct, cihazGrubu: (item as any).cihazGrubu, cihazGrubuImageUrl: (item as any).cihazGrubuImageUrl };
+  }), [pickingList, scannedSerials, depotStockQtyByProduct]);
 
   const filteredList = useMemo(() => {
     if (groupFilter === 'remaining') return enrichedList.filter(i => !i.isComplete);
@@ -1100,74 +1180,162 @@ export default function ToplamaPage() {
     );
   };
 
-  return (
-    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6" style={{ minHeight: '100dvh' }}>
+  // ── Design tokens for visual refresh ──
+  const T = {
+    surface: '#FCFAF5',
+    surface2: '#F5F1E8',
+    ink1: '#3D382F',
+    ink2: '#908872',
+    ink3: '#BBB2A0',
+    accent: '#C98A57',
+    accentLight: '#E0B776',
+    accentGlow: 'rgba(201,138,87,0.24)',
+    water: 'rgba(124,191,140,0.22)',
+    waterSolid: '#6FB585',
+    clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
+    clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
+    clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+    ease: 'cubic-bezier(.22, 1, .36, 1)',
+    r: '24px',
+    rsm: '16px',
+    rpill: '999px',
+  };
 
-      {/* ── Back + Header ── */}
+  return (
+    <>
+    <style>{`
+      @keyframes tplWaterRise { from { opacity: 0; } to { opacity: 1; } }
+      @keyframes tplScanPop { 0% { opacity:0; transform:translateY(-6px) scale(0.96); } 100% { opacity:1; transform:none; } }
+    `}</style>
+    {/* Full-bleed cream backdrop — PageShell kenar boşluklarındaki gri zeminin
+        görünmesini engeller, ekranı tek renk krem sarar. */}
+    <div aria-hidden style={{ position: 'fixed', inset: 0, background: T.surface2, zIndex: 0 }} />
+    <div style={{ position: 'relative', zIndex: 1, minHeight: '100dvh', background: T.surface2 }} className="px-3 py-4 sm:px-5 sm:py-6 pb-28 sm:pb-6">
+
+      {/* ── Back ── */}
       <button
         onClick={() => router.push('/siparisler')}
-        className="cihaz-tool-item inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium mb-4"
-        style={{ color: 'var(--dashboard-muted)' }}
+        style={{
+          all: 'unset', cursor: 'pointer',
+          display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '7px 14px', marginBottom: 16, borderRadius: T.rpill,
+          background: `linear-gradient(180deg, #fff, ${T.surface2})`,
+          boxShadow: T.clayFlat,
+          color: T.ink2, fontSize: 12.5, fontWeight: 700,
+        }}
       >
         <ChevronLeft className="w-3.5 h-3.5" /> Siparişler
       </button>
 
-      <header className="cihaz-card-strong p-4 sm:p-5 mb-4 sm:mb-5">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-lg sm:text-xl font-bold truncate" style={{ color: 'var(--dashboard-text)' }}>
-              Toplama: {order.kurumAdi}
-            </h1>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-              {order.depotName && (
-                <span className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
-                  Depo: {order.depotName}
-                </span>
-              )}
-              {order.createdBy && (
-                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  Açan: {order.createdBy}
-                </span>
-              )}
-              {orderDate && (
-                <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                  {orderDate}
-                </span>
-              )}
-              <span className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-                {pickingList.length} grup · {totalNeeded} adet
+      {/* ── Sticky header ── */}
+      <header style={{
+        borderRadius: T.r, marginBottom: 18,
+        background: `linear-gradient(180deg, ${T.surface} 0%, ${T.surface2} 100%)`,
+        boxShadow: T.clay, overflow: 'hidden',
+      }}>
+        {/* Top bar: title + last scan + CTA */}
+        <div style={{ padding: '18px 22px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800, letterSpacing: '-0.01em', color: T.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {order.kurumAdi}
+              </h1>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', marginTop: 4 }}>
+                {order.depotName && (
+                  <span style={{ fontSize: 11.5, color: T.ink2, fontWeight: 600 }}>Depo: {order.depotName}</span>
+                )}
+                {order.createdBy && (
+                  <span style={{ fontSize: 11.5, color: T.ink2 }}>Açan: {order.createdBy}</span>
+                )}
+                {orderDate && (
+                  <span style={{ fontSize: 11.5, color: T.ink3 }}>{orderDate}</span>
+                )}
+                <span style={{ fontSize: 11.5, color: T.ink3 }}>{pickingList.length} grup · {totalNeeded} adet</span>
+              </div>
+            </div>
+
+            {/* Desktop CTA */}
+            <button
+              onClick={commitTransfer}
+              disabled={!isTransferReady}
+              className="hidden sm:flex"
+              style={{
+                all: 'unset', cursor: isTransferReady ? 'pointer' : 'not-allowed',
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '10px 20px', borderRadius: T.rsm, flexShrink: 0,
+                background: isTransferReady
+                  ? 'linear-gradient(180deg, #8FD3A6 0%, #6FB585 100%)'
+                  : T.surface2,
+                boxShadow: isTransferReady
+                  ? 'inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px -8px rgba(111,181,133,0.5)'
+                  : T.clayInset,
+                color: isTransferReady ? '#fff' : T.ink3,
+                fontSize: 13.5, fontWeight: 800,
+                transition: `all 300ms ${T.ease}`,
+                opacity: isTransferReady ? 1 : 0.7,
+              }}
+            >
+              {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck style={{ width: 15, height: 15 }} />}
+              Transfer Et & Kapat
+            </button>
+          </div>
+
+          {/* Son Okutulan card (shown when scan feed has items) */}
+          {scanFeed.length > 0 && (
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '10px 14px', borderRadius: T.rsm,
+              background: scanFeed[0].ok ? 'rgba(111,181,133,0.12)' : 'rgba(192,121,106,0.10)',
+              border: `1px solid ${scanFeed[0].ok ? 'rgba(111,181,133,0.28)' : 'rgba(192,121,106,0.22)'}`,
+              animation: `tplScanPop 300ms ${T.ease}`,
+            }}>
+              {scanFeed[0].ok
+                ? <CheckCircle2 style={{ width: 15, height: 15, flexShrink: 0, color: '#4E9E6B' }} />
+                : <XCircle style={{ width: 15, height: 15, flexShrink: 0, color: '#B91C1C' }} />
+              }
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 12.5, fontWeight: 700, color: scanFeed[0].ok ? '#4E9E6B' : '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {scanFeed[0].message}
+                </p>
+                <p style={{ margin: 0, fontSize: 10.5, color: T.ink3 }}>
+                  Son okutma · {new Date(scanFeed[0].ts).toLocaleTimeString('tr-TR')}
+                </p>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 800, color: T.ink2, flexShrink: 0 }}>
+                {totalScanned}/{totalNeeded}
               </span>
             </div>
-          </div>
-
-          {/* Desktop CTA (hidden on mobile — sticky bar handles it) */}
-          <button
-            onClick={commitTransfer}
-            disabled={!isTransferReady}
-            className="hidden sm:inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF', boxShadow: isTransferReady ? 'var(--dashboard-raised-soft)' : 'none' }}
-          >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
-            Transfer Et & Kapat
-          </button>
+          )}
         </div>
 
-        {/* Overall progress */}
-        <div className="mt-3">
-          <div className="flex items-center justify-between text-xs font-medium mb-1">
-            <span style={{ color: 'var(--dashboard-muted)' }}>Genel İlerleme</span>
-            <span style={{ color: overallPct === 100 ? '#16A34A' : 'var(--dashboard-text)' }}>
-              {totalScanned}/{totalNeeded} ({overallPct}%)
+        {/* Progress bar */}
+        <div style={{ padding: '14px 22px 18px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Genel İlerleme
+            </span>
+            <span style={{
+              fontSize: 13, fontWeight: 800,
+              color: overallPct === 100 ? '#4E9E6B' : T.ink1,
+              transition: `color 400ms ${T.ease}`,
+            }}>
+              {totalScanned}/{totalNeeded} <span style={{ fontWeight: 600, fontSize: 12, color: T.ink2 }}>({overallPct}%)</span>
             </span>
           </div>
-          <div className="cihaz-pressed h-2.5 overflow-hidden" style={{ borderRadius: 8 }}>
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{
-                width: `${overallPct}%`,
-                background: overallPct === 100 ? '#16A34A' : 'var(--dashboard-accent)',
-              }}
-            />
+          <div style={{
+            height: 10, borderRadius: T.rpill,
+            background: T.surface2, boxShadow: T.clayInset,
+            overflow: 'hidden',
+          }}>
+            <div style={{
+              height: '100%', borderRadius: T.rpill,
+              width: `${overallPct}%`,
+              background: overallPct === 100
+                ? 'linear-gradient(90deg, #8FD3A6, #4E9E6B)'
+                : `linear-gradient(90deg, ${T.accentLight}, ${T.accent})`,
+              transition: `width 600ms ${T.ease}`,
+              boxShadow: overallPct > 0 ? `0 0 10px -3px ${overallPct === 100 ? 'rgba(78,158,107,0.5)' : T.accentGlow}` : 'none',
+            }} />
           </div>
         </div>
       </header>
@@ -1179,13 +1347,22 @@ export default function ToplamaPage() {
         <div className="flex-1 min-w-0 space-y-3">
 
           {/* Scanner status + filter chips */}
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-            <div className="cihaz-pressed inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium" style={{ borderRadius: 12, color: '#16A34A' }}>
-              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '7px 14px', borderRadius: T.rpill,
+              background: `linear-gradient(180deg, #fff, ${T.surface2})`,
+              boxShadow: T.clayFlat,
+              fontSize: 12, fontWeight: 700, color: '#4E9E6B',
+            }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#6FB585', display: 'inline-block', animation: 'pulse 2s infinite' }} />
               Barkod okuyucu aktif
             </div>
 
-            <div className="flex gap-1.5">
+            <div style={{
+              display: 'inline-flex', padding: 3, borderRadius: T.rpill,
+              background: T.surface2, boxShadow: T.clayInset, gap: 2,
+            }}>
               {(['all', 'remaining', 'done'] as const).map(f => {
                 const labels = { all: 'Tümü', remaining: 'Eksik', done: 'Tamamlanan' };
                 const counts = { all: enrichedList.length, remaining: remainingCount, done: doneCount };
@@ -1194,14 +1371,26 @@ export default function ToplamaPage() {
                   <button
                     key={f}
                     onClick={() => setGroupFilter(f)}
-                    className="px-3 py-1 rounded-full text-xs font-medium transition-all"
                     style={{
-                      background: isActive ? 'var(--dashboard-surface)' : 'transparent',
-                      color: isActive ? 'var(--dashboard-text)' : 'var(--dashboard-muted)',
-                      boxShadow: isActive ? 'var(--dashboard-raised-soft)' : 'none',
+                      all: 'unset', cursor: 'pointer',
+                      display: 'inline-flex', alignItems: 'center', gap: 5,
+                      height: 34, padding: '0 14px', borderRadius: T.rpill,
+                      background: isActive ? `linear-gradient(180deg, #fff, ${T.surface2})` : 'transparent',
+                      boxShadow: isActive ? T.clay : 'none',
+                      color: isActive ? T.ink1 : T.ink3,
+                      fontSize: 12.5, fontWeight: 700,
+                      transition: `color 200ms ${T.ease}`,
                     }}
                   >
-                    {labels[f]} ({counts[f]})
+                    {labels[f]}
+                    <span style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      minWidth: 18, height: 18, padding: '0 5px', borderRadius: 999,
+                      background: isActive ? T.accent : 'rgba(150,128,96,0.16)',
+                      color: isActive ? '#fff' : T.ink3, fontSize: 10, fontWeight: 800,
+                    }}>
+                      {counts[f]}
+                    </span>
                   </button>
                 );
               })}
@@ -1209,50 +1398,76 @@ export default function ToplamaPage() {
           </div>
 
           {/* Group section label */}
-          <p className="cihaz-section-label">Toplanacak Gruplar</p>
+          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Toplanacak Gruplar</p>
 
           {/* Group cards */}
           {filteredList.length === 0 ? (
-            <div className="cihaz-card p-8 text-center" style={{ color: 'var(--dashboard-muted)' }}>
-              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-              <p className="text-sm font-medium">
+            <div style={{
+              padding: '40px 24px', textAlign: 'center', borderRadius: T.r,
+              background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+              boxShadow: T.clay, color: T.ink3,
+            }}>
+              <Package style={{ width: 40, height: 40, margin: '0 auto 10px', opacity: 0.35 }} />
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 700, color: T.ink2 }}>
                 {groupFilter === 'done' ? 'Henüz tamamlanan grup yok.' : groupFilter === 'remaining' ? 'Tüm gruplar tamamlandı!' : 'Toplanacak ürün bulunamadı.'}
               </p>
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {filteredList.map(item => {
                 const isCollapsed = item.isComplete && collapsedGroups.has(item.id);
                 const isLastScanned = scanFeed[0]?.stokKodu === item.stokKodu && Date.now() - (scanFeed[0]?.ts ?? 0) < 2000;
+                const borderColor = item.status === 'blocked' ? '#B91C1C' : item.status === 'active' ? T.accent : item.status === 'done' ? '#6FB585' : 'transparent';
 
                 return (
                   <article
                     key={item.id}
-                    className={cn(
-                      'cihaz-card p-3 sm:p-4 transition-all duration-300 relative overflow-hidden',
-                      isLastScanned && 'ring-2 ring-offset-1',
-                    )}
                     style={{
-                      borderLeft: item.status === 'blocked' ? '3px solid #B91C1C' : item.status === 'active' ? '3px solid var(--dashboard-accent)' : item.status === 'done' ? '3px solid #16A34A' : '3px solid transparent',
-                      opacity: item.isComplete ? 0.7 : 1,
-                      ...(isLastScanned ? { '--tw-ring-color': 'var(--dashboard-accent)' } as any : {}),
+                      position: 'relative', overflow: 'hidden',
+                      borderRadius: T.r, padding: '16px 18px',
+                      background: `linear-gradient(180deg, ${T.surface} 0%, ${T.surface2} 100%)`,
+                      boxShadow: isLastScanned
+                        ? `${T.clay}, 0 0 0 2px ${T.accent}`
+                        : T.clay,
+                      borderLeft: `3px solid ${borderColor}`,
+                      opacity: item.isComplete ? 0.82 : 1,
+                      transition: `opacity 400ms ${T.ease}, box-shadow 300ms ${T.ease}`,
                     }}
                   >
+                    {/* Water fill — rises from bottom as pct increases */}
+                    <div
+                      aria-hidden="true"
+                      style={{
+                        position: 'absolute', left: 0, right: 0, bottom: 0,
+                        height: `${item.pct}%`,
+                        background: item.isComplete
+                          ? 'rgba(111,181,133,0.18)'
+                          : item.isInsufficient
+                            ? 'rgba(217,119,6,0.10)'
+                            : 'rgba(124,191,140,0.16)',
+                        transition: `height 600ms ${T.ease}`,
+                        pointerEvents: 'none',
+                      }}
+                    />
+
                     {/* Top row: name + status badge + actions */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm sm:text-base font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <h3 style={{
+                            margin: 0, fontSize: 14.5, fontWeight: 700, color: T.ink1,
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          }}>
                             {item.stokAdi}
                           </h3>
                           {statusBadge(item.status)}
                         </div>
-                        <p className="text-[11px] font-mono mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+                        <p style={{ margin: '3px 0 0', fontSize: 11, fontFamily: 'monospace', color: T.ink3 }}>
                           {item.stokKodu}
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-1 flex-shrink-0">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
                         {item.isComplete && (
                           <button
                             onClick={() => setCollapsedGroups(prev => {
@@ -1260,34 +1475,47 @@ export default function ToplamaPage() {
                               next.has(item.id) ? next.delete(item.id) : next.add(item.id);
                               return next;
                             })}
-                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                            style={{ all: 'unset', cursor: 'pointer', padding: 4, borderRadius: 8, color: T.ink3 }}
                           >
-                            {isCollapsed ? <ChevronDown className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} /> : <ChevronUp className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />}
+                            {isCollapsed ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
                           </button>
                         )}
                         {/* More menu with delete confirm */}
-                        <div className="relative">
+                        <div style={{ position: 'relative' }}>
                           <button
                             onClick={() => setConfirmDeleteId(confirmDeleteId === item.id ? null : item.id)}
-                            className="p-1 rounded-lg hover:bg-black/5 transition"
+                            style={{ all: 'unset', cursor: 'pointer', padding: 4, borderRadius: 8, color: T.ink3 }}
                           >
-                            <MoreHorizontal className="w-4 h-4" style={{ color: 'var(--dashboard-muted)' }} />
+                            <MoreHorizontal className="w-4 h-4" />
                           </button>
                           {confirmDeleteId === item.id && (
-                            <div className="absolute right-0 top-8 z-20 cihaz-card-strong p-3 w-48 space-y-2" style={{ borderRadius: 14 }}>
-                              <p className="text-xs font-medium" style={{ color: 'var(--dashboard-text)' }}>Bu grubu kaldır?</p>
-                              <div className="flex gap-2">
+                            <div style={{
+                              position: 'absolute', right: 0, top: 32, zIndex: 20,
+                              borderRadius: 14, padding: 12, width: 180,
+                              background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+                              boxShadow: T.clay,
+                            }}>
+                              <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: T.ink1 }}>Bu grubu kaldır?</p>
+                              <div style={{ display: 'flex', gap: 8 }}>
                                 <button
-                                  onClick={() => { deletePickingItem(item.stokKodu, item.lotNumarasi); setConfirmDeleteId(null); }}
-                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-semibold text-white"
-                                  style={{ background: '#B91C1C' }}
+                                  onClick={() => { deletePickingItem(item.stokKodu); setConfirmDeleteId(null); }}
+                                  style={{
+                                    all: 'unset', cursor: 'pointer', flex: 1,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                                    padding: '7px 0', borderRadius: T.rsm, fontSize: 12, fontWeight: 700,
+                                    background: '#B91C1C', color: '#fff',
+                                  }}
                                 >
-                                  <Trash2 className="w-3 h-3 inline mr-1" /> Kaldır
+                                  <Trash2 className="w-3 h-3" /> Kaldır
                                 </button>
                                 <button
                                   onClick={() => setConfirmDeleteId(null)}
-                                  className="flex-1 px-2 py-1.5 rounded-xl text-xs font-medium cihaz-pressed"
-                                  style={{ color: 'var(--dashboard-muted)' }}
+                                  style={{
+                                    all: 'unset', cursor: 'pointer', flex: 1,
+                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                    padding: '7px 0', borderRadius: T.rsm, fontSize: 12, fontWeight: 600,
+                                    background: T.surface2, boxShadow: T.clayInset, color: T.ink2,
+                                  }}
                                 >
                                   İptal
                                 </button>
@@ -1300,41 +1528,23 @@ export default function ToplamaPage() {
 
                     {/* Collapsible content */}
                     {!isCollapsed && (
-                      <>
-                        {/* Progress bar */}
-                        <div className="mt-2.5">
-                          <div className="flex items-center justify-between text-[11px] font-medium mb-1">
-                            <span style={{ color: 'var(--dashboard-muted)' }}>Toplanan / Gerekli</span>
-                            <span style={{ color: item.isComplete ? '#16A34A' : 'var(--dashboard-text)' }}>
-                              {item.scannedCount} / {item.needed}
-                            </span>
-                          </div>
-                          <div className="cihaz-pressed h-1.5 overflow-hidden" style={{ borderRadius: 6 }}>
-                            <div
-                              className="h-full rounded-full transition-all duration-500"
-                              style={{
-                                width: `${item.pct}%`,
-                                background: item.isComplete ? '#16A34A' : item.isInsufficient ? '#D97706' : 'var(--dashboard-accent)',
-                              }}
-                            />
-                          </div>
-                        </div>
-
+                      <div style={{ position: 'relative' }}>
                         {/* Counters + image */}
-                        <div className="flex items-center gap-3 mt-2.5">
-                          <div className="flex gap-2 flex-1">
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Gerekli</p>
-                              <p className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>{item.needed}</p>
-                            </div>
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Toplanan</p>
-                              <p className="text-lg font-bold" style={{ color: item.scannedCount > 0 ? '#16A34A' : 'var(--dashboard-text)' }}>{item.scannedCount}</p>
-                            </div>
-                            <div className="cihaz-pressed px-3 py-1.5 text-center" style={{ borderRadius: 10, minWidth: 70 }}>
-                              <p className="text-[10px] font-medium" style={{ color: 'var(--dashboard-muted)' }}>Depoda</p>
-                              <p className="text-lg font-bold" style={{ color: item.totalInDepot === 0 ? '#B91C1C' : 'var(--dashboard-text)' }}>{item.totalInDepot}</p>
-                            </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 14 }}>
+                          <div style={{ display: 'flex', gap: 8, flex: 1 }}>
+                            {[
+                              { label: 'Gerekli', value: item.needed, color: T.ink1 },
+                              { label: 'Toplanan', value: item.scannedCount, color: item.scannedCount > 0 ? '#4E9E6B' : T.ink1 },
+                              { label: 'Depoda', value: item.totalInDepot, color: item.totalInDepot === 0 ? '#B91C1C' : T.ink1 },
+                            ].map(stat => (
+                              <div key={stat.label} style={{
+                                padding: '8px 12px', textAlign: 'center', borderRadius: 12,
+                                background: T.surface2, boxShadow: T.clayInset, minWidth: 64, flex: 1,
+                              }}>
+                                <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{stat.label}</p>
+                                <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: stat.color, lineHeight: 1.3 }}>{stat.value}</p>
+                              </div>
+                            ))}
                           </div>
                           {item.cihazGrubuImageUrl && (
                             <div className="flex-shrink-0 hidden sm:block">
@@ -1344,34 +1554,32 @@ export default function ToplamaPage() {
                         </div>
 
                         {/* Recommendation chips */}
-                        <div className="flex flex-wrap items-center gap-1.5 mt-2.5">
-                          {item.lotNumarasi && item.lotNumarasi !== 'STOK YOK' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>
-                              Lot: {item.lotNumarasi}
-                            </span>
-                          )}
-                          {item.miad && item.miad !== '-' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(37,99,235,.08)', color: '#2563EB' }}>
-                              Miad: {formatMiad(item.miad)}
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
+                          {item.lotNumarasi !== 'STOK YOK' && (item.lotNumarasi || (item.miad && item.miad !== '-')) && (
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 600, background: 'rgba(224,163,62,0.12)', color: '#B45309' }}>
+                              Öneri:
+                              {item.lotNumarasi && ` Lot ${item.lotNumarasi}`}
+                              {item.lotNumarasi && item.miad && item.miad !== '-' && ' • '}
+                              {item.miad && item.miad !== '-' && `Miad ${formatMiad(item.miad)}`}
                             </span>
                           )}
                           {item.rafAdresiOnerilen && item.rafAdresiOnerilen !== '-' && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-medium" style={{ background: 'rgba(107,114,128,.08)', color: '#6B7280' }}>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 600, background: 'rgba(144,136,114,0.10)', color: T.ink2 }}>
                               Raf: {item.rafAdresiOnerilen}
                             </span>
                           )}
                           {item.isInsufficient && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[11px] font-semibold" style={{ background: 'rgba(185,28,28,.10)', color: '#B91C1C' }}>
-                              <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.availableInLot}
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: T.rpill, fontSize: 11, fontWeight: 700, background: 'rgba(185,28,28,0.10)', color: '#B91C1C' }}>
+                              <AlertTriangle className="w-3 h-3" /> Yetersiz: {item.totalInDepot}
                             </span>
                           )}
                         </div>
 
                         {/* Last transfer meta */}
-                        <div className="mt-1.5">
+                        <div style={{ marginTop: 8 }}>
                           <LastTransferLine date={lastTransferDates[item.stokKodu]} className="!text-[11px]" />
                         </div>
-                      </>
+                      </div>
                     )}
                   </article>
                 );
@@ -1382,31 +1590,39 @@ export default function ToplamaPage() {
 
         {/* RIGHT COLUMN: Scan feed (desktop only) */}
         <aside className="hidden lg:block w-80 xl:w-96 flex-shrink-0 space-y-3">
-          <p className="cihaz-section-label">Son Okutmalar</p>
-          <div className="cihaz-card-strong p-4 space-y-2" style={{ maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto' }}>
+          <p style={{ margin: 0, fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Son Okutmalar</p>
+          <div style={{
+            borderRadius: T.r, padding: 16,
+            background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+            boxShadow: T.clay,
+            maxHeight: 'calc(100dvh - 220px)', overflowY: 'auto',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}>
             {scanFeed.length === 0 ? (
-              <div className="text-center py-8" style={{ color: 'var(--dashboard-muted)' }}>
-                <ScanBarcode className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-xs">Henüz okutma yok</p>
-                <p className="text-[10px] mt-1">Barkod okuyucu ile taramaya başlayın</p>
+              <div style={{ textAlign: 'center', padding: '32px 0', color: T.ink3 }}>
+                <ScanBarcode style={{ width: 30, height: 30, margin: '0 auto 8px', opacity: 0.3 }} />
+                <p style={{ margin: 0, fontSize: 12 }}>Henüz okutma yok</p>
+                <p style={{ margin: '4px 0 0', fontSize: 11 }}>Barkod okuyucu ile taramaya başlayın</p>
               </div>
             ) : (
               scanFeed.map(evt => (
                 <div
                   key={evt.id}
-                  className="flex items-start gap-2 p-2 rounded-xl transition-all"
-                  style={{ background: evt.ok ? 'rgba(22,163,74,.06)' : 'rgba(185,28,28,.06)' }}
+                  style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 10px', borderRadius: T.rsm,
+                    background: evt.ok ? 'rgba(111,181,133,0.10)' : 'rgba(185,28,28,0.07)',
+                  }}
                 >
                   {evt.ok ? (
-                    <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#16A34A' }} />
+                    <CheckCircle2 style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: '#4E9E6B' }} />
                   ) : (
-                    <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#B91C1C' }} />
+                    <XCircle style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2, color: '#B91C1C' }} />
                   )}
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium truncate" style={{ color: evt.ok ? '#16A34A' : '#B91C1C' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: evt.ok ? '#4E9E6B' : '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {evt.message}
                     </p>
-                    <p className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>
+                    <p style={{ margin: 0, fontSize: 10.5, color: T.ink3 }}>
                       {new Date(evt.ts).toLocaleTimeString('tr-TR')}
                     </p>
                   </div>
@@ -1418,18 +1634,22 @@ export default function ToplamaPage() {
           {/* Issues / exceptions summary */}
           {enrichedList.some(i => i.isOutOfStock || i.isInsufficient) && (
             <>
-              <p className="cihaz-section-label">Sorunlar</p>
-              <div className="cihaz-card p-3 space-y-2">
+              <p style={{ margin: '14px 0 6px', fontSize: 10, fontWeight: 700, color: T.ink3, textTransform: 'uppercase', letterSpacing: '0.07em' }}>Sorunlar</p>
+              <div style={{
+                borderRadius: T.rsm, padding: '10px 14px',
+                background: `linear-gradient(180deg, ${T.surface}, ${T.surface2})`,
+                boxShadow: T.clay, display: 'flex', flexDirection: 'column', gap: 6,
+              }}>
                 {enrichedList.filter(i => i.isOutOfStock).map(i => (
-                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(185,28,28,.06)' }}>
-                    <XCircle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#B91C1C' }} />
-                    <span className="text-xs font-medium truncate" style={{ color: '#B91C1C' }}>{i.stokAdi} – Stok yok</span>
+                  <div key={`issue-${i.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: T.rsm, background: 'rgba(185,28,28,.06)' }}>
+                    <XCircle style={{ width: 13, height: 13, flexShrink: 0, color: '#B91C1C' }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#B91C1C', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.stokAdi} – Stok yok</span>
                   </div>
                 ))}
                 {enrichedList.filter(i => i.isInsufficient && !i.isOutOfStock).map(i => (
-                  <div key={`issue-${i.id}`} className="flex items-center gap-2 px-2 py-1.5 rounded-xl" style={{ background: 'rgba(245,158,11,.08)' }}>
-                    <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" style={{ color: '#D97706' }} />
-                    <span className="text-xs font-medium truncate" style={{ color: '#D97706' }}>{i.stokAdi} – Yetersiz ({i.availableInLot}/{i.needed})</span>
+                  <div key={`issue-${i.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: T.rsm, background: 'rgba(217,119,6,.08)' }}>
+                    <AlertTriangle style={{ width: 13, height: 13, flexShrink: 0, color: '#D97706' }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: '#D97706', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{i.stokAdi} – Yetersiz ({i.totalInDepot}/{i.needed})</span>
                   </div>
                 ))}
               </div>
@@ -1438,55 +1658,49 @@ export default function ToplamaPage() {
         </aside>
       </div>
 
-      {/* ── Mobile scan feed (single last event, shown above sticky CTA) ── */}
-      {scanFeed.length > 0 && (
-        <div className="fixed bottom-[72px] left-3 right-3 z-30 lg:hidden">
-          <div
-            className="cihaz-card p-2.5 flex items-center gap-2 animate-in slide-in-from-bottom-2 duration-300"
-            style={{ borderRadius: 14 }}
-          >
-            {scanFeed[0].ok ? (
-              <CheckCircle2 className="w-4 h-4 flex-shrink-0" style={{ color: '#16A34A' }} />
-            ) : (
-              <XCircle className="w-4 h-4 flex-shrink-0" style={{ color: '#B91C1C' }} />
-            )}
-            <p className="text-xs font-medium flex-1 truncate" style={{ color: scanFeed[0].ok ? '#16A34A' : '#B91C1C' }}>
-              {scanFeed[0].message}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* ── Mobile sticky bottom CTA ── */}
       <div
         className="fixed bottom-0 left-0 right-0 z-40 sm:hidden"
         style={{
-          background: 'var(--dashboard-surface)',
-          borderTop: '1px solid var(--dashboard-stroke)',
-          boxShadow: '0 -4px 20px rgba(0,0,0,.08)',
+          background: T.surface,
+          borderTop: `1px solid rgba(90,72,40,0.08)`,
+          boxShadow: '0 -8px 28px rgba(150,128,96,0.16)',
           paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
         }}
       >
-        <div className="flex items-center justify-between px-4 py-3">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px' }}>
           <div>
-            <p className="text-xs font-medium" style={{ color: 'var(--dashboard-muted)' }}>
+            <p style={{ margin: 0, fontSize: 11.5, fontWeight: 600, color: T.ink2 }}>
               {remainingCount > 0 ? `${remainingCount} grup kaldı` : 'Tüm gruplar tamam'}
             </p>
-            <p className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>
+            <p style={{ margin: '2px 0 0', fontSize: 14, fontWeight: 800, color: T.ink1 }}>
               {totalScanned}/{totalNeeded} toplanan
             </p>
           </div>
           <button
             onClick={commitTransfer}
             disabled={!isTransferReady}
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-            style={{ background: isTransferReady ? '#16A34A' : '#9CA3AF' }}
+            style={{
+              all: 'unset', cursor: isTransferReady ? 'pointer' : 'not-allowed',
+              display: 'inline-flex', alignItems: 'center', gap: 8,
+              padding: '11px 20px', borderRadius: 20, fontSize: 13.5, fontWeight: 800,
+              background: isTransferReady
+                ? 'linear-gradient(180deg, #8FD3A6 0%, #6FB585 100%)'
+                : T.surface2,
+              boxShadow: isTransferReady
+                ? 'inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px -8px rgba(111,181,133,0.5)'
+                : 'inset 0 2px 5px rgba(178,160,128,0.30)',
+              color: isTransferReady ? '#fff' : T.ink3,
+              opacity: isTransferReady ? 1 : 0.7,
+              transition: `all 300ms cubic-bezier(.22,1,.36,1)`,
+            }}
           >
-            {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Truck className="w-4 h-4" />}
+            {isProcessing ? <Loader2 style={{ width: 15, height: 15, animation: 'tplWaterRise 1s linear infinite' }} /> : <Truck style={{ width: 15, height: 15 }} />}
             Transfer Et
           </button>
         </div>
       </div>
     </div>
+    </>
   );
 }

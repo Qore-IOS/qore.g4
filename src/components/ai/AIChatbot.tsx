@@ -1,15 +1,18 @@
 'use client';
 
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Bot, Send, X, Loader2 } from 'lucide-react';
+import {
+  Menu, Sparkles, Mic, SendHorizonal, ChevronRight, HeartPulse,
+  Stethoscope, BellRing, MapPin, Clock, Bookmark, User as UserIcon, Loader2,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAI } from '@/contexts/ai-context';
-import { AIGlowEffect } from './AIGlowEffect';
-import { useTheme } from 'next-themes';
+import { useAuth } from '@/contexts/auth-context';
+import { getAuth } from 'firebase/auth';
+
+const QoreOrb3D = dynamic(() => import('./QoreOrb3D'), { ssr: false });
 
 interface Message {
   id: string;
@@ -17,118 +20,141 @@ interface Message {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
-  toolsUsed?: string[];
-  requiresConfirmation?: boolean;
 }
 
-// Keywords that trigger agent mode
-const AGENT_KEYWORDS = [
-  // Aksiyon kelimeleri
-  'oluştur', 'olustur', 'yap', 'hazırla', 'başlat', 'baslat',
-  'sipariş', 'siparis', 'transfer', 'sevk', 'gönder', 'gonder',
-  'planla', 'düzenle', 'ekle', 'sil', 'güncelle', 'guncelle',
-  // Analiz kelimeleri
-  'analiz', 'kontrol', 'incele', 'bul', 'listele',
-  'düşük stok', 'dusuk stok', 'eksik', 'kritik', 'altında', 'altinda',
-  // Sorgu kelimeleri
-  'hangi lab', 'hangi hastane', 'stok durumu', 'doluluk',
-  'min max', 'minimum', 'maksimum', 'ihtiyaç', 'ihtiyac',
+interface QuickAction {
+  id: string;
+  label: string;
+  Icon: React.ComponentType<{ className?: string }>;
+  prompt: string;
+  hue: 'purple' | 'cyan' | 'blue' | 'teal';
+}
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    id: 'stock',
+    label: 'Stok\nAnalizi',
+    Icon: HeartPulse,
+    prompt: 'Düşük stok seviyesindeki ürünleri listele',
+    hue: 'purple',
+  },
+  {
+    id: 'order',
+    label: 'Sipariş\nÖner',
+    Icon: Stethoscope,
+    prompt: 'Hangi laboratuvarlar için sipariş önerirsin?',
+    hue: 'cyan',
+  },
+  {
+    id: 'expiry',
+    label: 'Miad\nTakibi',
+    Icon: BellRing,
+    prompt: 'Önümüzdeki 30 gün içinde miadı dolacak ürünler hangileri?',
+    hue: 'blue',
+  },
+  {
+    id: 'devices',
+    label: 'Cihaz\nDurumu',
+    Icon: MapPin,
+    prompt: 'Açık cihaz arızalarını ve durumlarını özetler misin?',
+    hue: 'teal',
+  },
 ];
 
-function shouldUseAgentMode(message: string): boolean {
-  const lowerMessage = message.toLowerCase();
-  return AGENT_KEYWORDS.some(keyword => lowerMessage.includes(keyword));
-}
+const HUE_STYLES: Record<QuickAction['hue'], { icon: string; ring: string }> = {
+  purple: { icon: 'text-fuchsia-400', ring: 'shadow-[0_0_24px_-8px_rgba(217,70,239,0.55)]' },
+  cyan:   { icon: 'text-cyan-300',   ring: 'shadow-[0_0_24px_-8px_rgba(34,211,238,0.55)]' },
+  blue:   { icon: 'text-indigo-300', ring: 'shadow-[0_0_24px_-8px_rgba(99,102,241,0.55)]' },
+  teal:   { icon: 'text-teal-300',   ring: 'shadow-[0_0_24px_-8px_rgba(45,212,191,0.55)]' },
+};
 
 export function AIChatbot() {
-  const { isAIOpen, closeAI } = useAI();
-  const { resolvedTheme } = useTheme();
-  const isDark = resolvedTheme === 'dark';
+  const { isAIOpen, closeAI, consumePendingPrompt } = useAI();
+  const { currentUserProfile, currentUser } = useAuth();
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: `Merhaba! Ben Qore AI asistanıyım. Size yardımcı olabileceğim konular:
+  const firstName = useMemo(() => {
+    const raw = currentUserProfile?.name || currentUser?.displayName || currentUser?.email?.split('@')[0] || 'Kullanıcı';
+    return raw.split(' ')[0];
+  }, [currentUserProfile, currentUser]);
 
-📊 **Sorgulama**: Stok durumu, tüketim analizi, cihaz arızaları
-🔄 **Aksiyon**: Sipariş oluşturma, transfer önerileri
-📈 **Analiz**: Düşük stoklar, miad takibi, verimlilik
-
-Örnek: "Stok doluluk oranı %50 altındaki lablar için sipariş oluştur"`,
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showChat, setShowChat] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-scroll to bottom
+  // Lock body scroll when full-screen is open
+  useEffect(() => {
+    if (!isAIOpen) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prevOverflow; };
+  }, [isAIOpen]);
+
+  // Auto-scroll messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
 
-  // Focus input when opened
+  // Reset chat to home when closing
   useEffect(() => {
-    if (isAIOpen && inputRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 300);
+    if (!isAIOpen) {
+      // Slight delay so the exit animation can play first
+      const t = setTimeout(() => {
+        setShowChat(false);
+        setMessages([]);
+        setInput('');
+      }, 250);
+      return () => clearTimeout(t);
     }
   }, [isAIOpen]);
 
-  const sendMessage = useCallback(async () => {
-    if (!input.trim() || isLoading) return;
+  const sendMessage = useCallback(async (overrideText?: string) => {
+    const text = (overrideText ?? input).trim();
+    if (!text || isLoading) return;
+
+    setShowChat(true);
 
     const userMessage: Message = {
-      id: Date.now().toString(),
+      id: `${Date.now()}-u`,
       role: 'user',
-      content: input.trim(),
+      content: text,
       timestamp: new Date(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    const assistantId = `${Date.now()}-a`;
+    setMessages((prev) => [
+      ...prev,
+      userMessage,
+      { id: assistantId, role: 'assistant', content: '', timestamp: new Date(), isStreaming: true },
+    ]);
     setInput('');
     setIsLoading(true);
 
-    const assistantMessageId = (Date.now() + 1).toString();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: assistantMessageId,
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        isStreaming: true,
-      },
-    ]);
-
     try {
-      const history = messages
-        .filter((m) => m.id !== '1')
-        .map((m) => ({ role: m.role, content: m.content }));
+      const history = messages.map((m) => ({ role: m.role, content: m.content }));
 
-      // Automatically detect if agent mode should be used
-      const useAgent = shouldUseAgentMode(userMessage.content);
-      console.log(`[AIChatbot] Mode: ${useAgent ? 'AGENT' : 'CHAT'}`);
+      // Attach Firebase ID token so the server can scope the engine to this user.
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      try {
+        const idToken = await getAuth().currentUser?.getIdToken();
+        if (idToken) headers.Authorization = `Bearer ${idToken}`;
+      } catch { /* anonymous → server uses fallback context */ }
 
       const response = await fetch('/api/ai/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage.content,
-          history,
-          stream: true,
-          mode: useAgent ? 'agent' : 'chat',
-        }),
+        headers,
+        body: JSON.stringify({ message: text, history, stream: true }),
       });
 
       if (!response.ok) throw new Error('API hatası');
 
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
-
       if (!reader) throw new Error('Stream okunamadı');
 
       let fullContent = '';
@@ -136,71 +162,59 @@ export function AIChatbot() {
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-
         const chunk = decoder.decode(value);
         const lines = chunk.split('\n');
 
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.error) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMessageId
-                      ? { ...m, content: `Hata: ${data.error}`, isStreaming: false }
-                      : m
-                  )
-                );
-              } else if (data.chunk) {
-                fullContent += data.chunk;
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMessageId
-                      ? { ...m, content: fullContent }
-                      : m
-                  )
-                );
-              }
-              if (data.done) {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.id === assistantMessageId
-                      ? {
-                          ...m,
-                          isStreaming: false,
-                          toolsUsed: data.toolsUsed,
-                          requiresConfirmation: data.requiresConfirmation,
-                        }
-                      : m
-                  )
-                );
-              }
-            } catch {
-              // Skip invalid JSON
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.error) {
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantId ? { ...m, content: `Hata: ${data.error}`, isStreaming: false } : m,
+              ));
+            } else if (data.chunk) {
+              fullContent += data.chunk;
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantId ? { ...m, content: fullContent } : m,
+              ));
             }
-          }
+            if (data.done) {
+              setMessages((prev) => prev.map((m) =>
+                m.id === assistantId ? { ...m, isStreaming: false } : m,
+              ));
+            }
+          } catch { /* skip */ }
         }
       }
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMessageId
-            ? {
-                ...m,
-                content: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.',
-                isStreaming: false,
-              }
-            : m
-        )
-      );
+      setMessages((prev) => prev.map((m) =>
+        m.id === assistantId
+          ? { ...m, content: 'Üzgünüm, bir hata oluştu. Lütfen tekrar deneyin.', isStreaming: false }
+          : m,
+      ));
     } finally {
       setIsLoading(false);
     }
   }, [input, isLoading, messages]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  // Keep a ref to the latest sendMessage so the "open with queued prompt"
+  // effect can fire it without re-subscribing on every keystroke.
+  const sendMessageRef = useRef(sendMessage);
+  useEffect(() => { sendMessageRef.current = sendMessage; }, [sendMessage]);
+
+  // When opened from the Start menu search bar a prompt is queued on the AI
+  // context; consume and auto-send it once the panel is open.
+  useEffect(() => {
+    if (!isAIOpen) return;
+    const queued = consumePendingPrompt();
+    if (!queued) return;
+    const t = setTimeout(() => sendMessageRef.current(queued), 60);
+    return () => clearTimeout(t);
+  }, [isAIOpen, consumePendingPrompt]);
+
+  const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
@@ -208,173 +222,333 @@ export function AIChatbot() {
   };
 
   return (
-    <>
-      {/* Glow effect around screen edges */}
-      <AIGlowEffect isActive={isAIOpen} />
+    <AnimatePresence>
+      {isAIOpen && (
+        <motion.div
+          key="qore-ai-fullscreen"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.25 }}
+          className="fixed inset-0 z-[100] bg-black text-white overflow-hidden"
+          style={{
+            paddingTop: 'env(safe-area-inset-top)',
+            paddingBottom: 'env(safe-area-inset-bottom)',
+            paddingLeft: 'env(safe-area-inset-left)',
+            paddingRight: 'env(safe-area-inset-right)',
+          }}
+        >
+          {/* Background ambient gradients */}
+          <div className="pointer-events-none absolute inset-0 -z-10">
+            <div className="absolute inset-0 bg-black" />
+            <div className="absolute -top-32 -left-32 h-[480px] w-[480px] rounded-full bg-fuchsia-600/10 blur-[120px]" />
+            <div className="absolute -bottom-40 -right-32 h-[520px] w-[520px] rounded-full bg-cyan-500/10 blur-[140px]" />
+          </div>
 
-      {/* Full screen chat overlay */}
-      <AnimatePresence>
-        {isAIOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center"
-            style={{
-              paddingTop: 'env(safe-area-inset-top, 20px)',
-              paddingBottom: 'env(safe-area-inset-bottom, 20px)',
-              paddingLeft: 'env(safe-area-inset-left, 20px)',
-              paddingRight: 'env(safe-area-inset-right, 20px)',
-            }}
-          >
-            {/* Backdrop */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className={cn(
-                "absolute inset-0",
-                isDark
-                  ? "bg-black/90 backdrop-blur-xl"
-                  : "bg-white/90 backdrop-blur-xl"
-              )}
-              onClick={closeAI}
+          <div className="relative mx-auto flex h-full w-full max-w-5xl flex-col px-4 sm:px-6 md:px-8 lg:px-10">
+            <Header onClose={closeAI} />
+
+            {/* HERO + CHAT REGION */}
+            <div className="relative flex flex-1 flex-col overflow-hidden">
+              {/* HOME (welcome) view */}
+              <AnimatePresence mode="wait">
+                {!showChat ? (
+                  <motion.div
+                    key="home"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="flex flex-1 flex-col overflow-y-auto"
+                  >
+                    <InsightCard />
+                    <div className="flex flex-1 flex-col items-center justify-start pt-6 sm:pt-8 md:pt-10">
+                      <div className="text-center">
+                        <h1 className="bg-gradient-to-r from-fuchsia-400 via-violet-400 to-cyan-300 bg-clip-text text-3xl font-semibold text-transparent sm:text-4xl md:text-5xl">
+                          Merhaba, {firstName}
+                        </h1>
+                        <p className="mt-2 text-sm text-zinc-400 sm:text-base md:text-lg">
+                          Bugün size nasıl yardımcı olabilirim?
+                        </p>
+                      </div>
+
+                      {/* 3D Orb */}
+                      <div className="relative my-2 aspect-square w-full max-w-[78vmin] sm:max-w-[60vmin] md:max-w-[52vmin] lg:max-w-[480px]">
+                        <QoreOrb3D isProcessing={isLoading} className="h-full w-full" />
+                      </div>
+                    </div>
+                  </motion.div>
+                ) : (
+                  <motion.div
+                    key="chat"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.3 }}
+                    className="flex flex-1 flex-col overflow-hidden"
+                  >
+                    {/* Small Orb above the chat */}
+                    <div className="mx-auto mt-2 h-32 w-32 sm:h-40 sm:w-40 md:h-48 md:w-48 shrink-0">
+                      <QoreOrb3D isProcessing={isLoading} className="h-full w-full" />
+                    </div>
+
+                    <div ref={scrollRef} className="flex-1 overflow-y-auto px-1 pb-4">
+                      <div className="mx-auto flex max-w-3xl flex-col gap-3">
+                        {messages.map((m) => (
+                          <motion.div
+                            key={m.id}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}
+                          >
+                            <div
+                              className={cn(
+                                'max-w-[88%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-relaxed sm:text-[15px]',
+                                m.role === 'user'
+                                  ? 'bg-gradient-to-r from-fuchsia-500 to-cyan-500 text-white shadow-[0_0_24px_-6px_rgba(168,85,247,0.55)]'
+                                  : 'border border-white/10 bg-white/[0.04] text-zinc-100 backdrop-blur-sm',
+                              )}
+                            >
+                              {m.content}
+                              {m.isStreaming && (
+                                <span className="ml-1 inline-block h-4 w-[6px] translate-y-[2px] animate-pulse rounded-sm bg-current" />
+                              )}
+                              {m.isStreaming && m.content === '' && (
+                                <Loader2 className="h-4 w-4 animate-spin text-fuchsia-300" />
+                              )}
+                            </div>
+                          </motion.div>
+                        ))}
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* QUICK ACTIONS — visible only on home */}
+            {!showChat && (
+              <QuickActions
+                onSelect={(prompt) => {
+                  setInput(prompt);
+                  setTimeout(() => sendMessage(prompt), 0);
+                }}
+              />
+            )}
+
+            {/* COMPOSER */}
+            <Composer
+              inputRef={inputRef}
+              value={input}
+              disabled={isLoading}
+              onChange={setInput}
+              onKeyDown={handleKey}
+              onSend={() => sendMessage()}
             />
 
-            {/* Chat Container */}
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 20 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-              className={cn(
-                "relative w-full max-w-2xl h-[80vh] max-h-[700px] flex flex-col rounded-3xl overflow-hidden",
-                isDark
-                  ? "bg-gray-900/80 border border-white/10 shadow-2xl"
-                  : "bg-white/80 border border-gray-200 shadow-2xl"
-              )}
-            >
-              {/* Header */}
-              <div className={cn(
-                "flex items-center justify-between p-4 border-b",
-                isDark ? "border-white/10" : "border-gray-200"
-              )}>
-                <div className="flex items-center gap-3">
-                  <div className="relative">
-                    <div className={cn(
-                      "w-10 h-10 rounded-full flex items-center justify-center",
-                      "bg-gradient-to-br from-purple-500 to-blue-500"
-                    )}>
-                      <Bot className="w-5 h-5 text-white" />
-                    </div>
-                    <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-900" />
-                  </div>
-                  <div>
-                    <h2 className={cn(
-                      "font-semibold text-lg",
-                      isDark ? "text-white" : "text-gray-900"
-                    )}>
-                      Qore AI
-                    </h2>
-                    <p className={cn(
-                      "text-sm",
-                      isDark ? "text-gray-400" : "text-gray-500"
-                    )}>
-                      Akıllı stok ve operasyon asistanı
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={closeAI}
-                  className={cn(
-                    "rounded-full",
-                    isDark ? "hover:bg-white/10" : "hover:bg-gray-100"
-                  )}
-                >
-                  <X className="w-5 h-5" />
-                </Button>
-              </div>
+            {/* BOTTOM DOCK */}
+            <BottomDock
+              onHomeClick={() => {
+                setShowChat(false);
+                setMessages([]);
+              }}
+              active={showChat ? 'history' : 'home'}
+            />
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+}
 
-              {/* Messages */}
-              <ScrollArea className="flex-1 p-4" ref={scrollRef}>
-                <div className="space-y-4">
-                  {messages.map((message) => (
-                    <motion.div
-                      key={message.id}
-                      initial={{ opacity: 0, y: 10 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className={cn(
-                        'flex',
-                        message.role === 'user' ? 'justify-end' : 'justify-start'
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          'max-w-[85%] rounded-2xl px-4 py-3 text-sm',
-                          message.role === 'user'
-                            ? 'bg-gradient-to-r from-purple-500 to-blue-500 text-white'
-                            : isDark
-                              ? 'bg-white/10 text-white'
-                              : 'bg-gray-100 text-gray-900'
-                        )}
-                      >
-                        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
-                        {message.isStreaming && (
-                          <span className="inline-block w-2 h-4 ml-1 bg-current animate-pulse rounded" />
-                        )}
-                      </div>
-                    </motion.div>
-                  ))}
-                  {isLoading && messages[messages.length - 1]?.content === '' && (
-                    <div className="flex justify-start">
-                      <div className={cn(
-                        "rounded-2xl px-4 py-3",
-                        isDark ? "bg-white/10" : "bg-gray-100"
-                      )}>
-                        <Loader2 className="w-5 h-5 animate-spin text-purple-500" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
+/* ---------- Header ---------- */
 
-              {/* Input */}
-              <div className={cn(
-                "p-4 border-t",
-                isDark ? "border-white/10" : "border-gray-200"
-              )}>
-                <div className="flex gap-3">
-                  <Input
-                    ref={inputRef}
-                    placeholder="Bir soru sorun..."
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyPress={handleKeyPress}
-                    disabled={isLoading}
-                    className={cn(
-                      "flex-1 rounded-full px-4",
-                      isDark
-                        ? "bg-white/10 border-white/10 text-white placeholder:text-gray-400"
-                        : "bg-gray-100 border-gray-200"
-                    )}
-                  />
-                  <Button
-                    onClick={sendMessage}
-                    disabled={!input.trim() || isLoading}
-                    size="icon"
-                    className="rounded-full bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 h-10 w-10"
-                  >
-                    <Send className="w-4 h-4 text-white" />
-                  </Button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
+function Header({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between pt-3 sm:pt-4 pb-3">
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] backdrop-blur-sm transition hover:bg-white/[0.07]"
+        aria-label="Kapat"
+      >
+        <Menu className="h-5 w-5 text-zinc-200" />
+      </button>
+
+      <div className="flex items-center gap-2">
+        <span className="text-base font-semibold text-zinc-100 sm:text-lg">Qore AI</span>
+        <span className="rounded-md border border-cyan-400/40 bg-cyan-400/5 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-cyan-300">
+          Gemini
+        </span>
+        <ChevronRight className="h-4 w-4 text-zinc-500" />
+      </div>
+
+      <button
+        type="button"
+        onClick={onClose}
+        className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] backdrop-blur-sm transition hover:bg-white/[0.07]"
+        aria-label="Sparkle"
+      >
+        <Sparkles className="h-5 w-5 text-fuchsia-300" />
+      </button>
+    </div>
+  );
+}
+
+/* ---------- Insight Card ---------- */
+
+function InsightCard() {
+  return (
+    <div className="relative w-full rounded-2xl border border-white/10 bg-white/[0.03] p-3 backdrop-blur-sm">
+      <div className="flex items-center gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-fuchsia-500/15">
+          <HeartPulse className="h-5 w-5 text-fuchsia-300" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-zinc-100 sm:text-[15px]">Operasyon raporu hazır</p>
+          <p className="truncate text-xs text-zinc-400 sm:text-sm">Haftalık özet ve içgörüler görüntülenebilir.</p>
+        </div>
+        <button
+          type="button"
+          className="shrink-0 rounded-full border border-cyan-400/60 px-3 py-1.5 text-xs font-medium text-cyan-300 transition hover:bg-cyan-400/10 sm:text-sm"
+        >
+          Raporu Aç
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Quick Actions ---------- */
+
+function QuickActions({ onSelect }: { onSelect: (prompt: string) => void }) {
+  return (
+    <div className="grid grid-cols-4 gap-2 pb-3 sm:gap-3">
+      {QUICK_ACTIONS.map((a) => {
+        const styles = HUE_STYLES[a.hue];
+        return (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => onSelect(a.prompt)}
+            className={cn(
+              'group flex flex-col items-center justify-center gap-1 rounded-2xl border border-white/10 bg-white/[0.03] px-2 py-3 backdrop-blur-sm transition hover:bg-white/[0.06]',
+              styles.ring,
+            )}
+          >
+            <a.Icon className={cn('h-5 w-5 sm:h-6 sm:w-6', styles.icon)} />
+            <span className="whitespace-pre-line text-center text-[10px] font-medium leading-tight text-zinc-200 sm:text-xs">
+              {a.label}
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------- Composer ---------- */
+
+interface ComposerProps {
+  inputRef: React.RefObject<HTMLInputElement>;
+  value: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  onSend: () => void;
+}
+
+function Composer({ inputRef, value, disabled, onChange, onKeyDown, onSend }: ComposerProps) {
+  return (
+    <div className="relative pb-2">
+      <div
+        className="relative flex items-center gap-2 rounded-full border border-white/10 bg-black/60 px-2 py-2 backdrop-blur-sm"
+        style={{
+          boxShadow:
+            '0 0 0 1px rgba(255,255,255,0.04), 0 0 32px -8px rgba(168,85,247,0.45), 0 0 32px -8px rgba(34,211,238,0.4)',
+        }}
+      >
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={onKeyDown}
+          disabled={disabled}
+          placeholder="Bir mesaj yazın..."
+          className="flex-1 bg-transparent px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-500 focus:outline-none sm:text-base"
+        />
+        <button
+          type="button"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-fuchsia-500/80 to-violet-600/80 text-white shadow-[0_0_18px_-4px_rgba(168,85,247,0.7)] transition hover:from-fuchsia-500 hover:to-violet-600"
+          aria-label="Sesle giriş"
+        >
+          <Mic className="h-5 w-5" />
+        </button>
+        <button
+          type="button"
+          onClick={onSend}
+          disabled={disabled || !value.trim()}
+          className={cn(
+            'flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-cyan-400/40 bg-cyan-500/10 text-cyan-200 transition',
+            'hover:bg-cyan-500/20 disabled:opacity-40 disabled:hover:bg-cyan-500/10',
+          )}
+          aria-label="Gönder"
+        >
+          {disabled ? <Loader2 className="h-5 w-5 animate-spin" /> : <SendHorizonal className="h-5 w-5" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Bottom Dock ---------- */
+
+interface BottomDockProps {
+  onHomeClick: () => void;
+  active: 'home' | 'history';
+}
+
+function BottomDock({ onHomeClick, active }: BottomDockProps) {
+  return (
+    <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2 backdrop-blur-sm">
+      <DockButton Icon={Sparkles} active={false} tone="fuchsia" />
+      <DockButton Icon={Clock} active={active === 'history'} tone="zinc" />
+      <button
+        type="button"
+        onClick={onHomeClick}
+        aria-label="Ana sayfa"
+        className="relative -my-4 h-14 w-14 shrink-0 rounded-full border border-white/15 bg-black p-1 shadow-[0_0_24px_-4px_rgba(168,85,247,0.55)]"
+      >
+        <div className="h-full w-full overflow-hidden rounded-full">
+          <QoreOrb3D className="h-full w-full" />
+        </div>
+      </button>
+      <DockButton Icon={Bookmark} active={false} tone="zinc" />
+      <DockButton Icon={UserIcon} active={false} tone="zinc" />
+    </div>
+  );
+}
+
+function DockButton({
+  Icon, active, tone,
+}: {
+  Icon: React.ComponentType<{ className?: string }>;
+  active: boolean;
+  tone: 'fuchsia' | 'zinc';
+}) {
+  return (
+    <button
+      type="button"
+      className="flex h-10 w-10 items-center justify-center rounded-xl transition hover:bg-white/[0.06]"
+    >
+      <Icon
+        className={cn(
+          'h-5 w-5',
+          active ? 'text-fuchsia-300' : tone === 'fuchsia' ? 'text-fuchsia-300' : 'text-zinc-400',
         )}
-      </AnimatePresence>
-    </>
+      />
+    </button>
   );
 }

@@ -13,6 +13,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye, Warehouse, FlaskConical } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, increment
@@ -85,7 +87,7 @@ function autoOrder(stops: RouteStop[], startId: string): RouteStop[] {
 
 export default function RotaOlusturPage() {
   const { toast } = useToast();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const router = useRouter();
 
   const [myUid, setMyUid] = useState<string>('');
@@ -129,9 +131,9 @@ export default function RotaOlusturPage() {
     (async () => {
       try {
         const [hSnap, uSnap, dSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'users')),
-          getDocs(collection(db, 'depots')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
         ]);
         setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Hospital[]);
         setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Depot[]);
@@ -144,12 +146,12 @@ export default function RotaOlusturPage() {
         toast({ title: 'Veri Hatası', description: 'Veriler alınamadı.', variant: 'destructive' });
       }
     })();
-  }, [toast, planDriverId]);
+  }, [toast, planDriverId, currentCompanyId, isSuperAdmin]);
 
   // Tüm açık rotaları dinle
   useEffect(() => {
     if (!myUid) return;
-    const qy = query(collection(db, 'routes'), where('status', '!=', 'completed'));
+    const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, where('status', '!=', 'completed'));
     const unsub = onSnapshot(qy, (snap) => {
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as RouteDoc[];
       rows.sort((a,b)=> a.date === b.date ? (a.sequence||0)-(b.sequence||0) : a.date-b.date);
@@ -160,7 +162,7 @@ export default function RotaOlusturPage() {
 
   useEffect(() => {
     if (!myUid) { setMyAssignedRoutes([]); return; }
-    const qy = query(collection(db, 'routes'), where('driverId','==', myUid));
+    const qy = scopedQuery('routes', currentCompanyId, isSuperAdmin, where('driverId','==', myUid));
     const unsub = onSnapshot(qy, (snap) => {
       const rows = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as RouteDoc[];
       const mine = rows.filter(r => r.status !== 'completed');
@@ -293,7 +295,7 @@ export default function RotaOlusturPage() {
         createdAt: serverTimestamp() as any, updatedAt: serverTimestamp() as any,
       } as any;
 
-      await setDoc(doc(db, 'routes', routeId), payload, { merge: false });
+      await setDoc(doc(db, 'routes', routeId), withCompanyScope(payload, currentCompanyId), { merge: false });
 
       // Formu temizle
       setDraftStops([]);

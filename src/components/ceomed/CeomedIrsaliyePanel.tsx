@@ -12,11 +12,13 @@ import {
   updateDoc,
   serverTimestamp,
   getDocs,
+  setDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
-import { useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -98,8 +100,9 @@ function parseTarih(s: string): Date | null {
 }
 
 export default function CeomedIrsaliyePanel() {
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { data: hospitals = [] } = useHospitals();
+  const { data: depots = [] } = useDepots();
   const { data: productCodes = [] } = useProductCodes();
   const { toast } = useToast();
 
@@ -115,9 +118,12 @@ export default function CeomedIrsaliyePanel() {
   const [selected, setSelected] = useState<PendingIrsaliye | null>(null);
   const [approving, setApproving] = useState(false);
   const [targetHospitalId, setTargetHospitalId] = useState<string>('');
+  const [targetDepotId, setTargetDepotId] = useState<string>('');
 
   useEffect(() => {
-    const q = query(collection(db, 'pendingCeomedIrsaliye'));
+    // Deps: auth değişimine yanıt vermeli — aksi halde listener stale
+    // currentCompanyId/isSuperAdmin ile sabit kalıyordu.
+    const q = scopedQuery('pendingCeomedIrsaliye', currentCompanyId, isSuperAdmin);
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -135,7 +141,7 @@ export default function CeomedIrsaliyePanel() {
       }
     );
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Hospital lookup by ceomedCariKodu
   const hospitalByCari = useMemo(() => {
@@ -146,6 +152,16 @@ export default function CeomedIrsaliyePanel() {
     }
     return map;
   }, [hospitals]);
+
+  // Depot lookup by ceomedCariKodu
+  const depotByCari = useMemo(() => {
+    const map = new Map<string, { id: string; name: string }>();
+    for (const d of depots) {
+      const c = (d as any).ceomedCariKodu;
+      if (c) map.set(String(c).trim().toUpperCase(), { id: d.id, name: d.name });
+    }
+    return map;
+  }, [depots]);
 
   // Product lookup by stokKodu
   const productByStokKodu = useMemo(() => {
@@ -234,7 +250,7 @@ export default function CeomedIrsaliyePanel() {
       let removedStock = 0;
       if (wasApproved) {
         const stockSnap = await getDocs(
-          query(collection(db, 'depoStok'), where('ceomedIrsaliyeId', '==', irs.ceomedId))
+          scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('ceomedIrsaliyeId', '==', irs.ceomedId))
         );
         removedStock = stockSnap.size;
         for (let i = 0; i < stockSnap.docs.length; i += 400) {
@@ -265,23 +281,35 @@ export default function CeomedIrsaliyePanel() {
   };
 
   const handleApprove = async (irs: PendingIrsaliye) => {
-    const mainMatch = hospitalByCari.get((irs.cariKodu || '').trim().toUpperCase());
-    if (!mainMatch) {
+    const cari = (irs.cariKodu || '').trim().toUpperCase();
+    const mainHospitalMatch = hospitalByCari.get(cari);
+    const mainDepotMatch = depotByCari.get(cari);
+
+    if (!mainHospitalMatch && !mainDepotMatch) {
       toast({
         title: 'Eşleşme yok',
-        description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar bulunamadı. Yönetim → Laboratuvarlar'dan ceomedCariKodu alanını doldurun.`,
+        description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar/depo bulunamadı. Yönetim → Laboratuvarlar veya Yönetim → Depolar'dan Ceomed Cari Kodu alanını doldurun.`,
         variant: 'destructive',
       });
       return;
     }
-    // Hedef: kullanici secmisse o, yoksa ana eslesme
-    const targetId = targetHospitalId || mainMatch.id;
-    const targetHospital = hospitals.find((h) => h.id === targetId);
-    if (!targetHospital) {
+
+    const targetHospital = mainHospitalMatch
+      ? hospitals.find((h) => h.id === (targetHospitalId || mainHospitalMatch.id))
+      : null;
+    const targetDepot = mainDepotMatch
+      ? depots.find((d) => d.id === (targetDepotId || mainDepotMatch.id))
+      : null;
+
+    const useDepot = !!targetDepotId || (!targetHospital && !!targetDepot);
+    if (!useDepot && !targetHospital) {
       toast({ title: 'Hata', description: 'Hedef laboratuvar bulunamadı.', variant: 'destructive' });
       return;
     }
-    const match = { id: targetHospital.id, name: targetHospital.name };
+    if (useDepot && !targetDepot) {
+      toast({ title: 'Hata', description: 'Hedef depo bulunamadı.', variant: 'destructive' });
+      return;
+    }
 
     setApproving(true);
     try {
@@ -308,8 +336,8 @@ export default function CeomedIrsaliyePanel() {
             ref,
             withCompanyScope(
               {
-                depotId: '',
-                depotName: '',
+                depotId: useDepot ? targetDepot!.id : '',
+                depotName: useDepot ? targetDepot!.name : '',
                 stokKodu: item.STOK_KODU,
                 stokAdi: product.stokAdi || '',
                 lotNumarasi: item.LOT || '',
@@ -318,9 +346,12 @@ export default function CeomedIrsaliyePanel() {
                 rafAdresi: '',
                 irsaliyeNumarasi: irs.irsaliyeNo,
                 eklenmeTarihi: Timestamp.now(),
-                isShipped: true,
-                hedefKurumId: match.id,
-                hedefKurum: match.name,
+                isShipped: !useDepot,
+                // Kuruma direkt aktarımda onay anı = sevk anı; Total Verimlilik
+                // "Ay Başı Sevk (Kutu)" otomatik doldurma bu tarihe göre sayar.
+                sevkTarihi: useDepot ? null : Timestamp.now(),
+                hedefKurumId: useDepot ? '' : targetHospital!.id,
+                hedefKurum: useDepot ? '' : targetHospital!.name,
                 createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
                 createdByUid: currentUser?.uid || null,
                 source: 'ceomed',
@@ -335,23 +366,57 @@ export default function CeomedIrsaliyePanel() {
 
       await batch.commit();
 
-      const wasRouted = match.id !== mainMatch.id;
+      if (useDepot) {
+        const txRef = doc(db, 'malKabulTransactions', `MK-CEOMED-${irs.ceomedId}`);
+        const lineMap = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number; serials: string[] }>();
+        for (const item of irs.items || []) {
+          const product = productByStokKodu.get(String(item.STOK_KODU).trim());
+          if (!product || product.trackingMode !== 'serial') continue;
+          const key = `${item.STOK_KODU}||${item.LOT || ''}||${item.MIYAT || ''}`;
+          const prev = lineMap.get(key) || { stokKodu: item.STOK_KODU, stokAdi: product.stokAdi || '', lotNumarasi: item.LOT || '', miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '', adet: 0, serials: [] };
+          prev.adet += Math.max(1, Number(item.MIKTAR) || 1);
+          if (item.BARKOD_SERI) prev.serials.push(item.BARKOD_SERI);
+          lineMap.set(key, prev);
+        }
+        const lineBatch = writeBatch(db);
+        lineBatch.set(txRef, withCompanyScope({
+          transactionId: `MK-CEOMED-${irs.ceomedId}`,
+          depotId: targetDepot!.id,
+          depotName: targetDepot!.name,
+          userId: currentUser?.uid || '',
+          userName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+          timestamp: Timestamp.now(),
+          irsaliyeNo: irs.irsaliyeNo,
+          itemCount: added,
+          mode: 'verified',
+          source: 'ceomed',
+          ceomedIrsaliyeId: irs.ceomedId,
+        }, currentCompanyId));
+        for (const line of lineMap.values()) {
+          lineBatch.set(doc(collection(txRef, 'lines')), withCompanyScope(line, currentCompanyId));
+        }
+        await lineBatch.commit();
+      }
+
       await updateDoc(doc(db, 'pendingCeomedIrsaliye', irs.id), {
         status: 'approved',
         approvedAt: serverTimestamp(),
         approvedBy: currentUser?.uid || null,
         approvedByName: currentUserProfile?.name || currentUser?.email || '',
-        hospitalId: match.id,
-        hospitalName: match.name,
-        mainHospitalId: mainMatch.id,
-        mainHospitalName: mainMatch.name,
-        routedTo: wasRouted ? match.id : null,
+        hospitalId: useDepot ? null : targetHospital!.id,
+        hospitalName: useDepot ? null : targetHospital!.name,
+        depotId: useDepot ? targetDepot!.id : null,
+        depotName: useDepot ? targetDepot!.name : null,
+        mainHospitalId: mainHospitalMatch?.id || null,
+        mainHospitalName: mainHospitalMatch?.name || null,
+        mainDepotId: mainDepotMatch?.id || null,
+        mainDepotName: mainDepotMatch?.name || null,
       });
 
       toast({
         title: 'İrsaliye onaylandı',
         description:
-          `${match.name} stoğuna ${added} kayıt eklendi.` +
+          `${useDepot ? targetDepot!.name : targetHospital!.name} stoğuna ${added} kayıt eklendi.` +
           (skippedNoProduct ? ` ${skippedNoProduct} ürün eşleşmedi.` : '') +
           (skippedNotSeri ? ` ${skippedNotSeri} ürün seri takipli değil.` : ''),
       });
@@ -399,7 +464,7 @@ export default function CeomedIrsaliyePanel() {
           </h2>
           <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
             Ceomed ERP'den çekilmiş onay bekleyen irsaliyeler. Cari kodu eşleşen
-            laboratuvara seri takipli ürünler aktarılır.
+            laboratuvar/depo hedefine seri takipli ürünler aktarılır.
           </p>
         </div>
       </div>
@@ -461,14 +526,39 @@ export default function CeomedIrsaliyePanel() {
             <Loader2 className="h-5 w-5 animate-spin mr-2" /> Yükleniyor...
           </div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-10 text-[var(--dashboard-muted)]">
+          <div className="flex flex-col items-center justify-center py-10 text-[var(--dashboard-muted)] text-center px-4">
             <Package className="h-8 w-8 mb-2 opacity-50" />
-            <p className="text-sm">Onay bekleyen irsaliye yok.</p>
+            {list.length === 0 ? (
+              <>
+                <p className="text-sm font-medium">Bu firma için kayıt bulunamadı.</p>
+                <p className="text-xs mt-2 max-w-md">
+                  Sync yazdığı dokümanlara <code className="px-1 rounded bg-black/10">companyId</code> tag'i koymuyor olabilir.
+                  Sync makinasındaki <code className="px-1 rounded bg-black/10">.env</code> dosyasına{' '}
+                  <code className="px-1 rounded bg-black/10">CEOMED_COMPANY_ID</code> ekleyip{' '}
+                  <code className="px-1 rounded bg-black/10">node backfillCompanyId.js</code> bir kere çalıştırılmalı
+                  (eski tag'siz kayıtlar tag'lenir, yeni kayıtlar otomatik tag'lenmeye başlar).
+                </p>
+              </>
+            ) : (
+              <p className="text-sm">
+                {recordStatusFilter === 'pending'
+                  ? 'Onay bekleyen irsaliye yok.'
+                  : recordStatusFilter === 'approved'
+                  ? 'Onaylanan irsaliye yok.'
+                  : recordStatusFilter === 'rejected'
+                  ? 'Reddedilen irsaliye yok.'
+                  : recordStatusFilter === 'deleted'
+                  ? 'Silinen irsaliye yok.'
+                  : 'Filtre sonucu boş.'}
+              </p>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
             {filtered.map((i) => {
-              const match = hospitalByCari.get((i.cariKodu || '').trim().toUpperCase());
+              const cari = (i.cariKodu || '').trim().toUpperCase();
+              const hospitalMatch = hospitalByCari.get(cari);
+              const depotMatch = depotByCari.get(cari);
               const statusBadge =
                 i.status === 'approved'
                   ? { text: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' }
@@ -547,7 +637,7 @@ export default function CeomedIrsaliyePanel() {
       </div>
 
       {/* Detay Dialog */}
-      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setTargetHospitalId(''); } }}>
+      <Dialog open={!!selected} onOpenChange={(o) => { if (!o) { setSelected(null); setTargetHospitalId(''); setTargetDepotId(''); } }}>
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>

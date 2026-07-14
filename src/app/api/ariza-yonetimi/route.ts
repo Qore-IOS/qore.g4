@@ -75,6 +75,7 @@ export async function GET(request: NextRequest) {
     // Pagination
     const page = parseInt(searchParams.get('page') || '1', 10);
     const limit = parseInt(searchParams.get('limit') || '20', 10);
+    const exportAll = searchParams.get('all') === '1';
 
     // Fetch all reports.
     // NOTE: orderBy('openedAt') hides documents where openedAt is missing.
@@ -152,16 +153,18 @@ export async function GET(request: NextRequest) {
 
     // Pagination
     const totalFiltered = filteredReports.length;
-    const totalPages = Math.ceil(totalFiltered / limit);
+    const totalPages = exportAll ? 1 : Math.ceil(totalFiltered / limit);
     const startIndex = (page - 1) * limit;
-    const paginatedReports = filteredReports.slice(startIndex, startIndex + limit);
+    const paginatedReports = exportAll
+      ? filteredReports
+      : filteredReports.slice(startIndex, startIndex + limit);
 
     return NextResponse.json({
       success: true,
       data: paginatedReports,
       pagination: {
-        page,
-        limit,
+        page: exportAll ? 1 : page,
+        limit: exportAll ? totalFiltered : limit,
         totalFiltered,
         totalPages,
       },

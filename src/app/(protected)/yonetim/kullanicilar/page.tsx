@@ -14,9 +14,11 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
@@ -75,6 +77,8 @@ const DEFAULT_ROLE_VIEW_PRESETS: Partial<Record<string, AppView[]>> = {
   lojistik_sorumlusu: ['arama', 'kullanici-talepleri'],
   satin_alma: ['arama', 'kullanici-talepleri'],
   driver: ['arama', 'kullanici-talepleri'],
+  // Sarf dağıtım personeli /sarf-teslimat ekranına kilitli; ek panel izni gerekmez.
+  sarf_dagitim_personeli: [],
 };
 
 export default function KullaniciPanel() {
@@ -85,6 +89,7 @@ export default function KullaniciPanel() {
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
   const [companies, setCompanies] = useState<Company[]>([]);
+  const [labGroups, setLabGroups] = useState<{ id: string; name: string }[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -94,12 +99,14 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [uSnap, hSnap, dSnap, pSnap, cSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'companies')),
+      const [uSnap, hSnap, dSnap, pSnap, cSnap, lgSnap] = await Promise.all([
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        // companies — SuperAdmin all, normal user own doc only (special rule)
+        isSuperAdmin ? getDocs(collection(db, 'companies')) : Promise.resolve({ docs: [] } as any),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin)),
       ]);
       setUsers(filterByCompanyScope(
         uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)),
@@ -117,6 +124,7 @@ export default function KullaniciPanel() {
         isSuperAdmin
       ));
       setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
@@ -146,6 +154,7 @@ export default function KullaniciPanel() {
       setCurrentUser({
         ...user,
         primaryLaboratories: user.primaryLaboratories || [],
+        assignedLabGroups: user.assignedLabGroups || [],
         notificationPreferences: (user.notificationPreferences || []) as NotificationTypeUI[],
       });
     } else {
@@ -156,6 +165,7 @@ export default function KullaniciPanel() {
         notificationsEnabled: false,
         notificationPreferences: [],
         primaryLaboratories: [],
+        assignedLabGroups: [],
       });
     }
     setPassword('');
@@ -190,6 +200,7 @@ export default function KullaniciPanel() {
       primaryLaboratories: validPrimaryLabs,
       assignedDepots: currentUser.assignedDepots,
       assignedBrands: currentUser.assignedBrands,
+      assignedLabGroups: currentUser.assignedLabGroups,
       phoneNumber: currentUser.phoneNumber || '',
       notificationsEnabled: currentUser.notificationsEnabled ?? false,
       notificationPreferences: currentUser.notificationsEnabled ? (currentUser.notificationPreferences || []) : [],
@@ -286,23 +297,31 @@ export default function KullaniciPanel() {
     : null;
 
   return (
-    <>
-      <div className="dashboard-neu-page p-4 md:p-6 space-y-4 md:space-y-6 min-h-screen">
-        <BackButton fallback="/yonetim" />
-
-        <Card className="glass-card border-border/60 shadow-xl">
-          <CardHeader className="space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <CardTitle className="text-2xl font-semibold tracking-tight flex items-center gap-2">
-                  <Users className="h-6 w-6 text-teal-500" />
-                  Kullanıcı Yönetimi
-                </CardTitle>
-                <CardDescription className="mt-1">
-                  Kullanıcıları uygulamanın geri kalanındaki tasarıma uygun şekilde yönetin; rol, firma ve panel yetkilerini tek noktadan düzenleyin.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
+    <YonetimShell>
+      <YonetimHeader
+        title="Kullanıcı Yönetimi"
+        description="Rol, firma ve panel yetkilerini tek noktadan düzenleyin."
+        backHref="/yonetim/tanimlar"
+      />
+      <YonetimCard>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span
+                style={{
+                  width: 28, height: 28, borderRadius: 8,
+                  background: 'rgba(20,184,166,0.18)', color: '#14b8a6',
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                }}
+              >
+                <Users size={14} />
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Kullanıcılar
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
                 {currentUserProfile?.role === 'admin' && !users.some(u => u.role === 'super_admin') && (
                   <Button
                     variant="outline"
@@ -356,9 +375,8 @@ export default function KullaniciPanel() {
                 </CardContent>
               </Card>
             </div>
-          </CardHeader>
 
-          <CardContent>
+          <div className="pt-2">
             {isLoading ? (
               <div className="flex justify-center p-8"><Loader2 className="h-6 w-6 animate-spin" /></div>
             ) : (
@@ -408,9 +426,8 @@ export default function KullaniciPanel() {
                 </ScrollArea>
               </div>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </div>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="max-w-7xl w-[96vw] p-0 overflow-hidden max-h-[92vh] flex flex-col">
@@ -444,6 +461,7 @@ export default function KullaniciPanel() {
                       <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="teknik_lojistik">Teknik Lojistik</SelectItem>
                       <SelectItem value="satin_alma">Satın Alma</SelectItem>
+                      <SelectItem value="sarf_dagitim_personeli">Sarf Dağıtım Personeli</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
@@ -477,13 +495,11 @@ export default function KullaniciPanel() {
                   maxLength={8}
                 />
 
-                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen') && (
-                  <Input
-                    placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
-                    value={currentUser.phoneNumber || ''}
-                    onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
-                  />
-                )}
+                <Input
+                  placeholder="WhatsApp Telefon Numarası (örn: +905xxxxxxxxx)"
+                  value={currentUser.phoneNumber || ''}
+                  onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
+                />
 
                 <ScrollArea className="h-40 border rounded-md p-2">
                   <h4 className="font-medium text-sm mb-2">Atanan Markalar</h4>
@@ -628,6 +644,35 @@ export default function KullaniciPanel() {
                       </div>
                     ))}
                   </ScrollArea>
+
+                  {currentUser.role === 'lojistik_sorumlusu' && (
+                    <ScrollArea className="flex-1 min-h-0 border rounded-md p-2 bg-teal-50/50 dark:bg-teal-950/20">
+                      <h4 className="font-medium text-sm mb-2 text-teal-700 dark:text-teal-400">Atanan Laboratuvar Grupları</h4>
+                      {labGroups.length === 0 ? (
+                        <p className="text-xs text-muted-foreground italic">Henüz laboratuvar grubu tanımlanmamış</p>
+                      ) : (
+                        labGroups.map(lg => {
+                          const checked = currentUser.assignedLabGroups?.includes(lg.name)
+                            || currentUser.assignedLabGroups?.includes(lg.id);
+                          return (
+                            <div key={lg.id} className="flex items-center space-x-2 mb-1">
+                              <Checkbox
+                                id={`lg-${lg.id}`}
+                                checked={checked}
+                                onCheckedChange={(isChecked) => {
+                                  const currentGroups = (currentUser.assignedLabGroups || [])
+                                    .filter(k => k !== lg.id && k !== lg.name);
+                                  const newGroups = isChecked ? [...currentGroups, lg.name] : currentGroups;
+                                  setCurrentUser({ ...currentUser, assignedLabGroups: newGroups });
+                                }}
+                              />
+                              <label htmlFor={`lg-${lg.id}`} className="text-sm">{lg.name}</label>
+                            </div>
+                          );
+                        })
+                      )}
+                    </ScrollArea>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -639,6 +684,6 @@ export default function KullaniciPanel() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </>
+    </YonetimShell>
   );
 }

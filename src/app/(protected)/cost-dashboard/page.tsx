@@ -51,12 +51,12 @@ export default function CostDashboardPage() {
       icon: BarChart3,
       label: 'Maliyet Gözlem',
       description: 'Envanter maliyeti, trendler ve marka bazlı analizler',
-      href: '/cost-dashboard/gozlem',
+      href: '/maliyet-gozlem',
     },
   ];
 
   return (
-    <div className="cihaz-shell min-h-screen">
+    <div className="cihaz-shell maliyet-clay min-h-screen">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-8 sm:pt-12 pb-24">
         {/* Header */}
         <div className="flex items-center gap-3 mb-8 sm:mb-12 px-1">

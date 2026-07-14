@@ -24,7 +24,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onPeripheralOrderCreatedSendMail = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onShortcutRunRequestCreated = exports.shortcutScheduler = exports.onBankTransactionWritten = exports.backfillCompanyStats = exports.dailyStatsRollover = exports.onFaultWritten = exports.onShipmentWritten = exports.onTuketimWritten = exports.onDepoStokWritten = exports.onUserClaimSync = exports.onDepoStokAccepted = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -43,8 +43,28 @@ Object.defineProperty(exports, "nfcLoginWithSerial", { enumerable: true, get: fu
 var actionFormEmailNotification_1 = require("./actionFormEmailNotification");
 Object.defineProperty(exports, "onTeknikServisFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onTeknikServisFormCreated; } });
 Object.defineProperty(exports, "onAplikasyonFormCreated", { enumerable: true, get: function () { return actionFormEmailNotification_1.onAplikasyonFormCreated; } });
+var faultReportNotification_1 = require("./faultReportNotification");
+Object.defineProperty(exports, "onDeviceFaultReportResolved", { enumerable: true, get: function () { return faultReportNotification_1.onDeviceFaultReportResolved; } });
 var orderCreatedPeripheralEmail_1 = require("./orderCreatedPeripheralEmail");
 Object.defineProperty(exports, "onPeripheralOrderCreatedSendMail", { enumerable: true, get: function () { return orderCreatedPeripheralEmail_1.onPeripheralOrderCreatedSendMail; } });
+var peripheralOrderWhatsApp_1 = require("./peripheralOrderWhatsApp");
+Object.defineProperty(exports, "onPeripheralOrderCreatedSendWhatsApp", { enumerable: true, get: function () { return peripheralOrderWhatsApp_1.onPeripheralOrderCreatedSendWhatsApp; } });
+var peripheralOrderReconcile_1 = require("./peripheralOrderReconcile");
+Object.defineProperty(exports, "onDepoStokAccepted", { enumerable: true, get: function () { return peripheralOrderReconcile_1.onDepoStokAccepted; } });
+var userClaimSync_1 = require("./userClaimSync");
+Object.defineProperty(exports, "onUserClaimSync", { enumerable: true, get: function () { return userClaimSync_1.onUserClaimSync; } });
+var companyStatsAggregation_1 = require("./companyStatsAggregation");
+Object.defineProperty(exports, "onDepoStokWritten", { enumerable: true, get: function () { return companyStatsAggregation_1.onDepoStokWritten; } });
+Object.defineProperty(exports, "onTuketimWritten", { enumerable: true, get: function () { return companyStatsAggregation_1.onTuketimWritten; } });
+Object.defineProperty(exports, "onShipmentWritten", { enumerable: true, get: function () { return companyStatsAggregation_1.onShipmentWritten; } });
+Object.defineProperty(exports, "onFaultWritten", { enumerable: true, get: function () { return companyStatsAggregation_1.onFaultWritten; } });
+Object.defineProperty(exports, "dailyStatsRollover", { enumerable: true, get: function () { return companyStatsAggregation_1.dailyStatsRollover; } });
+Object.defineProperty(exports, "backfillCompanyStats", { enumerable: true, get: function () { return companyStatsAggregation_1.backfillCompanyStats; } });
+var cariReconciliation_1 = require("./cariReconciliation");
+Object.defineProperty(exports, "onBankTransactionWritten", { enumerable: true, get: function () { return cariReconciliation_1.onBankTransactionWritten; } });
+var shortcutScheduler_1 = require("./shortcutScheduler");
+Object.defineProperty(exports, "shortcutScheduler", { enumerable: true, get: function () { return shortcutScheduler_1.shortcutScheduler; } });
+Object.defineProperty(exports, "onShortcutRunRequestCreated", { enumerable: true, get: function () { return shortcutScheduler_1.onShortcutRunRequestCreated; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
@@ -121,14 +141,24 @@ exports.onNotificationCreated = functions
         // --- 1. Collect tokens from TWO sources ---
         const tokenMap = new Map();
         const notificationType = data.type || '';
-        // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based)
+        // Multi-tenancy: only deliver to users in the same company as the source.
+        // If the notification has no companyId (legacy), don't filter on company.
+        const sourceCompanyId = typeof data.companyId === 'string' && data.companyId.trim()
+            ? data.companyId.trim()
+            : null;
+        // Source A: pushTokens matching targets (role-based, lab-based, depot-based, user-based).
+        // pushTokens may carry companyId (Faz 1 backfill); if available, prefilter by it to
+        // avoid cross-tenant token reads. We still re-check in the final filter via the user doc.
         const targetChunks = chunk(data.targets, 30);
         for (const targetChunk of targetChunks) {
-            const tokensSnap = await db
+            let pushTokensQuery = db
                 .collection('pushTokens')
                 .where('membershipKeys', 'array-contains-any', targetChunk)
-                .where('enabled', '==', true)
-                .get();
+                .where('enabled', '==', true);
+            if (sourceCompanyId) {
+                pushTokensQuery = pushTokensQuery.where('companyId', '==', sourceCompanyId);
+            }
+            const tokensSnap = await pushTokensQuery.get();
             for (const tokenDoc of tokensSnap.docs) {
                 const td = tokenDoc.data();
                 if (td.token && !tokenMap.has(td.token)) {
@@ -142,11 +172,14 @@ exports.onNotificationCreated = functions
         if (notificationType && notificationType !== 'custom') {
             // First collect target UIDs to filter Source B
             const targetUids = await collectTargetUidsFromTargets(data.targets, (_a = data.actor) === null || _a === void 0 ? void 0 : _a.uid);
-            const prefsSnap = await db
+            let prefsQuery = db
                 .collection('users')
                 .where('notificationsEnabled', '==', true)
-                .where('notificationPreferences', 'array-contains', notificationType)
-                .get();
+                .where('notificationPreferences', 'array-contains', notificationType);
+            if (sourceCompanyId) {
+                prefsQuery = prefsQuery.where('companyId', '==', sourceCompanyId);
+            }
+            const prefsSnap = await prefsQuery.get();
             // Collect UIDs of users who opted into this notification type AND match target audience
             const optedInUids = [];
             for (const userDoc of prefsSnap.docs) {
@@ -209,7 +242,7 @@ exports.onNotificationCreated = functions
             .filter((t) => t.startsWith('user:'))
             .map((t) => t.split(':')[1])
             .filter(Boolean));
-        // --- 2. Filter tokens by user notification preferences ---
+        // --- 2. Filter tokens by user notification preferences + companyId ---
         // Fetch user profiles for preference-based filtering
         const uniqueUids = new Set(tokens.map(t => t.uid).filter((uid) => !!uid));
         const userPrefsMap = new Map();
@@ -221,22 +254,34 @@ exports.onNotificationCreated = functions
             for (const userDoc of docs) {
                 if (userDoc.exists) {
                     const ud = userDoc.data();
+                    const userCompanyId = typeof ud.companyId === 'string' && ud.companyId.trim()
+                        ? ud.companyId.trim()
+                        : null;
                     userPrefsMap.set(userDoc.id, {
                         enabled: ud.notificationsEnabled !== false,
                         prefs: ud.notificationPreferences || [],
                         name: ud.displayName || ud.name || ud.email || userDoc.id,
                         role: ud.role || 'unknown',
+                        companyId: userCompanyId,
                     });
                 }
             }
         }
-        // Filter: remove tokens for users who explicitly disabled notifications or excluded this type
+        // Filter: remove tokens for users who explicitly disabled notifications,
+        // excluded this type, or belong to a different tenant than the source.
+        let removedByCompanyFilter = 0;
         const filteredTokens = tokens.filter(t => {
             if (!t.uid)
                 return true; // No uid = allow (anonymous token)
             const prefs = userPrefsMap.get(t.uid);
             if (!prefs)
                 return true; // No user doc found = allow
+            // Multi-tenancy isolation: if both source and user carry a companyId,
+            // they must match. Either side missing → fall through (legacy compat).
+            if (sourceCompanyId && prefs.companyId && prefs.companyId !== sourceCompanyId) {
+                removedByCompanyFilter++;
+                return false;
+            }
             // User explicitly disabled all notifications
             if (!prefs.enabled)
                 return false;
@@ -252,6 +297,10 @@ exports.onNotificationCreated = functions
             }
             return true;
         });
+        if (removedByCompanyFilter > 0) {
+            firebase_functions_1.logger.info(`[fanOut] Company filter removed ${removedByCompanyFilter} tokens for ${notificationId} (sourceCompanyId=${sourceCompanyId})`);
+        }
+        logEntry.tokensFilteredByCompany = removedByCompanyFilter;
         logEntry.tokensAfterPrefs = filteredTokens.length;
         logEntry.tokensFilteredByPrefs = tokens.length - filteredTokens.length;
         if (filteredTokens.length === 0) {
@@ -446,7 +495,12 @@ exports.faultInterventionReminder = (0, scheduler_1.onSchedule)({
             const deviceName = data.model || data.deviceName || 'Bilinmeyen Cihaz';
             const labName = data.labName || '';
             const faultId = faultDoc.id;
-            // Create notification for the assigned personnel
+            // Create notification for the assigned personnel.
+            // Propagate companyId from the source fault so the notification
+            // stays scoped to the same tenant (Faz 6 Security Rules need this).
+            const sourceCompanyId = typeof data.companyId === 'string' && data.companyId.trim()
+                ? data.companyId.trim()
+                : null;
             const notificationData = {
                 type: 'fault_reminder',
                 title: `Arıza Hatırlatma: ${deviceName}`,
@@ -468,6 +522,8 @@ exports.faultInterventionReminder = (0, scheduler_1.onSchedule)({
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 readBy: [],
             };
+            if (sourceCompanyId)
+                notificationData.companyId = sourceCompanyId;
             await db.collection('notifications').add(notificationData);
             // Update the fault document to track last reminder time
             await faultDoc.ref.update({
@@ -613,7 +669,10 @@ exports.maintenanceUpcomingReminder = (0, scheduler_1.onSchedule)({
             const roleLabel = role === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
             const dueDateStr = nextDue.toLocaleDateString('tr-TR', { timeZone: 'Europe/Istanbul' });
             const taskName = plan.taskName || 'Periyodik bakım';
-            await db.collection('notifications').add({
+            const planCompanyId = typeof plan.companyId === 'string' && plan.companyId.trim()
+                ? plan.companyId.trim()
+                : null;
+            const maintNotification = {
                 type: 'maintenance_reminder',
                 title: `Bakım Hatırlatma: ${deviceName}`,
                 message: `${labName ? labName + ' - ' : ''}${deviceName} cihazı için "${taskName}" (${roleLabel}) görevi ${daysUntilDue} gün içinde (${dueDateStr}) planlanmış durumda. Lütfen kontrol ediniz.`,
@@ -636,7 +695,10 @@ exports.maintenanceUpcomingReminder = (0, scheduler_1.onSchedule)({
                 channel: 'push',
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 readBy: [],
-            });
+            };
+            if (planCompanyId)
+                maintNotification.companyId = planCompanyId;
+            await db.collection('notifications').add(maintNotification);
             await planDoc.ref.update({
                 lastMaintenanceReminderAt: admin.firestore.FieldValue.serverTimestamp(),
             });

@@ -2,57 +2,43 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, orderBy, query, Timestamp, getDocs } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+import { collection, onSnapshot, orderBy, query, Timestamp, getDocs, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-  CardFooter,
-} from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Badge } from '@/components/ui/badge';
-import { Loader2, AlertTriangle, CheckCircle, Server, Clock, ShieldCheck, RotateCcw, Building, ChevronsUpDown, Check as CheckIcon, Calendar, Package, ChevronDown, ChevronUp, Wrench, FlaskConical, Phone, MapPin, Timer, TrendingUp, Layers } from 'lucide-react';
 import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { classifyStopFault, type StopFaultType } from '@/lib/stop-fault';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Building, ChevronsUpDown, Check as CheckIcon } from 'lucide-react';
 import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import {
-  PieChart,
-  Pie,
-  Cell,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  ClayPage,
+  PageHead,
+  Card,
+  CardHead,
+  KpiTile,
+  Pill,
+  Segmented,
+  GhostBtn,
+  HBar,
+  Donut,
+  LineChart,
   Legend,
-} from 'recharts';
+  StatNum,
+  ClayLoader,
+  C,
+  AC,
+  PAL,
+  useMode,
+  fmtInt,
+} from '@/components/cihaz-yonetimi/clay-kit';
 
 // Fault definition type
 interface FaultDefinition {
@@ -61,17 +47,14 @@ interface FaultDefinition {
   type: 'teknik_servis' | 'aplikasyon';
 }
 
-// Chart colors
-const COLORS = {
-  teknik: '#3b82f6', // blue
-  aplikasyon: '#a855f7', // purple
-  kurum: '#22c55e', // green
-  telefon: '#f59e0b', // amber
-};
-
-const PIE_COLORS = ['#3b82f6', '#a855f7', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#f97316', '#8b5cf6'];
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
 export default function ArizaIstatistikleriPage() {
+  const router = useRouter();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
+  const gap = mobile ? 12 : 16;
+
   const [reports, setReports] = useState<any[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
@@ -80,6 +63,12 @@ export default function ArizaIstatistikleriPage() {
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
   const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
+
+  // Arıza istatistik penceresi — varsayılan son 365 gün (yıllık trend için).
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 365,
+    storageKey: 'ariza-istatistik:range',
+  });
 
   const [selectedLabId, setSelectedLabId] = useState<string>('all');
   const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
@@ -92,6 +81,8 @@ export default function ArizaIstatistikleriPage() {
   const [selectedProductGroup, setSelectedProductGroup] = useState<string>('all');
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
+  const [isBrandPopoverOpen, setIsBrandPopoverOpen] = useState(false);
+  const [isGroupPopoverOpen, setIsGroupPopoverOpen] = useState(false);
   const [expandedLabs, setExpandedLabs] = useState<Set<string>>(new Set());
   const [selectedStopType, setSelectedStopType] = useState<StopFaultType>('e_stop');
   const [selectedStopLabId, setSelectedStopLabId] = useState<string | null>(null);
@@ -100,9 +91,17 @@ export default function ArizaIstatistikleriPage() {
   const TARGET_RESOLUTION_TIME = 480; // 8 hours in minutes
 
   useEffect(() => {
-    const reportsQuery = query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'));
-    const devicesQuery = query(collection(db, 'devices'));
-    const hospitalsQuery = query(collection(db, 'hospitals'), orderBy('name', 'asc'));
+    // Tarih penceresi + hard cap — yoksa firma 5 yıllık veriyi tek seferde indirir.
+    const reportsQuery = scopedQuery(
+      'deviceFaultReports',
+      currentCompanyId,
+      isSuperAdmin,
+      ...dateFilter.constraints('openedAt'),
+      orderBy('openedAt', 'desc'),
+      limit(5000),
+    );
+    const devicesQuery = scopedQuery('devices', currentCompanyId, isSuperAdmin);
+    const hospitalsQuery = scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'));
 
     const unsubReports = onSnapshot(reportsQuery,
         (snapshot) => {
@@ -153,14 +152,14 @@ export default function ArizaIstatistikleriPage() {
     );
 
     // Fetch product codes
-    getDocs(collection(db, 'productCodes')).then(snapshot => {
+    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setProductCodes(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
     }).catch(err => {
       console.error('Error fetching product codes:', err);
     });
 
     // Fetch fault definitions
-    getDocs(collection(db, 'faultDefinitions')).then(snapshot => {
+    getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin)).then(snapshot => {
       setFaultDefinitions(filterByCompanyScope(
         snapshot.docs.map(d => ({ id: d.id, ...d.data() } as FaultDefinition)),
         currentCompanyId,
@@ -175,7 +174,7 @@ export default function ArizaIstatistikleriPage() {
         unsubDevices();
         unsubHospitals();
     };
-  }, [toast, currentCompanyId, isSuperAdmin]);
+  }, [toast, currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   // Fetch minMaxRules for all hospitals
   useEffect(() => {
@@ -307,8 +306,8 @@ export default function ArizaIstatistikleriPage() {
   const faultTypePieData = useMemo(() => {
     if (stats.teknikCount === 0 && stats.aplikasyonCount === 0) return [];
     return [
-      { name: 'Teknik Servis', value: stats.teknikCount, color: COLORS.teknik },
-      { name: 'Aplikasyon', value: stats.aplikasyonCount, color: COLORS.aplikasyon },
+      { name: 'Teknik Servis', value: stats.teknikCount, color: PAL.tech },
+      { name: 'Aplikasyon', value: stats.aplikasyonCount, color: PAL.app },
     ];
   }, [stats.teknikCount, stats.aplikasyonCount]);
 
@@ -316,8 +315,8 @@ export default function ArizaIstatistikleriPage() {
   const interventionTypePieData = useMemo(() => {
     if (stats.kurumCount === 0 && stats.telefonCount === 0) return [];
     return [
-      { name: 'Kurum Ziyareti', value: stats.kurumCount, color: COLORS.kurum },
-      { name: 'Telefonla', value: stats.telefonCount, color: COLORS.telefon },
+      { name: 'Kurum Ziyareti', value: stats.kurumCount, color: PAL.ready },
+      { name: 'Telefonla', value: stats.telefonCount, color: PAL.amber },
     ];
   }, [stats.kurumCount, stats.telefonCount]);
 
@@ -624,572 +623,486 @@ export default function ArizaIstatistikleriPage() {
     };
   }, [filteredReports, hospitals, devices]);
 
-  // Custom tooltip for bar chart
-  const CustomBarTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      return (
-        <div className="bg-popover border rounded-lg p-3 shadow-lg">
-          <p className="font-medium text-sm">{payload[0].payload.fullName}</p>
-          <p className="text-sm text-muted-foreground">{payload[0].value} arıza</p>
-        </div>
-      );
-    }
-    return null;
-  };
+  // ── derived presentation values ──────────────────────────────────────────────
+  const selectedLabName = selectedLabId === 'all'
+    ? 'Tüm Laboratuvarlar'
+    : hospitals.find((lab) => lab.id === selectedLabId)?.name || 'Laboratuvar Seç…';
+
+  const headSub = `${format(dateFilter.range.from, 'd MMM yyyy', { locale: tr })} – ${format(dateFilter.range.to, 'd MMM yyyy', { locale: tr })} · ${selectedLabName}`;
+
+  const avgFillPct = Math.min(100, (stats.avgResolutionTime / (TARGET_RESOLUTION_TIME * 1.5)) * 100);
+  const avgBarColor = stats.avgResolutionTime > TARGET_RESOLUTION_TIME
+    ? C.danger
+    : stats.avgResolutionTime > TARGET_RESOLUTION_TIME * 0.8
+      ? C.amber
+      : C.waterDeep;
+
+  const stopTotal = stopStats.counts.e_stop + stopStats.counts.s_stop + stopStats.counts.normal_stop;
+  const stopMaxKey = (['e_stop', 's_stop', 'normal_stop'] as StopFaultType[])
+    .reduce((m, k) => (stopStats.counts[k] > stopStats.counts[m] ? k : m), 'e_stop' as StopFaultType);
+
+  const interventionTotal = stats.kurumCount + stats.telefonCount;
+  const kurumPct = interventionTotal > 0 ? Math.round((stats.kurumCount / interventionTotal) * 100) : 0;
 
   if (loading) {
     return (
-      <div className="flex h-full w-full items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin" />
-        <span className="ml-2">İstatistikler yükleniyor...</span>
-      </div>
+      <ClayPage>
+        <ClayLoader label="İstatistikler yükleniyor…" />
+      </ClayPage>
     );
   }
 
+  const STOP_LABELS: { key: StopFaultType; label: string }[] = [
+    { key: 'e_stop', label: 'E Stop' },
+    { key: 's_stop', label: 'S Stop' },
+    { key: 'normal_stop', label: 'Normal Stop' },
+  ];
+
   return (
-    <div className="device-module-page p-4 space-y-6">
-      {/* Header with filters */}
-      <div className="flex justify-end items-center flex-wrap gap-4">
-        <div className="flex items-center gap-2 flex-wrap">
-          <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                role="combobox"
-                aria-expanded={isLabPopoverOpen}
-                className="w-[250px] justify-between cihaz-tool-item border-0 shadow-none"
-                style={{ color: 'var(--dashboard-text)' }}
-              >
-                {selectedLabId === 'all'
-                  ? 'Tüm Laboratuvarlar'
-                  : hospitals.find((lab) => lab.id === selectedLabId)?.name || 'Laboratuvar Seç...'}
-                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[250px] p-0">
-              <Command>
-                <CommandInput placeholder="Laboratuvar ara..." />
-                <CommandList>
-                  <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                  <CommandGroup>
-                    <CommandItem
-                      key="all"
-                      value="all"
-                      onSelect={() => {
-                        setSelectedLabId('all');
-                        setIsLabPopoverOpen(false);
-                      }}
-                    >
-                      <CheckIcon className={cn("mr-2 h-4 w-4", selectedLabId === 'all' ? "opacity-100" : "opacity-0")} />
-                      Tüm Laboratuvarlar
-                    </CommandItem>
-                    {hospitals.map((lab) => (
-                      <CommandItem
-                        key={lab.id}
-                        value={lab.name}
-                        onSelect={() => {
-                          setSelectedLabId(lab.id ?? 'all');
-                          setIsLabPopoverOpen(false);
-                        }}
-                      >
-                        <CheckIcon className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                        {lab.name}
-                      </CommandItem>
-                    ))}
-                  </CommandGroup>
-                </CommandList>
-              </Command>
-            </PopoverContent>
-          </Popover>
-        </div>
-      </div>
+    <ClayPage>
+      <PageHead
+        ico="alert"
+        title="Arıza İstatistikleri"
+        sub={headSub}
+        onBack={() => router.push('/ariza-yonetimi')}
+        mobile={mobile}
+        right={
+          <Segmented
+            value={selectedFaultType}
+            onChange={(v) => setSelectedFaultType(v)}
+            options={[
+              { v: 'all', l: 'Tümü' },
+              { v: 'teknik_servis', l: 'Teknik' },
+              { v: 'aplikasyon', l: 'Aplikasyon' },
+            ]}
+          />
+        }
+      />
 
-      {/* KPI Cards Row */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Total Faults */}
-        <Card className="glass-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              Toplam Arıza Sayısı
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold">{stats.totalFaults}</div>
-            <div className="flex gap-4 mt-2 text-sm text-muted-foreground">
-              <span className="flex items-center gap-1">
-                <AlertTriangle className="h-4 w-4 text-amber-500" />
-                {stats.openFaults} açık
-              </span>
-              <span className="flex items-center gap-1">
-                <CheckCircle className="h-4 w-4 text-green-500" />
-                {stats.closedFaults} çözüldü
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Average Resolution Time */}
-        <Card className="glass-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Clock className="h-5 w-5 text-primary" />
-              Ortalama Çözüm Süresi
-            </CardTitle>
-            <CardDescription>Hedef: {TARGET_RESOLUTION_TIME} dakika</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold">{stats.avgResolutionTime.toFixed(0)}</div>
-            <p className="text-sm text-muted-foreground">dakika</p>
-            <div className="relative h-2 w-full bg-muted rounded-full mt-2">
-              <div
-                className={cn("h-2 rounded-full transition-all duration-500", performanceData.colorClass)}
-                style={{ width: `${Math.min(100, (stats.avgResolutionTime / (TARGET_RESOLUTION_TIME * 1.5)) * 100)}%` }}
+      <div style={{ display: 'flex', flexDirection: 'column', gap }}>
+        {/* Filters: date range + lab selector */}
+        <Card pad={mobile ? 14 : 16}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+              <DateRangeFilterBar
+                range={dateFilter.range}
+                setRange={dateFilter.setRange}
+                label="İstatistik penceresi"
               />
             </div>
-            <p className={cn("text-xs mt-1", performanceData.isOver ? "text-red-500" : "text-green-500")}>
+            <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
+              <PopoverTrigger asChild>
+                <span>
+                  <GhostBtn onClick={() => setIsLabPopoverOpen((o) => !o)} active={selectedLabId !== 'all'}>
+                    <Building size={16} />
+                    <span style={{ maxWidth: mobile ? 150 : 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedLabName}</span>
+                    <ChevronsUpDown size={15} style={{ opacity: 0.5 }} />
+                  </GhostBtn>
+                </span>
+              </PopoverTrigger>
+              <PopoverContent className="w-[260px] p-0" align="end">
+                <Command>
+                  <CommandInput placeholder="Laboratuvar ara…" />
+                  <CommandList>
+                    <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
+                    <CommandGroup>
+                      <CommandItem
+                        key="all"
+                        value="all"
+                        onSelect={() => { setSelectedLabId('all'); setIsLabPopoverOpen(false); }}
+                      >
+                        <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedLabId === 'all' ? 1 : 0 }} />
+                        Tüm Laboratuvarlar
+                      </CommandItem>
+                      {hospitals.map((lab) => (
+                        <CommandItem
+                          key={lab.id}
+                          value={lab.name}
+                          onSelect={() => { setSelectedLabId(lab.id ?? 'all'); setIsLabPopoverOpen(false); }}
+                        >
+                          <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedLabId === lab.id ? 1 : 0 }} />
+                          {lab.name}
+                        </CommandItem>
+                      ))}
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
+        </Card>
+
+        {/* KPI Row */}
+        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : 'repeat(3,1fr)', gap }}>
+          <KpiTile
+            ico="shield"
+            label="Toplam Arıza Sayısı"
+            value={stats.totalFaults}
+            unit="arıza"
+            foot={
+              <>
+                <span style={{ color: '#9A6F1E' }}>{fmtInt(stats.openFaults)} açık</span>
+                <span style={{ color: C.ink3 }}>·</span>
+                <span style={{ color: C.waterDeep }}>{fmtInt(stats.closedFaults)} çözüldü</span>
+              </>
+            }
+          />
+
+          {/* Average resolution time — danger card with progress bar */}
+          <Card tone="danger" pad={16} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Ortalama Çözüm Süresi</div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: C.ink3, marginTop: 2 }}>Hedef: {TARGET_RESOLUTION_TIME} dakika</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 7 }}>
+              <StatNum value={Math.round(stats.avgResolutionTime)} size={30} color={C.danger} />
+              <span style={{ fontSize: 13, fontWeight: 600, color: C.ink3 }}>dakika</span>
+            </div>
+            <div style={{ height: 9, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: `${avgFillPct}%`, borderRadius: 99, background: `linear-gradient(90deg, ${avgBarColor}cc, ${avgBarColor})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35)', transition: `width 500ms ${EASE}` }} />
+            </div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: performanceData.isOver ? C.danger : C.waterDeep }}>
               {performanceData.isOver
                 ? `Hedefin %${performanceData.deviation.toFixed(1)} üzerinde`
-                : `Hedefin %${Math.abs(performanceData.deviation).toFixed(1)} altında`
-              }
-            </p>
-          </CardContent>
-        </Card>
-
-        {/* Faults Exceeding Target */}
-        <Card className="glass-card">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Timer className="h-5 w-5 text-destructive" />
-              Hedef Süreyi Aşan
-            </CardTitle>
-            <CardDescription>8 saati aşan arızalar</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-bold text-destructive">{stats.faultsExceedingTarget}</div>
-            <p className="text-sm text-muted-foreground">
-              {stats.closedFaults > 0
-                ? `Çözülen arızaların %${((stats.faultsExceedingTarget / stats.closedFaults) * 100).toFixed(1)}'i`
-                : 'Henüz çözülen arıza yok'
-              }
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Stop Fault Statistics */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <AlertTriangle className="h-5 w-5 text-red-500" />
-            Stop Arızası İstatistikleri
-          </CardTitle>
-          <CardDescription>E Stop, S Stop ve Normal Stop kayıtları</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {([
-              { key: 'e_stop' as StopFaultType, label: 'E Stop' },
-              { key: 's_stop' as StopFaultType, label: 'S Stop' },
-              { key: 'normal_stop' as StopFaultType, label: 'Normal Stop' },
-            ]).map((item) => (
-              <button
-                key={item.key}
-                type="button"
-                onClick={() => {
-                  setSelectedStopType(item.key);
-                  setSelectedStopLabId(null);
-                }}
-                className="cihaz-tool-item w-full flex items-center justify-between px-4 py-2.5 text-sm font-semibold rounded-xl transition-all active:scale-[0.99]"
-                style={{
-                  color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
-                  background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
-                  border: selectedStopType === item.key ? '1px solid color-mix(in srgb, var(--dashboard-accent) 30%, transparent)' : undefined,
-                }}
-              >
-                <span>{item.label}</span>
-                <span
-                  className="inline-flex items-center justify-center min-w-7 h-7 px-2 rounded-full text-xs font-bold"
-                  style={{
-                    background: selectedStopType === item.key ? 'color-mix(in srgb, var(--dashboard-accent) 18%, white)' : 'var(--dashboard-pressed)',
-                    color: selectedStopType === item.key ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)',
-                  }}
-                >
-                  {stopStats.counts[item.key]}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="rounded-lg border p-3 space-y-2">
-              <p className="text-sm font-semibold">Laboratuvar Dağılımı</p>
-              <div className="space-y-1 max-h-56 overflow-y-auto">
-                {stopStats.labsByType[selectedStopType].length === 0 && (
-                  <p className="text-xs text-muted-foreground">Bu tipte kayıt yok.</p>
-                )}
-                {stopStats.labsByType[selectedStopType].map((lab) => (
-                  <button
-                    key={lab.labId}
-                    type="button"
-                    onClick={() => setSelectedStopLabId(lab.labId)}
-                    className={cn(
-                      'w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center justify-between',
-                      selectedStopLabId === lab.labId ? 'bg-muted' : 'hover:bg-muted/60'
-                    )}
-                  >
-                    <span>{lab.labName}</span>
-                    <Badge variant="outline">{lab.count}</Badge>
-                  </button>
-                ))}
-              </div>
+                : `Hedefin %${Math.abs(performanceData.deviation).toFixed(1)} altında`}
             </div>
-            <div className="rounded-lg border p-3 space-y-2">
-              <p className="text-sm font-semibold">Cihaz Dağılımı</p>
-              <div className="space-y-1 max-h-56 overflow-y-auto">
-                {!selectedStopLabId && (
-                  <p className="text-xs text-muted-foreground">Cihaz listesini görmek için soldan laboratuvar seçin.</p>
-                )}
-                {selectedStopLabId && (
-                  Array.from(stopStats.devicesByTypeAndLab[selectedStopType].get(selectedStopLabId)?.values() || [])
-                    .sort((a, b) => b.count - a.count)
-                    .map((device) => (
-                      <div key={device.deviceId} className="px-2 py-1.5 rounded-md text-sm flex items-center justify-between hover:bg-muted/60">
-                        <span className="truncate pr-2">{device.model}</span>
-                        <Badge variant="outline">{device.count}</Badge>
-                      </div>
-                    ))
-                )}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </Card>
 
-      {/* Fault Type Toggle */}
-      <div className="flex justify-center">
-        <div className="inline-flex rounded-xl p-1.5 cihaz-pressed">
-          <button
-            type="button"
-            onClick={() => setSelectedFaultType('all')}
-            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
-            style={{
-              color: selectedFaultType === 'all' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
-              background: selectedFaultType === 'all' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
-            }}
-          >
-            <Layers className="h-4 w-4" />
-            Tümü
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedFaultType('teknik_servis')}
-            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
-            style={{
-              color: selectedFaultType === 'teknik_servis' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
-              background: selectedFaultType === 'teknik_servis' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
-            }}
-          >
-            <Wrench className="h-4 w-4" />
-            Teknik Servis
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedFaultType('aplikasyon')}
-            className="cihaz-tool-item inline-flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-all"
-            style={{
-              color: selectedFaultType === 'aplikasyon' ? 'var(--dashboard-accent)' : 'var(--dashboard-text)',
-              background: selectedFaultType === 'aplikasyon' ? 'color-mix(in srgb, var(--dashboard-accent) 14%, white)' : undefined,
-            }}
-          >
-            <FlaskConical className="h-4 w-4" />
-            Aplikasyon
-          </button>
+          <KpiTile
+            ico="clock"
+            label="Hedef Süreyi Aşan"
+            value={stats.faultsExceedingTarget}
+            unit="arıza"
+            tone="danger"
+            foot={
+              <span>
+                {stats.closedFaults > 0
+                  ? `Çözülen arızaların %${((stats.faultsExceedingTarget / stats.closedFaults) * 100).toFixed(1)}'i`
+                  : 'Henüz çözülen arıza yok'}
+              </span>
+            }
+          />
         </div>
-      </div>
 
-      {/* Charts Row 1: Fault Type Pie + Fault Definitions Bar */}
-      <div className="grid grid-cols-10 gap-6">
-        {/* Fault Type Pie Chart - 30% */}
-        <Card className="col-span-10 md:col-span-3 glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingUp className="h-5 w-5 text-primary" />
-              Arıza Tipi Dağılımı
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="h-64">
+        {/* Stop stats + Intervention type donut */}
+        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : 'minmax(0,1.4fr) minmax(0,1fr)', gap }}>
+          {/* Stop fault statistics */}
+          <Card tone="amber">
+            <CardHead ico="alert" title="Stop Arızası İstatistikleri" sub="E Stop, S Stop ve Normal Stop kayıtları" tone="amber" />
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 12 }}>
+              {STOP_LABELS.map((item) => {
+                const active = selectedStopType === item.key;
+                const highlight = item.key === stopMaxKey && stopStats.counts[item.key] > 0;
+                const cnt = stopStats.counts[item.key];
+                const pct = stopTotal > 0 ? Math.max(2, (cnt / stopTotal) * 100) : 2;
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => { setSelectedStopType(item.key); setSelectedStopLabId(null); }}
+                    style={{
+                      all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'block', padding: '11px 14px',
+                      borderRadius: C.radius,
+                      background: active ? C.surfaceHi : 'transparent',
+                      boxShadow: active ? C.clayInset : 'none',
+                      transition: `all 180ms ${EASE}`,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 7 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 800, color: highlight ? '#9A6F1E' : C.ink1 }}>{item.label}</span>
+                      <span style={{ fontSize: 15, fontWeight: 800, color: highlight ? '#9A6F1E' : C.ink1, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(cnt)}</span>
+                    </div>
+                    <div style={{ height: 14, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: highlight ? `linear-gradient(90deg, ${C.amber}cc, ${C.amber})` : `linear-gradient(90deg, ${C.ink3}aa, ${C.ink3})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35)' }} />
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Lab + device distribution for the selected stop type */}
+            <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : '1fr 1fr', gap: 10, marginTop: 14 }}>
+              <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayInset, padding: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>Laboratuvar Dağılımı</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                  {stopStats.labsByType[selectedStopType].length === 0 && (
+                    <span style={{ fontSize: 12, fontWeight: 600, color: C.ink3 }}>Bu tipte kayıt yok.</span>
+                  )}
+                  {stopStats.labsByType[selectedStopType].map((lab) => {
+                    const on = selectedStopLabId === lab.labId;
+                    return (
+                      <button
+                        key={lab.labId}
+                        type="button"
+                        onClick={() => setSelectedStopLabId(lab.labId)}
+                        style={{
+                          all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                          padding: '7px 10px', borderRadius: C.radiusSm,
+                          background: on ? C.surface2 : 'transparent',
+                          fontSize: 12.5, fontWeight: 700, color: C.ink1,
+                        }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.labName}</span>
+                        <Pill tone="amber">{lab.count}</Pill>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayInset, padding: 12 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: 8 }}>Cihaz Dağılımı</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                  {!selectedStopLabId && (
+                    <span style={{ fontSize: 12, fontWeight: 600, color: C.ink3 }}>Cihaz listesini görmek için soldan laboratuvar seçin.</span>
+                  )}
+                  {selectedStopLabId && (
+                    Array.from(stopStats.devicesByTypeAndLab[selectedStopType].get(selectedStopLabId)?.values() || [])
+                      .sort((a, b) => b.count - a.count)
+                      .map((device) => (
+                        <div key={device.deviceId} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '7px 10px', borderRadius: C.radiusSm, fontSize: 12.5, fontWeight: 700, color: C.ink1 }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{device.model}</span>
+                          <Pill>{device.count}</Pill>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Intervention type donut */}
+          <Card>
+            <CardHead ico="pin" title="Müdahale Tipi Dağılımı" />
+            {interventionTotal > 0 ? (
+              <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', alignItems: 'center', gap: 18, marginTop: 8 }}>
+                <Donut
+                  size={mobile ? 130 : 150}
+                  thickness={26}
+                  segments={[
+                    { v: stats.kurumCount, color: PAL.ready },
+                    { v: stats.telefonCount, color: PAL.amber },
+                  ]}
+                  center={
+                    <div>
+                      <div style={{ fontSize: 24, fontWeight: 800, color: C.ink1, lineHeight: 1 }}>%{kurumPct}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, marginTop: 3 }}>kurum</div>
+                    </div>
+                  }
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+                  <Legend color={PAL.ready} label="Kurum Ziyareti" val={fmtInt(stats.kurumCount)} />
+                  <Legend color={PAL.amber} label="Telefonla" val={fmtInt(stats.telefonCount)} />
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: 'grid', placeItems: 'center', minHeight: 150, color: C.ink3, fontSize: 13, fontWeight: 600 }}>Veri yok</div>
+            )}
+          </Card>
+        </div>
+
+        {/* Fault type donut + Fault definitions HBar */}
+        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : 'minmax(0,1fr) minmax(0,1.5fr)', gap }}>
+          <Card>
+            <CardHead ico="trend" title="Arıza Tipi Dağılımı" />
             {faultTypePieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={faultTypePieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {faultTypePieData.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => [`${value} arıza`, '']} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                Veri yok
+              <div style={{ display: 'flex', flexDirection: mobile ? 'column' : 'row', alignItems: 'center', gap: 18, marginTop: 8 }}>
+                <Donut
+                  size={mobile ? 130 : 150}
+                  thickness={26}
+                  segments={faultTypePieData.map(d => ({ v: d.value, color: d.color }))}
+                  center={
+                    <div>
+                      <StatNum value={stats.teknikCount + stats.aplikasyonCount} size={24} />
+                      <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, marginTop: 3 }}>arıza</div>
+                    </div>
+                  }
+                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 }}>
+                  <Legend color={PAL.tech} label="Teknik Servis" val={fmtInt(stats.teknikCount)} />
+                  <Legend color={PAL.app} label="Aplikasyon" val={fmtInt(stats.aplikasyonCount)} />
+                </div>
               </div>
+            ) : (
+              <div style={{ display: 'grid', placeItems: 'center', minHeight: 150, color: C.ink3, fontSize: 13, fontWeight: 600 }}>Veri yok</div>
             )}
-          </CardContent>
-        </Card>
+          </Card>
 
-        {/* Fault Definitions Bar Chart - 70% */}
-        <Card className="col-span-10 md:col-span-7 glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              {selectedFaultType === 'teknik_servis' ? (
-                <Wrench className="h-5 w-5 text-blue-500" />
-              ) : selectedFaultType === 'aplikasyon' ? (
-                <FlaskConical className="h-5 w-5 text-purple-500" />
+          <Card>
+            <CardHead
+              ico={selectedFaultType === 'teknik_servis' ? 'wrench' : selectedFaultType === 'aplikasyon' ? 'flask' : 'chart'}
+              tone={selectedFaultType === 'teknik_servis' ? 'tech' : selectedFaultType === 'aplikasyon' ? 'app' : 'default'}
+              title={`${selectedFaultType === 'teknik_servis' ? 'Teknik Servis' : selectedFaultType === 'aplikasyon' ? 'Aplikasyon' : 'Tümü'} Arıza Başlıkları`}
+              sub="En sık karşılaşılan arıza tanımlamaları"
+            />
+            <div style={{ marginTop: 14 }}>
+              {faultDefinitionsBarData.length > 0 ? (
+                <HBar
+                  labelW={mobile ? 96 : 200}
+                  color={selectedFaultType === 'teknik_servis' ? PAL.tech : selectedFaultType === 'aplikasyon' ? PAL.app : C.accent}
+                  items={faultDefinitionsBarData.map(d => ({ label: d.fullName, v: d.count }))}
+                />
               ) : (
-                <Layers className="h-5 w-5 text-primary" />
+                <div style={{ display: 'grid', placeItems: 'center', minHeight: 150, color: C.ink3, fontSize: 13, fontWeight: 600 }}>Bu tipte arıza kaydı yok</div>
               )}
-              {selectedFaultType === 'teknik_servis'
-                ? 'Teknik Servis'
-                : selectedFaultType === 'aplikasyon'
-                  ? 'Aplikasyon'
-                  : 'Tümü'} Arıza Başlıkları
-            </CardTitle>
-            <CardDescription>En sık karşılaşılan arıza tanımlamaları</CardDescription>
-          </CardHeader>
-          <CardContent className="h-64">
-            {faultDefinitionsBarData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={faultDefinitionsBarData} layout="vertical" margin={{ left: 20, right: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} />
-                  <XAxis type="number" />
-                  <YAxis
-                    type="category"
-                    dataKey="name"
-                    width={220}
-                    interval={0}
-                    tick={{ fontSize: 11 }}
-                  />
-                  <Tooltip content={<CustomBarTooltip />} />
-                  <Bar
-                    dataKey="count"
-                    fill={selectedFaultType === 'teknik_servis'
-                      ? COLORS.teknik
-                      : selectedFaultType === 'aplikasyon'
-                        ? COLORS.aplikasyon
-                        : '#64748b'}
-                    radius={[0, 4, 4, 0]}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                Bu tipte arıza kaydı yok
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+            </div>
+          </Card>
+        </div>
 
-      {/* Charts Row 2: Intervention Type Pie + Exceeding Target List */}
-      <div className="grid grid-cols-10 gap-6">
-        {/* Intervention Type Pie Chart - 30% */}
-        <Card className="col-span-10 md:col-span-3 glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <MapPin className="h-5 w-5 text-primary" />
-              Müdahale Tipi Dağılımı
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="h-64">
-            {interventionTypePieData.length > 0 ? (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={interventionTypePieData}
-                    dataKey="value"
-                    nameKey="name"
-                    cx="50%"
-                    cy="50%"
-                    outerRadius={80}
-                    label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
-                    labelLine={false}
-                  >
-                    {interventionTypePieData.map((entry, idx) => (
-                      <Cell key={idx} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(value: number) => [`${value} müdahale`, '']} />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
-            ) : (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                Veri yok
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Faults Exceeding Target Table - 70% */}
-        <Card className="col-span-10 md:col-span-7 glass-card">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
-              Hedef Sürede Çözülemeyen Arızalar
-            </CardTitle>
-            <CardDescription>8 saat hedef süresini aşan arıza başlıkları</CardDescription>
-          </CardHeader>
-          <CardContent>
+        {/* SLA-over table */}
+        <Card tone="danger">
+          <CardHead ico="clock" title="Hedef Sürede Çözülemeyen Arızalar" sub="8 saat hedef süresini aşan arıza başlıkları" tone="danger" />
+          <div style={{ marginTop: 12 }}>
             {faultsExceedingTargetList.length > 0 ? (
-              <ScrollArea className="h-56">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Arıza Başlığı</TableHead>
-                      <TableHead className="text-center">Adet</TableHead>
-                      <TableHead className="text-center">Ort. Aşım (dk)</TableHead>
-                      <TableHead className="text-center">Aşım Oranı</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {faultsExceedingTargetList.map((item, idx) => (
-                      <TableRow key={idx}>
-                        <TableCell className="font-medium max-w-[200px] truncate" title={item.title}>
-                          {item.title}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant="destructive">{item.count}</Badge>
-                        </TableCell>
-                        <TableCell className="text-center text-muted-foreground">
-                          +{item.avgExceedMinutes} dk
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <span className="text-destructive font-medium">+%{item.avgExceedPercent}</span>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </ScrollArea>
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: 520 }}>
+                  {/* header */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 90px 120px 110px', gap: 10, padding: '8px 14px', borderBottom: `1px solid ${C.line}` }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Arıza Başlığı</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>Adet</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>Ort. Aşım</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: 'center' }}>Aşım Oranı</span>
+                  </div>
+                  {faultsExceedingTargetList.map((item, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display: 'grid', gridTemplateColumns: '1fr 90px 120px 110px', gap: 10, alignItems: 'center',
+                        padding: '13px 14px', borderRadius: C.radius,
+                        background: i % 2 ? 'transparent' : C.surfaceHi,
+                        animation: `cyPopIn 420ms ${EASE} ${i * 45}ms both`,
+                      }}
+                    >
+                      <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.title}>{item.title}</span>
+                      <span style={{ textAlign: 'center' }}><Pill tone="danger">{item.count}</Pill></span>
+                      <span style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>+{item.avgExceedMinutes} dk</span>
+                      <span style={{ textAlign: 'center', fontSize: 13.5, fontWeight: 800, color: C.danger, fontVariantNumeric: 'tabular-nums' }}>+%{item.avgExceedPercent}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             ) : (
-              <div className="flex items-center justify-center h-56 text-muted-foreground">
-                <CheckCircle className="h-8 w-8 mr-2 text-green-500" />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, minHeight: 120, color: C.waterDeep, fontSize: 13.5, fontWeight: 700 }}>
                 Tüm arızalar hedef sürede çözülmüş
               </div>
             )}
-          </CardContent>
+          </div>
         </Card>
-      </div>
 
-      {/* Top Devices Card */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Server className="text-primary" />
-            En Çok Arıza Veren 5 Cihaz
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
+        {/* Top fault devices */}
+        <Card>
+          <CardHead ico="server" title="En Çok Arıza Veren 5 Cihaz" />
           {stats.topDevices.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-              {stats.topDevices.map((d, idx) => (
-                <div key={d.id} className="p-4 rounded-lg bg-muted/50 text-center">
-                  <div className="text-3xl font-bold text-destructive">{d.count as number}</div>
-                  <p className="font-medium mt-1 text-sm">{d.name}</p>
-                  <p className="text-xs text-muted-foreground">{d.lab}</p>
+            <div style={{ display: 'grid', gridTemplateColumns: mobile ? 'repeat(2,1fr)' : 'repeat(5,1fr)', gap: 10, marginTop: 12 }}>
+              {stats.topDevices.map((d, i) => (
+                <div
+                  key={d.id}
+                  style={{
+                    borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayInset,
+                    padding: '16px 12px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 5, alignItems: 'center',
+                    animation: `cyPopIn 420ms ${EASE} ${i * 60}ms both`,
+                  }}
+                >
+                  <StatNum value={d.count as number} size={30} color={C.danger} />
+                  <div style={{ fontSize: 12.5, fontWeight: 800, color: C.ink1, lineHeight: 1.25 }}>{d.name}</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: C.ink3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{d.lab}</div>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-center text-muted-foreground">Henüz arıza kaydı yok</p>
+            <div style={{ textAlign: 'center', color: C.ink3, fontSize: 13.5, fontWeight: 600, padding: '20px 0' }}>Henüz arıza kaydı yok</div>
           )}
-        </CardContent>
-      </Card>
+        </Card>
 
-      {/* Product Statistics Section */}
-      <Card className="glass-card">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Package className="text-primary" />
-            Ürün İstatistikleri
-          </CardTitle>
-          <CardDescription>
-            Marka ve ürün grubu seçerek ilgili ürünlerin laboratuvarlardaki arıza istatistiklerini görüntüleyin.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {/* Selectors */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            {/* Brand Selector */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Marka</label>
-              <Select value={selectedBrand} onValueChange={(val) => {
-                setSelectedBrand(val);
-                setSelectedProductId('');
-              }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Marka seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tümü</SelectItem>
-                  {uniqueBrands.map(brand => (
-                    <SelectItem key={brand} value={brand}>{brand}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+        {/* Product statistics */}
+        <Card>
+          <CardHead ico="package" title="Ürün İstatistikleri" sub="Marka ve ürün grubu seçerek ilgili ürünlerin laboratuvarlardaki arıza istatistiklerini görüntüleyin." />
+
+          <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : 'repeat(3,1fr)', gap: 12, marginTop: 14 }}>
+            {/* Brand */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Marka</label>
+              <Popover open={isBrandPopoverOpen} onOpenChange={setIsBrandPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <span style={{ display: 'block' }}>
+                    <GhostBtn onClick={() => setIsBrandPopoverOpen((o) => !o)} active={selectedBrand !== 'all'}>
+                      <span style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedBrand === 'all' ? 'Tümü' : selectedBrand}</span>
+                      <ChevronsUpDown size={15} style={{ opacity: 0.5 }} />
+                    </GhostBtn>
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent className="w-[260px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Marka ara…" />
+                    <CommandList>
+                      <CommandEmpty>Marka bulunamadı.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem value="all" onSelect={() => { setSelectedBrand('all'); setSelectedProductId(''); setIsBrandPopoverOpen(false); }}>
+                          <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedBrand === 'all' ? 1 : 0 }} />Tümü
+                        </CommandItem>
+                        {uniqueBrands.map(brand => (
+                          <CommandItem key={brand} value={brand} onSelect={() => { setSelectedBrand(brand); setSelectedProductId(''); setIsBrandPopoverOpen(false); }}>
+                            <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedBrand === brand ? 1 : 0 }} />{brand}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
-            {/* Product Group Selector */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ürün Grubu</label>
-              <Select value={selectedProductGroup} onValueChange={(val) => {
-                setSelectedProductGroup(val);
-                setSelectedProductId('');
-              }}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Ürün grubu seçin..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tümü</SelectItem>
-                  {uniqueProductGroups.map(group => (
-                    <SelectItem key={group} value={group}>{group}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            {/* Product Group */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Ürün Grubu</label>
+              <Popover open={isGroupPopoverOpen} onOpenChange={setIsGroupPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <span style={{ display: 'block' }}>
+                    <GhostBtn onClick={() => setIsGroupPopoverOpen((o) => !o)} active={selectedProductGroup !== 'all'}>
+                      <span style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedProductGroup === 'all' ? 'Tümü' : selectedProductGroup}</span>
+                      <ChevronsUpDown size={15} style={{ opacity: 0.5 }} />
+                    </GhostBtn>
+                  </span>
+                </PopoverTrigger>
+                <PopoverContent className="w-[260px] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Ürün grubu ara…" />
+                    <CommandList>
+                      <CommandEmpty>Ürün grubu bulunamadı.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem value="all" onSelect={() => { setSelectedProductGroup('all'); setSelectedProductId(''); setIsGroupPopoverOpen(false); }}>
+                          <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedProductGroup === 'all' ? 1 : 0 }} />Tümü
+                        </CommandItem>
+                        {uniqueProductGroups.map(group => (
+                          <CommandItem key={group} value={group} onSelect={() => { setSelectedProductGroup(group); setSelectedProductId(''); setIsGroupPopoverOpen(false); }}>
+                            <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedProductGroup === group ? 1 : 0 }} />{group}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
             </div>
 
-            {/* Product Selector */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Ürün</label>
+            {/* Product */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+              <label style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase' }}>Ürün</label>
               <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
                 <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    role="combobox"
-                    className="w-full justify-between cihaz-tool-item border-0 shadow-none"
-                    disabled={filteredProducts.length === 0}
-                    style={{ color: 'var(--dashboard-text)' }}
-                  >
-                    {selectedProduct
-                      ? `${selectedProduct.stokKodu} - ${selectedProduct.stokAdi?.substring(0, 30)}...`
-                      : 'Ürün seçin...'}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                  </Button>
+                  <span style={{ display: 'block', opacity: filteredProducts.length === 0 ? 0.5 : 1, pointerEvents: filteredProducts.length === 0 ? 'none' : 'auto' }}>
+                    <GhostBtn onClick={() => setIsProductPopoverOpen((o) => !o)} active={!!selectedProduct}>
+                      <span style={{ maxWidth: mobile ? 200 : 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {selectedProduct ? `${selectedProduct.stokKodu}` : 'Ürün seçin…'}
+                      </span>
+                      <ChevronsUpDown size={15} style={{ opacity: 0.5 }} />
+                    </GhostBtn>
+                  </span>
                 </PopoverTrigger>
-                <PopoverContent className="w-[400px] p-0">
+                <PopoverContent className="w-[360px] p-0" align="end">
                   <Command>
-                    <CommandInput placeholder="Ürün kodu veya adı ara..." />
+                    <CommandInput placeholder="Ürün kodu veya adı ara…" />
                     <CommandList>
                       <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
                       <CommandGroup>
@@ -1197,12 +1110,9 @@ export default function ArizaIstatistikleriPage() {
                           <CommandItem
                             key={product.id}
                             value={`${product.stokKodu} ${product.stokAdi}`}
-                            onSelect={() => {
-                              setSelectedProductId(product.id);
-                              setIsProductPopoverOpen(false);
-                            }}
+                            onSelect={() => { setSelectedProductId(product.id); setIsProductPopoverOpen(false); }}
                           >
-                            <CheckIcon className={cn("mr-2 h-4 w-4", selectedProductId === product.id ? "opacity-100" : "opacity-0")} />
+                            <CheckIcon className="mr-2 h-4 w-4" style={{ opacity: selectedProductId === product.id ? 1 : 0 }} />
                             <div className="flex flex-col">
                               <span className="font-medium">{product.stokKodu}</span>
                               <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
@@ -1217,146 +1127,93 @@ export default function ArizaIstatistikleriPage() {
             </div>
           </div>
 
-          {/* Product Lab Statistics */}
+          {/* Product lab statistics */}
           {selectedProduct && (
-            <div className="mt-6">
-              <div className="mb-4 p-4 bg-muted/50 rounded-lg">
-                <h4 className="font-semibold">{selectedProduct.stokAdi}</h4>
-                <p className="text-sm text-muted-foreground font-mono">{selectedProduct.stokKodu}</p>
+            <div style={{ marginTop: 18 }}>
+              <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayInset, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 15, fontWeight: 800, color: C.ink1 }}>{selectedProduct.stokAdi}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink3, fontFamily: 'monospace', marginTop: 2 }}>{selectedProduct.stokKodu}</div>
                 {selectedProduct.testAdi && (
-                  <Badge variant="secondary" className="mt-2">Test: {selectedProduct.testAdi}</Badge>
+                  <div style={{ marginTop: 8 }}><Pill tone="tech">Test: {String(selectedProduct.testAdi)}</Pill></div>
                 )}
               </div>
 
               {productLabStats.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <Building className="h-12 w-12 mx-auto mb-4 opacity-20" />
-                  <p>Bu ürünü kullanan laboratuvar bulunamadı.</p>
+                <div style={{ textAlign: 'center', padding: '32px 0', color: C.ink3 }}>
+                  <Building style={{ margin: '0 auto 12px', opacity: 0.3 }} className="h-12 w-12" />
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>Bu ürünü kullanan laboratuvar bulunamadı.</div>
                 </div>
               ) : (
-                <div className="border rounded-lg">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Laboratuvar</TableHead>
-                        <TableHead>Cihaz Sayısı</TableHead>
-                        <TableHead>Teknik Servis</TableHead>
-                        <TableHead>Aplikasyon</TableHead>
-                        <TableHead>Toplam Arıza</TableHead>
-                        <TableHead className="w-12"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {productLabStats.map(lab => (
-                        <Collapsible key={lab.hospitalId} asChild>
-                          <>
-                            <TableRow className="hover:bg-muted/50">
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Building className="h-4 w-4 text-muted-foreground" />
-                                  <span className="font-medium">{lab.hospitalName}</span>
-                                </div>
-                              </TableCell>
-                              <TableCell>{lab.devices.length}</TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <Wrench className="h-4 w-4 text-blue-500" />
-                                  <span>{lab.teknikServisFaults}</span>
-                                  {lab.openTeknikServis > 0 && (
-                                    <Badge variant="destructive" className="text-xs">
-                                      {lab.openTeknikServis} açık
-                                    </Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex items-center gap-2">
-                                  <FlaskConical className="h-4 w-4 text-purple-500" />
-                                  <span>{lab.aplikasyonFaults}</span>
-                                  {lab.openAplikasyon > 0 && (
-                                    <Badge variant="destructive" className="text-xs">
-                                      {lab.openAplikasyon} açık
-                                    </Badge>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <span className="font-bold">{lab.teknikServisFaults + lab.aplikasyonFaults}</span>
-                              </TableCell>
-                              <TableCell>
-                                <CollapsibleTrigger asChild>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleLabExpand(lab.hospitalId)}
-                                    className="cihaz-tool-item inline-flex items-center justify-center h-8 w-8 rounded-lg"
-                                  >
-                                    {expandedLabs.has(lab.hospitalId) ? (
-                                      <ChevronUp className="h-4 w-4" />
-                                    ) : (
-                                      <ChevronDown className="h-4 w-4" />
-                                    )}
-                                  </button>
-                                </CollapsibleTrigger>
-                              </TableCell>
-                            </TableRow>
-                            <CollapsibleContent asChild>
-                              <TableRow className="bg-muted/30">
-                                <TableCell colSpan={6}>
-                                  <div className="p-4">
-                                    <h5 className="font-medium mb-3 flex items-center gap-2">
-                                      <Calendar className="h-4 w-4" />
-                                      Son 6 Ay Arıza Geçmişi
-                                    </h5>
-                                    <div className="grid grid-cols-6 gap-2">
-                                      {lab.last6MonthsFaults.map((m, idx) => (
-                                        <div
-                                          key={idx}
-                                          className={cn(
-                                            "text-center p-3 rounded-lg border",
-                                            m.count === 0 ? "bg-green-50 dark:bg-green-950/20 border-green-200 dark:border-green-800" :
-                                            m.count <= 2 ? "bg-yellow-50 dark:bg-yellow-950/20 border-yellow-200 dark:border-yellow-800" :
-                                            "bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800"
-                                          )}
-                                        >
-                                          <p className="text-xs text-muted-foreground">{m.month}</p>
-                                          <p className={cn(
-                                            "text-2xl font-bold",
-                                            m.count === 0 ? "text-green-600" :
-                                            m.count <= 2 ? "text-yellow-600" :
-                                            "text-red-600"
-                                          )}>
-                                            {m.count}
-                                          </p>
-                                        </div>
-                                      ))}
-                                    </div>
-                                    {/* Device list */}
-                                    <div className="mt-4">
-                                      <h5 className="font-medium mb-2 text-sm">Cihazlar:</h5>
-                                      <div className="flex flex-wrap gap-2">
-                                        {lab.devices.map(device => (
-                                          <Badge key={device.id} variant="outline" className="text-xs">
-                                            {device.cihazAdi || device.model}
-                                            {device.seriNumarasi && ` (${device.seriNumarasi})`}
-                                          </Badge>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  </div>
-                                </TableCell>
-                              </TableRow>
-                            </CollapsibleContent>
-                          </>
-                        </Collapsible>
+                <div style={{ overflowX: 'auto' }}>
+                  <div style={{ minWidth: 560 }}>
+                    {/* header */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 90px 1fr 1fr 90px 44px', gap: 10, padding: '8px 14px', borderBottom: `1px solid ${C.line}` }}>
+                      {['Laboratuvar', 'Cihaz', 'Teknik Servis', 'Aplikasyon', 'Toplam', ''].map((h, i) => (
+                        <span key={i} style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: i === 0 ? 'left' : 'center' }}>{h}</span>
                       ))}
-                    </TableBody>
-                  </Table>
+                    </div>
+                    {productLabStats.map((lab, i) => {
+                      const open = expandedLabs.has(lab.hospitalId);
+                      const total = lab.teknikServisFaults + lab.aplikasyonFaults;
+                      return (
+                        <div key={lab.hospitalId} style={{ animation: `cyPopIn 420ms ${EASE} ${i * 45}ms both` }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 90px 1fr 1fr 90px 44px', gap: 10, alignItems: 'center', padding: '13px 14px', borderRadius: C.radius, background: i % 2 ? 'transparent' : C.surfaceHi }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                              <Building className="h-4 w-4" style={{ color: C.ink3, flexShrink: 0 }} />
+                              <span style={{ fontSize: 13.5, fontWeight: 700, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lab.hospitalName}</span>
+                            </div>
+                            <span style={{ textAlign: 'center', fontSize: 13.5, fontWeight: 700, color: C.ink2, fontVariantNumeric: 'tabular-nums' }}>{lab.devices.length}</span>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 13.5, fontWeight: 700, color: PAL.tech, fontVariantNumeric: 'tabular-nums' }}>{lab.teknikServisFaults}</span>
+                              {lab.openTeknikServis > 0 && <Pill tone="danger">{lab.openTeknikServis} açık</Pill>}
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: 13.5, fontWeight: 700, color: PAL.app, fontVariantNumeric: 'tabular-nums' }}>{lab.aplikasyonFaults}</span>
+                              {lab.openAplikasyon > 0 && <Pill tone="danger">{lab.openAplikasyon} açık</Pill>}
+                            </div>
+                            <span style={{ textAlign: 'center', fontSize: 14, fontWeight: 800, color: C.ink1, fontVariantNumeric: 'tabular-nums' }}>{total}</span>
+                            <div style={{ display: 'flex', justifyContent: 'center' }}>
+                              <button
+                                type="button"
+                                onClick={() => toggleLabExpand(lab.hospitalId)}
+                                style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: 10, display: 'grid', placeItems: 'center', color: C.ink2, background: C.surface2, boxShadow: C.clayInset }}
+                              >
+                                <span style={{ display: 'inline-block', transition: `transform 200ms ${EASE}`, transform: open ? 'rotate(180deg)' : 'none', fontSize: 11 }}>▾</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {open && (
+                            <div style={{ padding: '14px', borderRadius: C.radius, background: C.surface2, boxShadow: C.clayInset, margin: '4px 0 10px', animation: `cyFadeIn 280ms ${EASE} both` }}>
+                              <div style={{ fontSize: 12, fontWeight: 800, color: C.ink2, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>Son 6 Ay Arıza Geçmişi</div>
+                              <LineChart
+                                data={lab.last6MonthsFaults.map(m => m.count)}
+                                labels={lab.last6MonthsFaults.map(m => m.month)}
+                                height={140}
+                                yTicks
+                              />
+                              <div style={{ marginTop: 14 }}>
+                                <div style={{ fontSize: 12, fontWeight: 800, color: C.ink2, marginBottom: 8 }}>Cihazlar</div>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                                  {lab.devices.map(device => (
+                                    <Pill key={device.id}>
+                                      {device.cihazAdi || device.model}{device.seriNumarasi ? ` (${device.seriNumarasi})` : ''}
+                                    </Pill>
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
-    </div>
+        </Card>
+      </div>
+    </ClayPage>
   );
 }

@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, query, orderBy, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Rack } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -122,6 +124,7 @@ const FilterPopover: React.FC<{
 export default function NumuneArsiviGecmisPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [racks, setRacks] = useState<Rack[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -134,7 +137,7 @@ export default function NumuneArsiviGecmisPage() {
   const [labFilter, setLabFilter] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const q = query(collection(db, 'archiveRacks'), orderBy('sealedAt', 'desc'));
+    const q = scopedQuery('archiveRacks', currentCompanyId, isSuperAdmin, orderBy('sealedAt', 'desc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const rackList = snapshot.docs.map(doc => {
         const data = doc.data();

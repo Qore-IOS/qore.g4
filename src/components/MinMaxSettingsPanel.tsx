@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock, Search, X, Plus } from 'lucide-react';
@@ -27,6 +29,9 @@ interface RuleState {
     aylikTuketimLimiti?: number | string;
     ortalamaTuketimSuresi?: number | string;
     tuketimSuresiBirimi?: 'gun' | 'saat';
+    otomatikTransferAdedi?: number | string;
+    counterEnabled?: boolean;
+    counterPlusEnabled?: boolean;
     enabled: boolean;
   }
 }
@@ -34,6 +39,7 @@ interface RuleState {
 type PanelTab = 'selected' | 'unselected';
 
 export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetType, productCodes, toast }: MinMaxSettingsPanelProps) {
+  const { currentCompanyId } = useAuth();
   const [rules, setRules] = useState<RuleState>({});
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,6 +48,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
 
   const collectionName = targetType === 'depot' ? 'depots' : targetType === 'spare_parts_depot' ? 'yedekParcaDepoMinMax' : 'hospitals';
   const isDepotLike = targetType === 'depot' || targetType === 'spare_parts_depot';
+  // Hastane Sarf labları: aynı arayüz, otomatik transfer listesi olarak çalışır.
+  const isConsumables = !isDepotLike && (target as Hospital)?.isConsumablesHospital === true;
   const locationLabel = targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane';
   const targetId = target?.id;
   const targetName = target?.name || 'Hedef';
@@ -64,6 +72,9 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               aylikTuketimLimiti: (data.aylikTuketimLimiti ?? '') as string | number,
               ortalamaTuketimSuresi: (data.ortalamaTuketimSuresi ?? '') as string | number,
               tuketimSuresiBirimi: data.tuketimSuresiBirimi ?? 'gun',
+              otomatikTransferAdedi: (data.otomatikTransferAdedi ?? '') as string | number,
+              counterEnabled: !!data.counterEnabled,
+              counterPlusEnabled: !!data.counterPlusEnabled,
               enabled: true
             };
           }
@@ -84,19 +95,19 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
     setRules(prev => {
       const newRules = { ...prev };
       if (checked) {
-        newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun' }), enabled: true };
+        newRules[stockCode] = { ...(newRules[stockCode] || { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', counterEnabled: false, counterPlusEnabled: false }), enabled: true };
       } else {
         if (newRules[stockCode]) {
           newRules[stockCode].enabled = false;
         } else {
-          newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: false };
+          newRules[stockCode] = { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', counterEnabled: false, counterPlusEnabled: false, enabled: false };
         }
       }
       return newRules;
     });
   };
 
-  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti' | 'ortalamaTuketimSuresi', value: string) => {
+  const handleRuleChange = (stockCode: string, field: 'min' | 'max' | 'maxGun' | 'aylikTuketimLimiti' | 'ortalamaTuketimSuresi' | 'otomatikTransferAdedi', value: string) => {
     const numValue = value === '' ? '' : Number(value);
     setRules(prev => ({
       ...prev,
@@ -109,6 +120,30 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       ...prev,
       [stockCode]: { ...(prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true }), tuketimSuresiBirimi: birim }
     }));
+  };
+
+  const handleCounterChange = (stockCode: string, type: 'counter' | 'counterPlus', checked: boolean) => {
+    setRules(prev => {
+      const existing = prev[stockCode] ?? { min: '', max: '', maxGun: '', aylikTuketimLimiti: '', ortalamaTuketimSuresi: '', tuketimSuresiBirimi: 'gun', enabled: true };
+      let nextCounter = existing.counterEnabled ?? false;
+      let nextCounterPlus = existing.counterPlusEnabled ?? false;
+      if (type === 'counter') {
+        nextCounter = checked;
+        if (checked) nextCounterPlus = false;
+      } else {
+        nextCounterPlus = checked;
+        if (checked) nextCounter = false;
+      }
+      return {
+        ...prev,
+        [stockCode]: {
+          ...existing,
+          counterEnabled: nextCounter,
+          counterPlusEnabled: nextCounterPlus,
+          enabled: true
+        }
+      };
+    });
   };
 
   const handleExcelUpsertRules = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -126,20 +161,32 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       jsonData.forEach((row: any) => {
         const stockCode = String(row['stock_code'] || row['Stok Kodu'] || '').trim();
         if (!stockCode || !validProductCodes.has(stockCode)) { skippedRows++; return; }
-        const min = Number(row['min']);
-        const max = Number(row['max']);
+        const min = isConsumables ? Number(row['min'] ?? 0) : Number(row['min']);
+        const max = isConsumables ? Number(row['max'] ?? 0) : Number(row['max']);
         const maxGun = Number(row['max_gun'] || row['Max Gün']);
         const aylikTuketimLimiti = Number(row['aylik_tuketim_limiti'] || row['Aylık Tüketim Limiti']);
         const ortalamaTuketimSuresi = Number(row['ortalama_tuketim_suresi'] || row['Ort. Tüketim Süresi']);
         const tuketimBirimi = String(row['tuketim_birimi'] || row['Tüketim Birimi'] || '').toLowerCase();
-        if (isNaN(min) || isNaN(max) || min < 0 || max < min) { skippedRows++; return; }
+        const otomatikTransferAdedi = Number(row['otomatik_transfer_adedi'] ?? row['Otomatik Transfer Adedi']);
+        if (isConsumables) {
+          if (isNaN(otomatikTransferAdedi) || otomatikTransferAdedi < 0) { skippedRows++; return; }
+        } else if (isNaN(min) || isNaN(max) || min < 0 || max < min) { skippedRows++; return; }
+        const counterVal = String(row['Counter'] || row['counter'] || '').toLowerCase();
+        const counterPlusVal = String(row['Counter+'] || row['counter+'] || '').toLowerCase();
+        const counterEnabled = counterVal === 'evet' || counterVal === 'true' || counterVal === '1';
+        const counterPlusEnabled = counterPlusVal === 'evet' || counterPlusVal === 'true' || counterPlusVal === '1';
+
         const willBeNewRule = !existingRuleCodes.has(stockCode);
         updatedRules[stockCode] = {
-          min, max,
+          min: isNaN(min) ? 0 : min,
+          max: isNaN(max) ? 0 : max,
           maxGun: isNaN(maxGun) ? '' : maxGun,
           aylikTuketimLimiti: isNaN(aylikTuketimLimiti) ? '' : aylikTuketimLimiti,
           ortalamaTuketimSuresi: isNaN(ortalamaTuketimSuresi) ? '' : ortalamaTuketimSuresi,
           tuketimSuresiBirimi: tuketimBirimi === 'saat' ? 'saat' : (rules[stockCode]?.tuketimSuresiBirimi ?? 'gun'),
+          otomatikTransferAdedi: isNaN(otomatikTransferAdedi) ? (rules[stockCode]?.otomatikTransferAdedi ?? '') : otomatikTransferAdedi,
+          counterEnabled,
+          counterPlusEnabled,
           enabled: true
         };
         upsertedRows++;
@@ -169,16 +216,23 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       toast({ title: "Veri Yok", description: "Dışa aktarılacak aktif kural bulunmuyor.", variant: "default" });
       return;
     }
-    const dataToExport = enabledRules.map(([stockCode, rule]) => ({
-      'Stok Kodu': stockCode,
-      min: rule.min,
-      max: rule.max,
-      'Max Gün': rule.maxGun,
-      'Aylık Tüketim Limiti': rule.aylikTuketimLimiti,
-      'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
-      'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
-    }));
-    exportDataToExcel(dataToExport, `${targetName}_MinMax_Kurallari`, 'Kurallar', toast);
+    const dataToExport = isConsumables
+      ? enabledRules.map(([stockCode, rule]) => ({
+          'Stok Kodu': stockCode,
+          'Otomatik Transfer Adedi': rule.otomatikTransferAdedi ?? 0,
+        }))
+      : enabledRules.map(([stockCode, rule]) => ({
+          'Stok Kodu': stockCode,
+          min: rule.min,
+          max: rule.max,
+          'Max Gün': rule.maxGun,
+          'Aylık Tüketim Limiti': rule.aylikTuketimLimiti,
+          'Ort. Tüketim Süresi': rule.ortalamaTuketimSuresi,
+          'Tüketim Birimi': rule.tuketimSuresiBirimi === 'saat' ? 'Saat' : 'Gün',
+          'Counter': rule.counterEnabled ? 'Evet' : 'Hayır',
+          'Counter+': rule.counterPlusEnabled ? 'Evet' : 'Hayır',
+        }));
+    exportDataToExcel(dataToExport, isConsumables ? `${targetName}_Otomatik_Transfer_Listesi` : `${targetName}_MinMax_Kurallari`, 'Kurallar', toast);
   };
 
   const handleSaveRules = async () => {
@@ -229,18 +283,29 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (maxGun !== undefined) dataToSet.maxGun = maxGun;
         if (aylikTuketimLimiti !== undefined) dataToSet.aylikTuketimLimiti = aylikTuketimLimiti;
         if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
+        if (rule.counterEnabled !== undefined) dataToSet.counterEnabled = !!rule.counterEnabled;
+        if (rule.counterPlusEnabled !== undefined) dataToSet.counterPlusEnabled = !!rule.counterPlusEnabled;
+        if (isConsumables) {
+          const otomatikAdet = rule.otomatikTransferAdedi === '' || rule.otomatikTransferAdedi === undefined ? 0 : Number(rule.otomatikTransferAdedi);
+          if (isNaN(otomatikAdet) || otomatikAdet < 0) {
+            toast({ title: `Hata: ${stockCode}`, description: `Geçersiz otomatik transfer adedi.`, variant: "destructive" });
+            hasError = true;
+            continue;
+          }
+          dataToSet.otomatikTransferAdedi = otomatikAdet;
+        }
         
         currentBatch.set(ruleRef, dataToSet);
         commitOp();
         
-        currentBatch.set(historyRef, { ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() });
+        currentBatch.set(historyRef, withCompanyScope({ ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() }, currentCompanyId));
         commitOp();
       } else {
         if (existingRuleIds.has(stockCode)) {
           currentBatch.delete(ruleRef);
           commitOp();
           
-          currentBatch.set(historyRef, { stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' });
+          currentBatch.set(historyRef, withCompanyScope({ stokKodu: stockCode, min: null, max: null, maxGun: null, aylikTuketimLimiti: null, locationId: targetId, locationType: targetType, timestamp: serverTimestamp(), action: 'deleted' }, currentCompanyId));
           commitOp();
         }
       }
@@ -350,8 +415,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         <div className="flex items-center gap-3 min-w-0">
           <SlidersHorizontal className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--dashboard-accent, #6366f1)' }} />
           <div className="min-w-0">
-            <h1 className="text-sm font-bold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>Min-Max Stok Seviyeleri</h1>
-            <p className="text-[11px] truncate" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{target.name} &middot; {selectedCount} ürün tanımlı</p>
+            <h1 className="text-sm font-bold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>{isConsumables ? 'Otomatik Transfer Listesi' : 'Min-Max Stok Seviyeleri'}</h1>
+            <p className="text-[11px] truncate" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{target.name} &middot; {selectedCount} ürün tanımlı{isConsumables ? ' · Sarf Dağıtım transfer ekranında adetler otomatik gelir' : ''}</p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -442,7 +507,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           selectedProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
               <SlidersHorizontal className="w-10 h-10 mb-3 opacity-20" />
-              <p className="text-sm font-medium">{searchQuery ? 'Eşleşen tanımlı ürün yok.' : 'Henüz min-max kuralı tanımlanmamış.'}</p>
+              <p className="text-sm font-medium">{searchQuery ? 'Eşleşen tanımlı ürün yok.' : (isConsumables ? 'Henüz otomatik transfer ürünü tanımlanmamış.' : 'Henüz min-max kuralı tanımlanmamış.')}</p>
               <p className="text-xs mt-1">Ürün Ekle sekmesinden ürün seçerek başlayın.</p>
             </div>
           ) : (
@@ -452,15 +517,25 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                   <tr className="border-b" style={{ borderColor: 'var(--dashboard-stroke, #e5e7eb)' }}>
                     <th className="text-left px-4 sm:px-6 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-10" style={{ color: 'var(--dashboard-muted, #6b7280)' }}></th>
                     <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Ürün</th>
-                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Min</th>
-                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max</th>
-                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max Gün</th>
-                    {!isDepotLike && (
-                      <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[110px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Aylık Limit</th>
+                    {isConsumables ? (
+                      <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[180px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Otomatik Transfer Adedi</th>
+                    ) : (
+                      <>
+                        <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Min</th>
+                        <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max</th>
+                        <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[90px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Max Gün</th>
+                        {!isDepotLike && (
+                          <>
+                            <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[110px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Aylık Limit</th>
+                            <th className="text-center px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[80px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Counter</th>
+                            <th className="text-center px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[80px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>Counter+</th>
+                          </>
+                        )}
+                        <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[160px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
+                          <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Ort. Tüketim</span>
+                        </th>
+                      </>
                     )}
-                    <th className="text-left px-2 py-2.5 text-[10px] font-semibold uppercase tracking-wider w-[160px]" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>
-                      <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> Ort. Tüketim</span>
-                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -479,6 +554,20 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                           <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>{product.stokAdi}</p>
                           <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{product.stokKodu}</p>
                         </td>
+                        {isConsumables ? (
+                          <td className="px-2 py-2">
+                            <input
+                              type="number"
+                              value={isEnabled ? (rule?.otomatikTransferAdedi ?? '') : ''}
+                              onChange={e => handleRuleChange(product.stokKodu!, 'otomatikTransferAdedi', e.target.value)}
+                              disabled={!isEnabled}
+                              min={0}
+                              className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                              style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                              placeholder="0"
+                            />
+                          </td>
+                        ) : (
                         <td className="px-2 py-2">
                           <input
                             type="number"
@@ -490,6 +579,9 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                             placeholder="0"
                           />
                         </td>
+                        )}
+                        {!isConsumables && (
+                          <>
                         <td className="px-2 py-2">
                           <input
                             type="number"
@@ -513,17 +605,33 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                           />
                         </td>
                         {!isDepotLike && (
-                          <td className="px-2 py-2">
-                            <input
-                              type="number"
-                              value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
-                              onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
-                              disabled={!isEnabled}
-                              className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
-                              style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
-                              placeholder="-"
-                            />
-                          </td>
+                          <>
+                            <td className="px-2 py-2">
+                              <input
+                                type="number"
+                                value={isEnabled ? (rule?.aylikTuketimLimiti ?? '') : ''}
+                                onChange={e => handleRuleChange(product.stokKodu!, 'aylikTuketimLimiti', e.target.value)}
+                                disabled={!isEnabled}
+                                className="w-full h-8 px-2.5 rounded-lg text-xs border-0 outline-none disabled:opacity-30"
+                                style={{ background: 'var(--dashboard-pressed, #f3f4f6)', color: 'var(--dashboard-text, #111)' }}
+                                placeholder="-"
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={isEnabled ? !!rule?.counterEnabled : false}
+                                onCheckedChange={(val) => handleCounterChange(product.stokKodu!, 'counter', !!val)}
+                                disabled={!isEnabled}
+                              />
+                            </td>
+                            <td className="px-2 py-2 text-center">
+                              <Checkbox
+                                checked={isEnabled ? !!rule?.counterPlusEnabled : false}
+                                onCheckedChange={(val) => handleCounterChange(product.stokKodu!, 'counterPlus', !!val)}
+                                disabled={!isEnabled}
+                              />
+                            </td>
+                          </>
                         )}
                         <td className="px-2 py-2">
                           <div className="flex items-center gap-1.5">
@@ -553,6 +661,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
                             </Select>
                           </div>
                         </td>
+                          </>
+                        )}
                       </tr>
                     );
                   })}

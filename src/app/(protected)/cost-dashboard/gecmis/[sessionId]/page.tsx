@@ -3,22 +3,23 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, getDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { ProductCode, Currency } from '@/lib/types';
+import type { ProductCode, Currency, MinMaxRule } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
-  Loader2, ArrowLeft, Calendar, User, MapPin, Package,
-  ChevronRight, ChevronDown, Search, X, Building2, TestTube,
-  Wallet, Tag, Users, Clock, History,
+  Loader2, ArrowLeft, Calendar, User,
+  ChevronDown, Search, X, Building2, TestTube,
+  Tag, Users, History, Edit3, Save,
 } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { useFirebaseQueries } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { useToast } from '@/hooks/use-toast';
 
 // ============================================================================
 // TYPES
@@ -66,6 +67,9 @@ interface SayimSession {
   sessionId?: string; // reference to maliyetSayimOturumlar
   totalBrands: number;
   totalProducts: number;
+  updatedAt?: any;
+  updatedByUid?: string;
+  updatedByName?: string;
 }
 
 const CURRENCY_SYMBOLS: Record<Currency, string> = {
@@ -103,6 +107,23 @@ function getParticipantColor(uid: string, participants: SessionParticipantInfo[]
   const idx = participants.findIndex(p => p.uid === uid);
   return PARTICIPANT_COLORS[idx >= 0 ? idx % PARTICIPANT_COLORS.length : 0];
 }
+
+
+function toEditableNumber(value: number | string | undefined | null): string {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) && n > 0 ? String(n) : '';
+}
+
+function itemFromProduct(product: ProductCode, existing?: SayimSessionItem): SayimSessionItem {
+  return {
+    stokKodu: product.stokKodu,
+    stokAdi: product.stokAdi || existing?.stokAdi || product.stokKodu,
+    marka: product.marka || existing?.marka || '',
+    stokAdedi: existing?.stokAdedi ?? 0,
+    cihazUstuAdedi: existing?.cihazUstuAdedi ?? 0,
+  };
+}
+
 
 // ============================================================================
 // UPDATE LOG COMPONENT
@@ -166,9 +187,10 @@ export default function MaliyetSayimDetayPage() {
   const params = useParams();
   const sessionId = Array.isArray(params?.sessionId) ? params.sessionId[0] : params?.sessionId;
   const router = useRouter();
-  const { productCodes } = useFirebaseQueries();
+  const { data: productCodes } = useProductCodes();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
   const isAdminRole = ['admin', 'admin_developer', 'super_admin'].includes(currentUserProfile?.role ?? '');
+  const { toast } = useToast();
 
   const [session, setSession] = useState<SayimSession | null>(null);
   const [loading, setLoading] = useState(true);
@@ -177,6 +199,11 @@ export default function MaliyetSayimDetayPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedBrands, setExpandedBrands] = useState<Set<string>>(new Set());
   const [showAttribution, setShowAttribution] = useState(true);
+  const [editMode, setEditMode] = useState(false);
+  const [isEditLoading, setIsEditLoading] = useState(false);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [editableBaseItems, setEditableBaseItems] = useState<SayimSessionItem[]>([]);
+  const [editValues, setEditValues] = useState<Record<string, { stokAdedi: string; cihazUstuAdedi: string }>>({});
 
   // Fetch session and rates
   useEffect(() => {
@@ -226,14 +253,164 @@ export default function MaliyetSayimDetayPage() {
     return map;
   }, [productCodes]);
 
+  const loadEditableItems = useCallback(async (targetSession: SayimSession) => {
+    setIsEditLoading(true);
+    try {
+      const baseCollection = targetSession.locationType === 'lab' ? 'hospitals' : 'depots';
+      const rulesSnap = await getDocs(collection(db, `${baseCollection}/${targetSession.locationId}/minMaxRules`));
+      const minMaxCodes = new Set(
+        rulesSnap.docs
+          .map(d => (d.data() as MinMaxRule).stokKodu)
+          .filter(Boolean),
+      );
+
+      const existingByCode = new Map<string, SayimSessionItem>();
+      (targetSession.items || []).forEach(item => existingByCode.set(item.stokKodu, item));
+      (targetSession.itemsDetailed || []).forEach(item => existingByCode.set(item.stokKodu, item));
+
+      const allCodes = new Set<string>([...minMaxCodes, ...existingByCode.keys()]);
+      const rows = Array.from(allCodes)
+        .map(code => {
+          const product = productMap.get(code);
+          const existing = existingByCode.get(code);
+          if (product) return itemFromProduct(product, existing);
+          return existing;
+        })
+        .filter((item): item is SayimSessionItem => !!item)
+        .sort((a, b) => (a.marka || '').localeCompare(b.marka || '', 'tr') || a.stokAdi.localeCompare(b.stokAdi, 'tr'));
+
+      setEditableBaseItems(rows);
+      setEditValues(Object.fromEntries(rows.map(item => [
+        item.stokKodu,
+        {
+          stokAdedi: toEditableNumber(item.stokAdedi),
+          cihazUstuAdedi: toEditableNumber(item.cihazUstuAdedi),
+        },
+      ])));
+    } catch (err) {
+      console.error('Error loading editable count items:', err);
+      toast({ title: 'Düzenleme verileri yüklenemedi', description: 'Lokasyon min-max ürünleri alınırken hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsEditLoading(false);
+    }
+  }, [productMap, toast]);
+
+  const startEdit = useCallback(() => {
+    if (!session) return;
+    setEditMode(true);
+    loadEditableItems(session);
+  }, [session, loadEditableItems]);
+
+  const cancelEdit = useCallback(() => {
+    setEditMode(false);
+    setEditableBaseItems([]);
+    setEditValues({});
+  }, []);
+
+  const updateEditValue = useCallback((stokKodu: string, field: 'stokAdedi' | 'cihazUstuAdedi', value: string) => {
+    const sanitized = value.replace(/[^0-9]/g, '');
+    setEditValues(prev => ({
+      ...prev,
+      [stokKodu]: {
+        stokAdedi: prev[stokKodu]?.stokAdedi ?? '',
+        cihazUstuAdedi: prev[stokKodu]?.cihazUstuAdedi ?? '',
+        [field]: sanitized,
+      },
+    }));
+  }, []);
+
+  const saveEdit = useCallback(async () => {
+    if (!sessionId || !session || isSavingEdit) return;
+    setIsSavingEdit(true);
+    try {
+      const existingDetailed = new Map<string, DetailedSessionItem>();
+      (session.itemsDetailed || []).forEach(item => existingDetailed.set(item.stokKodu, item));
+      const editorUid = currentUserProfile?.uid || '';
+      const editorName = currentUserProfile?.name || currentUserProfile?.email || 'Kullanıcı';
+      const timestamp = new Date().toISOString();
+
+      const items = editableBaseItems.map(base => {
+        const values = editValues[base.stokKodu] || { stokAdedi: '', cihazUstuAdedi: '' };
+        return {
+          ...base,
+          stokAdedi: parseInt(values.stokAdedi, 10) || 0,
+          cihazUstuAdedi: parseInt(values.cihazUstuAdedi, 10) || 0,
+        };
+      });
+
+      const itemsDetailed = items.map(item => {
+        const previous = existingDetailed.get(item.stokKodu);
+        const updates = [...(previous?.updates || [])];
+        if ((previous?.stokAdedi ?? 0) !== item.stokAdedi) {
+          updates.push({ uid: editorUid, name: editorName, field: 'stokAdedi', value: item.stokAdedi, timestamp });
+        }
+        if ((previous?.cihazUstuAdedi ?? 0) !== item.cihazUstuAdedi) {
+          updates.push({ uid: editorUid, name: editorName, field: 'cihazUstuAdedi', value: item.cihazUstuAdedi, timestamp });
+        }
+        const hasCount = item.stokAdedi > 0 || item.cihazUstuAdedi > 0;
+        return {
+          ...item,
+          counted: hasCount,
+          countedByUid: hasCount ? (previous?.countedByUid || editorUid) : undefined,
+          countedByName: hasCount ? (previous?.countedByName || editorName) : undefined,
+          updates,
+        };
+      });
+
+      const snapshotItems = items.map(item => {
+        const product = productMap.get(item.stokKodu);
+        return {
+          ...item,
+          cost: product?.cost ?? (session.items.find(i => i.stokKodu === item.stokKodu) as any)?.cost ?? 0,
+          currency: product?.currency || (session.items.find(i => i.stokKodu === item.stokKodu) as any)?.currency || 'TRY',
+          ambalajDegeri: Number(product?.ambalajDegeri) || 1,
+        };
+      });
+
+      await updateDoc(doc(db, 'maliyetSayimSessions', sessionId), {
+        items: snapshotItems,
+        itemsDetailed: itemsDetailed.map(item => {
+          const product = productMap.get(item.stokKodu);
+          return {
+            ...item,
+            cost: product?.cost ?? (session.items.find(i => i.stokKodu === item.stokKodu) as any)?.cost ?? 0,
+            currency: product?.currency || (session.items.find(i => i.stokKodu === item.stokKodu) as any)?.currency || 'TRY',
+            ambalajDegeri: Number(product?.ambalajDegeri) || 1,
+          };
+        }),
+        totalBrands: new Set(items.map(i => i.marka).filter(Boolean)).size,
+        totalProducts: items.length,
+        updatedAt: serverTimestamp(),
+        updatedByUid: editorUid,
+        updatedByName: editorName,
+      });
+
+      setSession(prev => prev ? {
+        ...prev,
+        items: snapshotItems,
+        itemsDetailed,
+        totalBrands: new Set(items.map(i => i.marka).filter(Boolean)).size,
+        totalProducts: items.length,
+      } : prev);
+      setEditMode(false);
+      toast({ title: 'Sayım güncellendi', description: 'Maliyet gözlem hesapları güncel sayım değerleriyle yeniden hesaplanacak.' });
+    } catch (err) {
+      console.error('Error updating count session:', err);
+      toast({ title: 'Kayıt hatası', description: 'Sayım güncellenirken bir sorun oluştu.', variant: 'destructive' });
+    } finally {
+      setIsSavingEdit(false);
+    }
+  }, [sessionId, session, isSavingEdit, currentUserProfile, editableBaseItems, editValues, productMap, toast]);
+
   // Calculate cost for a product
   const getProductCost = useCallback((stokKodu: string, quantity: number, cihazUstu: number) => {
     if (!rates) return 0;
     const product = productMap.get(stokKodu);
-    if (!product?.cost || !product?.ambalajDegeri) return 0;
+    if (!product?.cost) return 0;
+    const ambalajDegeri = Number(product.ambalajDegeri) > 0 ? Number(product.ambalajDegeri) : 1;
 
-    const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-    const costPerTest = product.cost / product.ambalajDegeri;
+    const totalTest = (quantity * ambalajDegeri) + cihazUstu;
+    const costPerTest = product.cost / ambalajDegeri;
     const totalCostNative = costPerTest * totalTest;
     const productCurrency = (product.currency || 'TRY') as Currency;
 
@@ -252,9 +429,16 @@ export default function MaliyetSayimDetayPage() {
   const hasDetailedItems = !!session?.itemsDetailed && session.itemsDetailed.length > 0;
   const displayItems: (SayimSessionItem & { countedByUid?: string; countedByName?: string; updates?: CellUpdate[] })[] = useMemo(() => {
     if (!session) return [];
+    if (editMode && editableBaseItems.length > 0) {
+      return editableBaseItems.map(item => ({
+        ...item,
+        stokAdedi: parseInt(editValues[item.stokKodu]?.stokAdedi || '', 10) || 0,
+        cihazUstuAdedi: parseInt(editValues[item.stokKodu]?.cihazUstuAdedi || '', 10) || 0,
+      }));
+    }
     if (hasDetailedItems) return session.itemsDetailed!;
     return session.items;
-  }, [session, hasDetailedItems]);
+  }, [session, editMode, editableBaseItems, editValues, hasDetailedItems]);
 
   const sessionParticipants = session?.participants || [];
   const isMultiUser = sessionParticipants.length > 1;
@@ -319,7 +503,7 @@ export default function MaliyetSayimDetayPage() {
 
   if (!session) {
     return (
-      <div className="cihaz-shell min-h-screen flex items-center justify-center">
+      <div className="cihaz-shell maliyet-clay min-h-screen flex items-center justify-center">
         <div className="text-center">
           <p className="text-sm text-[var(--dashboard-muted)] mb-4">Sayim oturumu bulunamadi.</p>
           <button
@@ -336,7 +520,7 @@ export default function MaliyetSayimDetayPage() {
   const sessionDate = getSessionDate(session);
 
   return (
-    <div className="cihaz-shell min-h-screen">
+    <div className="cihaz-shell maliyet-clay min-h-screen">
       <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6 sm:pt-8 pb-24">
 
         {/* Header */}
@@ -380,7 +564,48 @@ export default function MaliyetSayimDetayPage() {
               )}
             </div>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {editMode ? (
+              <>
+                <button
+                  onClick={cancelEdit}
+                  disabled={isSavingEdit}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] disabled:opacity-50"
+                >
+                  Vazgeç
+                </button>
+                <button
+                  onClick={saveEdit}
+                  disabled={isSavingEdit || isEditLoading}
+                  className="px-3 py-2 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSavingEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  Kaydet
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={startEdit}
+                className="px-3 py-2 rounded-xl text-xs font-semibold bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] flex items-center gap-2"
+              >
+                <Edit3 className="w-4 h-4" />
+                Düzenle
+              </button>
+            )}
+          </div>
         </div>
+
+        {editMode && (
+          <div className="cihaz-card-strong rounded-2xl p-4 mb-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-[var(--dashboard-text)]">
+              {isEditLoading && <Loader2 className="w-4 h-4 animate-spin text-[var(--dashboard-accent)]" />}
+              <span>Sayım düzenleme modu</span>
+            </div>
+            <p className="mt-1 text-xs text-[var(--dashboard-muted)]">
+              Bu ekranda lokasyona ait min-max tanımlı tüm ürünler gösterilir. Boş bırakılan değerler 0 kabul edilir ve kaydedildiğinde maliyet gözlem hesapları bu oturum üzerinden güncellenir.
+            </p>
+          </div>
+        )}
 
         {/* Participants bar (for multi-user sessions) */}
         {isMultiUser && (
@@ -564,10 +789,26 @@ export default function MaliyetSayimDetayPage() {
                                 {item.stokAdi}
                               </div>
                               <div className="col-span-2 text-sm text-[var(--dashboard-text)] text-center">
-                                {item.stokAdedi}
+                                {editMode ? (
+                                  <input
+                                    inputMode="numeric"
+                                    value={editValues[item.stokKodu]?.stokAdedi ?? ''}
+                                    onChange={(e) => updateEditValue(item.stokKodu, 'stokAdedi', e.target.value)}
+                                    className="w-full h-9 rounded-lg bg-[var(--dashboard-surface-2)] px-2 text-center outline-none shadow-[var(--dashboard-pressed)]"
+                                    placeholder="0"
+                                  />
+                                ) : item.stokAdedi}
                               </div>
                               <div className="col-span-2 text-sm text-[var(--dashboard-text)] text-center">
-                                {item.cihazUstuAdedi || 0}
+                                {editMode ? (
+                                  <input
+                                    inputMode="numeric"
+                                    value={editValues[item.stokKodu]?.cihazUstuAdedi ?? ''}
+                                    onChange={(e) => updateEditValue(item.stokKodu, 'cihazUstuAdedi', e.target.value)}
+                                    className="w-full h-9 rounded-lg bg-[var(--dashboard-surface-2)] px-2 text-center outline-none shadow-[var(--dashboard-pressed)]"
+                                    placeholder="0"
+                                  />
+                                ) : (item.cihazUstuAdedi || 0)}
                               </div>
                               <div className="col-span-2 text-right">
                                 <span className="text-sm font-semibold text-[var(--dashboard-accent)]">
@@ -609,6 +850,24 @@ export default function MaliyetSayimDetayPage() {
                                     {item.stokKodu} · Stok: {item.stokAdedi}
                                     {item.cihazUstuAdedi > 0 && ` · CU: ${item.cihazUstuAdedi}`}
                                   </p>
+                                  {editMode && (
+                                    <div className="grid grid-cols-2 gap-2 mt-2">
+                                      <input
+                                        inputMode="numeric"
+                                        value={editValues[item.stokKodu]?.stokAdedi ?? ''}
+                                        onChange={(e) => updateEditValue(item.stokKodu, 'stokAdedi', e.target.value)}
+                                        className="h-9 rounded-lg bg-[var(--dashboard-surface-2)] px-2 text-xs outline-none shadow-[var(--dashboard-pressed)]"
+                                        placeholder="Stok"
+                                      />
+                                      <input
+                                        inputMode="numeric"
+                                        value={editValues[item.stokKodu]?.cihazUstuAdedi ?? ''}
+                                        onChange={(e) => updateEditValue(item.stokKodu, 'cihazUstuAdedi', e.target.value)}
+                                        className="h-9 rounded-lg bg-[var(--dashboard-surface-2)] px-2 text-xs outline-none shadow-[var(--dashboard-pressed)]"
+                                        placeholder="Cihaz üstü"
+                                      />
+                                    </div>
+                                  )}
                                   {isMultiUser && showAttribution && detailedItem.countedByName && (
                                     <div className="flex items-center gap-1 mt-1">
                                       <span

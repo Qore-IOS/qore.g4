@@ -6,7 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, FlaskConical, FilePenLine, Wrench, Package, ArrowLeftRight, Warehouse, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload, Calculator } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -26,8 +26,10 @@ import { db } from '@/lib/firebase';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import { withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 import { useAuth } from '@/contexts/auth-context';
 import {
   Dialog,
@@ -51,7 +53,7 @@ export default function AplikasyonPaneliDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -122,7 +124,7 @@ export default function AplikasyonPaneliDetayPage() {
       return;
     }
     setLoading(true);
-    const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', hospitalId));
+    const qDevices = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(
       qDevices,
       (snap) => {
@@ -158,21 +160,28 @@ export default function AplikasyonPaneliDetayPage() {
       const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
-        if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
-          // Track all fault report IDs per device
-          if (!idsMap[data.deviceId]) idsMap[data.deviceId] = [];
-          idsMap[data.deviceId].push(d.id);
-          // For aplikasyon panel: aplikasyon is primary (red), teknik_servis is secondary (amber)
-          // If device has both, prefer aplikasyon
-          if (map[data.deviceId] === 'aplikasyon') return;
-          map[data.deviceId] = data.faultType;
-        }
+        if (!data.faultType || !matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+
+        getAffectedDeviceIds(data).forEach((deviceId) => {
+          if (!deviceIds.has(deviceId)) return;
+
+          if (!idsMap[deviceId]) idsMap[deviceId] = [];
+          if (!idsMap[deviceId].includes(d.id)) {
+            if (data.faultType === 'aplikasyon') idsMap[deviceId].unshift(d.id);
+            else idsMap[deviceId].push(d.id);
+          }
+
+          // Cihazda iki tür arıza da varsa bu panelin kendi arıza türünü önceliklendir.
+          if (map[deviceId] !== 'aplikasyon') {
+            map[deviceId] = data.faultType;
+          }
+        });
       });
       setOpenFaultMap(map);
       setOpenFaultReportIds(idsMap);
     });
     return () => unsub();
-  }, [devicesByHospital]);
+  }, [devicesByHospital, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -213,7 +222,7 @@ export default function AplikasyonPaneliDetayPage() {
 
   useEffect(() => {
     if (!hospitalId) return;
-    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const q = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(q, (snap) => {
       const counts: Record<string, { e: number; s: number; n: number }> = {};
       snap.docs.forEach((d) => {
@@ -288,16 +297,20 @@ export default function AplikasyonPaneliDetayPage() {
         }
 
         // Fetch periodic part changes for this device
-        const partsQ = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQ = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partsSnap = await getDocs(partsQ);
         const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChange));
 
         // Fetch periodic part change logs for this device
-        const partLogsQ = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const partLogsQ = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partLogsSnap = await getDocs(partLogsQ);
@@ -361,8 +374,10 @@ export default function AplikasyonPaneliDetayPage() {
   const handleDeviceClick = async (device: Device) => {
     // Check for existing drafts for this device
     try {
-      const draftQuery = query(
-        collection(db, 'draftActionForms'),
+      const draftQuery = scopedQuery(
+        'draftActionForms',
+        currentCompanyId,
+        isSuperAdmin,
         where('deviceId', '==', device.id),
         where('formType', '==', 'aplikasyon')
       );
@@ -589,7 +604,7 @@ export default function AplikasyonPaneliDetayPage() {
     setIsDigerFirmaSaving(true);
     try {
       // Create a record for the other company fault
-      await addDoc(collection(db, 'digerFirmaArizalar'), {
+      await addDoc(collection(db, 'digerFirmaArizalar'), withCompanyScope({
         hospitalId,
         hospitalName: hospital?.name || '',
         digerFirmaAdi: digerFirmaAdi.trim(),
@@ -599,7 +614,7 @@ export default function AplikasyonPaneliDetayPage() {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserProfile?.name || currentUserProfile?.displayName || '',
         formType: 'aplikasyon',
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Diğer firma arıza kaydı oluşturuldu.' });
 
@@ -629,8 +644,8 @@ export default function AplikasyonPaneliDetayPage() {
 
   const fetchTemplateOptions = async () => {
     const [hospitalsSnap, devicesSnap] = await Promise.all([
-      getDocs(collection(db, 'hospitals')),
-      getDocs(collection(db, 'devices')),
+      getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
     ]);
     const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
     const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];
@@ -726,8 +741,8 @@ export default function AplikasyonPaneliDetayPage() {
       }
 
       const [hospitalsSnap, devicesSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
       ]);
       const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
       const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];
@@ -1163,7 +1178,7 @@ export default function AplikasyonPaneliDetayPage() {
             <DialogDescription>
               {selectedDeviceFaultType === 'aplikasyon'
                 ? 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.'
-                : 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Bu arızayı yalnızca teknik servis personeli yönetebilir.'}
+                : 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Arıza kaydı salt okunur görüntülenir; aplikasyon işlem formu yine de oluşturabilirsiniz.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
@@ -1181,6 +1196,12 @@ export default function AplikasyonPaneliDetayPage() {
                   >
                     <FilePenLine className="mr-2 h-4 w-4" /> Yeni İşlem Oluştur
                   </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                  >
+                    <Calculator className="mr-2 h-4 w-4" /> Kümülatif Hesapla
+                  </Button>
                 </>
               ) : (
                 <>
@@ -1190,6 +1211,18 @@ export default function AplikasyonPaneliDetayPage() {
                     disabled={!faultIdForSelectedDevice}
                   >
                     <Wrench className="mr-2 h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => selectedDevice?.id && navigateToAction(`/aplikasyon-paneli/islem-formu/${selectedDevice.id}`)}
+                  >
+                    <FilePenLine className="mr-2 h-4 w-4" /> Aplikasyon İşlem Formu Aç
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                  >
+                    <Calculator className="mr-2 h-4 w-4" /> Kümülatif Hesapla
                   </Button>
                   <Button
                     variant="outline"

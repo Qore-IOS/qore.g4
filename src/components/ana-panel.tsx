@@ -8,7 +8,7 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useRef, Suspense, useMemo, useDeferredValue, useTransition } from 'react';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
@@ -23,10 +23,13 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepoStokByDepot, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
+import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
+import { LedStripGlow } from '@/components/ui/led-strip-glow';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // UI Components
 import { Button } from '@/components/ui/button';
@@ -38,14 +41,17 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 
 // Icons
-import { Trash2, CheckSquare, PlusCircle, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles } from 'lucide-react';
+import { Trash2, CheckSquare, PlusCircle, Plus, Minus, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles, CheckCircle2, Clock, RefreshCw, Zap } from 'lucide-react';
 
 // Firebase
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit, increment, arrayUnion } from 'firebase/firestore';
+import { flushSync } from 'react-dom';
+import { scheduleIdle, cancelIdle, sanitizeFsId, type IdleHandle } from '@/lib/sync/idle-scheduler';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -59,7 +65,13 @@ import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
-import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, normalizeCompanyId, withCompanyScope } from '@/lib/company-scope';
+import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
+import {
+  MK_C, MkClayStyles, MkTopStepper, MkSoftBtn, MkReadinessCard, MkAddPanel,
+  MkChipBtn, MkAcceptBtn, MkWarnChip, MkGoodChip, MkEmptyState, MkWaybillCard,
+  type MkLastItem,
+} from '@/components/mal-kabul/clay-kit';
 
 // Child Components
 const ManualInlineAdder = dynamic(() => import('@/components/mal-kabul/ManualInlineAdder'), {
@@ -122,6 +134,15 @@ const DynamicCameraBarcodeScanner = dynamic(
 // =============================================================================
 
 /**
+ * Oto Kabul (arka plan artımlı yazma) için satır senkron durumu.
+ * - `pending`    : kuyrukta, henüz yazılmadı
+ * - `processing` : worker tarafından kilitlendi, Firestore yazımı sürüyor
+ * - `confirmed`  : stoğa yazıldı (sunucu onayı / yerel kalıcı kuyruğa alındı)
+ * - `failed`     : yazılamadı veya geçmişte işlem görmüş seri (atlandı)
+ */
+type SyncStatus = 'pending' | 'processing' | 'confirmed' | 'failed';
+
+/**
  * Extended scanned item with grouping support
  * @description Represents a single scanned item or a group of items with the same lot
  */
@@ -140,6 +161,14 @@ type ScanRow = ScannedItem & {
   items?: ScannedItem[];
   /** Whether item already included in a bulk serial QR assignment */
   bulkQrAssigned?: boolean;
+  /** Oto Kabul: arka plan yazma durumu (sadece oto kabul açıkken set edilir) */
+  syncStatus?: SyncStatus;
+  /** Oto Kabul: başarısızlık nedeni (UI'da gösterilir) */
+  syncError?: string;
+  /** Oto Kabul: geçici hatalarda otomatik yeniden deneme sayacı */
+  syncRetries?: number;
+  /** Oto Kabul: yazılan depoStok belge kimliği (idempotency + izlenebilirlik) */
+  serverDocId?: string;
 };
 
 /**
@@ -168,6 +197,43 @@ type MalKabulHeader = {
   brands: string[];
   mode: 'verified' | 'unverified';
 };
+
+type CeomedItem = {
+  BARKOD_SERI: string;
+  STOK_KODU: string;
+  LOT: string;
+  MIYAT: string;
+  MIKTAR: number;
+};
+
+type PendingCeomedIrsaliye = {
+  id: string;
+  ceomedId: number;
+  irsaliyeNo: string;
+  tarih: string;
+  cariKodu: string;
+  cariUnvan: string;
+  durumAciklama: string;
+  status: 'pending' | 'approved' | 'rejected' | 'deleted';
+  items: CeomedItem[];
+};
+type PendingCeomedLine = {
+  key: string;
+  stokKodu: string;
+  stokAdi: string;
+  marka: string;
+  lot: string;
+  miad: string;
+  adet: number;
+  serials: string[];
+};
+type CeomedVerifyLine = PendingCeomedLine & { verifiedSerials: Set<string> };
+
+const PENDING_CEOMED_DURUM_SET = new Set([
+  'IRSALIYE YAZDIRILABILIR',
+  'IRSALIYE YAZDIRILDI',
+  'KURUMA SEVK EDILDI',
+]);
 
 // =============================================================================
 // UTILITY FUNCTIONS
@@ -234,7 +300,7 @@ const stripUndefined = (val: unknown): unknown => {
  */
 function upsertGroupedRow(
   setScannedItems: React.Dispatch<React.SetStateAction<ScanRow[]>>,
-  base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string },
+  base: { stokKodu: string; stokAdi: string; lot?: string; miad?: string; barkod?: string; syncStatus?: SyncStatus },
   match: (r: ScanRow) => boolean,
   delta = 1
 ) {
@@ -248,7 +314,7 @@ function upsertGroupedRow(
       copy[idx] = existingItem;
       return copy;
     }
-    
+
     // If no match found, create a new item
     const key = `${base.stokKodu}-${base.lot || ''}-${base.miad || ''}`;
     const row: ScanRow = {
@@ -268,10 +334,18 @@ function upsertGroupedRow(
       isGroup: true,
       key: key,
       bulkQrAssigned: false,
+      ...(base.syncStatus ? { syncStatus: base.syncStatus } : {}),
     };
     return [row, ...prev];
   });
 }
+
+// Oto Kabul: bir satırın arka plan worker'ı tarafından kilitli (yeniden işlenmemesi
+// gereken) olup olmadığını söyler. Kilitli satırlar yeni okutmalarla GRUPLANMAZ;
+// böylece worker yazarken gelen okutmalar yeni bir "pending" gruba düşer ve adet
+// kaybı yaşanmaz.
+const isRowSyncLocked = (r: ScanRow): boolean =>
+  !!r.isProcessed || r.syncStatus === 'processing' || r.syncStatus === 'confirmed' || r.syncStatus === 'failed';
 
 
 const turkishFold = (value: string) =>
@@ -480,6 +554,36 @@ const enqueueSerialHistory = (
   });
 };
 
+// Tek bir depoStok belgesinin gövdesini üretir. Hem manuel "Mal Kabul" akışı hem
+// de Oto Kabul arka plan worker'ı bu fonksiyonu kullanır; böylece iki yolda da
+// belge şeması birebir aynıdır (companyId çağıran tarafça eklenir).
+type DepoStokDocContext = {
+  depotId: string;
+  depotName: string;
+  createdByName: string;
+  createdByUid: string | null;
+};
+const buildDepoStokDocData = (item: ScanRow, serial: string, ctx: DepoStokDocContext) => ({
+  depotId: ctx.depotId,
+  depotName: ctx.depotName,
+  stokKodu: item.stokKodu || '',
+  stokAdi: item.stokAdi || '',
+  lotNumarasi: item.lotNumarasi || '',
+  miad: item.miad ? normalizeMiad(item.miad) : '',
+  seriNumarasi: serial,
+  rafAdresi: item.rafAdresi || '',
+  irsaliyeNumarasi: item.irsaliyeNumarasi || '',
+  eklenmeTarihi: toFsTimestamp(item.timestamp),
+  isShipped: false,
+  createdByName: ctx.createdByName,
+  createdByUid: ctx.createdByUid,
+});
+
+
+// Stable empty reference for the depot serial index so that, while the query is
+// loading (data === undefined), the fallback doesn't allocate a new Map every
+// render and retrigger memos/callbacks that depend on `existingDepotSerials`.
+const EMPTY_SERIAL_INDEX: ReadonlyMap<string, Set<string>> = new Map();
 
 export default function AnaPanel(props: AnaPanelProps) {
   const { toast } = useToast();
@@ -487,22 +591,60 @@ export default function AnaPanel(props: AnaPanelProps) {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   // Use TanStack Query for static data - shared cache, 1 hour stale time
-  const { data: depots = [], isLoading: depotsLoading } = useDepots();
-  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
+  // isPending: veri hiç cache'de yoksa true. isLoading: isPending && isFetching.
+  // Prefetch (AppLayout) sayesinde cache'de veri varsa isPending bile false döner → anında açılır.
+  const { data: depots = [], isPending: depotsPending } = useDepots();
+  const { data: productCodes = [], isPending: productsPending } = useProductCodes();
   const { data: addressDefinitions = [] } = useAddressDefinitions();
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [], isPending: barcodeFormatsPending } = useBarcodeFormatsQuery();
   const { data: users = [] } = useUsers();
   const { invalidateDepoStok } = useInvalidateQueries();
 
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
 
-  // Use TanStack Query for depot stock with polling
-  const { data: depotStockData = [] } = useDepoStokByDepot(selectedDepotId);
+  // Depo seri indeksi ARTIK otomatik yüklenmiyor (auto: false). Okutma yolu
+  // tamamen bellek-içi kalsın diye depo sorgusu yalnızca kullanıcı "Depoda
+  // Kontrol Et" butonuna bastığında (refetch) yapılır. Oturum içi mükerrer
+  // kontrolü ise sorgu gerektirmediği için her zaman aktiftir (scannedSerialsRef).
+  const depotSerialIndexQuery = useDepotSerialIndex(selectedDepotId, { auto: false });
+  const existingDepotSerials = depotSerialIndexQuery.data ?? EMPTY_SERIAL_INDEX;
+  const [isCheckingDepotSerials, setIsCheckingDepotSerials] = useState(false);
 
-  const isLoading = depotsLoading || productsLoading;
-  const [isProcessingScan, setIsProcessingScan] = useState(false);
+  // Skeleton yalnızca veri gerçekten hiç cache'de yoksa (isPending) gösterilir.
+  // Arka planda yenileme (isFetching) sırasında UI bloke edilmez.
+  const isLoading = depotsPending || productsPending || barcodeFormatsPending;
+  const masterDataProgress = useMemo(() => {
+    const completedSources = Number(!productsPending) + Number(!barcodeFormatsPending);
+    return Math.round((completedSources / 2) * 100);
+  }, [productsPending, barcodeFormatsPending]);
+  const isMasterDataLoading = masterDataProgress < 100;
 
   const [scannedItems, setScannedItems] = useState<ScanRow[]>([]);
+  // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
+  const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
+  const [, startTransition] = useTransition();
+
+  // ── Oto Kabul (arka plan artımlı stoğa yazma) ───────────────────────────────
+  // Switch açıkken okutulan her ürün, tarama hot-path'ine dokunmadan, tarayıcı
+  // boş anlarında (idle) küçük partiler halinde depoStok'a yazılır ve satır
+  // "Stokta" olarak işaretlenir. Okutma yine tamamen bellek-içi kalır (<10ms);
+  // yalnızca yeni satıra `syncStatus: 'pending'` damgası eklenir.
+  const [otoKabul, setOtoKabul] = useState(false);
+  const otoKabulRef = useRef(false);
+  useEffect(() => { otoKabulRef.current = otoKabul; }, [otoKabul]);
+  const [autoStats, setAutoStats] = useState<{ confirmed: number; failed: number }>({ confirmed: 0, failed: 0 });
+  const [autoTxId, setAutoTxId] = useState<string | null>(null);
+  const autoRunningRef = useRef(false);
+  const autoIdleHandleRef = useRef<IdleHandle | null>(null);
+  const autoTxRef = useRef<{ id: string; ref: ReturnType<typeof doc>; depotId: string } | null>(null);
+
+  // A scan must stay on the urgent input path. Grouping and sorting thousands of
+  // rows synchronously here used to block the next HID/keyboard event for a few
+  // milliseconds on every read. React may now coalesce this deferred snapshot
+  // during rapid scanning while counters and duplicate detection keep using the
+  // authoritative, up-to-date array above.
+  const deferredScannedItems = useDeferredValue(scannedItems);
+
   const [lastScannedProduct, setLastScannedProduct] = useState<ScanRow | null>(null);
   const [scanStatus, setScanStatus] = useState<'idle'|'success'|'error'>('idle');
 
@@ -520,6 +662,12 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isBatchScanning, setIsBatchScanning] = useState(false);
   const [isOcrModalOpen, setIsOcrModalOpen] = useState(false);
   const [pendingIrsaliyeCount, setPendingIrsaliyeCount] = useState(0);
+  const [pendingCeomedIrsaliye, setPendingCeomedIrsaliye] = useState<PendingCeomedIrsaliye[]>([]);
+  const [pendingFileIrsaliyeCount, setPendingFileIrsaliyeCount] = useState(0);
+  const [isPendingCeomedModalOpen, setIsPendingCeomedModalOpen] = useState(false);
+  const [ceomedApprovingId, setCeomedApprovingId] = useState<string | null>(null);
+  const [selectedPendingIrs, setSelectedPendingIrs] = useState<PendingCeomedIrsaliye | null>(null);
+  const [ceomedVerifyMap, setCeomedVerifyMap] = useState<Record<string, CeomedVerifyLine>>({});
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
 
@@ -533,8 +681,10 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [showUnverified, setShowUnverified] = useState(false);
   const [commitInfo, setCommitInfo] = useState<{ commits: number; pending: number } | null>(null);
   
-  // Map: stokKodu -> Set<seriNumarasi> - oturum içi mükerrer kontrolü ürün bazında
+  // Map: stokKodu -> Set<seriNumarasi> - oturum içi mükerrer kontrolü sadece ürün bazında
+  // Seri numarası aynı ürün için lot fark etmeksizin benzersiz olmalıdır.
   const scannedSerialsRef = useRef(new Map<string, Set<string>>());
+  const serialProductKey = useCallback((stokKodu?: string) => stokKodu || '', []);
 
 
   const incomingQuantities = useMemo(() => {
@@ -584,6 +734,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const sessionsQuery = useDepotCountSessions(selectedDepotId);
   const scannedItemsQuery = useScannedItems(activeSession?.id ?? null);
   const irsaliyeQuery = useIrsaliyeFiles(selectedDepotId);
+  const selectedDepot = useMemo(() => sourceDepots.find(d => d.id === selectedDepotId), [sourceDepots, selectedDepotId]);
 
   // Derive state from queries
   const availableSessions = useMemo(() => 
@@ -628,25 +779,90 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
   }, [irsaliyeQuery.data, selectedDepotId]);
 
-  // Build existing serials map from TanStack Query data (polling instead of real-time listener)
-  // This reduces Firestore reads dramatically
-  const existingDepotSerials = useMemo(() => {
-    const serialsByProduct = new Map<string, Set<string>>();
-    depotStockData.forEach(item => {
-      const serial = item.seriNumarasi;
-      const stokKodu = item.stokKodu;
-      if (serial && stokKodu) {
-        if (!serialsByProduct.has(stokKodu)) {
-          serialsByProduct.set(stokKodu, new Set());
-        }
-        serialsByProduct.get(stokKodu)!.add(serial);
+  useEffect(() => {
+    if (!selectedDepotId) {
+      setPendingFileIrsaliyeCount(0);
+      return;
+    }
+    const pendingFilesQuery = scopedQuery('bekleyenIrsaliyeler', currentCompanyId, isSuperAdmin, orderBy('scannedAt', 'desc'));
+    const unsubscribe = onSnapshot(pendingFilesQuery, (snapshot) => {
+      const count = snapshot.docs.reduce((total, document) => {
+        const data = document.data() as any;
+        if (!matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return total;
+        const belongsToDepot = data.locationType === 'depot' && data.locationId === selectedDepotId;
+        return total + Number(data.status === 'pending' && belongsToDepot);
+      }, 0);
+      setPendingFileIrsaliyeCount(count);
+    }, () => setPendingFileIrsaliyeCount(0));
+    return () => unsubscribe();
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    const cari = ((selectedDepot as any)?.ceomedCariKodu || '').toString().trim().toUpperCase();
+    if (!cari) {
+      setPendingCeomedIrsaliye([]);
+      return;
+    }
+    const q = scopedQuery('pendingCeomedIrsaliye', currentCompanyId, isSuperAdmin, where('status', '==', 'pending'));
+    const unsub = onSnapshot(q, (snap) => {
+      const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as PendingCeomedIrsaliye[];
+      const filtered = rows.filter((r) =>
+        (r.cariKodu || '').trim().toUpperCase() === cari &&
+        PENDING_CEOMED_DURUM_SET.has((r.durumAciklama || '').trim().toUpperCase())
+      );
+      setPendingCeomedIrsaliye(filtered);
+    }, () => setPendingCeomedIrsaliye([]));
+    return () => unsub();
+  }, [selectedDepot]);
+
+  // Kullanıcı "Depoda Kontrol Et" butonuna bastığında depo seri indeksini çeker
+  // ve listedeki serileri depoyla karşılaştırır. Depoda zaten mevcut serileri
+  // listeden çıkarır ve özet gösterir. Buton bir kez kullanıldığında indeks
+  // cache'e gireceğinden, sonraki okutmalar da ekstra sorgu olmadan depo
+  // mükerrerini anında yakalar (processScan içindeki `existingDepotSerials`).
+  const handleDepotSerialCheck = useCallback(async () => {
+    if (!selectedDepotId) {
+      toast({ title: 'Depo seçili değil', description: 'Önce bir depo seçin.', variant: 'destructive' });
+      return;
+    }
+    setIsCheckingDepotSerials(true);
+    try {
+      const res = await depotSerialIndexQuery.refetch();
+      const index = res.data ?? new Map<string, Set<string>>();
+      // Listedeki seri-takipli (gruplanmamış) satırlar
+      const dupRows = scannedItems.filter(r =>
+        !r.isProcessed && !r.isGroup && r.seriNumarasi && r.stokKodu &&
+        (index.get(serialProductKey(r.stokKodu)) as Set<string> | undefined)?.has(r.seriNumarasi)
+      );
+      if (dupRows.length === 0) {
+        flashScanFeedback('success', 'Listedeki seriler depoda mevcut değil — temiz.');
+        toast({ title: 'Depo Kontrolü', description: 'Listedeki hiçbir seri depoda bulunmuyor.' });
+        return;
       }
-    });
-    return serialsByProduct;
-  }, [depotStockData]);
-  
+      const dupIds = new Set(dupRows.map(r => r.id));
+      setScannedItems(prev => prev.filter(r => !dupIds.has(r.id)));
+      // Oturum içi mükerrer takibinden de düş
+      dupRows.forEach(r => {
+        scannedSerialsRef.current.get(serialProductKey(r.stokKodu))?.delete(r.seriNumarasi!);
+      });
+      flashScanFeedback('error', `${dupRows.length} seri zaten depoda mevcut — listeden çıkarıldı.`);
+      toast({
+        title: 'Depo Kontrolü',
+        description: `${dupRows.length} seri depoda zaten mevcut olduğu için listeden çıkarıldı.`,
+        variant: 'destructive',
+      });
+    } catch (e) {
+      malKabulLogger.error('Depo seri kontrolü başarısız', e);
+      toast({ title: 'Depo Kontrolü Hatası', description: 'Depo serileri sorgulanamadı.', variant: 'destructive' });
+    } finally {
+      setIsCheckingDepotSerials(false);
+    }
+  }, [selectedDepotId, scannedItems, depotSerialIndexQuery, serialProductKey, toast, flashScanFeedback]);
+
   const processScan = useCallback(async (barcodeData: string, source: 'barcode' | 'bulk_item' = 'barcode') => {
     const scanCorrelationId = createCorrelationId();
+    // Toplu QR içindeki alt okutmalar ana okutmanın ölçümünü ezmesin.
+    if (source === 'barcode') startScanMeasurement();
     const trimmedData = (barcodeData || '').trim();
     if (!trimmedData) {
       malKabulLogger.warn('Scan ignored: empty payload', { source, isBulkScanMode }, { correlationId: scanCorrelationId });
@@ -654,7 +870,11 @@ export default function AnaPanel(props: AnaPanelProps) {
     }
 
     const isBulkItem = source === 'bulk_item';
-    malKabulLogger.info('Scan received', {
+    // PERFORMANS: Okutma hot-path'indeki bilgi logları `debug` seviyesinde —
+    // production'da (minLevel: 'info') bastırılır, böylece her okutmada gereksiz
+    // JSON.stringify + console maliyeti olmaz (direkt transfer paneliyle aynı
+    // hafiflik). Uyarı/hata logları korunur.
+    malKabulLogger.debug('Scan received', {
       source,
       isBulkItem,
       isBulkScanMode,
@@ -664,7 +884,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     }, { correlationId: scanCorrelationId });
 
     const bulkBarcodes = decodeBulkSerialQrPayload(trimmedData);
-    malKabulLogger.info('Bulk decode result', {
+    malKabulLogger.debug('Bulk decode result', {
       source,
       isBulkMode: isBulkScanMode,
       decodedCount: bulkBarcodes?.length || 0,
@@ -676,7 +896,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         await processScan(serialBarcode, 'bulk_item');
       }
       setIsBulkScanMode(false);
-      malKabulLogger.info('Bulk scan processed successfully', {
+      malKabulLogger.debug('Bulk scan processed successfully', {
         itemCount: bulkBarcodes.length,
       }, { correlationId: scanCorrelationId });
       flashScanFeedback('success', `${bulkBarcodes.length} ürün tek seferde işlendi.`);
@@ -692,7 +912,6 @@ export default function AnaPanel(props: AnaPanelProps) {
       return;
     }
 
-    setIsProcessingScan(true);
     try {
         const resolveResult = parseAndResolveBarcode(trimmedData, barcodeFormats, productCodes as any);
         if (!resolveResult || !resolveResult.parsed) {
@@ -719,50 +938,86 @@ export default function AnaPanel(props: AnaPanelProps) {
         const mode = (staticTrackingMode === 'qty_manual' || staticTrackingMode === 'qty_barcode')
           ? 'qty_barcode'
           : resolveEffectiveTrackingMode(resolved, matchedFormat, matchedProduct as any);
-
         const isLotOnlyBarcode = (mode === 'serial') && !!lotNumarasi && !seriNumarasi;
 
         if ((mode === 'serial') && !isLotOnlyBarcode) {
             if (!seriNumarasi) throw new Error('Bu ürün seri numarası ile takip edilir, barkod seri içermiyor.');
 
-            // Mükerrer kontrolü: aynı ürün için aynı seri numarası kontrol edilir
-            const sessionSerials = scannedSerialsRef.current.get(stokKodu);
-            const depotSerials = existingDepotSerials.get(stokKodu);
+            // Mükerrer kontrolü: aynı ürün + seri no eşleşmesi (lot fark etmez)
+            const serialKey = serialProductKey(stokKodu);
+            const sessionSerials = scannedSerialsRef.current.get(serialKey);
+            const depotSerials = existingDepotSerials.get(serialKey);
             const isInSession = sessionSerials?.has(seriNumarasi) ?? false;
             const isInDepot = depotSerials?.has(seriNumarasi) ?? false;
 
             if (isInSession || isInDepot) {
               playFeedback(true);
               const location = isInSession ? 'bu oturumda' : 'depoda';
+              // Structured log: hata mesajı tekrar görüldüğünde stokKodu+seri eşleşmesini
+              // konsoldan doğrulamak için. Yanlış pozitif geliyorsa burada görülür.
+              malKabulLogger.warn('Mükerrer seri tespit edildi', {
+                stokKodu,
+                stokAdi: matchedProduct.stokAdi,
+                seriNumarasi,
+                isInSession,
+                isInDepot,
+                sessionSerialCount: sessionSerials?.size ?? 0,
+                depotSerialCount: depotSerials?.size ?? 0,
+              }, { correlationId: scanCorrelationId });
               flashScanFeedback('error', `SN ${seriNumarasi} (${matchedProduct.stokAdi}) ${location} zaten mevcut.`);
               if (source === 'barcode') { setScanStatus('error'); setTimeout(() => setScanStatus('idle'), 3000); }
-              setIsProcessingScan(false);
               return;
             }
 
             const newItem: ScanRow = {
               id: generateId(), barkod: trimmedData, stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi,
               lotNumarasi: lotNumarasi || '', miad: miadFormatted || '', seriNumarasi: seriNumarasi || '',
-              rafAdresi: '', irsaliyeNumarasi: '', isSelected: false, timestamp: new Date(), isProcessed: false,
-              adet: 1, isGroup: false, bulkQrAssigned: false
+              rafAdresi: '', irsaliyeNumarasi: selectedPendingIrs?.irsaliyeNo || '', isSelected: false, timestamp: new Date(), isProcessed: false,
+              adet: 1, isGroup: false, bulkQrAssigned: false,
+              ...(otoKabulRef.current ? { syncStatus: 'pending' as const } : {}),
             };
             newItem.key = `${newItem.stokKodu}-${newItem.lotNumarasi}-${newItem.miad}`;
-            // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi>
-            if (!scannedSerialsRef.current.has(stokKodu)) {
-              scannedSerialsRef.current.set(stokKodu, new Set());
+            // Oturum içi mükerrer takibi: stokKodu -> Set<seriNumarasi> (lot dahil değil)
+            if (!scannedSerialsRef.current.has(serialKey)) {
+              scannedSerialsRef.current.set(serialKey, new Set());
             }
-            scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
-            setScannedItems(prev => [newItem, ...prev]);
+            scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
+            
+            startTransition(() => {
+              setScannedItems(prev => [newItem, ...prev]);
+              if (selectedPendingIrs) {
+                const verifyKey = `${stokKodu}||${lotNumarasi || ''}||${miadFormatted || ''}`;
+                setCeomedVerifyMap((prev) => {
+                  const v = prev[verifyKey];
+                  if (!v) return prev;
+                  const nextSet = new Set(v.verifiedSerials);
+                  nextSet.add(seriNumarasi);
+                  return { ...prev, [verifyKey]: { ...v, verifiedSerials: nextSet } };
+                });
+              }
+            });
             if (source === 'barcode') setLastScannedProduct(newItem);
+
+            // PERFORMANS: Geçmişte tüketilmiş/işlem görmüş seri kontrolü artık her
+            // okutmada Firestore'a sorgu atmıyor. Eskiden burada her seri için
+            // `getDocs(serialHistory/{seri}/events)` çağrısı yapılıyordu; "fire and
+            // forget" olsa bile her okutmada Firestore IndexedDB persistence katmanını
+            // ve ağı tetikliyordu. Hızlı okutmalarda bu sorgular birikip ana iş
+            // parçacığını boğuyor, her tuşa basıştan sonra boyamayı (paint) geciktiriyordu
+            // (INP "keyboard" ~1.2sn). Aynı kontrol zaten "Mal Kabul" anında
+            // (commit) TÜM seriler için tek bir batch halinde yapılıyor ve tüketilmiş
+            // seriler yazımdan önce eleniyor — dolayısıyla doğruluk kaybı yok, sadece
+            // uyarı okutma anı yerine kayıt anında görünür. Bu sayede okutma yolu
+            // tamamen bellek-içi (in-memory) kalır ve <10ms hedefine ulaşır.
 
         } else {
           // It's a lot-based or quantity-based item
-          upsertGroupedRow(
+          startTransition(() => upsertGroupedRow(
             setScannedItems,
-            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData },
-            (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '')),
+            { stokKodu: stokKodu, stokAdi: matchedProduct.stokAdi, lot: lotNumarasi, miad: miadFormatted, barkod: trimmedData, syncStatus: otoKabulRef.current ? 'pending' : undefined },
+            (r) => !!(r.isGroup && r.stokKodu === stokKodu && r.lotNumarasi === (lotNumarasi || '') && r.miad === (miadFormatted || '') && !isRowSyncLocked(r)),
             1
-          );
+          ));
           if (source === 'barcode') {
             const newItem = { stokKodu, stokAdi: matchedProduct.stokAdi, lotNumarasi, miad: miadFormatted, seriNumarasi: '' } as ScanRow;
             setLastScannedProduct(newItem);
@@ -788,13 +1043,17 @@ export default function AnaPanel(props: AnaPanelProps) {
         setScanStatus('error');
         setTimeout(() => setScanStatus('idle'), 3000);
       }
-    } finally {
-      setIsProcessingScan(false);
     }
-  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode]);
+  }, [flashScanFeedback, productCodes, barcodeFormats, existingDepotSerials, productTracking, isBulkScanMode, startScanMeasurement]);
 
+  // Direkt transfer paneliyle aynı davranış: tarayıcı yalnızca modal/kamera/manuel
+  // giriş açıkken devre dışı. Eskiden buradaki `!isProcessingScan` koşulu HER
+  // okutmada window keydown dinleyicisini söküp yeniden ekliyordu (re-subscribe
+  // churn) ve okutma işlenirken tarayıcıyı kapatıyordu. Okutma yolu artık tamamen
+  // bellek-içi olduğundan (per-scan Firestore sorgusu kaldırıldı) bu kapıya gerek
+  // yok; kaldırılması anlık, kesintisiz okutma sağlar.
   useHidScanner({
-    enabled: !isPreCheckModalOpen && !isProcessingScan && !isCameraScannerOpen && !showManualInline,
+    enabled: !isPreCheckModalOpen && !isCameraScannerOpen && !showManualInline,
     onScan: ({ raw }) => {
       if (raw) processScan(raw, 'barcode');
     },
@@ -902,9 +1161,10 @@ export default function AnaPanel(props: AnaPanelProps) {
 
       // If serial number exists, add as individual serial-tracked item
       if (seriNumarasi) {
-        // Duplicate check
-        const sessionSerials = scannedSerialsRef.current.get(stokKodu);
-        const depotSerials = existingDepotSerials.get(stokKodu);
+        // Duplicate check: stokKodu + seriNumarasi (lot fark etmez)
+        const serialKey = serialProductKey(stokKodu);
+        const sessionSerials = scannedSerialsRef.current.get(serialKey);
+        const depotSerials = existingDepotSerials.get(serialKey);
         if (sessionSerials?.has(seriNumarasi) || depotSerials?.has(seriNumarasi)) {
           skipped++;
           return;
@@ -929,10 +1189,10 @@ export default function AnaPanel(props: AnaPanelProps) {
           bulkQrAssigned: false,
         };
 
-        if (!scannedSerialsRef.current.has(stokKodu)) {
-          scannedSerialsRef.current.set(stokKodu, new Set());
+        if (!scannedSerialsRef.current.has(serialKey)) {
+          scannedSerialsRef.current.set(serialKey, new Set());
         }
-        scannedSerialsRef.current.get(stokKodu)!.add(seriNumarasi);
+        scannedSerialsRef.current.get(serialKey)!.add(seriNumarasi);
         setScannedItems((prev) => [newItem, ...prev]);
         addedSerial++;
         addedAdet++;
@@ -982,7 +1242,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const groupedScannedItems = useMemo(() => {
     const grouped: Record<string, ScanRow> = {};
-    scannedItems.forEach(item => {
+    deferredScannedItems.forEach(item => {
       const key = item.key ?? `${item.stokKodu}-${item.lotNumarasi}-${item.miad}`;
       if (!grouped[key]) {
         grouped[key] = {
@@ -1008,7 +1268,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const bTime = b.timestamp instanceof Date ? b.timestamp.getTime() : (b.timestamp as any)?.toDate?.()?.getTime?.() || 0;
       return bTime - aTime;
     });
-  }, [scannedItems]);
+  }, [deferredScannedItems]);
   
   const toggleGroupSelection = (groupKey: string | undefined) => {
     if (!groupKey) return;
@@ -1028,7 +1288,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         const itemsToRemove = prev.filter(item => item.key === groupKey);
         itemsToRemove.forEach(item => {
             if(item.seriNumarasi && item.stokKodu) {
-                const productSerials = scannedSerialsRef.current.get(item.stokKodu);
+                const productSerials = scannedSerialsRef.current.get(serialProductKey(item.stokKodu));
                 productSerials?.delete(item.seriNumarasi);
             }
         });
@@ -1049,8 +1309,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [isAddressModalOpen, setIsAddressModalOpen] = useState(false);
   const [isIrsaliyeModalOpen, setIsIrsaliyeModalOpen] = useState(false);
   const [selectedAddressBarcode, setSelectedAddressBarcode] = useState<string>('');
-  const [addressAssignmentInput, setAddressAssignmentInput] = useState<string>('');
-  const [irsaliyeNoInput, setIrsaliyeNoInput] = useState<string>('');
+  const addressInputRef = useRef<HTMLInputElement>(null);
+  const irsaliyeInputRef = useRef<HTMLInputElement>(null);
   const [malKabulIsLoading, setMalKabulIsLoading] = useState(false);
   const [isGeneratingBulkQr, setIsGeneratingBulkQr] = useState(false);
 
@@ -1134,7 +1394,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const txRef = doc(db, 'malKabulTransactions', transactionId);
       const batch = writeBatch(db);
 
-      batch.set(txRef, stripUndefined(header));
+      batch.set(txRef, withCompanyScope(stripUndefined(header), currentCompanyId));
 
       const lines = buildTransactionLines(rows);
       for (const line of lines) {
@@ -1147,7 +1407,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           adet: line.adet ?? 0,
           serials: Array.isArray(line.serials) ? (line.serials as string[]).filter(Boolean) : [],
         });
-        batch.set(lineRef, cleanLine);
+        batch.set(lineRef, withCompanyScope(cleanLine, currentCompanyId));
       }
 
       await batch.commit();
@@ -1168,13 +1428,13 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
   
   const handleAssignAddress = () => {
-    const address = (addressDefinitions || []).find(ad => ad.addressBarcode === selectedAddressBarcode);
-    if (!address && addressAssignmentInput.trim() === '') {
-      toast({ title: 'Hata', description: 'Lütfen geçerli bir adres barkodu seçin veya manuel adres girin.', variant: 'destructive' });
+    const manualVal = addressInputRef.current?.value || '';
+    const address = addressDefinitions.find(ad => ad.addressBarcode === selectedAddressBarcode);
+    if (!address && manualVal.trim() === '') {
+      toast({ title: 'Hata', description: 'Lütfen listeden bir adres seçin veya manuel girin', variant: 'destructive' });
       return;
     }
-    const targetAddressName = address ? address.addressName : addressAssignmentInput.trim();
-
+    const targetAddressName = address ? address.addressName : manualVal.trim();
     setScannedItems(prev =>
       prev.map(item =>
         item.isSelected && !item.isProcessed
@@ -1182,9 +1442,9 @@ export default function AnaPanel(props: AnaPanelProps) {
           : item
       )
     );
-    toast({ title: 'Başarılı', description: `Seçili ürünlere "${targetAddressName}" adresi atandı.` });
+    toast({ title: 'Başarılı', description: `Seçili ürünlere adres atandı.` });
     setSelectedAddressBarcode('');
-    setAddressAssignmentInput('');
+    if (addressInputRef.current) addressInputRef.current.value = '';
     setIsAddressModalOpen(false);
   };
 
@@ -1198,19 +1458,20 @@ export default function AnaPanel(props: AnaPanelProps) {
   };
   
   const handleAssignIrsaliyeNo = () => {
-    if (irsaliyeNoInput.trim() === '') {
-      toast({ title: 'Hata', description: 'İrsaliye numarası boş olamaz.', variant: 'destructive' });
+    const val = irsaliyeInputRef.current?.value || '';
+    if (val.trim() === '') {
+      toast({ title: 'Hata', description: 'Lütfen irsaliye numarası girin', variant: 'destructive' });
       return;
     }
     setScannedItems(prev =>
       prev.map(item =>
         item.isSelected && !item.isProcessed
-          ? { ...item, irsaliyeNumarasi: irsaliyeNoInput.trim(), isSelected: false }
+          ? { ...item, irsaliyeNumarasi: val.trim(), isSelected: false }
           : item
       )
     );
-    toast({ title: 'Başarılı', description: `Seçili ürünlere "${irsaliyeNoInput.trim()}" irsaliye no atandı.` });
-    setIrsaliyeNoInput('');
+    toast({ title: 'Başarılı', description: `Seçili ürünlere "${val.trim()}" irsaliye no atandı.` });
+    if (irsaliyeInputRef.current) irsaliyeInputRef.current.value = '';
     setIsIrsaliyeModalOpen(false);
   };
 
@@ -1293,11 +1554,12 @@ export default function AnaPanel(props: AnaPanelProps) {
     // Geçici olarak map'i temizle ve kalan öğeleri yeniden ekle
     scannedSerialsRef.current.clear();
     scannedItems.forEach(item => {
-      if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
-        if (!scannedSerialsRef.current.has(item.stokKodu)) {
-          scannedSerialsRef.current.set(item.stokKodu, new Set());
+        if (item.id && !processedIds.has(item.id) && item.seriNumarasi && item.stokKodu) {
+        const serialKey = serialProductKey(item.stokKodu);
+        if (!scannedSerialsRef.current.has(serialKey)) {
+          scannedSerialsRef.current.set(serialKey, new Set());
         }
-        scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+        scannedSerialsRef.current.get(serialKey)!.add(item.seriNumarasi);
       }
     });
 
@@ -1316,58 +1578,78 @@ export default function AnaPanel(props: AnaPanelProps) {
       });
 
       try {
-        // OPTIMIZED: Parallel serial verification with Promise.all
-        const serialsToVerify = itemsToProcess.map(i => i.seriNumarasi).filter(Boolean) as string[];
-        const existingSerialsInDb = new Set<string>();
+        // NOTE: Mükerrer seri kontrolü artık tamamen `existingDepotSerials`
+        // üzerinden yapılıyor — `Map<stokKodu, Set<seriNumarasi>>` formatında,
+        // dolayısıyla farklı ürünler aynı seri numarasını paylaşabiliyor.
+        // Eski versiyonda burada `where('seriNumarasi', 'in', ...)` ile stokKodu
+        // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
+        // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
-        if (serialsToVerify.length > 0) {
-          const chunks: string[][] = [];
-          for (let i = 0; i < serialsToVerify.length; i += 30) {
-            chunks.push(serialsToVerify.slice(i, i + 30));
+        // Check history of all serials to process to avoid duplicates of consumed/processed serials
+        const serialsToCheck: { serial: string; stokKodu: string }[] = [];
+        itemsToProcess.forEach(item => {
+          if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
+            serialsToCheck.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
+          } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
+            item.scannedSerials.forEach(s => {
+              if (s) {
+                serialsToCheck.push({ serial: s, stokKodu: item.stokKodu! });
+              }
+            });
           }
+        });
 
-          for (let i = 0; i < chunks.length; i += 5) {
-            const batchChunks = chunks.slice(i, i + 5);
-            const results = await Promise.all(
-              batchChunks.map(async (chunk) => {
-                const q = query(collection(db, 'depoStok'), where('seriNumarasi', 'in', chunk));
-                const snap = await getDocs(q);
-                return snap.docs
-                  .filter(doc => matchesCompanyScope(doc.data() as any, currentCompanyId, isSuperAdmin))
-                  .map(doc => doc.data().seriNumarasi as string);
-              })
-            );
-            results.flat().forEach(serial => existingSerialsInDb.add(serial));
-          }
+        const consumedSerials = new Set<string>();
+        if (serialsToCheck.length > 0) {
+          await Promise.all(
+            serialsToCheck.map(async ({ serial, stokKodu }) => {
+              try {
+                const historySnap = await getDocs(
+                  query(
+                    collection(db, `serialHistory/${serial}/events`),
+                    limit(1)
+                  )
+                );
+                if (!historySnap.empty) {
+                  const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
+                  if (matchedEvent) {
+                    consumedSerials.add(`${stokKodu}||${serial}`);
+                  }
+                }
+              } catch (e) {
+                console.error("Error checking history in commit", e);
+              }
+            })
+          );
         }
 
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
+        // Okutma anındaki Firestore sorgusu kaldırıldığı için, geçmişte tüketilmiş
+        // serileri burada (commit) eleyip kullanıcıya kaç tanesinin atlandığını bildiriyoruz.
+        let skippedConsumed = 0;
 
         for (const item of itemsToProcess) {
-          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(item.stokKodu) : undefined;
-          if (item.seriNumarasi && depotProductSerials?.has(item.seriNumarasi)) {
+          const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
+          if (item.seriNumarasi && (depotProductSerials?.has(item.seriNumarasi) || consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
+            if (consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`)) skippedConsumed++;
             continue;
           }
 
           const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
+          const filteredSerials = (serialsToProcess.filter(Boolean) as string[]).filter(serial => {
+            const isConsumed = consumedSerials.has(`${item.stokKodu}||${serial}`);
+            if (isConsumed) skippedConsumed++;
+            return !isConsumed;
+          });
 
-          const createDocData = (serial = '') => ({
+          const createDocData = (serial = '') => buildDepoStokDocData(item, serial, {
             depotId: selectedDepotId,
             depotName,
-            stokKodu: item.stokKodu || '',
-            stokAdi: item.stokAdi || '',
-            lotNumarasi: item.lotNumarasi || '',
-            miad: item.miad ? normalizeMiad(item.miad) : '',
-            seriNumarasi: serial,
-            rafAdresi: item.rafAdresi || '',
-            irsaliyeNumarasi: item.irsaliyeNumarasi || '',
-            eklenmeTarihi: toFsTimestamp(item.timestamp),
-            isShipped: false,
             createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
             createdByUid: currentUser?.uid || null,
           });
 
-          if (item.isGroup && serialsToProcess.length === 0) {
+          if (item.isGroup && filteredSerials.length === 0) {
             // OPTIMIZED: Create ONE document with 'adet' instead of 1000 separate ones
             docsToCreate.push({
               ref: doc(collection(db, 'depoStok')),
@@ -1378,7 +1660,7 @@ export default function AnaPanel(props: AnaPanelProps) {
               item,
             });
           } else {
-            for (const serial of (serialsToProcess.filter(Boolean) as string[])) {
+            for (const serial of filteredSerials) {
               docsToCreate.push({
                 ref: doc(collection(db, 'depoStok')),
                 data: withCompanyScope({ 
@@ -1414,9 +1696,9 @@ export default function AnaPanel(props: AnaPanelProps) {
         const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
         toast({
           title: 'Kabul Tamamlandı',
-          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.`,
+          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.${skippedConsumed > 0 ? ` ${skippedConsumed} seri geçmişte işlem görmüş/tüketilmiş olduğu için atlandı.` : ''}`,
           action: (
-            <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?open=${encodeURIComponent(txId)}`)}>
+            <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(txId)}`)}>
               Geçmişte Aç
             </Button>
           ),
@@ -1429,10 +1711,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.clear();
         previousScannedItems.forEach(item => {
           if (item.seriNumarasi && item.stokKodu) {
-            if (!scannedSerialsRef.current.has(item.stokKodu)) {
-              scannedSerialsRef.current.set(item.stokKodu, new Set());
+            const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+            if (!scannedSerialsRef.current.has(serialKey)) {
+              scannedSerialsRef.current.set(serialKey, new Set());
             }
-            scannedSerialsRef.current.get(item.stokKodu)!.add(item.seriNumarasi);
+            scannedSerialsRef.current.get(serialKey)!.add(item.seriNumarasi);
           }
         });
         toast({ 
@@ -1446,19 +1729,473 @@ export default function AnaPanel(props: AnaPanelProps) {
     })();
   };
 
+  // ── Oto Kabul arka plan worker'ı ────────────────────────────────────────────
+  // Tek bir mikro-partiyi (≤ AUTO_BATCH_SIZE pending satır) idempotent biçimde
+  // stoğa yazar: depoStok + serialHistory + (oturum başına tek) malKabulTransactions
+  // başlığı/satırları. Deterministik belge kimlikleri sayesinde yeniden denemeler
+  // çift kayıt oluşturmaz. Geçmişte işlem görmüş seriler manuel akışla birebir aynı
+  // şekilde elenir.
+  const AUTO_BATCH_SIZE = 20;
+
+  const commitAutoAcceptBatch = async (
+    picked: ScanRow[]
+  ): Promise<{ confirmed: Map<string, string>; failed: Map<string, string> }> => {
+    const confirmed = new Map<string, string>();
+    const failed = new Map<string, string>();
+    const depotName = sourceDepots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
+    const ctx: DepoStokDocContext = {
+      depotId: selectedDepotId,
+      depotName,
+      createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+      createdByUid: currentUser?.uid || null,
+    };
+
+    // 1) Geçmişte işlem görmüş serileri tespit et (arka planda, okutma dışı).
+    const serialChecks: { serial: string; stokKodu: string }[] = [];
+    picked.forEach(item => {
+      if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
+        serialChecks.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
+      } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
+        item.scannedSerials.forEach(s => { if (s) serialChecks.push({ serial: s, stokKodu: item.stokKodu! }); });
+      }
+    });
+    const consumed = new Set<string>();
+    if (serialChecks.length > 0) {
+      await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
+        try {
+          const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), limit(1)));
+          if (!snap.empty && snap.docs.some(d => d.data().details?.stokKodu === stokKodu)) {
+            consumed.add(`${stokKodu}||${serial}`);
+          }
+        } catch { /* okuma hatasında yazım yine denenir */ }
+      }));
+    }
+
+    // 2) depoStok + serialHistory tek writeBatch (parti küçük; 500 op limiti uzak).
+    const batch = writeBatch(db);
+    const writtenRows: ScanRow[] = [];
+
+    for (const item of picked) {
+      const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
+      if (!item.isGroup && item.seriNumarasi &&
+          (depotProductSerials?.has(item.seriNumarasi) || consumed.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
+        failed.set(item.id, 'Bu seri depoda mevcut veya geçmişte işlem görmüş.');
+        continue;
+      }
+
+      const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
+      const filteredSerials = (serialsToProcess.filter(Boolean) as string[])
+        .filter(s => !consumed.has(`${item.stokKodu}||${s}`));
+
+      if (item.isGroup && filteredSerials.length === 0) {
+        // Lot/adet grubu → tek belge + adet. Deterministik id: satıra bağlı.
+        const ref = doc(db, 'depoStok', `mkrow-${sanitizeFsId(item.id)}`);
+        batch.set(ref, withCompanyScope({ ...buildDepoStokDocData(item, '', ctx), adet: Math.max(1, item.adet ?? 1) }, currentCompanyId));
+        confirmed.set(item.id, ref.id);
+        writtenRows.push(item);
+      } else {
+        if (filteredSerials.length === 0) {
+          failed.set(item.id, 'Seri(ler) geçmişte işlem görmüş.');
+          continue;
+        }
+        let firstId = '';
+        for (const serial of filteredSerials) {
+          // Deterministik id (companyId+depot+stok+seri) → tekrar denemeler tek belge.
+          const ref = doc(db, 'depoStok', `mk-${sanitizeFsId(currentCompanyId || 'nc')}-${sanitizeFsId(selectedDepotId)}-${sanitizeFsId(item.stokKodu || '')}-${sanitizeFsId(serial)}`);
+          batch.set(ref, withCompanyScope({ ...buildDepoStokDocData(item, serial, ctx), adet: 1 }, currentCompanyId));
+          const histRef = doc(collection(db, `serialHistory/${serial}/events`));
+          batch.set(histRef, {
+            type: 'intake',
+            details: { stokKodu: item.stokKodu || '', stokAdi: item.stokAdi || '', depotId: selectedDepotId, depotName, rafAdresi: item.rafAdresi || '', irsaliyeNumarasi: item.irsaliyeNumarasi || '' },
+            timestamp: Timestamp.now(),
+          });
+          if (!firstId) firstId = ref.id;
+        }
+        confirmed.set(item.id, firstId);
+        writtenRows.push(item);
+      }
+    }
+
+    // 3) malKabulTransactions: oturum başına tek başlık (lazy), satırlar artımlı.
+    if (writtenRows.length > 0) {
+      if (autoTxRef.current && autoTxRef.current.depotId !== selectedDepotId) autoTxRef.current = null;
+      const addedCount = writtenRows.reduce((n, r) => n + Math.max(1, r.adet ?? 1), 0);
+      const brands = Array.from(new Set(writtenRows.map(r => getBrandFor(r.stokKodu || '', r.stokAdi || '')).filter(Boolean)));
+
+      if (!autoTxRef.current) {
+        const transactionId = `MK-${generateId()}`;
+        const txRef = doc(db, 'malKabulTransactions', transactionId);
+        const header: MalKabulHeader = {
+          transactionId, depotId: selectedDepotId, depotName,
+          userId: currentUser?.uid || '', userName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+          timestamp: Timestamp.now(), itemCount: addedCount, brands, mode: 'unverified',
+        };
+        batch.set(txRef, withCompanyScope(stripUndefined(header), currentCompanyId));
+        autoTxRef.current = { id: transactionId, ref: txRef, depotId: selectedDepotId };
+      } else {
+        const upd: Record<string, unknown> = { itemCount: increment(addedCount) };
+        if (brands.length) upd.brands = arrayUnion(...brands);
+        batch.update(autoTxRef.current.ref, upd);
+      }
+
+      const txRef = autoTxRef.current.ref;
+      for (const line of buildTransactionLines(writtenRows)) {
+        const lineRef = doc(collection(txRef, 'lines'));
+        batch.set(lineRef, withCompanyScope(stripUndefined({
+          stokKodu: line.stokKodu, stokAdi: line.stokAdi, lotNumarasi: line.lotNumarasi || '', miad: line.miad || '',
+          adet: line.adet ?? 0, serials: Array.isArray(line.serials) ? (line.serials as string[]).filter(Boolean) : [],
+        }), currentCompanyId));
+      }
+    }
+
+    await batch.commit();
+    return { confirmed, failed };
+  };
+
+  // Tek tur drenaj: pending satırları atomik kilitle (flushSync ile snapshot al),
+  // yaz, sonucu işaretle. Dönen değer: daha işlenecek pending kaldıysa true.
+  const drainAutoAcceptOnce = async (): Promise<boolean> => {
+    let picked: ScanRow[] = [];
+    // flushSync: kilit+snapshot'ı senkron uygula → adet kaybı/yarış olmadan
+    // `picked`'i güvenle dışarı al. Tarama duraklamasında (idle) çalıştığı için
+    // okutma gecikmesini etkilemez.
+    flushSync(() => {
+      setScannedItems(prev => {
+        picked = [];
+        let changed = false;
+        const next = prev.map(it => {
+          if (picked.length >= AUTO_BATCH_SIZE) return it;
+          if (it.syncStatus !== 'pending' || !it.stokKodu) return it;
+          const locked: ScanRow = { ...it, syncStatus: 'processing' };
+          picked.push(locked);
+          changed = true;
+          return locked;
+        });
+        return changed ? next : prev;
+      });
+    });
+    if (picked.length === 0) return false;
+
+    try {
+      const { confirmed, failed } = await commitAutoAcceptBatch(picked);
+      setScannedItems(prev => prev.map(it => {
+        if (confirmed.has(it.id)) return { ...it, isProcessed: true, isSelected: false, syncStatus: 'confirmed', serverDocId: confirmed.get(it.id) };
+        if (failed.has(it.id)) return { ...it, syncStatus: 'failed', syncError: failed.get(it.id) };
+        return it;
+      }));
+      if (confirmed.size || failed.size) {
+        setAutoStats(s => ({ confirmed: s.confirmed + confirmed.size, failed: s.failed + failed.size }));
+      }
+      if (autoTxRef.current) setAutoTxId(autoTxRef.current.id);
+      await touchStockMetadata();
+      invalidateDepoStok();
+      return true;
+    } catch (e: any) {
+      const msg = safeStr(e?.message) || 'Stoğa yazılamadı.';
+      const pickedIds = new Set(picked.map(p => p.id));
+      setScannedItems(prev => prev.map(it => {
+        if (!pickedIds.has(it.id)) return it;
+        const retries = (it.syncRetries ?? 0) + 1;
+        // Kalıcı hatada (3 deneme) failed; geçici hatada pending → otomatik retry.
+        if (retries >= 3) return { ...it, syncStatus: 'failed', syncError: msg, syncRetries: retries };
+        return { ...it, syncStatus: 'pending', syncRetries: retries };
+      }));
+      return false;
+    }
+  };
+
+  // drainRef her render'da en güncel closure ile yenilenir; zamanlayıcı efekti
+  // yalnızca bu ref'i çağırır (stale-closure / dep churn yok).
+  const drainAutoAcceptRef = useRef<() => Promise<void>>(async () => {});
+  drainAutoAcceptRef.current = async () => {
+    if (autoRunningRef.current || !otoKabulRef.current) return;
+    autoRunningRef.current = true;
+    try {
+      let more = true;
+      while (more && otoKabulRef.current) {
+        more = await drainAutoAcceptOnce();
+      }
+    } finally {
+      autoRunningRef.current = false;
+    }
+  };
+
+  // Oto kabul açık ve pending satır varken, tarama duraklamasında drenajı planla.
+  // Her okutmada efekt yeniden kurulur ve önceki idle görevi iptal edilir →
+  // hızlı okutma sırasında drenaj ertelenir, okutma bitince devreye girer.
+  useEffect(() => {
+    if (!otoKabul) return;
+    if (!scannedItems.some(i => i.syncStatus === 'pending')) return;
+    const handle = scheduleIdle(() => { void drainAutoAcceptRef.current(); });
+    autoIdleHandleRef.current = handle;
+    return () => { cancelIdle(handle); autoIdleHandleRef.current = null; };
+  }, [otoKabul, scannedItems]);
+
+  const handleToggleOtoKabul = (next: boolean) => {
+    if (next && !selectedDepotId) {
+      toast({ title: 'Depo Seçilmedi', description: 'Oto kabul için önce bir depo seçin.', variant: 'destructive' });
+      return;
+    }
+    setOtoKabul(next);
+    otoKabulRef.current = next;
+    if (next) {
+      setAutoStats({ confirmed: 0, failed: 0 });
+      setAutoTxId(null);
+      autoTxRef.current = null;
+      // Açılmadan önce okutulmuş, henüz işlenmemiş satırları da kuyruğa al.
+      setScannedItems(prev => prev.map(it =>
+        (!it.isProcessed && it.syncStatus !== 'confirmed' && it.syncStatus !== 'processing')
+          ? { ...it, syncStatus: 'pending', syncRetries: 0, syncError: undefined }
+          : it
+      ));
+      toast({ title: 'Oto Kabul Açık', description: 'Okutulan ürünler arka planda otomatik stoğa eklenecek.' });
+    } else {
+      if (autoIdleHandleRef.current != null) { cancelIdle(autoIdleHandleRef.current); autoIdleHandleRef.current = null; }
+      autoTxRef.current = null;
+      // Kuyrukta bekleyen (henüz yazılmamış) satırları normal listeye döndür.
+      setScannedItems(prev => prev.map(it => it.syncStatus === 'pending' ? { ...it, syncStatus: undefined } : it));
+      toast({ title: 'Oto Kabul Kapalı', description: 'Yeni okutmalar elle "Kabul Et" ile kaydedilecek.' });
+    }
+  };
+
+  const retryAutoGroup = (group: ScanRow) => {
+    const ids = new Set((group.items && group.items.length ? group.items : [group]).map(i => i.id));
+    setScannedItems(prev => prev.map(it =>
+      ids.has(it.id) && it.syncStatus === 'failed'
+        ? { ...it, syncStatus: 'pending', syncRetries: 0, syncError: undefined }
+        : it
+    ));
+  };
+
   const handlePreCheckAndDogrulamasizMalKabul = async () => {
     if (!selectedDepotId) {
       toast({ title: 'Hata', description: 'Ön kontrol için önce bir depo seçilmelidir.', variant: 'destructive' });
       return;
     }
   
-    const itemsToProcess = scannedItems.filter(i => !i.isProcessed && !!i.rafAdresi && !!i.irsaliyeNumarasi);
+    const expectedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => v.serials.map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const verifiedSerials = new Set(
+      Object.values(ceomedVerifyMap).flatMap((v) => Array.from(v.verifiedSerials).map((s) => `${v.stokKodu}||${v.lot || ''}||${v.miad || ''}||${s}`))
+    );
+    const itemsToProcess = scannedItems.filter(i => {
+      if (i.isProcessed || !i.rafAdresi) return false;
+      const hasIrs = !!i.irsaliyeNumarasi || !!selectedPendingIrs;
+      if (!hasIrs) return false;
+      if (!i.seriNumarasi) return true;
+      const key = `${i.stokKodu || ''}||${i.lotNumarasi || ''}||${i.miad || ''}||${i.seriNumarasi || ''}`;
+      if (!expectedSerials.has(key)) return true; // irsaliyede olmayan ama okutulanlar da stoğa eklensin
+      return verifiedSerials.has(key); // irsaliyede olup doğrulanmayanlar eklenmesin
+    }).map(i => ({ ...i, irsaliyeNumarasi: i.irsaliyeNumarasi || selectedPendingIrs?.irsaliyeNo || '' }));
     if (itemsToProcess.length === 0) {
       toast({ title: 'Bilgi', description: 'İşlenecek yeni ürün yok (adres ve irsaliye atanmamış olabilir).', variant: "default" });
       return;
     }
     
     performGoodsReceipt(itemsToProcess);
+  };
+
+  const handleApproveCeomedToDepot = async (irs: PendingCeomedIrsaliye) => {
+    if (!selectedDepotId || !selectedDepot) return;
+    setCeomedApprovingId(irs.id);
+    try {
+      const batch = writeBatch(db);
+      let added = 0;
+      const lineMap = new Map<string, MalKabulLine>();
+
+      for (const item of (irs.items || [])) {
+        const product = productCodes.find((p) => (p.stokKodu || '').trim() === (item.STOK_KODU || '').trim());
+        if (!product || ((product as any).trackingMode !== 'serial')) continue;
+        const qty = Math.max(1, Number(item.MIKTAR) || 1);
+        for (let i = 0; i < qty; i++) {
+          const ref = doc(collection(db, 'depoStok'));
+          batch.set(ref, withCompanyScope({
+            depotId: selectedDepotId,
+            depotName: selectedDepot.name || '',
+            stokKodu: item.STOK_KODU,
+            stokAdi: product.stokAdi || '',
+            lotNumarasi: item.LOT || '',
+            miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '',
+            seriNumarasi: item.BARKOD_SERI || '',
+            rafAdresi: '',
+            irsaliyeNumarasi: irs.irsaliyeNo,
+            eklenmeTarihi: Timestamp.now(),
+            isShipped: false,
+            hedefKurumId: '',
+            hedefKurum: '',
+            createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+            createdByUid: currentUser?.uid || null,
+            source: 'ceomed',
+            ceomedIrsaliyeId: irs.ceomedId,
+          }, currentCompanyId));
+          added++;
+        }
+        const key = `${item.STOK_KODU}||${item.LOT || ''}||${item.MIYAT || ''}`;
+        const prev = lineMap.get(key) || { stokKodu: item.STOK_KODU, stokAdi: product.stokAdi || '', lotNumarasi: item.LOT || '', miad: item.MIYAT ? normalizeMiad(item.MIYAT) : '', adet: 0, serials: [] };
+        prev.adet += qty;
+        if (item.BARKOD_SERI) prev.serials.push(item.BARKOD_SERI);
+        lineMap.set(key, prev);
+      }
+      await batch.commit();
+
+      const txRef = doc(db, 'malKabulTransactions', `MK-CEOMED-${irs.ceomedId}`);
+      const lineBatch = writeBatch(db);
+      lineBatch.set(txRef, withCompanyScope({
+        transactionId: `MK-CEOMED-${irs.ceomedId}`,
+        depotId: selectedDepotId,
+        depotName: selectedDepot.name || '',
+        userId: currentUser?.uid || '',
+        userName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
+        timestamp: Timestamp.now(),
+        irsaliyeNo: irs.irsaliyeNo,
+        itemCount: added,
+        mode: 'verified',
+        source: 'ceomed',
+        ceomedIrsaliyeId: irs.ceomedId,
+      }, currentCompanyId));
+      for (const line of lineMap.values()) lineBatch.set(doc(collection(txRef, 'lines')), withCompanyScope(line, currentCompanyId));
+      lineBatch.set(doc(db, 'pendingCeomedIrsaliye', irs.id), {
+        status: 'approved',
+        approvedAt: Timestamp.now(),
+        approvedBy: currentUser?.uid || null,
+        approvedByName: currentUserProfile?.name || currentUser?.email || '',
+        depotId: selectedDepotId,
+        depotName: selectedDepot.name || '',
+      }, { merge: true });
+      await lineBatch.commit();
+      await touchStockMetadata();
+      invalidateDepoStok();
+      toast({ title: 'İrsaliye stoğa aktarıldı', description: `${irs.irsaliyeNo} için ${added} kayıt depoya eklendi.` });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'Ceomed aktarım hatası', variant: 'destructive' });
+    } finally {
+      setCeomedApprovingId(null);
+    }
+  };
+
+  const buildPendingLines = useCallback((irs: PendingCeomedIrsaliye | null): PendingCeomedLine[] => {
+    if (!irs) return [];
+    const grouped = new Map<string, PendingCeomedLine>();
+    for (const it of (irs.items || [])) {
+      const key = `${it.STOK_KODU}||${it.LOT || ''}||${it.MIYAT || ''}`;
+      const p = productCodes.find((x) => (x.stokKodu || '').trim() === (it.STOK_KODU || '').trim());
+      const prev = grouped.get(key) || {
+        key,
+        stokKodu: it.STOK_KODU,
+        lot: it.LOT || '',
+        miad: it.MIYAT ? normalizeMiad(it.MIYAT) : '',
+        stokAdi: p?.stokAdi || '',
+        marka: (p as any)?.marka || '',
+        adet: 0,
+        serials: [],
+      };
+      prev.adet += Math.max(1, Number(it.MIKTAR) || 1);
+      if (it.BARKOD_SERI) prev.serials.push(it.BARKOD_SERI);
+      grouped.set(key, prev);
+    }
+    return Array.from(grouped.values());
+  }, [productCodes]);
+
+  const handleStartVerifiedCeomedReceipt = (irs: PendingCeomedIrsaliye) => {
+    const lines = buildPendingLines(irs);
+    const rows: ScanRow[] = [];
+    for (const line of lines) {
+      if (line.serials.length > 0) {
+        for (const s of line.serials) {
+          rows.push({
+            id: generateId(),
+            barkod: s,
+            stokKodu: line.stokKodu,
+            stokAdi: line.stokAdi || line.stokKodu,
+            lotNumarasi: line.lot,
+            miad: line.miad,
+            seriNumarasi: s,
+            rafAdresi: '',
+            irsaliyeNumarasi: irs.irsaliyeNo,
+            isSelected: false,
+            timestamp: new Date(),
+            isProcessed: false,
+            adet: 1,
+            isGroup: false,
+            bulkQrAssigned: false,
+            key: `${line.stokKodu}-${line.lot}-${line.miad}`,
+          } as ScanRow);
+        }
+      }
+    }
+    setScannedItems((prev) => [...rows, ...prev]);
+    setSelectedPendingIrs(irs);
+    const verify: Record<string, CeomedVerifyLine> = {};
+    for (const line of lines) {
+      if (line.serials.length > 0) verify[line.key] = { ...line, verifiedSerials: new Set<string>() };
+    }
+    setCeomedVerifyMap(verify);
+    setIsPendingCeomedModalOpen(false);
+    toast({ title: 'Doğrulamalı moda aktarıldı', description: `${irs.irsaliyeNo} seri numaraları mal kabul listesine eklendi. Adres ataması yapıp doğrulayarak devam edin.` });
+  };
+
+  const markVerifyLineComplete = (group: ScanRow) => {
+    const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    setCeomedVerifyMap((prev) => {
+      const v = prev[key];
+      if (v) {
+        const nextSet = new Set(v.serials);
+        return { ...prev, [key]: { ...v, verifiedSerials: nextSet } };
+      }
+      // fallback: map key bulunamazsa satırdaki seriallardan doğrulama satırı oluştur
+      const rowSerials = Array.from(new Set((group.items || []).map(i => i.seriNumarasi).filter(Boolean) as string[]));
+      if (rowSerials.length === 0) return prev;
+      const normalizedKey = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+      return {
+        ...prev,
+        [normalizedKey]: {
+          key: normalizedKey,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: rowSerials.length,
+          serials: rowSerials,
+          verifiedSerials: new Set(rowSerials),
+        },
+      };
+    });
+  };
+
+  const getVerifyLineForGroup = (group: ScanRow): CeomedVerifyLine | null => {
+    const raw = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+    if (ceomedVerifyMap[raw]) return ceomedVerifyMap[raw];
+    const normalized = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad ? normalizeMiad(group.miad) : ''}`;
+    if (ceomedVerifyMap[normalized]) return ceomedVerifyMap[normalized];
+    // Fallback: doğrulamalı modda map key tutarsızlığı olsa bile satırdaki seriallardan üret
+    if (selectedPendingIrs && group.items && group.items.length > 0) {
+      const serials = Array.from(new Set(group.items.map((it) => it.seriNumarasi).filter(Boolean) as string[]));
+      if (serials.length > 0) {
+        const verifiedSerials = new Set(
+          group.items
+            .filter((it) => !!it.seriNumarasi)
+            .map((it) => it.seriNumarasi as string)
+            .filter((s) => {
+              const k = `${group.stokKodu || ''}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+              return ceomedVerifyMap[k]?.verifiedSerials.has(s) || ceomedVerifyMap[normalized]?.verifiedSerials.has(s);
+            })
+        );
+        return {
+          key: normalized,
+          stokKodu: group.stokKodu || '',
+          stokAdi: group.stokAdi || '',
+          marka: '',
+          lot: group.lotNumarasi || '',
+          miad: group.miad || '',
+          adet: serials.length,
+          serials,
+          verifiedSerials,
+        };
+      }
+    }
+    return null;
   };
   
   // Barkodsuz giriş için tüm non-serial ürünleri listele (lot_manual, qty_manual, lot_barcode, qty_barcode)
@@ -1508,190 +2245,117 @@ export default function AnaPanel(props: AnaPanelProps) {
     [scannedItems]
   );
 
-  if (isLoading && scannedItems.length === 0) {
-    return <AnaPanelSkeleton />;
-  }
+  // Skeleton kaldırıldı: panel artık anında açılır.
+  // Prefetch (AppLayout) sayesinde cache doluysa depolar anında gelir;
+  // cache boşsa depo dropdown'ı birkaç 100ms sonra dolar — kullanıcı bekleme ekranı görmez.
+
+  // ── Readiness (gerçek veri yüklemesine bağlı 3 adım) ──
+  // 1) Barkod formatları  2) Stok & adres verileri  3) İrsaliye eşleştirme
+  const readinessStage = useMemo(() => {
+    const fmtReady = !barcodeFormatsPending && barcodeFormats.length > 0;
+    const stockReady = !productsPending && productCodes.length > 0;
+    const irsReady = Boolean(selectedDepotId);
+    if (fmtReady && stockReady && irsReady) return 3;
+    if (fmtReady && stockReady) return 2;
+    if (fmtReady) return 1;
+    return 0;
+  }, [barcodeFormatsPending, barcodeFormats.length, productsPending, productCodes.length, selectedDepotId]);
+  const systemReady = readinessStage >= 3;
+  const readinessPct = Math.round((readinessStage / 3) * 100);
+
+  // Distinct lot count across the scanned list (for the KPI "lot" figure).
+  const distinctLotCount = useMemo(
+    () => new Set(scannedItems.filter(i => i.lotNumarasi).map(i => i.lotNumarasi)).size,
+    [scannedItems]
+  );
+
+  // Last scanned product, mapped to the readiness card shape.
+  const readinessLastItem: MkLastItem = useMemo(() => {
+    if (!lastScannedProduct) return null;
+    const meta = productMetaByCode.get(lastScannedProduct.stokKodu || '');
+    return {
+      stokAdi: lastScannedProduct.stokAdi || '',
+      stokKodu: lastScannedProduct.stokKodu || '',
+      seriNumarasi: lastScannedProduct.seriNumarasi || '',
+      lotNumarasi: lastScannedProduct.lotNumarasi || '',
+      miad: (lastScannedProduct.miad as string) || '',
+      qty: totalCountForProduct,
+      unit: meta?.anaBirim || 'adet',
+    };
+  }, [lastScannedProduct, totalCountForProduct, productMetaByCode]);
+
+  // Top stepper position: Depo → Okut → Kabul.
+  const topStepperActive = stepperState.hasItems ? (stepperState.hasMeta ? 2 : 1) : 0;
+  const pendingIrsaliyeTotal = pendingCeomedIrsaliye.length + pendingFileIrsaliyeCount;
 
   return (
-    <div className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen">
+    <>
+      {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+    <div className="mk-shell px-3 py-4 sm:px-6 sm:py-5 space-y-4 min-h-screen" style={{ maxWidth: 1720, margin: '0 auto', position: 'relative', zIndex: 1 }}>
+      <MkClayStyles />
+      <ScanCommitProbe controller={scanPerformanceController} />
 
-      {/* ── STEP 1: Header – Depo Seçimi ── */}
-      <header className="cihaz-card-strong px-4 py-4 sm:px-6 sm:py-5">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
-          {/* Stepper indicator */}
-          <div className="flex items-center gap-2 mr-2">
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasDepot
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>1</div>
-            <div className={cn("w-6 h-0.5 rounded", stepperState.hasItems ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasItems
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>2</div>
-            <div className={cn("w-6 h-0.5 rounded", stepperState.hasMeta ? "bg-[var(--dashboard-accent)]" : "bg-[var(--dashboard-surface-2)]")} />
-            <div className={cn(
-              "w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors",
-              stepperState.hasMeta
-                ? "bg-[var(--dashboard-accent)] text-white"
-                : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-            )}>3</div>
-          </div>
-
-          <div className="flex-1 w-full sm:max-w-xs">
-            <Label className="text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Çalışma Deposu</Label>
-            <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
-              <SelectTrigger className="w-full mt-1 bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl">
-                <SelectValue placeholder="Depo seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {sourceDepots.filter(d => !!d.id).map(dep => (
-                  <SelectItem key={dep.id!} value={dep.id!}>{dep.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <button
-            onClick={() => router.push('/mal-kabul/gecmis')}
-            className="cihaz-tool-item flex items-center gap-2 px-4 py-2.5 text-sm font-medium self-start sm:self-center sm:ml-auto"
-          >
-            <History className="h-4 w-4" />
-            <span>Geçmiş</span>
-          </button>
+      {/* ── TOP CONTEXT BAR: stepper + depo + geçmiş + bekleyen ── */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, padding: '16px 22px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, flexWrap: 'wrap', animation: 'mkRise 420ms cubic-bezier(0.34,1.56,0.64,1) both' }}>
+        <MkTopStepper active={topStepperActive} />
+        <div style={{ width: 1, height: 38, background: MK_C.line }} className="hidden sm:block" />
+        <div style={{ minWidth: 230 }} className="flex-1 sm:flex-none">
+          <div style={{ fontSize: 10.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 5 }}>Çalışma Deposu</div>
+          <Select value={selectedDepotId} onValueChange={(v: string) => setSelectedDepotId(v)}>
+            <SelectTrigger className="w-full border-0" style={{ background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm, height: 44 }}>
+              <SelectValue placeholder="Depo seçin..." />
+            </SelectTrigger>
+            <SelectContent>
+              {sourceDepots.filter(d => !!d.id).map(dep => (
+                <SelectItem key={dep.id!} value={dep.id!}>{dep.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
-      </header>
+        <div style={{ flex: 1 }} className="hidden sm:block" />
+        <MkSoftBtn icon={<History size={17} />} onClick={() => router.push(selectedDepotId ? `/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}` : '/mal-kabul/gecmis')}>
+          Geçmiş
+        </MkSoftBtn>
+        <MkSoftBtn icon={<FileText size={17} />} onClick={() => setIsPendingCeomedModalOpen(true)} disabled={!selectedDepotId} badge={pendingIrsaliyeTotal}>
+          Bekleyen İrsaliyeler
+        </MkSoftBtn>
+      </div>
 
-      {/* ── KPI Row – Son Okutulan Detay + Okuma Adetleri + Ürün Ekle ── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-        {/* Col 1: Son Okutulan Detay (with scan feedback) */}
-        <div className={cn(
-          "cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 transition-all duration-300",
-          scanFeedback?.type === 'success' && "ring-2 ring-green-500/60",
-          scanFeedback?.type === 'error' && "ring-2 ring-red-500/60"
-        )}>
-          <div className="flex items-center justify-between mb-3">
-            <p className="cihaz-overline text-xs">Son Okutulan Detay</p>
-            {scanFeedback && (
-              <span className={cn(
-                "text-[10px] font-bold uppercase tracking-wide",
-                scanFeedback.type === 'success' ? "text-green-600" : "text-red-600"
-              )}>
-                {scanFeedback.type === 'success' ? '✓ Başarılı' : '✗ Hata'}
-              </span>
-            )}
-          </div>
-          {scanFeedback?.type === 'error' && !lastScannedProduct ? (
-            <p className="text-sm font-bold text-red-600 truncate">{scanFeedback.message}</p>
-          ) : lastScannedProduct ? (
-            <div className="space-y-1">
-              <p className={cn(
-                "text-sm sm:text-base font-semibold truncate",
-                scanFeedback?.type === 'error' ? "text-red-600" : "text-[var(--dashboard-text)]"
-              )}>
-                {scanFeedback?.type === 'error' ? scanFeedback.message : (lastScannedProduct.stokAdi || '')}
-              </p>
-              {scanFeedback?.type !== 'error' && (
-                <>
-                  <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)] font-mono truncate">{lastScannedProduct.stokKodu}</p>
-                  <div className="flex flex-wrap gap-1.5 mt-1">
-                    {lastScannedProduct.seriNumarasi && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-blue-100 text-blue-800">
-                        SN: {lastScannedProduct.seriNumarasi}
-                      </span>
-                    )}
-                    {lastScannedProduct.lotNumarasi && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-800">
-                        Lot: {lastScannedProduct.lotNumarasi}
-                      </span>
-                    )}
-                    {lastScannedProduct.miad && (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-100 text-amber-800">
-                        SKT: {lastScannedProduct.miad}
-                      </span>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 py-1">
-              <Package className="h-4 w-4 text-[var(--dashboard-muted)]" />
-              <p className="text-xs text-[var(--dashboard-muted)]">Barkod okutun</p>
-            </div>
-          )}
-        </div>
-
-        {/* Col 2: Okuma Adetleri (bigger fonts) */}
-        <div className="cihaz-card px-3 py-3 sm:px-4 sm:py-4">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Okuma Adetleri</p>
-          <div className="flex items-baseline gap-1.5">
-            <span className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)]">{lotCount}</span>
-            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">lot</span>
-          </div>
-          <div className="flex items-baseline gap-1.5 mt-1">
-            <span className="text-lg sm:text-xl font-semibold text-[var(--dashboard-text)]">{totalCountForProduct}</span>
-            <span className="text-xs sm:text-sm text-[var(--dashboard-muted)]">ürün</span>
-          </div>
-        </div>
-
-        {/* Col 3: Ürün Ekle (action tiles) */}
-        <div className="cihaz-card-strong px-3 py-3 sm:px-4 sm:py-4">
-          <p className="cihaz-overline text-[10px] sm:text-xs mb-2">Ürün Ekle</p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
-            >
-              <Camera className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Tekli Tara</span>
-            </button>
-            <button
-              onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-              className="cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center"
-              style={{ background: 'linear-gradient(135deg, #0d9488 0%, #14b8a6 100%)', color: '#fff', border: 'none' }}
-            >
-              <Camera className="h-4 w-4" />
-              <span className="text-[10px] sm:text-xs font-medium">Seri Tarama</span>
-            </button>
-            <button
-              onClick={() => setShowManualInline(v => !v)}
-              className={cn("cihaz-action-tile flex flex-col items-center justify-center gap-1 py-2.5 text-center", showManualInline && "cihaz-pressed")}
-            >
-              <PlusCircle className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">Manuel Ekle</span>
-            </button>
-            <button
-              onClick={() => setIsOcrModalOpen(true)}
-              className="cihaz-action-tile relative flex flex-col items-center justify-center gap-1 py-2.5 text-center"
-            >
-              <ScanLine className="h-4 w-4 text-[var(--dashboard-accent)]" />
-              <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-text)]">İrsaliye Tara</span>
-              {pendingIrsaliyeCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                  {pendingIrsaliyeCount}
-                </span>
-              )}
-            </button>
-          </div>
-        </div>
+      {/* ── KPI ROW: readiness + add panel ── */}
+      <div className="mk-grid-kpi" style={{ animation: 'mkRise 460ms cubic-bezier(0.34,1.56,0.64,1) 60ms both' }}>
+        <MkReadinessCard
+          stage={readinessStage}
+          ready={systemReady}
+          pct={readinessPct}
+          lastItem={readinessLastItem}
+          lotCount={distinctLotCount}
+          unitCount={totalScannedQuantity}
+          pulse={scanFeedback?.type === 'success'}
+          feedback={scanFeedback}
+          onReload={() => window.location.reload()}
+        />
+        <MkAddPanel
+          ready={systemReady}
+          onTekli={() => { setIsBatchScanning(false); setIsCameraScannerOpen(true); }}
+          onSeri={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+          onManual={() => setShowManualInline(v => !v)}
+          onIrsaliye={() => setIsOcrModalOpen(true)}
+          onDepoda={handleDepotSerialCheck}
+          manualActive={showManualInline}
+          irsaliyeBadge={pendingIrsaliyeCount}
+          depodaDisabled={isCheckingDepotSerials || !selectedDepotId}
+          depodaLoading={isCheckingDepotSerials}
+        />
       </div>
 
       {/* ── Manuel Giriş Paneli (collapsible drawer) ── */}
       {showManualInline && (
-        <div className="cihaz-card-strong px-4 py-4 sm:px-5 sm:py-5 relative">
+        <div style={{ padding: '16px 20px', borderRadius: MK_C.radius, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, position: 'relative' }}>
           <div className="flex items-center justify-between mb-3">
-            <p className="cihaz-overline text-xs">Manuel Ürün Girişi</p>
-            <button
-              onClick={() => setShowManualInline(false)}
-              className="cihaz-tool-item p-1.5 rounded-lg"
-              title="Manuel Girişi Gizle"
-            >
-              <X className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            <p style={{ fontSize: 11.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.07em', textTransform: 'uppercase' }}>Manuel Ürün Girişi</p>
+            <button onClick={() => setShowManualInline(false)} title="Manuel Girişi Gizle" style={{ all: 'unset', cursor: 'pointer', width: 30, height: 30, borderRadius: 8, background: MK_C.surface2, display: 'grid', placeItems: 'center', color: MK_C.ink3 }}>
+              <X className="h-4 w-4" />
             </button>
           </div>
           <ManualInlineAdder
@@ -1720,10 +2384,10 @@ export default function AnaPanel(props: AnaPanelProps) {
       )}
 
       {/* ── STEP 3: Okutulan Ürünler Tablosu ── */}
-      <div className="cihaz-card-strong flex-1 flex flex-col overflow-hidden">
+      <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden', minHeight: 460, display: 'flex', flexDirection: 'column', animation: 'mkRise 500ms cubic-bezier(0.34,1.56,0.64,1) 130ms both' }}>
         {/* ── Selection mode sticky bar ── */}
         {isSelectionMode && (
-          <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 bg-[var(--dashboard-accent)] text-white rounded-t-[18px]">
+          <div className="sticky top-0 z-10 flex items-center gap-2 sm:gap-3 px-4 py-2.5 text-white" style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})` }}>
             <span className="text-sm font-semibold">{selectedItemsCount} seçildi</span>
             <div className="flex-1" />
             <button
@@ -1762,165 +2426,114 @@ export default function AnaPanel(props: AnaPanelProps) {
         )}
 
         {/* ── Table toolbar ── */}
-        <div className={cn(
-          "flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]",
-          isSelectionMode && "rounded-t-none"
-        )}>
-          <div className="flex-shrink-0">
-            <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
-              Okutulan Ürünler
-              <span className="ml-1.5 text-[var(--dashboard-muted)]">({scannedItems.length})</span>
-            </h2>
-            <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Stoğa eklenecek ürünlerin listesi</p>
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 px-4 py-4 sm:px-6" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+          <div className="flex items-baseline gap-2.5 flex-shrink-0">
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1, whiteSpace: 'nowrap' }}>Okutulan Ürünler</h2>
+            <span style={{ fontSize: 18, fontWeight: 800, color: MK_C.accent }}>({scannedItems.length})</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', lineHeight: 1.1, padding: '4px 14px', borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset }} className="ml-2">
+              <span style={{ fontSize: 10, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Toplam Okutulan</span>
+              <span key={totalScannedQuantity} style={{ fontSize: 22, fontWeight: 800, color: MK_C.accent, animation: 'mkCountPop 400ms ease' }}>{totalScannedQuantity}</span>
+            </div>
+            {commitInfo && <span style={{ fontSize: 11, color: MK_C.ink3 }}>Yazılıyor... ({commitInfo.commits} batch)</span>}
           </div>
           <div className="flex-1" />
           {!isSelectionMode && (
-            <div className="flex items-center gap-3 sm:gap-4">
-              <div className="text-right">
-                <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">Toplam Okutulan</p>
-                <p className="text-2xl sm:text-3xl font-bold text-[var(--dashboard-accent)] leading-none">{totalScannedQuantity}</p>
-                {commitInfo && (
-                  <p className="text-[10px] text-[var(--dashboard-muted)] mt-1">Yazılıyor... ({commitInfo.commits} batch)</p>
-                )}
-              </div>
-              <button
-                onClick={handlePreCheckAndDogrulamasizMalKabul}
-                disabled={malKabulIsLoading || isLoading || unprocessedScannedItems === 0 || stepperState.readyCount === 0}
-                className={cn(
-                  "flex items-center gap-2 px-4 sm:px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-semibold transition-all",
-                  "disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none",
-                  stepperState.readyCount > 0
-                    ? "bg-green-600 hover:bg-green-700 active:bg-green-800 text-white shadow-lg shadow-green-600/30 hover:shadow-xl hover:shadow-green-600/40"
-                    : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                )}
-                title={stepperState.readyCount === 0 ? 'Önce ürünlere adres ve irsaliye atayın' : undefined}
-              >
-                {(malKabulIsLoading || isLoading) && <Loader2 className="h-4 w-4 animate-spin" />}
-                <Package className="h-4 w-4" />
-                {selectedItemsCount > 0
-                  ? `Seçilenleri Kabul Et (${selectedItemsCount})`
-                  : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`
-                }
-              </button>
-            </div>
-          )}
-          {/* Non-selection mode toolbar */}
-          {!isSelectionMode && (
-            <div className="flex flex-wrap gap-1.5 sm:gap-2">
-              <button
+            <div className="flex flex-wrap items-center gap-2">
+              <MkChipBtn
+                icon={<CheckSquare className="h-4 w-4" />}
                 onClick={() => {
                   const anySelected = scannedItems.some(i => !i.isProcessed && i.isSelected);
                   setScannedItems(prev => prev.map(item => (!item.isProcessed ? { ...item, isSelected: !anySelected } : item)));
                 }}
                 disabled={malKabulIsLoading || unprocessedScannedItems === 0}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
                 title={unprocessedScannedItems === 0 ? 'Önce ürün ekleyin' : undefined}
               >
-                <CheckSquare className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Seç ({unprocessedScannedItems})</span>
-                <span className="sm:hidden">{unprocessedScannedItems}</span>
-              </button>
-              <button
+                Seç {unprocessedScannedItems > 0 ? `(${unprocessedScannedItems})` : ''}
+              </MkChipBtn>
+              <MkChipBtn
+                icon={<QrCode className="h-4 w-4" />}
                 onClick={() => {
                   const next = !isBulkScanMode;
                   setIsBulkScanMode(next);
-                  flashScanFeedback(
-                    'success',
-                    next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.'
-                  );
+                  flashScanFeedback('success', next ? 'Toplu barkod modu açık' : 'Normal barkod okuma moduna dönüldü.');
                 }}
                 disabled={malKabulIsLoading}
-                className={cn(
-                  "cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed",
-                  isBulkScanMode && "bg-[var(--dashboard-accent)] text-white"
-                )}
+                active={isBulkScanMode}
                 title="Sadece toplu barkod okutma modunu aç/kapat"
               >
-                <QrCode className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Toplu Barkod Oku</span>
-                <span className="sm:hidden">Toplu</span>
-              </button>
-              <button
-                onClick={() => setIsBulkBarcodeScanOpen(true)}
-                disabled={malKabulIsLoading}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed"
-                title="AI ile toplu barkod tarama (fotoğraf çek veya yükle)"
+                Toplu Barkod Oku
+              </MkChipBtn>
+              <MkChipBtn icon={<Sparkles className="h-4 w-4" style={{ color: MK_C.accent }} />} onClick={() => setIsBulkBarcodeScanOpen(true)} disabled={malKabulIsLoading} title="AI ile toplu barkod tarama">
+                AI Toplu Tara
+              </MkChipBtn>
+              <MkChipBtn icon={<Trash2 className="h-4 w-4" />} onClick={clearAllScannedItems} disabled={malKabulIsLoading || scannedItems.length === 0} danger title={scannedItems.length === 0 ? 'Liste boş' : undefined}>
+                Temizle
+              </MkChipBtn>
+              {/* Oto Kabul: açıkken okutulanlar arka planda anında stoğa eklenir */}
+              <label
+                title={!selectedDepotId ? 'Önce depo seçin' : 'Açıkken okutulan her ürün arka planda otomatik stoğa eklenir'}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 8, cursor: selectedDepotId ? 'pointer' : 'not-allowed',
+                  padding: '6px 12px', borderRadius: MK_C.radiusPill,
+                  background: otoKabul ? 'rgba(111,181,133,0.16)' : MK_C.surface2,
+                  boxShadow: otoKabul ? `0 0 0 1.5px ${MK_C.accent}55` : MK_C.clayInset,
+                  opacity: selectedDepotId ? 1 : 0.55,
+                }}
               >
-                <Sparkles className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">AI Toplu Tara</span>
-                <span className="sm:hidden">AI</span>
-              </button>
-              <button
-                onClick={clearAllScannedItems}
-                disabled={malKabulIsLoading || scannedItems.length === 0}
-                className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-40 disabled:cursor-not-allowed"
-                title={scannedItems.length === 0 ? 'Liste boş' : undefined}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span className="hidden sm:inline">Temizle</span>
-              </button>
+                <Zap className="h-3.5 w-3.5" style={{ color: otoKabul ? MK_C.accent : MK_C.ink3 }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: otoKabul ? MK_C.waterDeep : MK_C.ink2 }}>Oto Kabul</span>
+                <Switch checked={otoKabul} onCheckedChange={handleToggleOtoKabul} disabled={!selectedDepotId} />
+                {otoKabul && (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700 }}>
+                    <span style={{ color: MK_C.waterDeep }}>{autoStats.confirmed} eklendi</span>
+                    {autoStats.failed > 0 && <span style={{ color: MK_C.danger }}>· {autoStats.failed} hata</span>}
+                    {autoTxId && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.preventDefault(); router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(autoTxId)}`); }}
+                        style={{ all: 'unset', cursor: 'pointer', color: MK_C.accent, textDecoration: 'underline' }}
+                      >
+                        Geçmiş
+                      </button>
+                    )}
+                  </span>
+                )}
+              </label>
+              <MkAcceptBtn
+                count={stepperState.readyCount}
+                onClick={handlePreCheckAndDogrulamasizMalKabul}
+                disabled={isLoading || unprocessedScannedItems === 0}
+                loading={malKabulIsLoading || isLoading}
+                label={selectedItemsCount > 0 ? `Seçilenleri Kabul Et (${selectedItemsCount})` : `Kabul Et ve Stoğa Ekle (${stepperState.readyCount})`}
+              />
             </div>
           )}
         </div>
 
         {/* ── Table header (desktop) ── */}
         {scannedItems.length > 0 && (
-          <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
-            <span></span>
-            <span>Ürün</span>
-            <span>Lot</span>
-            <span>Miad</span>
-            <span>Adres</span>
-            <span>İrsaliye</span>
-            <span className="text-right">Adet</span>
-            <span className="text-center">Birim</span>
-            <span></span>
+          <div className="hidden sm:grid grid-cols-[40px_46px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-6 py-3" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+            {['', '', 'Ürün', 'Lot', 'Miad', 'Adres', 'İrsaliye', 'Adet', 'Birim', ''].map((h, i) => (
+              <span key={i} style={{ fontSize: 11, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase', textAlign: i === 7 ? 'right' : i === 8 ? 'center' : 'left' }}>{h}</span>
+            ))}
           </div>
         )}
 
         {/* ── Table body ── */}
-        <div className="flex-1 overflow-hidden">
+        <div className="flex-1 overflow-hidden" style={{ padding: scannedItems.length === 0 ? 0 : '12px 14px' }}>
           {scannedItems.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[40vh] text-center px-4">
-              <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
-                <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
-              </div>
-              <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Okutulmuş ürün bulunmuyor</p>
-              <p className="text-xs text-[var(--dashboard-muted)] mb-4">Başlamak için bir yöntem seçin:</p>
-              <div className="flex flex-wrap gap-2 justify-center">
-                <button
-                  onClick={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <Camera className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  Seri Tarama Başlat
-                </button>
-                <button
-                  onClick={() => setIsOcrModalOpen(true)}
-                  className="cihaz-tool-item relative flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <ScanLine className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  PDF İrsaliye Yükle
-                  {pendingIrsaliyeCount > 0 && (
-                    <span className="absolute -top-1 -right-1 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                      {pendingIrsaliyeCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setIsBulkBarcodeScanOpen(true)}
-                  className="cihaz-tool-item flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                >
-                  <Sparkles className="h-3.5 w-3.5 text-[var(--dashboard-accent)]" />
-                  AI Toplu Barkod Tara
-                </button>
-              </div>
-            </div>
+            <MkEmptyState
+              ready={systemReady}
+              onSerial={() => { setIsBatchScanning(true); setIsCameraScannerOpen(true); }}
+              onIrsaliye={() => setIsOcrModalOpen(true)}
+              onAI={() => setIsBulkBarcodeScanOpen(true)}
+              irsaliyeBadge={pendingIrsaliyeCount}
+            />
           ) : (
             <VirtualizedList<ScanRow>
               items={groupedScannedItems}
-              height="40vh"
-              estimateSize={72}
+              height="44vh"
+              estimateSize={84}
               overscan={10}
               getItemKey={(item: ScanRow) => item.key || item.id}
               className=""
@@ -1928,172 +2541,192 @@ export default function AnaPanel(props: AnaPanelProps) {
                 const trackingMode = (group.stokKodu && productTracking[group.stokKodu]) || resolveDefaultTrackingMode({stokAdi: group.stokAdi} as any);
                 const hasSerials = trackingMode === 'serial';
                 const meta = productMetaByCode.get(group.stokKodu || '');
+                const verifyLine = getVerifyLineForGroup(group);
                 const multiplier = formatUnitMultiplier(meta);
-                const missingAddress = !group.rafAdresi;
-                const missingIrsaliye = !group.irsaliyeNumarasi;
-                const hasWarnings = missingAddress || missingIrsaliye;
+                const unitLabel = `${normalizeUnitLabel(meta?.anaBirim)}${multiplier ? ` (${multiplier})` : ''}`;
+                const adet = group.adet ?? 0;
+
+                // ── Oto Kabul: grup içi senkron durum özeti ──
+                const subRows = (group.items && group.items.length ? group.items : [group]) as ScanRow[];
+                const sConfirmed = subRows.filter(i => i.syncStatus === 'confirmed').length;
+                const sProcessing = subRows.filter(i => i.syncStatus === 'processing').length;
+                const sPending = subRows.filter(i => i.syncStatus === 'pending').length;
+                const sFailed = subRows.filter(i => i.syncStatus === 'failed').length;
+                const syncFailReason = subRows.find(i => i.syncStatus === 'failed')?.syncError;
+                let syncBadge: React.ReactNode = null;
+                if (sFailed > 0) {
+                  syncBadge = (
+                    <button
+                      type="button"
+                      onClick={() => retryAutoGroup(group)}
+                      title={syncFailReason || 'Yeniden dene'}
+                      style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(220,80,80,0.14)', color: MK_C.danger, fontSize: 10, fontWeight: 700 }}
+                    >
+                      <RefreshCw className="h-2.5 w-2.5" /> Hata · Tekrar
+                    </button>
+                  );
+                } else if (sProcessing > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(120,150,210,0.16)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                      <Loader2 className="h-2.5 w-2.5 animate-spin" /> Ekleniyor
+                    </span>
+                  );
+                } else if (sPending > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: MK_C.surface2, color: MK_C.ink3, fontSize: 10, fontWeight: 700 }}>
+                      <Clock className="h-2.5 w-2.5" /> Sırada
+                    </span>
+                  );
+                } else if (sConfirmed > 0) {
+                  syncBadge = (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(111,181,133,0.16)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                      <CheckCircle2 className="h-2.5 w-2.5" /> Stokta
+                    </span>
+                  );
+                }
+
+                const checkbox = (
+                  <Checkbox checked={group.isSelected} onCheckedChange={() => toggleGroupSelection(group.key)} />
+                );
+                const qtyControl = hasSerials ? (
+                  <span style={{ fontSize: 15, fontWeight: 800, color: MK_C.ink1 }}>{formatQuantityWithUnit(adet, meta, { showMultiplier: true })}</span>
+                ) : (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: 5, borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset }}>
+                    <button onClick={() => handleAdetChange(group.key, String(Math.max(1, adet - 1)))} style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clayFlat, color: MK_C.ink2 }}><Minus className="h-3.5 w-3.5" /></button>
+                    <input value={adet} onChange={(e) => { const v = parseInt(e.target.value.replace(/\D/g, ''), 10); handleAdetChange(group.key, String(isNaN(v) ? 1 : v)); }} style={{ width: 40, textAlign: 'center', border: 'none', background: 'transparent', fontSize: 15, fontWeight: 800, color: MK_C.accent, fontFamily: 'inherit', outline: 'none' }} />
+                    <button onClick={() => handleAdetChange(group.key, String(adet + 1))} style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', background: `radial-gradient(120% 120% at 30% 25%, ${MK_C.accent2}, ${MK_C.accent})`, boxShadow: `0 5px 11px -4px ${MK_C.accentGlow}`, color: '#fff' }}><Plus className="h-3.5 w-3.5" /></button>
+                  </div>
+                );
+                const actions = (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    {(verifyLine || (selectedPendingIrs && hasSerials)) && (
+                      <button onClick={() => markVerifyLineComplete(group)} title="Bu satırdaki tüm seri numaralarını okutulmuş say" style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', color: MK_C.waterDeep, background: MK_C.surface2, boxShadow: MK_C.clayFlat }}>
+                        <CheckSquare className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                    <button onClick={() => deleteGroup(group.key)} aria-label="Sil" style={{ all: 'unset', cursor: 'pointer', width: 32, height: 32, borderRadius: '50%', display: 'grid', placeItems: 'center', color: MK_C.danger, background: MK_C.surface2, boxShadow: MK_C.clayFlat }}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                );
 
                 return (
-                  <div className={cn(
-                    "border-b border-[var(--dashboard-stroke)] transition-colors",
-                    group.isSelected && "bg-[var(--dashboard-accent)]/5"
-                  )}>
-                    {/* Desktop row */}
-                    <div className="hidden sm:grid grid-cols-[40px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5 cursor-pointer hover:bg-[var(--dashboard-surface-2)]/60">
-                      <div>
-                        <Checkbox
-                          checked={group.isSelected}
-                          onCheckedChange={() => toggleGroupSelection(group.key)}
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                        <div className="flex items-center gap-1.5">
-                          <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                          {group.bulkQrAssigned && (
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
-                              <Download className="h-2.5 w-2.5" />
-                              Barkod atandı
-                            </span>
-                          )}
+                  <div style={{ paddingBottom: 10, animation: 'mkPopIn 280ms ease' }}>
+                    <div style={{ borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: group.isSelected ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accent}66` : MK_C.clayFlat, overflow: 'hidden' }}>
+                      {/* Desktop row */}
+                      <div className="hidden sm:grid grid-cols-[40px_46px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center" style={{ padding: '13px 18px' }}>
+                        <div>{checkbox}</div>
+                        <div style={{
+                          width: 40, height: 40, borderRadius: 13, flexShrink: 0, display: 'grid', placeItems: 'center',
+                          background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF 0%, #ECE4D4 82%)',
+                          boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.9), inset 0 -4px 7px rgba(178,160,128,0.22), 0 4px 10px -5px rgba(150,128,96,0.28)',
+                          color: MK_C.accent,
+                        }}>
+                          <Package className="h-4.5 w-4.5" style={{ width: 18, height: 18 }} />
                         </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+                          <div className="flex items-center gap-1.5" style={{ marginTop: 2 }}>
+                            <span style={{ fontSize: 11.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{group.stokKodu}</span>
+                            {group.bulkQrAssigned && (
+                              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '1px 7px', borderRadius: 999, background: 'rgba(111,181,133,0.14)', color: MK_C.waterDeep, fontSize: 10, fontWeight: 700 }}>
+                                <Download className="h-2.5 w-2.5" /> Barkod atandı
+                              </span>
+                            )}
+                            {syncBadge}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.lotNumarasi || '—'}</div>
+                        <div style={{ fontSize: 12.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', textAlign: 'center', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.miad || '—'}</div>
+                        <div style={{ textAlign: 'center' }}>
+                          {group.rafAdresi ? <MkGoodChip mono><MapPin className="h-3 w-3" /> {group.rafAdresi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> Adres yok</MkWarnChip>}
+                        </div>
+                        <div style={{ textAlign: 'center' }}>
+                          {group.irsaliyeNumarasi ? <MkGoodChip mono>{group.irsaliyeNumarasi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> İrsaliye yok</MkWarnChip>}
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'center' }}>{qtyControl}</div>
+                        <div style={{ textAlign: 'center', fontSize: 12, color: MK_C.ink2, fontWeight: 600 }}>{unitLabel}</div>
+                        {actions}
                       </div>
-                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.lotNumarasi || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
-                      <p className="text-xs text-[var(--dashboard-text)] truncate">{group.miad || <span className="text-[var(--dashboard-muted)]">-</span>}</p>
-                      <div>
-                        {group.rafAdresi ? (
-                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.rafAdresi}</p>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            Adres yok
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        {group.irsaliyeNumarasi ? (
-                          <p className="text-xs text-[var(--dashboard-text)] truncate">{group.irsaliyeNumarasi}</p>
-                        ) : (
-                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 text-amber-700">
-                            <AlertTriangle className="h-2.5 w-2.5" />
-                            İrsaliye yok
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-right">
-                        {hasSerials ? (
-                          <span className="text-sm font-bold text-[var(--dashboard-text)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
-                        ) : (
-                          <Input
-                            type="number"
-                            value={group.adet}
-                            onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                            className="h-7 w-16 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg ml-auto"
-                            min="1"
-                          />
-                        )}
-                      </div>
-                      <div className="text-center">
-                        <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                      </div>
-                      <div className="text-center">
-                        <button
-                          onClick={() => deleteGroup(group.key)}
-                          className="p-1 rounded-lg hover:bg-red-100 transition-colors"
-                        >
-                          <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                        </button>
-                      </div>
-                    </div>
 
-                    {/* Mobile row (card layout with column structure) */}
-                    <div className="sm:hidden px-3 py-2.5">
-                      <div className="flex items-start gap-2.5">
-                        <Checkbox
-                          checked={group.isSelected}
-                          onCheckedChange={() => toggleGroupSelection(group.key)}
-                          className="mt-1"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-[var(--dashboard-text)] truncate">{group.stokAdi}</p>
-                              <div className="flex items-center gap-1.5">
-                                <p className="text-[10px] text-[var(--dashboard-muted)] font-mono">{group.stokKodu}</p>
-                                <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                                {group.bulkQrAssigned && (
-                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700">
-                                    <Download className="h-2.5 w-2.5" />
-                                    Barkod atandı
-                                  </span>
-                                )}
+                      {/* Mobile row */}
+                      <div className="sm:hidden" style={{ padding: '13px 15px' }}>
+                        <div className="flex items-start gap-2.5">
+                          <div className="mt-1">{checkbox}</div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <div style={{ fontSize: 14.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{group.stokAdi}</div>
+                                <div style={{ fontSize: 11.5, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace', marginTop: 2 }}>{group.stokKodu} · {unitLabel}</div>
+                              </div>
+                              <div className="flex items-center gap-1.5 flex-shrink-0">
+                                {qtyControl}
+                                {actions}
                               </div>
                             </div>
-                            <div className="flex items-center gap-1.5 flex-shrink-0">
-                              {hasSerials ? (
-                                <span className="text-base font-bold text-[var(--dashboard-accent)]">{formatQuantityWithUnit(group.adet ?? 0, meta, { showMultiplier: true })}</span>
-                              ) : (
-                                <Input
-                                  type="number"
-                                  value={group.adet}
-                                  onChange={(e) => handleAdetChange(group.key, e.target.value)}
-                                  className="h-7 w-14 text-center font-bold text-sm bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] rounded-lg"
-                                  min="1"
-                                />
-                              )}
-                              <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                              <button onClick={() => deleteGroup(group.key)} className="p-1">
-                                <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                              </button>
+                            <div className="flex flex-wrap gap-1.5 items-center" style={{ marginTop: 8 }}>
+                              {group.lotNumarasi && <MkGoodChip mono>Lot {group.lotNumarasi}</MkGoodChip>}
+                              {group.miad && <MkGoodChip mono>SKT {group.miad}</MkGoodChip>}
+                              {group.rafAdresi ? <MkGoodChip mono><MapPin className="h-3 w-3" /> {group.rafAdresi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> Adres yok</MkWarnChip>}
+                              {group.irsaliyeNumarasi ? <MkGoodChip mono>{group.irsaliyeNumarasi}</MkGoodChip> : <MkWarnChip><AlertTriangle className="h-3 w-3" /> İrsaliye yok</MkWarnChip>}
+                              {syncBadge}
                             </div>
                           </div>
-                          {/* Mobile meta row with label+value pairs */}
-                          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[10px]">
-                            {group.lotNumarasi && (
-                              <span className="text-[var(--dashboard-muted)]">Lot: <strong className="text-[var(--dashboard-text)]">{group.lotNumarasi}</strong></span>
-                            )}
-                            {group.miad && (
-                              <span className="text-[var(--dashboard-muted)]">SKT: <strong className="text-[var(--dashboard-text)]">{group.miad}</strong></span>
-                            )}
-                            {group.rafAdresi ? (
-                              <span className="text-[var(--dashboard-muted)]">Adres: <strong className="text-[var(--dashboard-text)]">{group.rafAdresi}</strong></span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                <AlertTriangle className="h-2.5 w-2.5" /> Adres yok
-                              </span>
-                            )}
-                            {group.irsaliyeNumarasi ? (
-                              <span className="text-[var(--dashboard-muted)]">İrs: <strong className="text-[var(--dashboard-text)]">{group.irsaliyeNumarasi}</strong></span>
-                            ) : (
-                              <span className="inline-flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">
-                                <AlertTriangle className="h-2.5 w-2.5" /> İrsaliye yok
-                              </span>
-                            )}
+                        </div>
+                      </div>
+
+                      {/* Serial number expansion */}
+                      {hasSerials && group.items && group.items.length > 0 && (
+                        <div style={{ padding: '10px 18px', background: MK_C.surface2, borderTop: `1px solid ${MK_C.line}` }}>
+                          {verifyLine && (
+                            <div className="flex items-center justify-between mb-2">
+                              <div style={{ fontSize: 12, color: MK_C.ink2 }}>Okutulan {verifyLine.verifiedSerials.size} / Beklenen {verifyLine.serials.length}</div>
+                              <Button size="sm" variant="outline" onClick={() => markVerifyLineComplete(group)}>✓ Tümü Okutuldu</Button>
+                            </div>
+                          )}
+                          <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-1">
+                            {group.items.slice(0, 100).map(item => {
+                              const key = `${group.stokKodu}||${group.lotNumarasi || ''}||${group.miad || ''}`;
+                              const vm = ceomedVerifyMap[key];
+                              const verified = !!(vm && item.seriNumarasi && vm.verifiedSerials.has(item.seriNumarasi));
+                              return (
+                                <span key={item.id} className="truncate" style={{ padding: '2px 8px', borderRadius: 8, border: `1px solid ${verified ? 'rgba(111,181,133,0.5)' : 'rgba(192,121,106,0.4)'}`, color: verified ? MK_C.waterDeep : MK_C.danger }}>{item.seriNumarasi}</span>
+                              );
+                            })}
+                            {group.items.length > 100 && <span style={{ color: MK_C.ink3 }}>+{group.items.length - 100} daha...</span>}
                           </div>
                         </div>
-                      </div>
+                      )}
                     </div>
-
-                    {/* Serial number expansion */}
-                    {hasSerials && group.items && group.items.length > 0 && (
-                      <div className="px-5 sm:px-10 py-2 bg-[var(--dashboard-surface-2)] border-t border-[var(--dashboard-stroke)]">
-                        <div className="text-[10px] font-mono grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-x-4 gap-y-0.5 text-[var(--dashboard-muted)]">
-                          {group.items.slice(0, 100).map(item => (
-                            <span key={item.id} className="truncate">{item.seriNumarasi}</span>
-                          ))}
-                          {group.items.length > 100 && (
-                            <span>+{group.items.length - 100} daha...</span>
-                          )}
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               }}
             />
           )}
         </div>
+
+        {/* ── Footer summary ── */}
+        {scannedItems.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '14px 26px', borderTop: `1px solid ${MK_C.line}` }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Kalem</span>
+              <strong>{groupedScannedItems.length}</strong>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Lot</span>
+              <strong>{distinctLotCount}</strong>
+            </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 13, fontWeight: 700, color: MK_C.ink1 }}>
+              <span style={{ fontSize: 10.5, color: MK_C.ink3, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Toplam</span>
+              <strong style={{ color: MK_C.accent }}>{totalScannedQuantity}</strong>
+            </span>
+            {scannedItems.some(i => !i.isProcessed && (!i.rafAdresi || !i.irsaliyeNumarasi)) && (
+              <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 14px', borderRadius: MK_C.radiusPill, background: MK_C.amberSoft, fontSize: 13, fontWeight: 700, color: '#9A6F1E' }}>
+                <AlertTriangle className="h-3.5 w-3.5" /> Bazı ürünlerde adres / irsaliye eksik
+              </span>
+            )}
+          </div>
+        )}
 
       </div>
 
@@ -2150,7 +2783,7 @@ export default function AnaPanel(props: AnaPanelProps) {
             </div>
             <div>
               <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">Manuel Adres</Label>
-              <Input value={addressAssignmentInput} onChange={e => setAddressAssignmentInput(e.target.value)} placeholder="Veya manuel adres girin" className="mt-1" />
+              <Input ref={addressInputRef} placeholder="Veya manuel adres girin" className="mt-1" />
             </div>
           </div>
           <DialogFooter>
@@ -2171,7 +2804,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           </DialogHeader>
           <div className="py-4">
             <Label className="text-xs font-semibold text-[var(--dashboard-muted)] uppercase tracking-wide">İrsaliye Numarası</Label>
-            <Input value={irsaliyeNoInput} onChange={e => setIrsaliyeNoInput(e.target.value)} placeholder="İrsaliye numarasını girin" className="mt-1" />
+            <Input ref={irsaliyeInputRef} placeholder="İrsaliye numarasını girin" className="mt-1" />
           </div>
           <DialogFooter>
             <DialogClose asChild><Button variant="outline">İptal</Button></DialogClose>
@@ -2180,7 +2813,93 @@ export default function AnaPanel(props: AnaPanelProps) {
         </DialogContent>
       </Dialog>
 
-      {/* OCR Modal */}
+      {/* CEOMED ve dosya yönetimi kaynaklı bekleyen irsaliyeler */}
+      <Dialog open={isPendingCeomedModalOpen} onOpenChange={setIsPendingCeomedModalOpen}>
+        <DialogContent className="max-w-3xl max-h-[88vh] overflow-hidden flex flex-col p-0" style={{ background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, borderRadius: MK_C.radiusLg, border: 'none' }}>
+          <MkClayStyles />
+          <DialogHeader className="px-6 pt-6 pb-4" style={{ borderBottom: `1px solid ${MK_C.line}` }}>
+            <div className="flex items-start gap-3">
+              <span style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: MK_C.accent, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: MK_C.clayFlat }}><FileText className="h-5 w-5" /></span>
+              <div>
+                <DialogTitle style={{ fontSize: 20, fontWeight: 800, color: MK_C.ink1 }}>Bekleyen İrsaliyeler</DialogTitle>
+                <DialogDescription style={{ color: MK_C.ink2, marginTop: 4 }}>
+                  CEOMED entegrasyonundan ve dosya yönetiminde taranan PDF&apos;lerden gelen kayıtları tek alandan yönetin.
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <div className="flex-1 overflow-y-auto space-y-6 px-6 py-5">
+            <section className="space-y-3">
+              <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
+                <span style={{ color: MK_C.accent, display: 'inline-flex' }}><FileText className="h-4 w-4" /></span>
+                <span style={{ fontSize: 14.5, fontWeight: 800, color: MK_C.ink1 }}>CEOMED Entegrasyonu</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: MK_C.ink3 }}>({pendingCeomedIrsaliye.length})</span>
+              </div>
+              {!((selectedDepot as any)?.ceomedCariKodu) ? (
+                <div style={{ borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset, padding: '24px 16px', textAlign: 'center', fontSize: 13.5, color: MK_C.ink2 }}>
+                  Seçili depo için CEOMED cari kodu tanımlı değil.
+                </div>
+              ) : pendingCeomedIrsaliye.length === 0 ? (
+                <div style={{ borderRadius: MK_C.radiusSm, background: MK_C.surface2, boxShadow: MK_C.clayInset, padding: '24px 16px', textAlign: 'center', fontSize: 13.5, color: MK_C.ink2 }}>Bekleyen CEOMED irsaliyesi bulunamadı.</div>
+              ) : pendingCeomedIrsaliye.map((irs) => {
+                const lines = buildPendingLines(irs);
+                const brands = Array.from(new Set(lines.map(l => l.marka).filter(Boolean)));
+                const totalKalem = lines.length;
+                const isSelected = selectedPendingIrs?.id === irs.id;
+                return (
+                  <MkWaybillCard
+                    key={irs.id}
+                    title={irs.irsaliyeNo}
+                    subtitle={`${brands.length ? `Markalar: ${brands.join(', ')}` : 'Marka bilgisi yok'} · ${totalKalem} kalem`}
+                    code={irs.cariKodu}
+                    selected={isSelected}
+                    onClick={() => setSelectedPendingIrs(isSelected ? null : irs)}
+                  >
+                    {isSelected && (
+                      <div className="space-y-2" style={{ borderTop: `1px solid ${MK_C.line}`, paddingTop: 12 }}>
+                        {lines.map((g, idx) => (
+                          <Accordion key={`${g.stokKodu}-${g.lot}-${idx}`} type="single" collapsible>
+                            <AccordionItem value="s">
+                              <AccordionTrigger>
+                                <div className="flex w-full justify-between pr-2 text-sm" style={{ color: MK_C.ink1 }}>
+                                  <span>{g.stokKodu} - {g.stokAdi} • Lot: {g.lot || '-'} • SKT: {g.miad || '-'}</span>
+                                  <span className="font-semibold">Adet: {g.adet}</span>
+                                </div>
+                              </AccordionTrigger>
+                              <AccordionContent>
+                                <div className="text-xs grid grid-cols-2 md:grid-cols-4 gap-1 font-mono">
+                                  {g.serials.length ? g.serials.map((serial, index) => <span key={`${serial}-${index}`} style={{ padding: '4px 8px', borderRadius: 8, border: `1px solid rgba(192,121,106,0.4)`, color: MK_C.danger }}>{serial}</span>) : <span style={{ color: MK_C.ink3 }}>Seri yok</span>}
+                                </div>
+                              </AccordionContent>
+                            </AccordionItem>
+                          </Accordion>
+                        ))}
+                        <div className="flex justify-end gap-2 pt-1">
+                          <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>Doğrulamalı Stoğa Aktar</Button>
+                          <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id} style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})`, color: '#fff' }}>
+                            {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </MkWaybillCard>
+                );
+              })}
+            </section>
+
+            <section style={{ borderTop: `1px solid ${MK_C.line}`, paddingTop: 20 }}>
+              {selectedDepotId && selectedDepot && (
+                <BekleyenIrsaliyelerPanel
+                  locationType="depot"
+                  locationId={selectedDepotId}
+                  locationName={selectedDepot.name || ''}
+                />
+              )}
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {isOcrModalOpen && (
         <IrsaliyeOcrModal
           isOpen={isOcrModalOpen}
@@ -2202,5 +2921,6 @@ export default function AnaPanel(props: AnaPanelProps) {
         />
       )}
     </div>
+    </>
   );
 }

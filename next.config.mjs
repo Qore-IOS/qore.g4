@@ -5,6 +5,21 @@
  * @version 2.0.0
  */
 
+// Faz 0 ölçüm: `ANALYZE=true pnpm analyze` ile rota bazlı bundle raporu üretir.
+// ANALYZE set değilse hiçbir etkisi yoktur (normal build'i değiştirmez).
+let withBundleAnalyzer = (config) => config;
+
+if (process.env.ANALYZE === "true") {
+  try {
+    const withBundleAnalyzerInit = (await import("@next/bundle-analyzer")).default;
+    withBundleAnalyzer = withBundleAnalyzerInit({
+      enabled: true,
+    });
+  } catch (e) {
+    console.warn("Bundle analyzer could not be loaded:", e);
+  }
+}
+
 /** @type {import('next').NextConfig} */
 const config = {
   // Enable React Strict Mode for highlighting potential problems
@@ -12,6 +27,16 @@ const config = {
 
   // Remove X-Powered-By header for security
   poweredByHeader: false,
+
+  // PERF (Faz 1): Production'da console.* çağrılarını kaldır (error/warn hariç).
+  // Kod tabanında 727 console çağrısı vardı; her biri prod'da ana thread'de
+  // çalışıp argümanları serialize ediyordu (SW/FCM log seli). error/warn,
+  // prod teşhisi için korunur. Dev build'i etkilenmez.
+  compiler: {
+    removeConsole: {
+      exclude: ["error", "warn"],
+    },
+  },
 
   // ESLint Configuration
   // TEMPORARILY DISABLED: Set to false after fixing all linting errors
@@ -42,6 +67,15 @@ const config = {
   // Experimental features
   experimental: {
     serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas"],
+    // PERF (Faz 1): Barrel paketlerden yalnızca kullanılan export'ları al →
+    // paylaşılan/rota bundle'larını küçültür. lucide-react 268 dosyada import
+    // ediliyor; date-fns/recharts/framer-motion ağır barrel'lar.
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "recharts",
+      "framer-motion",
+    ],
   },
 
   // Webpack configuration
@@ -101,4 +135,4 @@ const config = {
   },
 };
 
-export default config;
+export default withBundleAnalyzer(config);

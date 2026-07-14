@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Bell } from "lucide-react";
+import { X, Bell, Calendar } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
@@ -14,6 +14,8 @@ import { useAI } from "@/contexts/ai-context";
 import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
+import { CalendarDockPanel } from "./dock/CalendarDockPanel";
+import { LiquidGlassSurface } from "@/components/ui/liquid-glass";
 
 // --- HELPERS ---
 
@@ -42,6 +44,7 @@ const LONG_PRESS_DURATION = 500;
 export default function MobileDock({ items }: { items: DockItemData[] }) {
   const isMobile = useIsMobile();
   const [isOpen, setIsOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { openAI } = useAI();
@@ -164,17 +167,21 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
         style={{ paddingBottom: "env(safe-area-inset-bottom, 16px)" }}
       >
         <div className="pointer-events-auto px-4 pb-4 w-full max-w-md">
-          {/* Dock Container */}
+          {/* Dock Container — Apple Liquid Glass yüzeyi (eski neumorphic kabuk kalktı) */}
           <div
             className={cn(
               "relative flex items-center justify-between h-14 px-4 rounded-full transition-all duration-300",
               isDark
-                ? "bg-white/10 backdrop-blur-xl border border-white/20 shadow-[0_4px_30px_rgba(0,0,0,0.3)]"
-                : "bg-[#e0e0e0] shadow-[6px_6px_12px_#bebebe,-6px_-6px_12px_#ffffff]"
+                ? "shadow-[0_10px_32px_rgba(0,0,0,0.45),0_2px_8px_rgba(0,0,0,0.25)]"
+                : "shadow-[0_12px_32px_rgba(0,0,0,0.16),0_3px_8px_rgba(0,0,0,0.08)]"
             )}
           >
+            <LiquidGlassSurface radius={28} strength={34} dispersion={0.42} blur={2.5} bezel={18} zoom={0.22} fallbackBlur={22} shine={false} />
+
             {/* Left - Profile Button */}
-            <MobileProfileButton isDark={isDark} />
+            <div className="relative">
+              <MobileProfileButton isDark={isDark} />
+            </div>
 
             {/* Center - Logo Button (Floating Above) */}
             {/* Tap: Open menu | Long press: Open AI */}
@@ -203,7 +210,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             </div>
 
             {/* Right - Notification Button */}
-            <div className="flex items-center">
+            <div className="relative flex items-center">
               {notificationItem ? (
                 <NotificationsBell
                   triggerClassName={cn(
@@ -215,6 +222,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
                   items={notificationItem.items || []}
                   unreadCount={notificationItem.unreadCount || 0}
                   loading={notificationItem.loading || false}
+                  customIcon={mobileIcons['notifications']}
                 />
               ) : (
                 <button
@@ -240,8 +248,16 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             items={menuItems}
             onClose={() => setIsOpen(false)}
             isDark={isDark}
+            onCalendarClick={() => {
+              setIsOpen(false);
+              setCalendarOpen(true);
+            }}
           />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} />}
       </AnimatePresence>
     </>
   );
@@ -253,9 +269,10 @@ interface FullScreenMenuProps {
   items: DockItemData[];
   onClose: () => void;
   isDark: boolean;
+  onCalendarClick: () => void;
 }
 
-function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
+function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenMenuProps) {
   const router = useRouter();
   const iconData = useIconMappings();
   const mobileIcons = iconData?.mappings?.mobile || {};
@@ -279,8 +296,8 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
       className={cn(
         "fixed inset-0 z-50 flex flex-col",
         isDark
-          ? "bg-black/95 backdrop-blur-xl"
-          : "bg-[#e0e0e0]"
+          ? "bg-black/70 backdrop-blur-2xl"
+          : "bg-white/60 backdrop-blur-2xl"
       )}
       style={{
         paddingTop: "env(safe-area-inset-top, 20px)",
@@ -300,8 +317,8 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
           className={cn(
             "p-3 rounded-full transition-all duration-200",
             isDark
-              ? "bg-white/10 text-white hover:bg-white/20"
-              : "bg-[#e0e0e0] text-[#333] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff] active:shadow-[inset_4px_4px_8px_#bebebe,inset_-4px_-4px_8px_#ffffff]"
+              ? "bg-white/10 text-white hover:bg-white/20 border border-white/15"
+              : "bg-white/55 text-[#333] border border-white/70 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.12),inset_0_1px_1px_rgba(255,255,255,0.8)] active:scale-95"
           )}
         >
           <X size={24} />
@@ -364,6 +381,46 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
               </button>
             </motion.li>
           ))}
+          {/* Takvim Item */}
+          <motion.li
+            key="calendar"
+            variants={{
+              hidden: { opacity: 0, x: -20 },
+              visible: { opacity: 1, x: 0 },
+            }}
+            transition={{ type: "spring", stiffness: 300, damping: 25 }}
+          >
+            <button
+              onClick={() => {
+                triggerHaptic();
+                onCalendarClick();
+              }}
+              className={cn(
+                "w-full text-left px-1 py-4 transition-all duration-200 flex items-center gap-4",
+                isDark
+                  ? "text-white hover:bg-white/5"
+                  : "text-[#333] hover:bg-black/5"
+              )}
+            >
+              {mobileIcons['calendar'] ? (
+                <Image
+                  src={getIconSrc(mobileIcons['calendar'])}
+                  alt="Takvim"
+                  width={50}
+                  height={50}
+                  className="w-[50px] h-[50px] shrink-0 object-contain"
+                />
+              ) : (
+                <Calendar
+                  className={cn(
+                    "w-[50px] h-[50px] shrink-0",
+                    isDark ? "text-amber-400" : "text-amber-600"
+                  )}
+                />
+              )}
+              <span className="text-lg font-medium">Takvim</span>
+            </button>
+          </motion.li>
         </motion.ul>
       </div>
 
@@ -378,7 +435,7 @@ function FullScreenMenu({ items, onClose, isDark }: FullScreenMenuProps) {
               "p-3 rounded-2xl",
               isDark
                 ? "bg-white/5 border border-white/10"
-                : "bg-[#e0e0e0] shadow-[4px_4px_8px_#bebebe,-4px_-4px_8px_#ffffff]"
+                : "bg-white/55 border border-white/70 backdrop-blur-xl shadow-[0_8px_24px_rgba(0,0,0,0.10),inset_0_1px_1px_rgba(255,255,255,0.8)]"
             )}
           >
             <ThemeToggleDock />

@@ -25,6 +25,7 @@ import {
   serverTimestamp,
   setDoc,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import { compareAsc, format as formatDateFns, parse as parseDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
@@ -44,6 +45,7 @@ import {
 } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
+import { archiveCompletedOrderInBatch } from '@/lib/orders-archive';
 import type {
   Depot,
   DepoStokItem,
@@ -79,6 +81,7 @@ import { cn } from '@/lib/utils';
 import { formatMiad, toDateFromAny } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 
 type LabStockInfo = {
@@ -160,9 +163,9 @@ export default function PeripheralOrderPage() {
         setOrder(orderData);
 
         const [hospitalsSnap, depotsSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'depots')),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
         const hospitals = hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital));
         const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
@@ -175,7 +178,7 @@ export default function PeripheralOrderPage() {
 
         // Lab stock = depoStok that was shipped to this hospital
         const shippedSnap = await getDocs(
-          query(collection(db, 'depoStok'), where('isShipped', '==', true))
+          scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))
         );
         const shippedAll = filterByCompanyScope(
           shippedSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
@@ -338,9 +341,19 @@ export default function PeripheralOrderPage() {
         payload.transferredAt = serverTimestamp();
         payload.transferredById = currentUser?.uid || null;
         payload.transferredBy = currentUserProfile?.name || currentUser?.email || null;
+        payload.completedAt = serverTimestamp();
       }
 
-      await setDoc(doc(db, 'orders', order.id), payload, { merge: true });
+      if (isComplete) {
+        // Tamamlanan sipariş `ordersArchive`'a taşınır (kopyala + sil); merge
+        // alanları tam dokümana yedirilir. `orders` yalnızca aktif/eksik tutar.
+        const { status: _omitStatus, ...completionFields } = payload;
+        const batch = writeBatch(db);
+        archiveCompletedOrderInBatch(batch, order.id, order as unknown as Record<string, unknown>, completionFields);
+        await batch.commit();
+      } else {
+        await setDoc(doc(db, 'orders', order.id), payload, { merge: true });
+      }
 
       toast({
         title: isComplete ? 'Sipariş Tamamlandı' : 'Eksik Olarak Kaydedildi',

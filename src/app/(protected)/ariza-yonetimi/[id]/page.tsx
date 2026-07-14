@@ -18,12 +18,14 @@ import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { closeDeviceFaultReport, resolveEjectedKitFault, assignFaultToSelf, startIntervention, transferFaultToOtherUnit, verifyLocationForIntervention } from '@/lib/faults';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Device, DeviceFaultReport, DeviceFaultStatus, InterventionType, ProductCode, User, PersonalStockItem, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import QRCode from 'qrcode';
+// PERF (mobil): jspdf + jspdf-autotable + qrcode (~500KB JS) yalnızca PDF dışa-aktarımında
+// kullanılıyor → statik import yerine generatePdf içinde DİNAMİK import edilir; böylece her
+// arıza-id açılışında mobil bundle'a girmez (zayıf mobil CPU'da parse maliyeti düşer).
 import { prefetchPdfAssets, resolveLabDisplayName, computeFormNo } from '@/lib/pdf-assets';
 import {
   DropdownMenu,
@@ -138,7 +140,7 @@ export default function FaultDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, isAdmin } = useAuth();
+  const { currentUser, currentUserProfile, isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
   const { theme, setTheme } = useTheme();
 
   const [fault, setFault] = useState<FaultDoc | null>(null);
@@ -225,6 +227,27 @@ export default function FaultDetailPage() {
   const [isSavingHucre, setIsSavingHucre] = useState(false);
   const [isSavingPart, setIsSavingPart] = useState(false);
 
+  // AI açıklama
+  type AiSuggestion = {
+    briefExplanation?: string;
+    summary?: string;
+    recurrenceLikelihood?: 'dusuk' | 'orta' | 'yuksek';
+    recurrenceRationale?: string;
+    similarFaultStats?: { total?: number; sameTitleCategoryCount?: number; sameModelCount?: number; resolvedCount?: number; actionFormCount?: number; sameCategoryActionFormCount?: number };
+    resolutionStats?: { kalici?: number; gecici?: number; belirsiz?: number };
+    actionFormStats?: { teknikServisCount?: number; aplikasyonCount?: number; partChanges?: number };
+    docMeta?: { sourcePath?: string; matchedSections?: number; topHeadings?: string[]; keywordsUsed?: string[]; totalChars?: number; excerptChars?: number };
+    aiSource?: 'gemini' | 'fallback';
+    aiDebug?: string;
+    generatedAt?: string;
+    scopeSerial?: string;
+  };
+  const [aiSuggestion, setAiSuggestion] = useState<AiSuggestion | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [aiFromCache, setAiFromCache] = useState(false);
+  const aiFetchedForRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!params?.id) return;
     const ref = doc(db, 'deviceFaultReports', params.id);
@@ -271,10 +294,41 @@ export default function FaultDetailPage() {
     };
   }, [params?.id, router, toast]);
 
+  // AI açıklama: arıza detayı yüklendiğinde otomatik getir (cache varsa anında, yoksa Gemini'den üret)
+  const fetchAiSuggestion = useCallback(async (forceRefresh = false) => {
+    if (!params?.id) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const url = `/api/ariza-yonetimi/ai-oneri?reportId=${encodeURIComponent(params.id)}${forceRefresh ? '&force=1' : ''}`;
+      const res = await fetch(url, { method: 'GET' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.success) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+      setAiSuggestion(json.data || null);
+      setAiFromCache(Boolean(json.cached));
+    } catch (e: any) {
+      setAiError(e?.message || 'AI açıklaması alınamadı.');
+    } finally {
+      setAiLoading(false);
+    }
+  }, [params?.id]);
+
+  useEffect(() => {
+    if (!fault?.id || !fault?.serial) return;
+    if (aiFetchedForRef.current === fault.id) return;
+    aiFetchedForRef.current = fault.id;
+    fetchAiSuggestion(false);
+  }, [fault?.id, fault?.serial, fetchAiSuggestion]);
+
   // Laboratuvara ait test listesini çek
   useEffect(() => {
     const fetchTests = async () => {
-      if (!fault?.hospitalId) return;
+      // PERF (Faz 6 mobil): availableTests yalnızca arıza KAPATMA akışında kullanılıyor.
+      // Çözülmüş (cozuldu) arızada gereksiz — tüm productCodes'u indirmeyi atla → mobilde
+      // görüntüleme anında. Açık arızada yüklenir (kapatırken test listesi gerekir).
+      if (!fault?.hospitalId || normalizeStatus(fault.status) === 'cozuldu') return;
 
       try {
         // Laboratuvara tanımlı minMaxRules'dan ürünlerin testAdi'lerini al
@@ -287,7 +341,7 @@ export default function FaultDetailPage() {
         }
 
         // ProductCodes'dan testAdi'leri al
-        const productCodesSnap = await getDocs(collection(db, 'productCodes'));
+        const productCodesSnap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
         const testNames = new Set<string>();
 
         productCodesSnap.docs.forEach(d => {
@@ -304,7 +358,7 @@ export default function FaultDetailPage() {
     };
 
     fetchTests();
-  }, [fault?.hospitalId]);
+  }, [fault?.hospitalId, fault?.status]);
 
   // Kit arızası için ürünün testAdi bilgisini çek
   useEffect(() => {
@@ -317,7 +371,7 @@ export default function FaultDetailPage() {
       try {
         // ProductCodes'dan stokKodu ile eşleşen ürünü bul
         const productCodesSnap = await getDocs(
-          query(collection(db, 'productCodes'), where('stokKodu', '==', fault.productStokKodu))
+          scopedQuery('productCodes', currentCompanyId, isSuperAdmin, where('stokKodu', '==', fault.productStokKodu))
         );
 
         if (!productCodesSnap.empty) {
@@ -341,9 +395,12 @@ export default function FaultDetailPage() {
 
   // Fetch personnel for support personnel selector
   useEffect(() => {
+    // PERF (Faz 6 mobil): Destek personeli yalnızca kapatma akışında gerekli.
+    // Çözülmüş arızada tüm users'ı indirmeyi atla.
+    if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
-        const usersSnap = await getDocs(collection(db, 'users'));
+        const usersSnap = await getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin));
         const users = usersSnap.docs.map(d => ({ uid: d.id, ...d.data() } as User));
         // Filter to teknik_servis and aplikasyon roles
         const personnel = users.filter(u => u.role === 'teknik_servis' || u.role === 'aplikasyon');
@@ -352,7 +409,7 @@ export default function FaultDetailPage() {
         console.error('Personel listesi alınamadı:', e);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Şahsi stok verilerini çek
   useEffect(() => {
@@ -375,9 +432,12 @@ export default function FaultDetailPage() {
   }, [currentUser]);
 
   useEffect(() => {
+    // PERF (Faz 6 mobil): Limitsiz yedekParcaDepoStok koleksiyonu yalnızca parça-ekleme
+    // akışında gerekli. Çözülmüş arızada indirmeyi atla → görüntüleme anında.
+    if (!fault || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -386,16 +446,18 @@ export default function FaultDetailPage() {
             createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
           } as YedekParcaDepoStokItem;
         });
-        setDepotStockItems(items);
+        setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error('Depo stok alınamadı:', err);
       }
     })();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Havuz stok verilerini çek
   useEffect(() => {
-    if (!fault?.deviceId) return;
+    // PERF (Faz 6 mobil): Havuz stok yürüyüşü (pools→depots→poolWarehouseStock) yalnızca
+    // parça-ekleme akışında gerekli. Çözülmüş arızada atla.
+    if (!fault?.deviceId || normalizeStatus(fault.status) === 'cozuldu') return;
     (async () => {
       try {
         const deviceSnap = await getDoc(doc(db, 'devices', fault.deviceId));
@@ -404,7 +466,7 @@ export default function FaultDetailPage() {
         const hospitalId = deviceData.hospitalId;
         if (!hospitalId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -414,7 +476,7 @@ export default function FaultDetailPage() {
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -426,8 +488,10 @@ export default function FaultDetailPage() {
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const pwId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
@@ -441,12 +505,12 @@ export default function FaultDetailPage() {
             } as PoolWarehouseStockItem);
           });
         }
-        setPoolStockItems(allPoolStock);
+        setPoolStockItems(filterByCompanyScope(allPoolStock, currentCompanyId, isSuperAdmin));
       } catch (err) {
         console.error("Error fetching pool stock:", err);
       }
     })();
-  }, [fault?.deviceId]);
+  }, [fault?.deviceId, currentCompanyId, isSuperAdmin, fault?.status]);
 
   // Arızaya eklenen parça değişimlerini çek
   useEffect(() => {
@@ -908,6 +972,38 @@ export default function FaultDetailPage() {
       const now = new Date();
       let restoredDepotEntry: YedekParcaDepoStokItem | null = null;
 
+      if (removedHn) {
+        const duplicateRemovedHucreSnap = await getDocs(query(
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', item.stokKodu),
+          where('hucreNumarasi', '==', removedHn)
+        ));
+
+        if (duplicateRemovedHucreSnap.empty) {
+          const removedHucreDepotRef = doc(collection(db, 'yedekParcaDepoStok'));
+          batch.set(removedHucreDepotRef, withCompanyScope({
+            productCodeId: (item as any).productCodeId || '',
+            stokKodu: item.stokKodu,
+            stokAdi: item.stokAdi,
+            anaBirim: (item as any).anaBirim || 'Adet',
+            serialNumber: '',
+            hucreNumarasi: removedHn,
+            address: '',
+            quantity: 1,
+            partCondition: 'cihazdan_cikan',
+            partConditionNote: `Cihazdan çıkan hücre: ${fault.model || fault.deviceId || ''}`.trim(),
+            sourceType: 'device_removed',
+            sourceDeviceId: fault.deviceId,
+            sourceDeviceName: fault.model || '',
+            sourceFormId: fault.id,
+            sourceFormType: 'ariza_yonetimi',
+            createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUser.uid,
+            createdByName: currentUserProfile?.name || '',
+          }, currentCompanyId));
+        }
+      }
+
       if (hucreStockSourceTab === 'depot') {
         const depotEntry = depotStockItems.find((stock) => stock.id === item.id);
         if (!depotEntry) throw new Error('Seçilen depo hücre stoğu bulunamadı.');
@@ -1160,45 +1256,43 @@ export default function FaultDetailPage() {
         });
       }
 
-      // If removed part has serial number, create personal stock entry for removed part.
+      // Cihazdan çıkan parça teknisyenin şahsi stoğuna değil yedek parça deposuna iade edilir.
       // Guardrails:
-      // 1) Do not re-add when removed serial equals installed serial.
-      // 2) Do not create duplicate active stock for same owner + stokKodu + serial.
+      // 1) Takılan seri ile çıkan seri aynıysa tekrar stok oluşturma.
+      // 2) Aynı stok kodu + seri için depoda zaten kayıt varsa mükerrer iade oluşturma.
       const removedSerial = removedPartSerialNumber.trim();
       const removedStokKoduValue = removedPartStokKodu.trim() || resolvedStokKodu;
-      const isReusableStockStatus = (status: unknown) => {
-        const normalized = String(status || '').trim().toLowerCase();
-        return normalized === 'in_stock' || normalized === 'pending_approval';
-      };
 
       if (removedSerial && removedSerial !== (resolvedSerialNumber || '').trim()) {
         const duplicateSnap = await getDocs(query(
-          collection(db, 'personalStock'),
-          where('ownerUid', '==', currentUser.uid),
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', removedStokKoduValue),
           where('serialNumber', '==', removedSerial)
         ));
-        const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
-          const data = docSnap.data();
-          return data.stokKodu === removedStokKoduValue && isReusableStockStatus(data.status);
-        });
 
-        if (!hasActiveDuplicate) {
-          const removedStockRef = doc(collection(db, 'personalStock'));
-          batch.set(removedStockRef, {
-            ownerUid: currentUser.uid,
-            ownerName: currentUserProfile?.name || '',
-            productCodeId: null,
+        if (duplicateSnap.empty) {
+          const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+          batch.set(removedStockRef, withCompanyScope({
+            productCodeId: selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || selectedDepotStockItem?.productCodeId || '',
             stokKodu: removedStokKoduValue,
             stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+            anaBirim: (selectedStockItem as any)?.anaBirim || (selectedPoolStockItem as any)?.anaBirim || selectedDepotStockItem?.anaBirim || 'Adet',
             serialNumber: removedSerial,
             imageUrl: removedImgUrl || null,
-            source: 'device',
+            address: '',
+            quantity: 1,
+            partCondition: 'cihazdan_cikan',
+            partConditionNote: `Cihazdan çıkan parça: ${fault.model || fault.deviceId || ''}`.trim(),
+            sourceType: 'device_removed',
             sourceDeviceId: fault.deviceId,
             sourceDeviceName: fault.model || '',
-            status: 'in_stock',
+            sourceFormId: fault.id,
+            sourceFormType: 'ariza_yonetimi',
             createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUser.uid,
+            createdByName: currentUserProfile?.name || '',
             replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
-          });
+          }, currentCompanyId));
         }
       }
 
@@ -1217,7 +1311,7 @@ export default function FaultDetailPage() {
       // Log post-closure part change to dedicated collection for audit trail
       if (isPostClosure) {
         const logRef = doc(collection(db, 'postClosurePartChangeLogs'));
-        batch.set(logRef, {
+        batch.set(logRef, withCompanyScope({
           faultReportId: fault.id,
           deviceId: fault.deviceId,
           model: fault.model,
@@ -1240,7 +1334,7 @@ export default function FaultDetailPage() {
           addedByName: currentUserProfile?.name || 'Bilinmeyen',
           addedAt: Timestamp.fromDate(now),
           sourceType: 'ariza_yonetimi',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();
@@ -1289,6 +1383,13 @@ export default function FaultDetailPage() {
   const generatePdf = async () => {
     if (!fault) return;
 
+    // Ağır PDF/QR kütüphanelerini yalnızca burada (export anında) yükle — bkz. import notu.
+    const [{ default: jsPDF }, { default: autoTable }, { default: QRCode }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+      import('qrcode'),
+    ]);
+
     const hospitalId = fault.hospitalId || fault.labId;
     const recordUrl = `${window.location.origin}/ariza-yonetimi/${fault.id}`;
     const typeChar = fault.faultType === 'teknik_servis' ? 'T' : 'A';
@@ -1296,9 +1397,9 @@ export default function FaultDetailPage() {
     // Fire ALL independent async operations in parallel
     const [assets, labDisplayName, qrDataUrl, formNo] = await Promise.all([
       prefetchPdfAssets(),
-      resolveLabDisplayName(hospitalId, fault.labName || ''),
+      resolveLabDisplayName(hospitalId, fault.labName || '', currentCompanyId, isSuperAdmin),
       QRCode.toDataURL(recordUrl, { errorCorrectionLevel: 'M', margin: 0, scale: 4 }),
-      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, 'openedAt', [where('faultType', '==', fault.faultType)]),
+      computeFormNo('deviceFaultReports', 'openedByUid', fault.openedByUid, fault.id, fault.openedByName || '', typeChar, currentCompanyId, isSuperAdmin, 'openedAt', [where('faultType', '==', fault.faultType)]),
     ]);
 
     const pdfDoc = new jsPDF({ unit: 'pt', format: 'a4' });
@@ -1802,6 +1903,100 @@ export default function FaultDetailPage() {
           <div className="fault-clay-section space-y-3">
             <p className="font-medium">Açıklama</p>
             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{fault.description || '-'}</p>
+          </div>
+
+          {/* AI Açıklama (geçmiş arıza analizi + master teknik doküman) */}
+          <div className="fault-clay-section space-y-3">
+            <div className="fault-section-head">
+              <p className="fault-section-title">
+                <Sparkles className="h-4 w-4" />
+                AI Açıklama
+              </p>
+              <button
+                type="button"
+                className="fault-pill-btn"
+                onClick={() => fetchAiSuggestion(true)}
+                disabled={aiLoading}
+              >
+                {aiLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Sparkles className="h-4 w-4" />
+                )}
+                {aiLoading ? 'Üretiliyor…' : 'Yenile'}
+              </button>
+            </div>
+            <div className="fault-action-card text-sm">
+              {aiLoading && !aiSuggestion?.briefExplanation ? (
+                <p className="text-muted-foreground italic">
+                  Geçmiş arızalar ve teknik doküman okunarak açıklama hazırlanıyor…
+                </p>
+              ) : aiError ? (
+                <p className="text-sm text-red-600 dark:text-red-400">
+                  {aiError}
+                </p>
+              ) : aiSuggestion?.briefExplanation ? (
+                <>
+                  <p className="whitespace-pre-wrap leading-relaxed">{aiSuggestion.briefExplanation}</p>
+                  {(aiSuggestion.recurrenceLikelihood || aiSuggestion.recurrenceRationale) && (() => {
+                    const lvl = aiSuggestion.recurrenceLikelihood;
+                    const label = lvl === 'yuksek' ? 'Yüksek' : lvl === 'orta' ? 'Orta' : lvl === 'dusuk' ? 'Düşük' : '—';
+                    const tone = lvl === 'yuksek'
+                      ? 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30'
+                      : lvl === 'orta'
+                        ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/30'
+                        : 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
+                    return (
+                      <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-medium text-muted-foreground">Tekrarlama olasılığı:</span>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full border text-[11px] font-semibold ${tone}`}>{label}</span>
+                        {aiSuggestion.recurrenceRationale && (
+                          <span className="text-muted-foreground">— {aiSuggestion.recurrenceRationale}</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {(aiSuggestion.similarFaultStats || aiSuggestion.generatedAt) && (
+                    <div className="mt-3 pt-3 border-t border-white/20 dark:border-white/10 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {typeof aiSuggestion.similarFaultStats?.sameTitleCategoryCount === 'number' && (
+                        <span>Aynı kategoride geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameTitleCategoryCount}</strong></span>
+                      )}
+                      {typeof aiSuggestion.similarFaultStats?.sameCategoryActionFormCount === 'number' && (
+                        <span>İlgili işlem formu: <strong className="font-mono">{aiSuggestion.similarFaultStats.sameCategoryActionFormCount}</strong></span>
+                      )}
+                      {typeof aiSuggestion.similarFaultStats?.total === 'number' && (
+                        <span>Bu serideki toplam geçmiş arıza: <strong className="font-mono">{aiSuggestion.similarFaultStats.total}</strong></span>
+                      )}
+                      {typeof aiSuggestion.docMeta?.matchedSections === 'number' && aiSuggestion.docMeta.matchedSections > 0 && (
+                        <span>Doküman bölümü eşleşmesi: <strong className="font-mono">{aiSuggestion.docMeta.matchedSections}</strong></span>
+                      )}
+                      {aiSuggestion.aiSource === 'fallback' && (
+                        <span className="text-amber-700 dark:text-amber-300">
+                          AI motoru yanıtsız ({aiSuggestion.aiDebug || 'bilinmiyor'})
+                        </span>
+                      )}
+                      {aiSuggestion.generatedAt && (
+                        <span>
+                          {aiFromCache ? 'Önbellek' : 'Üretildi'}: {format(new Date(aiSuggestion.generatedAt), 'dd.MM.yyyy HH:mm', { locale: tr })}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                  {aiSuggestion.docMeta?.topHeadings && aiSuggestion.docMeta.topHeadings.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">
+                      <span className="opacity-75">Dokümandan okunan bölümler:</span>
+                      {aiSuggestion.docMeta.topHeadings.slice(0, 4).map((h, i) => (
+                        <span key={i} className="px-1.5 py-0.5 rounded bg-white/30 dark:bg-white/5 border border-white/30 dark:border-white/10 font-mono">
+                          {h.length > 60 ? h.slice(0, 60) + '…' : h}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-muted-foreground italic">Henüz AI açıklaması üretilmedi. Yenile butonuna basabilirsiniz.</p>
+              )}
+            </div>
           </div>
 
           {/* Yeni Arıza Akış Sistemi */}

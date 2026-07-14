@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
@@ -63,7 +65,7 @@ export default function PostClosurePartChangeButton({
   formCollection,
   createdByUid,
 }: PostClosurePartChangeButtonProps) {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -98,8 +100,10 @@ export default function PostClosurePartChangeButton({
     (async () => {
       try {
         const stockSnap = await getDocs(
-          query(
-            collection(db, 'personalStock'),
+          scopedQuery(
+            'personalStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('ownerUid', '==', currentUser.uid),
             where('status', '==', 'in_stock')
           )
@@ -122,7 +126,7 @@ export default function PostClosurePartChangeButton({
         const hId = hospitalId || deviceData.hospitalId;
         if (!hId) return;
 
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         poolsSnap.docs.forEach(d => {
           const pool = d.data() as DeviceLabPool;
@@ -132,7 +136,7 @@ export default function PostClosurePartChangeButton({
         });
         if (matchingPoolIds.length === 0) return;
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         depotsSnap.docs.forEach(d => {
           const depot = d.data() as Depot;
@@ -144,8 +148,10 @@ export default function PostClosurePartChangeButton({
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const pwId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
@@ -352,49 +358,47 @@ export default function PostClosurePartChangeButton({
         });
       }
 
-      // If removed part has serial number, create personal stock entry.
-      // Protect against re-adding used part serial as a new active stock row.
+      // Cihazdan çıkan parça teknisyenin şahsi stoğuna değil yedek parça deposuna iade edilir.
+      // Protect against re-adding the installed serial as a returned depot stock row.
       const removedSerial = removedPartSerialNumber.trim();
       const removedStokKoduValue = removedPartStokKodu.trim() || resolvedStokKodu;
-      const isReusableStockStatus = (status: unknown) => {
-        const normalized = String(status || '').trim().toLowerCase();
-        return normalized === 'in_stock' || normalized === 'pending_approval';
-      };
 
       if (removedSerial && removedSerial !== resolvedSerialNumber.trim()) {
         const duplicateSnap = await getDocs(query(
-          collection(db, 'personalStock'),
-          where('ownerUid', '==', currentUser.uid),
+          collection(db, 'yedekParcaDepoStok'),
+          where('stokKodu', '==', removedStokKoduValue),
           where('serialNumber', '==', removedSerial)
         ));
-        const hasActiveDuplicate = duplicateSnap.docs.some((docSnap) => {
-          const data = docSnap.data();
-          return data.stokKodu === removedStokKoduValue && isReusableStockStatus(data.status);
-        });
 
-        if (!hasActiveDuplicate) {
-          const removedStockRef = doc(collection(db, 'personalStock'));
-          batch.set(removedStockRef, {
-            ownerUid: currentUser.uid,
-            ownerName: currentUserProfile?.name || '',
-            productCodeId: null,
+        if (duplicateSnap.empty) {
+          const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
+          batch.set(removedStockRef, withCompanyScope({
+            productCodeId: selectedStockItem?.productCodeId || selectedPoolStockItem?.productCodeId || '',
             stokKodu: removedStokKoduValue,
             stokAdi: removedPartStokAdi.trim() || resolvedStokAdi,
+            anaBirim: (selectedStockItem as any)?.anaBirim || (selectedPoolStockItem as any)?.anaBirim || 'Adet',
             serialNumber: removedSerial,
             imageUrl: removedImgUrl || null,
-            source: 'device',
+            address: '',
+            quantity: 1,
+            partCondition: 'cihazdan_cikan',
+            partConditionNote: `Cihazdan çıkan parça: ${deviceName || deviceId || ''}`.trim(),
+            sourceType: 'device_removed',
             sourceDeviceId: deviceId,
             sourceDeviceName: deviceName || '',
-            status: 'in_stock',
+            sourceFormId: formId,
+            sourceFormType: formType,
             createdAt: Timestamp.fromDate(now),
+            createdByUid: currentUser.uid,
+            createdByName: currentUserProfile?.name || '',
             replacedPartId: selectedStockItem?.id || selectedPoolStockItem?.id || null,
-          });
+          }, currentCompanyId));
         }
       }
 
       // Log to dedicated audit collection
       const logRef = doc(collection(db, 'postClosurePartChangeLogs'));
-      batch.set(logRef, {
+      batch.set(logRef, withCompanyScope({
         formId,
         formCollection,
         formType,
@@ -416,7 +420,7 @@ export default function PostClosurePartChangeButton({
         addedByName: currentUserProfile?.name || 'Bilinmeyen',
         addedAt: Timestamp.fromDate(now),
         sourceType,
-      });
+      }, currentCompanyId));
 
       await batch.commit();
 

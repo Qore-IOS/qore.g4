@@ -2,6 +2,8 @@
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -102,6 +104,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import PurchasingAgentChat from '@/components/purchasing/PurchasingAgentChat';
 import WorkflowCanvasPanel from '@/components/purchasing/WorkflowCanvasPanel';
+import { LabSelector } from '@/components/common/LabSelector';
 
 // ==========================================
 // Helper: Occupancy calculation (9-5, 8 hours)
@@ -566,7 +569,7 @@ function parseNaturalTaskInputForPlanning(
 // ==========================================
 
 export default function SatinAlmaPanel() {
-  const { currentUserProfile, isAdmin, isSuperAdmin } = useAuth();
+  const { currentUserProfile, isAdmin, isSuperAdmin, currentCompanyId } = useAuth();
   const userName = currentUserProfile?.name || 'Kullanıcı';
 
   // State
@@ -633,7 +636,7 @@ export default function SatinAlmaPanel() {
 
   // Firestore listener
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'asc'));
+    const q = scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin, orderBy('date', 'asc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -663,7 +666,7 @@ export default function SatinAlmaPanel() {
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'deviceFaultReports'));
+    const q = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin);
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -749,7 +752,7 @@ export default function SatinAlmaPanel() {
   }, [isOffline, syncOfflineMutations]);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTaskDefinitions'), orderBy('name', 'asc'));
+    const q = scopedQuery('purchasingTaskDefinitions', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -762,7 +765,7 @@ export default function SatinAlmaPanel() {
   }, []);
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingWorkflows'), orderBy('updatedAt', 'desc'));
+    const q = scopedQuery('purchasingWorkflows', currentCompanyId, isSuperAdmin, orderBy('updatedAt', 'desc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -780,9 +783,9 @@ export default function SatinAlmaPanel() {
     async function fetchReferenceData() {
       try {
         const [hospSnap, poolSnap, usersSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'labPools')),
-          getDocs(query(collection(db, 'users'), where('role', 'in', ['admin', 'satin_alma']))),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
         ]);
         if (cancelled) return;
         setLaboratories(hospSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
@@ -2432,12 +2435,12 @@ export default function SatinAlmaPanel() {
               toast.error('Bu görev tanımı zaten mevcut');
               return;
             }
-            await addDoc(collection(db, 'purchasingTaskDefinitions'), {
+            await addDoc(collection(db, 'purchasingTaskDefinitions'), withCompanyScope({
               name: trimmed,
               requiresLaboratory,
               active: true,
               createdAt: Timestamp.now(),
-            });
+            }, currentCompanyId));
             toast.success('Görev tanımı eklendi');
           }}
           onDelete={async (id) => {
@@ -3168,9 +3171,7 @@ function TaskFormModal({
   const [assignedPersonnel, setAssignedPersonnel] = useState<{ uid: string; name: string }[]>(
     isEdit ? task.assignedPersonnel || [] : []
   );
-  const [labSearchQuery, setLabSearchQuery] = useState('');
   const [personnelSearchQuery, setPersonnelSearchQuery] = useState('');
-  const [showLabDropdown, setShowLabDropdown] = useState(false);
   const [showPersonnelDropdown, setShowPersonnelDropdown] = useState(false);
   const [showAssignedDropdown, setShowAssignedDropdown] = useState(false);
 
@@ -3233,13 +3234,11 @@ function TaskFormModal({
     }
   }, [wpBusinessDays, weeklyPlanMode]);
 
-  const labDropdownRef = useRef<HTMLDivElement>(null);
   const personnelDropdownRef = useRef<HTMLDivElement>(null);
   const assignedDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (labDropdownRef.current && !labDropdownRef.current.contains(e.target as Node)) setShowLabDropdown(false);
       if (personnelDropdownRef.current && !personnelDropdownRef.current.contains(e.target as Node)) setShowPersonnelDropdown(false);
       if (assignedDropdownRef.current && !assignedDropdownRef.current.contains(e.target as Node)) setShowAssignedDropdown(false);
     }
@@ -3259,12 +3258,6 @@ function TaskFormModal({
       setSelectedPersonnel([]);
     }
   }, [isVisitType]);
-
-  const filteredLabs = useMemo(() => {
-    if (!labSearchQuery.trim()) return laboratories;
-    const q = labSearchQuery.toLowerCase();
-    return laboratories.filter((l) => (l.name || '').toLowerCase().includes(q) || (l.kod || '').toLowerCase().includes(q));
-  }, [laboratories, labSearchQuery]);
 
   const filteredPersonnel = useMemo(() => {
     if (!personnelSearchQuery.trim()) return personnel;
@@ -3815,7 +3808,7 @@ function TaskFormModal({
           <div ref={assignedDropdownRef} className="relative">
             <button
               type="button"
-              onClick={() => { setShowAssignedDropdown((v) => !v); setShowLabDropdown(false); setShowPersonnelDropdown(false); }}
+              onClick={() => { setShowAssignedDropdown((v) => !v); setShowPersonnelDropdown(false); }}
               className={cn(dropdownTriggerCls, showAssignedDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed rounded-xl')}
               style={{ color: assignedPersonnel.length > 0 ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
             >
@@ -3886,41 +3879,13 @@ function TaskFormModal({
 
           {/* Laboratory selector (kurum_ziyareti only) */}
           {isVisitType && (
-            <div ref={labDropdownRef} className="relative">
-              <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Kurum (Laboratuvar) *</label>
-              <button
-                type="button"
-                onClick={() => { setShowLabDropdown((v) => !v); setShowPersonnelDropdown(false); setShowAssignedDropdown(false); }}
-                className={cn(dropdownTriggerCls, showLabDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed')}
-                style={{ color: selectedLabId ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
-              >
-                <span className="truncate">{selectedLab?.name || 'Laboratuvar seçin'}</span>
-                <ChevronDown className={cn('w-4 h-4 text-muted-foreground shrink-0 transition-transform', showLabDropdown && 'rotate-180')} />
-              </button>
-              {showLabDropdown && (
-                <div className="absolute z-20 mt-1 w-full rounded-xl overflow-hidden animate-in slide-in-from-top-1 duration-150" style={{ background: 'var(--dashboard-surface)', border: '1px solid var(--dashboard-stroke)', boxShadow: 'var(--dashboard-raised)' }}>
-                  <div className="p-2" style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}>
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg cihaz-pressed">
-                      <Search className="w-3.5 h-3.5" style={{ color: 'var(--dashboard-muted)' }} />
-                      <input type="text" value={labSearchQuery} onChange={(e) => setLabSearchQuery(e.target.value)} placeholder="Ara..." className="flex-1 bg-transparent text-sm outline-none" style={{ color: 'var(--dashboard-text)' }} autoFocus />
-                    </div>
-                  </div>
-                  <div className="max-h-48 overflow-y-auto">
-                    {filteredLabs.length === 0 ? (
-                      <div className="px-4 py-3 text-xs text-center" style={{ color: 'var(--dashboard-muted)' }}>Sonuç bulunamadı</div>
-                    ) : (
-                      filteredLabs.map((lab) => (
-                        <button key={lab.id} type="button" onClick={() => { setSelectedLabId(lab.id); setShowLabDropdown(false); setLabSearchQuery(''); }} className="w-full flex items-center gap-3 px-4 py-2.5 text-sm text-left transition-all hover:brightness-[0.97]" style={{ color: selectedLabId === lab.id ? 'var(--dashboard-accent)' : 'var(--dashboard-text)' }}>
-                          <Building2 className="w-3.5 h-3.5 shrink-0 opacity-50" />
-                          <span className="truncate">{lab.name}</span>
-                          {selectedLabId === lab.id && <Check className="w-3.5 h-3.5 shrink-0 ml-auto" style={{ color: 'var(--dashboard-accent)' }} />}
-                        </button>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
+            <LabSelector
+              label="Kurum (Laboratuvar) *"
+              labs={laboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              value={selectedLabId}
+              onChange={setSelectedLabId}
+              placeholder="Laboratuvar seçin"
+            />
           )}
 
           {/* Description */}
@@ -3935,7 +3900,7 @@ function TaskFormModal({
               <label className="block text-xs font-medium mb-1.5" style={{ color: 'var(--dashboard-muted)' }}>Eşlik Eden Personel</label>
               <button
                 type="button"
-                onClick={() => { setShowPersonnelDropdown((v) => !v); setShowLabDropdown(false); setShowAssignedDropdown(false); }}
+                onClick={() => { setShowPersonnelDropdown((v) => !v); setShowAssignedDropdown(false); }}
                 className={cn(dropdownTriggerCls, showPersonnelDropdown ? 'ring-2 ring-[#F2994A]/30' : '', 'cihaz-pressed')}
                 style={{ color: selectedPersonnel.length > 0 ? 'var(--dashboard-text)' : 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}
               >

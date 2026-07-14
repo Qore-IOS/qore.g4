@@ -18,6 +18,7 @@ import {
 import type { ProductCode, Depot } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -60,7 +61,7 @@ export default function HavuzStokGirisPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const poolWarehouseId = searchParams.get('poolWarehouseId') || '';
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,13 +105,13 @@ export default function HavuzStokGirisPage() {
 
     const fetchData = async () => {
       try {
-        const [productsSnap, brandsSnap, depotSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'def_brands')),
+        const [productDocs, brandsSnap, depotSnap] = await Promise.all([
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
           getDoc(doc(db, 'depots', poolWarehouseId)),
         ]);
-        const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
+        const allProducts = productDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const sparePartProducts = allProducts.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf');
         const brands = brandsSnap.docs
           .map(d => String(d.data().name || '').trim())
           .filter(Boolean)
@@ -132,7 +133,7 @@ export default function HavuzStokGirisPage() {
     };
 
     fetchData();
-  }, [isAuthorized, poolWarehouseId, toast]);
+  }, [isAuthorized, poolWarehouseId, currentCompanyId, isSuperAdmin, toast]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearchQuery) return spareParts.slice(0, 50);
@@ -470,7 +471,7 @@ export default function HavuzStokGirisPage() {
 
       for (const row of rows) {
         const stockRef = doc(collection(db, 'poolWarehouseStock'));
-        batch.set(stockRef, {
+        batch.set(stockRef, withCompanyScope({
           poolWarehouseId,
           poolWarehouseName: poolWarehouse.name,
           productCodeId: row.productCodeId,
@@ -484,7 +485,7 @@ export default function HavuzStokGirisPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();
@@ -549,10 +550,10 @@ export default function HavuzStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(collection(db, 'productCodes'));
-        const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const refreshedDocs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
+        const refreshed = refreshedDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
-        setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));
+        setSpareParts(refreshed.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf'));
       } catch (err) {
         console.error('Error auto-creating product cards:', err);
         toast({ title: 'Hata', description: 'Stok kartları oluşturulamadı.', variant: 'destructive' });

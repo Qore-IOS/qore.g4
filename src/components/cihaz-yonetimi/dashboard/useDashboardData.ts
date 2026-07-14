@@ -2,7 +2,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { collection, getDocs, Timestamp, query, orderBy } from 'firebase/firestore';
+import { collection, getDocs, Timestamp, query, orderBy, where, limit as fsLimit } from 'firebase/firestore';
+import { subDays, subMonths } from 'date-fns';
 import { db } from '@/lib/firebase';
 import type {
   Hospital,
@@ -20,6 +21,7 @@ import type {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 const processTimestamp = (docData: any) => {
   const data = { ...docData };
@@ -57,6 +59,10 @@ export function useDashboardData() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
+      // Tarih pencereleri — dashboard her açılışta tüm geçmişi indirmemeli.
+      const ninetyDaysAgoTs = Timestamp.fromDate(subDays(new Date(), 90));
+      const twentyFourMonthsAgoTs = Timestamp.fromDate(subMonths(new Date(), 24));
+
       // Using Promise.all for parallel fetching
       const [
         hospitalsSnap,
@@ -72,18 +78,30 @@ export function useDashboardData() {
         labPoolsSnap,
         assignmentsSnap,
       ] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'depoStok')),
-        getDocs(collection(db, 'tuketimKayitlari')),
-        getDocs(collection(db, 'efficiencyHistory')),
-        getDocs(collection(db, 'cihazUstuGecmisi')),
-        getDocs(query(collection(db, 'kumulatifRaporlar'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'shipments')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'labPools')),
-        getDocs(collection(db, 'hospitalDeviceAssignments')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        // Sadece mevcut stok — sevk edilenler dashboard'da gerekmez.
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin,
+          where('isShipped', '==', false))),
+        // Son 90 gün tüketim — yeterli trend için.
+        getDocs(scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin,
+          where('consumptionTimestamp', '>=', ninetyDaysAgoTs))),
+        // Son 24 ay verimlilik geçmişi.
+        getDocs(scopedQuery('efficiencyHistory', currentCompanyId, isSuperAdmin,
+          where('timestamp', '>=', twentyFourMonthsAgoTs))),
+        // Cihaz üstü geçmiş — son 24 ay yeter (dönem bazlı analiz).
+        getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin,
+          fsLimit(2000))),
+        // Kümülatif raporlar — son 50 rapor yeter.
+        getDocs(scopedQuery('kumulatifRaporlar', currentCompanyId, isSuperAdmin,
+          orderBy('createdAt', 'desc'), fsLimit(50))),
+        // Son 180 gün sevkiyat.
+        getDocs(scopedQuery('shipments', currentCompanyId, isSuperAdmin,
+          where('timestamp', '>=', Timestamp.fromDate(subDays(new Date(), 180))))),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('labPools', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
       ]);
 
       const hospitalsData = hospitalsSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as Hospital));

@@ -52,13 +52,21 @@ const storage = getStorage(app);
 
 let analytics: Analytics | null = null;
 
-// Conditionally initialize Analytics only on the client-side
+// Conditionally initialize Analytics only on the client-side, delayed to avoid blocking hydration
 if (typeof window !== "undefined") {
-  isSupported().then((supported) => {
-    if (supported) {
-      analytics = getAnalytics(app);
-    }
-  });
+  const initAnalytics = () => {
+    isSupported().then((supported) => {
+      if (supported) {
+        analytics = getAnalytics(app);
+      }
+    });
+  };
+
+  if ('requestIdleCallback' in window) {
+    window.requestIdleCallback(initAnalytics);
+  } else {
+    setTimeout(initAnalytics, 2000);
+  }
 }
 
 export { app, db, functions, analytics, storage };

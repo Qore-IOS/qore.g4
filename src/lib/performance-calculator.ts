@@ -1,7 +1,8 @@
 'use client';
 
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getDocs, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { subDays } from 'date-fns';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
 import { isUnavailableAt, toDateValue, type PersonnelAvailabilityRecord } from '@/lib/personnel-availability';
 
@@ -65,15 +66,46 @@ function calculateResolutionQualityScore(avgMinutes: number): number {
   return Math.max(0, Math.min(10, 10 * (1 - avgMinutes / 480)));
 }
 
+
+function isResolvedStatus(status?: string | null): boolean {
+  return status === 'cozuldu' || status === 'closed';
+}
+
+function getInterventionKind(fault: { interventionType?: string | null; locationVerifiedAt?: Date | null; interventionStartedAt?: Date | null }): 'onsite' | 'phone' | null {
+  const type = String(fault.interventionType || '').trim().toLocaleLowerCase('tr-TR');
+  if (type === 'kurum_ziyaret' || type === 'yerinde' || type === 'kurumda' || type === 'onsite') return 'onsite';
+  if (type === 'telefon' || type === 'telefonla' || type === 'phone') return 'phone';
+
+  // Legacy/incomplete records can have location verification without a normalized
+  // interventionType. Count those as kurumda müdahale so field work is not lost.
+  if (fault.locationVerifiedAt && fault.interventionStartedAt) return 'onsite';
+  return null;
+}
+
+function getFaultTitleForRecurrence(fault: { faultName?: string | null; title?: string | null }): string {
+  return String(fault.faultName || fault.title || '').trim();
+}
+
 export interface PerformanceFilters {
   dateRange?: { start: Date | null; end: Date | null };
   selectedLaboratoryId?: string | null;
+  /** Caller's company id (from useAuth().currentCompanyId). */
+  companyId?: string | null;
+  /** Caller's super-admin flag. */
+  isSuperAdmin?: boolean;
 }
 
 export async function calculateAllPerformances(filters?: PerformanceFilters): Promise<PersonnelPerformance[]> {
-  const { dateRange, selectedLaboratoryId } = filters || {};
+  const { dateRange, selectedLaboratoryId, companyId, isSuperAdmin } = filters || {};
   const hasDateFilter = dateRange?.start || dateRange?.end;
   const hasLabFilter = !!selectedLaboratoryId;
+
+  // Faz 4: Server-side tarih penceresi. Caller dateRange vermediyse son 365 gün.
+  const effectiveStart = dateRange?.start ?? subDays(new Date(), 365);
+  const effectiveEnd = dateRange?.end ?? new Date();
+  const startTs = Timestamp.fromDate(effectiveStart);
+  const endTs = Timestamp.fromDate(effectiveEnd);
+
   // Fetch all required data
   const [
     usersSnap,
@@ -87,16 +119,26 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
     periodicPartChangeLogsSnap,
     availabilitySnap,
   ] = await Promise.all([
-    getDocs(collection(db, 'users')),
-    getDocs(collection(db, 'deviceFaultReports')),
-    getDocs(collection(db, 'deviceActionForms')),
-    getDocs(collection(db, 'aplikasyonActionForms')),
-    getDocs(collection(db, 'devices')),
-    getDocs(collection(db, 'maintenancePlans')),
-    getDocs(collection(db, 'maintenanceLogs')),
-    getDocs(collection(db, 'periodicPartChanges')),
-    getDocs(collection(db, 'periodicPartChangeLogs')),
-    getDocs(collection(db, 'personnelAvailability')),
+    getDocs(scopedQuery('users', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('deviceFaultReports', companyId, isSuperAdmin,
+      where('openedAt', '>=', startTs), where('openedAt', '<=', endTs),
+      orderBy('openedAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('deviceActionForms', companyId, isSuperAdmin,
+      where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
+      orderBy('createdAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('aplikasyonActionForms', companyId, isSuperAdmin,
+      where('createdAt', '>=', startTs), where('createdAt', '<=', endTs),
+      orderBy('createdAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('devices', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('maintenancePlans', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('maintenanceLogs', companyId, isSuperAdmin,
+      where('completedAt', '>=', startTs), where('completedAt', '<=', endTs),
+      orderBy('completedAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('periodicPartChanges', companyId, isSuperAdmin)),
+    getDocs(scopedQuery('periodicPartChangeLogs', companyId, isSuperAdmin,
+      where('changedAt', '>=', startTs), where('changedAt', '<=', endTs),
+      orderBy('changedAt', 'desc'), limit(10000))),
+    getDocs(scopedQuery('personnelAvailability', companyId, isSuperAdmin)),
   ]);
 
   // Parse data
@@ -162,11 +204,14 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
       assignedAt: data.assignedAt?.toDate?.() || null,
       interventionStartedAt: data.interventionStartedAt?.toDate?.() || null,
       closedAt: data.closedAt?.toDate?.() || null,
+      locationVerifiedAt: data.locationVerifiedAt?.toDate?.() || null,
       assignedToUid: data.assignedToUid || null,
       closedByUid: data.closedByUid || null,
       faultType: data.faultType || 'teknik_servis',
       status: data.status,
       interventionType: data.interventionType || null,
+      faultName: data.faultName || null,
+      title: data.title || null,
       deviceId: data.deviceId,
       hospitalId: data.hospitalId,
       supportPersonnelUid: data.supportPersonnelUid || null,
@@ -413,7 +458,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
         : faultsForCalculation;
       const userForms = relevantForms.filter(f => f.createdByUid === user.uid).length;
       const onsiteInterventions = relevantFaultsForVisits.filter(f =>
-        f.assignedToUid === user.uid && f.interventionType === 'yerinde'
+        f.assignedToUid === user.uid && getInterventionKind(f) === 'onsite'
       ).length;
       return sum + userForms + onsiteInterventions;
     }, 0);
@@ -548,10 +593,10 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     const userForms = relevantForms.filter(f => f.createdByUid === user.uid).length;
     const onsiteInterventions = relevantFaultsForVisits.filter(f =>
-      f.assignedToUid === user.uid && f.interventionType === 'yerinde'
+      f.assignedToUid === user.uid && getInterventionKind(f) === 'onsite'
     ).length;
     const phoneInterventions = relevantFaultsForVisits.filter(f =>
-      f.assignedToUid === user.uid && f.interventionType === 'telefonla'
+      f.assignedToUid === user.uid && getInterventionKind(f) === 'phone'
     ).length;
     const institutionVisits = userForms + onsiteInterventions;
 
@@ -565,6 +610,7 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     // =========================================================================
     // 5. KURUMDA MÜDAHALE ORANI (max 10 points) - With sample threshold
+    //    Kurumda müdahale saha eforu olduğu için telefon müdahalesinden daha yüksek katkı sağlar.
     //    100% on-site = 10 pts, but scaled down if < 3 total interventions
     // =========================================================================
     const totalInterventions = onsiteInterventions + phoneInterventions;
@@ -600,25 +646,33 @@ export async function calculateAllPerformances(filters?: PerformanceFilters): Pr
 
     // =========================================================================
     // 7. TEKRAR ARIZA CEZASI (-10 to 0 points)
-    //    -2 per recurrence within 7 days, max -10
+    //    -2 per exact same fault title recurrence within 3 hours, max -10
     // =========================================================================
-    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const recurrenceWindowMs = 3 * 60 * 60 * 1000;
     let recurrenceCount = 0;
 
-    const userResolvedFaultsForRecurrence = (hasPrimaryLabs
+    const recurrenceFaultPool = hasPrimaryLabs
       ? faultsForCalculation.filter(f => f.hospitalId && primaryLabs.includes(f.hospitalId))
-      : faultsForCalculation
-    ).filter(f => f.closedByUid === user.uid && f.status === 'closed' && f.closedAt);
+      : faultsForCalculation;
+
+    const userResolvedFaultsForRecurrence = recurrenceFaultPool.filter(f =>
+      f.closedByUid === user.uid &&
+      isResolvedStatus(f.status) &&
+      f.closedAt &&
+      getFaultTitleForRecurrence(f)
+    );
 
     for (const resolved of userResolvedFaultsForRecurrence) {
-      const hasRecurrence = faultsForCalculation.some(f =>
-        f.id !== resolved.id &&
-        f.deviceId === resolved.deviceId &&
-        f.openedAt &&
-        resolved.closedAt &&
-        f.openedAt.getTime() > resolved.closedAt.getTime() &&
-        f.openedAt.getTime() - resolved.closedAt.getTime() <= sevenDaysMs
-      );
+      const resolvedTitle = getFaultTitleForRecurrence(resolved);
+      const hasRecurrence = recurrenceFaultPool.some(f => {
+        if (f.id === resolved.id) return false;
+        if (f.deviceId !== resolved.deviceId) return false;
+        if (!f.openedAt || !resolved.closedAt) return false;
+        if (getFaultTitleForRecurrence(f) !== resolvedTitle) return false;
+
+        const delta = f.openedAt.getTime() - resolved.closedAt.getTime();
+        return delta > 0 && delta <= recurrenceWindowMs;
+      });
       if (hasRecurrence) recurrenceCount++;
     }
 

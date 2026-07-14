@@ -5,16 +5,20 @@ import AppLayout from '@/components/app-layout';
 import { RouteObserver } from '@/components/RouteObserver';
 import { AIProvider } from '@/contexts/ai-context';
 import { AIChatbot } from '@/components/ai/AIChatbot';
+import { StartMenuProvider } from '@/contexts/start-menu-context';
+import { StartMenu } from '@/components/start-menu/StartMenu';
 
 export default function ProtectedPagesLayout({ children }: { children: React.ReactNode }) {
     // This layout wraps all pages that require authentication.
-    // The AppLayout component contains the main UI shell with navigation etc.
     return (
         <AIProvider>
-            <AppLayout>
-                <RouteObserver />
-                {children}
-            </AppLayout>
+            <StartMenuProvider>
+                <AppLayout>
+                    <RouteObserver />
+                    {children}
+                </AppLayout>
+                <StartMenu />
+            </StartMenuProvider>
             <AIChatbot />
         </AIProvider>
     );

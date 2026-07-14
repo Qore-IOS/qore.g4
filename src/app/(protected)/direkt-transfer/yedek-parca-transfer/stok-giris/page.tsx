@@ -15,6 +15,7 @@ import {
 } from 'firebase/firestore';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
@@ -72,7 +73,7 @@ interface SavedSparePartOrder {
 
 export default function YedekParcaStokGirisPage() {
   const router = useRouter();
-  const { currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -116,13 +117,13 @@ export default function YedekParcaStokGirisPage() {
 
     const fetchData = async () => {
       try {
-        const [productsSnap, brandsSnap, ordersSnap] = await Promise.all([
-          getDocs(collection(db, 'productCodes')),
-          getDocs(collection(db, 'def_brands')),
-          getDocs(collection(db, 'yedekParcaSiparisler')),
+        const [productDocs, brandsSnap, ordersSnap] = await Promise.all([
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+          getDocs(scopedQuery('def_brands', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('yedekParcaSiparisler', currentCompanyId, isSuperAdmin)),
         ]);
-        const allProducts = productsSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
-        const sparePartProducts = allProducts.filter(p => p.urunGrubu === 'yedek_parca');
+        const allProducts = productDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const sparePartProducts = allProducts.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf');
         const brands = brandsSnap.docs
           .map(d => String(d.data().name || '').trim())
           .filter(Boolean)
@@ -145,7 +146,7 @@ export default function YedekParcaStokGirisPage() {
     };
 
     fetchData();
-  }, [isAuthorized, toast]);
+  }, [isAuthorized, currentCompanyId, isSuperAdmin, toast]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearchQuery) return spareParts.slice(0, 50);
@@ -711,10 +712,10 @@ export default function YedekParcaStokGirisPage() {
         await createMissingSparePartCards(missing, selectedBrandForCards);
         toast({ title: 'Stok Kartları Açıldı', description: `${missing.length} ürün için yedek parça stok kartı oluşturuldu.` });
 
-        const refreshedSnap = await getDocs(collection(db, 'productCodes'));
-        const refreshed = refreshedSnap.docs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
+        const refreshedDocs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin);
+        const refreshed = refreshedDocs.map(d => ({ id: d.id, ...d.data() }) as ProductCode);
         setAllProductCodes(refreshed);
-        setSpareParts(refreshed.filter(p => p.urunGrubu === 'yedek_parca'));
+        setSpareParts(refreshed.filter(p => p.urunGrubu !== 'kit' && p.urunGrubu !== 'sarf'));
       } catch (err) {
         console.error('Error auto-creating product cards:', err);
         toast({ title: 'Hata', description: 'Stok kartları oluşturulamadı.', variant: 'destructive' });

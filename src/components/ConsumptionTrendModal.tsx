@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LabSelector } from '@/components/common/LabSelector';
 import { format, subMonths, eachMonthOfInterval, startOfMonth, endOfMonth, isValid, startOfWeek, endOfWeek, eachDayOfInterval, startOfDay, endOfDay, subDays, addDays, subWeeks, addWeeks, subYears, addYears } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { X, TrendingUp, ChevronLeft, ChevronRight, FileDown } from 'lucide-react';
@@ -16,9 +17,12 @@ import { Tabs, TabsList, TabsTrigger } from './ui/tabs';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { toDateFromAny } from '@/lib/time';
+import { HOME_C, Segmented, ClayIconBtn } from '@/components/dashboard-v2/clay-home';
 
 
 const COLORS = ['#8884d8', '#82ca9d', '#ffc658', '#ff7f50', '#d0ed57', '#ff8042', '#a4de6c', '#d0ed57', '#ffc658'];
+// Clay palette for on-screen lab comparison lines (cream-clay tones)
+const LAB_COLORS = [HOME_C.accent, HOME_C.sky, HOME_C.waterSolid, HOME_C.violet, HOME_C.amber, HOME_C.skyDeep, HOME_C.violetDeep];
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
@@ -219,68 +223,49 @@ export default function ConsumptionTrendModal({
     setIsReportOptionsOpen(false);
   }, [consumptionRecords, hospitals, reportLabSelection]);
 
-  const toggleLabSelection = (labId: string) => {
-    setSelectedLabIds(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-  
-  const toggleReportLabSelection = (labId: string) => {
-    setReportLabSelection(prev =>
-      prev.includes(labId) ? prev.filter(id => id !== labId) : [...prev, labId]
-    );
-  };
-
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-7xl h-[90vh] flex flex-col p-0 glass-card">
-        <DialogHeader className="p-6 pb-2 border-b border-white/10">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
-            <DialogTitle className="text-2xl font-headline text-gradient-primary flex items-center gap-2">
-              <TrendingUp/> Aylık Tüketim Analizi
+      <DialogContent className="max-w-7xl h-[90vh] flex flex-col p-0 border-0 gap-0" style={{ background: `linear-gradient(180deg, ${HOME_C.surface} 0%, ${HOME_C.surface2} 100%)`, boxShadow: HOME_C.clay, borderRadius: HOME_C.radiusLg, overflow: 'hidden' }}>
+        <DialogHeader className="space-y-0" style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${HOME_C.line}` }}>
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3" style={{ flexWrap: 'wrap' }}>
+            <DialogTitle className="flex items-center gap-3" style={{ fontSize: 21, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1, margin: 0 }}>
+              <span style={{ width: 42, height: 42, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.accent, background: `${HOME_C.accent}16`, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><TrendingUp size={21} /></span>
+              Tüketim Analizi
             </DialogTitle>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setIsReportOptionsOpen(true)} variant="outline" size="sm">
-                  <FileDown className="h-4 w-4 mr-2"/> PDF Olarak İndir
-              </Button>
-              <Tabs value={trendPeriod} onValueChange={(v) => setTrendPeriod(v as TrendPeriod)} className="w-full sm:w-auto">
-                <TabsList>
-                  <TabsTrigger value="daily">Günlük</TabsTrigger>
-                  <TabsTrigger value="weekly">Haftalık</TabsTrigger>
-                  <TabsTrigger value="monthly">Aylık</TabsTrigger>
-                  <TabsTrigger value="yearly">Yıllık</TabsTrigger>
-                </TabsList>
-              </Tabs>
+            <div className="flex items-center gap-2 sm:ml-auto" style={{ flexWrap: 'wrap' }}>
+              <button onClick={() => setIsReportOptionsOpen(true)}
+                style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 16px', borderRadius: HOME_C.radiusSm, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: HOME_C.clay, color: HOME_C.danger, fontSize: 13.5, fontWeight: 700 }}>
+                <FileDown className="h-[17px] w-[17px]" /> PDF Olarak İndir
+              </button>
+              <Segmented value={trendPeriod} onChange={(v) => setTrendPeriod(v as TrendPeriod)}
+                options={[{ v: 'daily', l: 'Günlük' }, { v: 'weekly', l: 'Haftalık' }, { v: 'monthly', l: 'Aylık' }, { v: 'yearly', l: 'Yıllık' }]} />
             </div>
           </div>
-           <div className="flex items-center justify-between mt-2">
-             <DialogDescription>{trendTitle}</DialogDescription>
-             <div className="flex items-center gap-1">
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleTrendNav('prev')}>
-                  <ChevronLeft className="h-4 w-4" />
-                </Button>
-                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => handleTrendNav('next')}>
-                  <ChevronRight className="h-4 w-4" />
-                </Button>
-             </div>
+          <div className="flex items-center justify-between" style={{ marginTop: 12 }}>
+            <DialogDescription style={{ fontSize: 13.5, fontWeight: 600, color: HOME_C.ink2, margin: 0 }}>{trendTitle}</DialogDescription>
+            <div className="flex items-center gap-2">
+              <ClayIconBtn round onClick={() => handleTrendNav('prev')}><ChevronLeft size={16} /></ClayIconBtn>
+              <ClayIconBtn round onClick={() => handleTrendNav('next')}><ChevronRight size={16} /></ClayIconBtn>
+            </div>
           </div>
         </DialogHeader>
-        
-        <div className="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-6 px-6 pb-6 overflow-hidden">
-          <Card className="lg:col-span-3 flex flex-col glass-card">
-            <CardContent className="flex-grow p-4">
+
+        <div className="flex-grow grid grid-cols-1 lg:grid-cols-4 gap-4 overflow-hidden" style={{ padding: 20 }}>
+          <div className="lg:col-span-3 flex flex-col" style={{ padding: 18, borderRadius: HOME_C.radius, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, minHeight: 0 }}>
+            <div className="flex-grow" style={{ minHeight: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border) / 0.5)" />
-                  <XAxis dataKey="date" stroke="hsl(var(--muted-foreground))" fontSize={12} />
-                  <YAxis stroke="hsl(var(--muted-foreground))" fontSize={12} />
+                <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="2 6" stroke={HOME_C.line} vertical={false} />
+                  <XAxis dataKey="date" stroke={HOME_C.ink3} fontSize={12} fontWeight={600} tickLine={false} axisLine={{ stroke: HOME_C.line }} />
+                  <YAxis stroke={HOME_C.ink3} fontSize={12} fontWeight={600} tickLine={false} axisLine={false} width={36} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: 'hsl(var(--background)/0.8)', border: '1px solid hsl(var(--border))', borderRadius: 'var(--radius)' }}
-                    labelStyle={{ fontWeight: 'bold' }}
+                    contentStyle={{ background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, border: 'none', borderRadius: HOME_C.radiusSm, boxShadow: HOME_C.clay, fontWeight: 600, color: HOME_C.ink1 }}
+                    labelStyle={{ fontWeight: 800, color: HOME_C.accent }}
+                    cursor={{ stroke: HOME_C.accent, strokeWidth: 1.2, strokeDasharray: '3 4' }}
                   />
-                  <Legend />
-                  <Line type="monotone" dataKey="Tüketim" name="Toplam Tüketim" stroke="hsl(var(--primary))" strokeWidth={3} dot={false} />
+                  <Legend wrapperStyle={{ fontSize: 12.5, fontWeight: 700, color: HOME_C.ink2 }} />
+                  <Line type="monotone" dataKey="Tüketim" name="Toplam Tüketim" stroke={HOME_C.accent} strokeWidth={3.5} dot={false} activeDot={{ r: 6, fill: HOME_C.accent, stroke: HOME_C.surfaceHi, strokeWidth: 3 }} />
                   {selectedLabIds.map((labId, index) => {
                     const lab = hospitals.find(h => h.id === labId);
                     return (
@@ -289,84 +274,70 @@ export default function ConsumptionTrendModal({
                         type="monotone"
                         dataKey={labId}
                         name={lab?.name || labId}
-                        stroke={COLORS[index % COLORS.length]}
-                        strokeWidth={2}
+                        stroke={LAB_COLORS[index % LAB_COLORS.length]}
+                        strokeWidth={2.5}
                         dot={false}
                       />
                     );
                   })}
                 </LineChart>
               </ResponsiveContainer>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
-          <Card className="lg:col-span-1 glass-card">
-            <CardHeader><CardTitle className="text-lg">Laboratuvarlar</CardTitle></CardHeader>
-            <CardContent>
-              <ScrollArea className="h-[calc(80vh-120px)] pr-3">
-                <div className="space-y-2">
-                  {hospitals.filter(h => h.consumptionTrackingEnabled !== false).map((lab, index) => (
-                    <div
-                      key={lab.id}
-                      className="flex items-center space-x-3 p-2 rounded-md hover:bg-white/10 transition-colors cursor-pointer"
-                      onClick={() => toggleLabSelection(lab.id)}
-                    >
-                      <Checkbox
-                        id={`lab-${lab.id}-modal`}
-                        checked={selectedLabIds.includes(lab.id)}
-                        style={{ color: COLORS[index % COLORS.length] }}
-                      />
-                      <label htmlFor={`lab-${lab.id}-modal`} className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer">
-                        {lab.name}
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
+          <div className="lg:col-span-1 flex flex-col" style={{ padding: 18, borderRadius: HOME_C.radius, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, minHeight: 0, overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 12px', fontSize: 17, fontWeight: 800, color: HOME_C.ink1 }}>Laboratuvarlar</h3>
+            <LabSelector
+              mode="multi"
+              labs={hospitals
+                .filter(h => h.consumptionTrackingEnabled !== false)
+                .map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              values={selectedLabIds}
+              onValuesChange={setSelectedLabIds}
+              placeholder="Karşılaştırılacak laboratuvarları seçin"
+              showChips
+            />
+          </div>
         </div>
 
         <DialogClose asChild className="absolute right-4 top-4">
-            <Button variant="ghost" size="icon">
-                <X className="h-5 w-5" />
-            </Button>
+          <button style={{ all: 'unset', cursor: 'pointer', width: 40, height: 40, borderRadius: '50%', display: 'grid', placeItems: 'center', color: HOME_C.ink2, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: HOME_C.clayFlat }}>
+            <X className="h-[18px] w-[18px]" />
+          </button>
         </DialogClose>
       </DialogContent>
     </Dialog>
     
     <Dialog open={isReportOptionsOpen} onOpenChange={setIsReportOptionsOpen}>
-        <DialogContent>
+        <DialogContent className="border-0" style={{ background: `linear-gradient(180deg, ${HOME_C.surface} 0%, ${HOME_C.surface2} 100%)`, boxShadow: HOME_C.clay, borderRadius: HOME_C.radiusLg }}>
           <DialogHeader>
-            <DialogTitle>Rapor için Laboratuvar Seçimi</DialogTitle>
-            <DialogDescription>
+            <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 11, fontSize: 18, fontWeight: 800, color: HOME_C.ink1 }}>
+              <span style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: HOME_C.danger, background: 'rgba(192,121,106,0.12)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><FileDown size={18} /></span>
+              Rapor için Laboratuvar Seçimi
+            </DialogTitle>
+            <DialogDescription style={{ fontSize: 13, color: HOME_C.ink2, fontWeight: 500, marginTop: 4 }}>
               PDF raporuna dahil edilecek laboratuvarları seçin. Hiçbir seçim yapılmazsa, otomatik tüketim takibi kapalı olan tüm laboratuvarlar dahil edilir.
             </DialogDescription>
           </DialogHeader>
-          <ScrollArea className="h-64 mt-4 border rounded-md p-4">
-            <div className="space-y-2">
-              {hospitals.filter(h => h.consumptionTrackingEnabled !== false).map((lab) => (
-                <div
-                  key={`report-${lab.id}`}
-                  className="flex items-center space-x-3 p-2 rounded-md hover:bg-muted/50 transition-colors cursor-pointer"
-                  onClick={() => toggleReportLabSelection(lab.id)}
-                >
-                  <Checkbox
-                    id={`report-lab-${lab.id}`}
-                    checked={reportLabSelection.includes(lab.id)}
-                  />
-                  <label htmlFor={`report-lab-${lab.id}`} className="text-sm font-medium leading-none cursor-pointer">
-                    {lab.name}
-                  </label>
-                </div>
-              ))}
-            </div>
-          </ScrollArea>
+          <div className="mt-4">
+            <LabSelector
+              mode="multi"
+              labs={hospitals
+                .filter(h => h.consumptionTrackingEnabled !== false)
+                .map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              values={reportLabSelection}
+              onValuesChange={setReportLabSelection}
+              placeholder="Tüm laboratuvarlar dahil"
+              showChips
+            />
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsReportOptionsOpen(false)}>İptal</Button>
-            <Button onClick={generateConsumptionReportPDF}>
-                <FileDown className="h-4 w-4 mr-2"/> Rapor Oluştur
-            </Button>
+            <button onClick={() => setIsReportOptionsOpen(false)}
+              style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', height: 44, padding: '0 18px', borderRadius: HOME_C.radiusSm, background: HOME_C.surface2, boxShadow: HOME_C.clayInset, color: HOME_C.ink2, fontSize: 14, fontWeight: 700 }}>İptal</button>
+            <button onClick={generateConsumptionReportPDF}
+              style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 9, height: 44, padding: '0 20px', borderRadius: HOME_C.radiusSm, background: `linear-gradient(180deg, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 0 rgba(255,255,255,0.4), 0 10px 20px -9px ${HOME_C.accentGlow}`, color: '#fff', fontSize: 14, fontWeight: 800 }}>
+              <FileDown className="h-4 w-4" /> Rapor Oluştur
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

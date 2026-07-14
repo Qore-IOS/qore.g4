@@ -5,6 +5,7 @@ import type { Laboratory, ProductCode, ConsumptionRecord } from '@/lib/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
@@ -27,6 +28,8 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 const NFC_TAG_REGEX = /^[0-9A-F]{2}(:[0-9A-F]{2}){7}$/;
 const NFC_INPUT_ID = 'nfc-tag-input';
@@ -141,7 +144,7 @@ const uniqueStrings = (values: Array<string | undefined | null>) =>
 
 export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: KullanimDogrulamaPanelProps) {
   const { toast } = useToast();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [selectedLaboratoryId, setSelectedLaboratoryId] = useState<string>(initialLaboratoryId);
   const [selectedRange, setSelectedRange] = useState<DayRangeOption>('1');
@@ -184,8 +187,8 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
       setIsLabsLoading(true);
       try {
         const [laboratoriesSnap, productsSnap] = await Promise.all([
-          getDocs(collection(db, 'hospitals')),
-          getDocs(collection(db, 'productCodes')),
+          getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+          getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
         ]);
 
         setLaboratories(
@@ -382,7 +385,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         consumptionConstraints.push(where('consumptionTimestamp', '>=', Timestamp.fromDate(sinceDate)));
       }
 
-      const consumptionQuery = query(collection(db, 'tuketimKayitlari'), ...consumptionConstraints);
+      const consumptionQuery = scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin, ...consumptionConstraints);
       const unsubscribeConsumption = onSnapshot(
         consumptionQuery,
         async (snapshot) => {
@@ -409,8 +412,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         }
       );
 
-      const disposalQuery = query(
-        collection(db, 'nfcDisposalEvents'),
+      const disposalQuery = scopedQuery(
+        'nfcDisposalEvents',
+        currentCompanyId,
+        isSuperAdmin,
         where('laboratoryId', '==', selectedLaboratoryId)
       );
       const unsubscribeDisposals = onSnapshot(
@@ -532,7 +537,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         return;
       }
 
-      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), {
+      await setDoc(doc(db, 'nfcDisposalEvents', disposalDocId), withCompanyScope({
         laboratoryId: selectedLaboratoryId,
         laboratoryName: laboratories.find((laboratory) => laboratory.id === selectedLaboratoryId)?.name || '',
         stokKodu: exactGroup.stokKodu,
@@ -548,7 +553,7 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
         verifiedAt: serverTimestamp(),
         verifiedByUid: currentUserProfile?.uid || '',
         verifiedByName: currentUserProfile?.name || 'Bilinmeyen Kullanıcı',
-      });
+      }, currentCompanyId));
 
       kullanimDogrulamaLogger.info('NFC disposal doğrulaması tamamlandı', {
         uid,
@@ -665,12 +670,12 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
 
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,0.8fr)_auto]">
             <div>
-              <label htmlFor="lab-select-nfc" className="block text-sm font-medium mb-1">
-                Laboratuvar Seçin
-              </label>
-              <Select
+              <LabSelector
+                id="lab-select-nfc"
+                label="Laboratuvar Seçin"
+                labs={laboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
                 value={selectedLaboratoryId}
-                onValueChange={(value) => {
+                onChange={(value) => {
                   setSelectedLaboratoryId(value);
                   setHasFetchedData(false);
                   setConsumptionRecords([]);
@@ -680,18 +685,10 @@ export default function KullanimDogrulamaPanel({ initialLaboratoryId = '' }: Kul
                   clearSubscriptions();
                   syncLabUrl(value);
                 }}
-              >
-                <SelectTrigger id="lab-select-nfc" className="w-full rounded-md" disabled={isLabsLoading}>
-                  <SelectValue placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'} />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map((laboratory) => (
-                    <SelectItem key={laboratory.id} value={laboratory.id}>
-                      {laboratory.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                placeholder={isLabsLoading ? 'Laboratuvarlar yükleniyor...' : 'Doğrulama yapılacak laboratuvarı seçin'}
+                disabled={isLabsLoading}
+                loading={isLabsLoading}
+              />
             </div>
 
             <div>

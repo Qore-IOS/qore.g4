@@ -24,6 +24,8 @@ import React, { useState, useEffect } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -35,6 +37,7 @@ import { tr } from 'date-fns/locale';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 
 interface EfficiencyMetrics {
   toplamKumulatif: number;
@@ -45,6 +48,11 @@ interface EfficiencyMetrics {
   stokDogrulukSkoru: number;
   kitVerimlilikSkoru: number;
   genelVerimlilik: number;
+  toplamEtkiDegeri?: number;
+  maliyetAgirlikli?: boolean;
+  hesaplananSatirSayisi?: number;
+  hakEdisVerisiGirildi?: boolean;
+  algoritma?: 'value-impact-efficiency-index';
 }
 
 interface TotalEfficiencyRecord {
@@ -57,6 +65,7 @@ interface TotalEfficiencyRecord {
   createdByName: string;
   rowCount: number;
   efficiencyMetrics?: EfficiencyMetrics;
+  isAraKayit?: boolean;
 }
 
 const MONTHS = [
@@ -66,6 +75,7 @@ const MONTHS = [
 
 export default function TotalVerimlilikGecmisPanel() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [records, setRecords] = useState<TotalEfficiencyRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -73,8 +83,10 @@ export default function TotalVerimlilikGecmisPanel() {
   useEffect(() => {
     const fetchRecords = async () => {
       try {
-        const recordsQuery = query(
-          collection(db, 'totalEfficiencyRecords'),
+        const recordsQuery = scopedQuery(
+          'totalEfficiencyRecords',
+          currentCompanyId,
+          isSuperAdmin,
           orderBy('createdAt', 'desc')
         );
         const snapshot = await getDocs(recordsQuery);
@@ -90,7 +102,10 @@ export default function TotalVerimlilikGecmisPanel() {
             createdAt: data.createdAt || null,
             createdByName: data.createdByName || '',
             rowCount: data.rows?.length || 0,
-            efficiencyMetrics: data.efficiencyMetrics || undefined,
+            efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+              ? calculateEfficiencyMetrics(data.rows)
+              : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+            isAraKayit: data.isAraKayit === true,
           };
         });
 
@@ -178,6 +193,11 @@ export default function TotalVerimlilikGecmisPanel() {
                         <div className="flex items-center gap-2">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
                           <span className="font-medium">{record.poolName}</span>
+                          {record.isAraKayit && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+                              Ara Kayıt
+                            </span>
+                          )}
                         </div>
                       </TableCell>
                       <TableCell>

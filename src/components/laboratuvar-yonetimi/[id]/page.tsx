@@ -14,6 +14,7 @@ import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { formatMiad } from "@/lib/date";
 import TimestampText from '@/components/TimestampText';
 import { AlertTriangle } from 'lucide-react';
@@ -63,7 +64,7 @@ export default function LabStockDetailPage() {
         let fetchedItems: DepoStokItem[] = [];
 
         if (parent.hedefKurumId) {
-            const q = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
+            const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, ...baseConstraints, where('hedefKurumId', '==', parent.hedefKurumId));
             const snap = await getDocs(q);
             fetchedItems = filterByCompanyScope(
               snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
@@ -74,7 +75,7 @@ export default function LabStockDetailPage() {
 
         // Also query by hedefKurum (name) for legacy records
         if (parent.hedefKurum) {
-            const legacyQ = query(collection(db, 'depoStok'), ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
+            const legacyQ = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, ...baseConstraints, where('hedefKurum', '==', parent.hedefKurum));
             const legacySnap = await getDocs(legacyQ);
             const legacyItems = filterByCompanyScope(
               legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),

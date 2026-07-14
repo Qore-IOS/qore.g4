@@ -14,6 +14,8 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
 import type { Order, ProductCode } from '@/lib/types';
 import {
   ArrowLeft,
@@ -34,9 +36,13 @@ import { cn } from '@/lib/utils';
 
 export default function LojistikTamamlananPanel() {
   const router = useRouter();
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
-  const [orders, setOrders] = useState<Order[]>([]);
+  // Tamamlanan siparişler iki kaynaktan gelir: arşiv (`ordersArchive`, yeni
+  // tamamlananlar) + canlı `orders`'ta status==completed kalanlar (backfill
+  // öncesi). id'ye göre birleştirilir → geçişte veri kaybı olmaz.
+  const [liveCompleted, setLiveCompleted] = useState<Order[]>([]);
+  const [archivedOrders, setArchivedOrders] = useState<Order[]>([]);
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -53,43 +59,44 @@ export default function LojistikTamamlananPanel() {
   // Product codes for name lookup
   useEffect(() => {
     (async () => {
-      const snap = await getDocs(collection(db, 'productCodes'));
+      const snap = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin));
       setProductCodes(
         snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) } as ProductCode))
       );
     })();
+  }, [currentCompanyId, isSuperAdmin]);
+
+  // Listen to completed peripheral orders — arşiv + (geçiş için) canlı kalanlar.
+  useEffect(() => {
+    const mapDocs = (snap: any): Order[] =>
+      snap.docs.map((d: any) => {
+        const data = d.data();
+        return {
+          ...data,
+          id: d.id,
+          createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
+        } as Order;
+      });
+    const unsubLive = onSnapshot(
+      query(collection(db, 'orders'), where('isPeripheral', '==', true), where('status', '==', 'completed')),
+      (snap) => { setLiveCompleted(mapDocs(snap)); setLoading(false); }
+    );
+    const unsubArchive = onSnapshot(
+      query(collection(db, ORDERS_ARCHIVE_COLLECTION), where('isPeripheral', '==', true)),
+      (snap) => { setArchivedOrders(mapDocs(snap)); setLoading(false); }
+    );
+    return () => { unsubLive(); unsubArchive(); };
   }, []);
 
-  // Listen to completed peripheral orders
-  useEffect(() => {
-    const q = query(
-      collection(db, 'orders'),
-      where('isPeripheral', '==', true),
-      where('status', '==', 'completed')
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const list = snap.docs
-        .map((d) => {
-          const data = d.data();
-          return {
-            ...data,
-            id: d.id,
-            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-          } as Order;
-        })
-        .filter((o) => !!o.labId && assignedLabIds.has(o.labId as string))
-        .sort((a, b) => {
-          const at = (a.transferredAt as any)?.toDate?.()?.getTime?.() ??
-            (a.createdAt as Date)?.getTime?.() ?? 0;
-          const bt = (b.transferredAt as any)?.toDate?.()?.getTime?.() ??
-            (b.createdAt as Date)?.getTime?.() ?? 0;
-          return bt - at;
-        });
-      setOrders(list);
-      setLoading(false);
-    });
-    return () => unsub();
-  }, [assignedLabIds]);
+  const orders = useMemo(() => {
+    return mergeOrdersById(archivedOrders, liveCompleted)
+      .filter((o) => !!o.labId && assignedLabIds.has(o.labId as string))
+      .sort((a, b) => {
+        const at = (a.transferredAt as any)?.toDate?.()?.getTime?.() ?? (a.createdAt as Date)?.getTime?.() ?? 0;
+        const bt = (b.transferredAt as any)?.toDate?.()?.getTime?.() ?? (b.createdAt as Date)?.getTime?.() ?? 0;
+        return bt - at;
+      });
+  }, [archivedOrders, liveCompleted, assignedLabIds]);
 
   const productNameMap = useMemo(() => {
     const m = new Map<string, string>();

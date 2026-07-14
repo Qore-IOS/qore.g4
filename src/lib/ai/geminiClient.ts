@@ -26,15 +26,50 @@ interface GenerateOptions {
   temperature?: number;
   maxOutputTokens?: number;
   tools?: GeminiFunctionDeclaration[];
+  // Gemini 2.5+ "düşünme" (thinking) bütçesi. 0 → düşünmeyi kapatır, böylece
+  // tüm çıktı token'ları ve süresi gerçek yanıta gider (kesik/yüzeysel çıktı önlenir).
+  thinkingBudget?: number;
+}
+
+export interface GeminiVisionImage {
+  mimeType: string;
+  base64: string;
+}
+
+interface GenerateVisionOptions {
+  systemPrompt?: string;
+  prompt: string;
+  images: GeminiVisionImage[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  responseJson?: boolean;
 }
 
 const DEFAULT_GEMINI_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-pro',
   'gemini-2.5-flash',
+  'gemini-3-flash-preview',
   'gemini-2.0-flash',
   'gemini-2.0-flash-001',
   'gemini-2.5-flash-lite',
   'gemini-2.0-flash-lite',
+  'gemini-2.5-pro',
+  'gemini-3-pro-preview',
 ];
+
+const DEFAULT_VISION_MODELS = [
+  'gemini-3.5-flash',
+  'gemini-3.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-001',
+  'gemini-2.5-pro',
+];
+
+// Module-level cache to memorize working models across calls (speeds up execution/avoids timeouts)
+let lastSuccessfulModel: string | null = null;
+let lastSuccessfulVisionModel: string | null = null;
 
 function toGeminiContents(messages: GeminiMessage[]) {
   return messages.map((m) => ({
@@ -60,16 +95,35 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
   const apiKey = getGeminiApiKey();
   if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
 
-  const models = getCandidateModels();
+  const baseModels = getCandidateModels();
+  const models = lastSuccessfulModel
+    ? [lastSuccessfulModel, ...baseModels.filter((m) => m !== lastSuccessfulModel)]
+    : baseModels;
+
   let lastDebug = 'gemini_no_attempt';
 
+  // İstek başına ve toplam zaman bütçesi: model üretimi yavaşlarsa fetch
+  // süresiz beklemesin (aksi halde platform ağ geçidi 504 döndürür). Bütçe
+  // ağ geçidi süresinin (maxDuration 60s) altında tutulur ki temiz 5xx dönsün.
+  const overallBudgetMs = Number(process.env.GEMINI_TOTAL_TIMEOUT_MS) || 50_000;
+  const perAttemptMs = Number(process.env.GEMINI_ATTEMPT_TIMEOUT_MS) || 28_000;
+  const startedAt = Date.now();
+
   for (const model of models) {
+    const remainingMs = overallBudgetMs - (Date.now() - startedAt);
+    if (remainingMs <= 1500) { if (lastDebug === 'gemini_no_attempt') lastDebug = 'gemini_timeout_budget_exhausted'; break; }
+    const generationConfig: Record<string, unknown> = {
+      temperature: options.temperature ?? 0.1,
+      maxOutputTokens: options.maxOutputTokens ?? 2048,
+    };
+    // Düşünme bütçesi verildiyse uygula (0 = kapalı). Destekleyen modellerde
+    // (gemini-2.5-flash vb.) çıktı token'larının düşünmeye gitmesini engeller.
+    if (options.thinkingBudget !== undefined) {
+      generationConfig.thinkingConfig = { thinkingBudget: options.thinkingBudget };
+    }
     const body: Record<string, unknown> = {
       contents: toGeminiContents(options.messages),
-      generationConfig: {
-        temperature: options.temperature ?? 0.1,
-        maxOutputTokens: options.maxOutputTokens ?? 2048,
-      },
+      generationConfig,
     };
 
     if (options.systemPrompt) {
@@ -80,16 +134,29 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
       body.tools = [{ functionDeclarations: options.tools }];
     }
 
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
+    const controller = new AbortController();
+    const attemptMs = Math.min(perAttemptMs, remainingMs);
+    const timer = setTimeout(() => controller.abort(), attemptMs);
+    let res: Response;
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+    } catch (err) {
+      clearTimeout(timer);
+      const aborted = (err as Error)?.name === 'AbortError';
+      lastDebug = aborted ? `gemini_timeout:${model}:${attemptMs}ms` : `gemini_fetch_error:${model}:${(err as Error)?.message?.slice(0, 120)}`;
+      continue; // sıradaki modeli dene (veya bütçe dolunca döngü kırılır)
+    }
+    clearTimeout(timer);
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       lastDebug = `gemini_http_${res.status}:${model}:${errText.slice(0, 180)}`;
-      if (res.status === 400 || res.status === 404 || res.status === 429 || res.status === 503) continue;
+      if (res.status === 400 || res.status === 403 || res.status === 404 || res.status === 422 || res.status === 429 || res.status === 503) continue;
       throw new Error(lastDebug);
     }
 
@@ -108,6 +175,7 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
       continue;
     }
 
+    lastSuccessfulModel = model;
     return { text, functionCalls, model };
   }
 
@@ -116,6 +184,88 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
     throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin veya farklı bir API anahtarı kullanın.');
   }
   if (lastDebug.startsWith('gemini_http_503')) {
+    throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
+  }
+  throw new Error(lastDebug);
+}
+
+/**
+ * Call Gemini with one or more images attached. Used for image-based OCR.
+ * Falls through a small list of vision-capable models so the same payload
+ * keeps working when Google rotates preview model names.
+ */
+export async function generateVisionWithGemini(
+  options: GenerateVisionOptions
+): Promise<{ text: string; model: string }> {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
+
+  const envModel = process.env.GEMINI_VISION_MODEL?.trim() || process.env.GEMINI_MODEL?.trim();
+  const baseModels = envModel
+    ? [envModel, ...DEFAULT_VISION_MODELS.filter((m) => m !== envModel)]
+    : DEFAULT_VISION_MODELS;
+
+  const models = lastSuccessfulVisionModel
+    ? [lastSuccessfulVisionModel, ...baseModels.filter((m) => m !== lastSuccessfulVisionModel)]
+    : baseModels;
+
+  let lastDebug = 'gemini_vision_no_attempt';
+
+  for (const model of models) {
+    const parts: Array<Record<string, unknown>> = options.images.map((img) => ({
+      inlineData: { mimeType: img.mimeType, data: img.base64 },
+    }));
+    parts.push({ text: options.prompt });
+
+    const body: Record<string, unknown> = {
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        temperature: options.temperature ?? 0.1,
+        maxOutputTokens: options.maxOutputTokens ?? 4096,
+        ...(options.responseJson ? { responseMimeType: 'application/json' } : {}),
+      },
+    };
+    if (options.systemPrompt) {
+      body.systemInstruction = { parts: [{ text: options.systemPrompt }] };
+    }
+
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    );
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      lastDebug = `gemini_vision_http_${res.status}:${model}:${errText.slice(0, 180)}`;
+      if (res.status === 400 || res.status === 403 || res.status === 404 || res.status === 422 || res.status === 429 || res.status === 503) continue;
+      throw new Error(lastDebug);
+    }
+
+    const data = await res.json();
+    const responseParts = data?.candidates?.[0]?.content?.parts ?? [];
+    const text = responseParts
+      .filter((p: { text?: string }) => typeof p?.text === 'string')
+      .map((p: { text: string }) => p.text)
+      .join('\n')
+      .trim();
+
+    if (!text) {
+      lastDebug = `gemini_vision_empty_response:${model}`;
+      continue;
+    }
+    lastSuccessfulVisionModel = model;
+    return { text, model };
+  }
+
+  aiLogger.error('Gemini Vision tum modellerde basarisiz oldu', { debug: lastDebug });
+  if (lastDebug.includes('http_429')) {
+    throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin.');
+  }
+  if (lastDebug.includes('http_503')) {
     throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
   }
   throw new Error(lastDebug);

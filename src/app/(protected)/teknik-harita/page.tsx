@@ -10,6 +10,7 @@ import { Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 const DeviceMapPanel = dynamic(() => import('@/components/DeviceMapPanel'), { ssr: false });
 
@@ -21,7 +22,7 @@ export default function TeknikHaritaPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, 'hospitals'), orderBy('name', 'asc')),
+      scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc')),
       (snap) => {
         const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Hospital);
         setHospitals(filterByCompanyScope(all, currentCompanyId, isSuperAdmin));

@@ -58,6 +58,8 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
     collection,
@@ -78,6 +80,7 @@ import type {
     TrashBinRecord,
 } from '@/lib/types';
 import { cn, generateId } from '@/lib/utils';
+import { LabSelector } from '@/components/common/LabSelector';
 import BackButton from '@/components/BackButton';
 import { openEjectedKitFaultReport } from '@/lib/faults';
 import { format } from 'date-fns';
@@ -87,7 +90,7 @@ export default function EjectedKitPanel() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const { toast } = useToast();
-    const { currentUser, currentUserProfile } = useAuth();
+    const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
     const initialTab = searchParams.get('tab') || 'kayit';
     const [activeTab, setActiveTab] = useState(initialTab);
@@ -113,7 +116,6 @@ export default function EjectedKitPanel() {
     const [aciklama, setAciklama] = useState<string>('');
 
     // Modal State
-    const [isLabModalOpen, setIsLabModalOpen] = useState(false);
     const [isDeviceModalOpen, setIsDeviceModalOpen] = useState(false);
     const [isProductModalOpen, setIsProductModalOpen] = useState(false);
 
@@ -161,21 +163,15 @@ export default function EjectedKitPanel() {
     const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [hospitalSnap, deviceSnap, productSnap] = await Promise.all([
-                getDocs(collection(db, 'hospitals')),
-                getDocs(collection(db, 'devices')),
-                getDocs(collection(db, 'productCodes')),
+            const [hospitalDocs, deviceDocs, productDocs] = await Promise.all([
+                getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+                getScopedDocs('devices', currentCompanyId, isSuperAdmin),
+                getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
             ]);
 
-            setAllHospitals(
-                hospitalSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital))
-            );
-            setAllDevices(
-                deviceSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Device))
-            );
-            setAllProducts(
-                productSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductCode))
-            );
+            setAllHospitals(hospitalDocs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
+            setAllDevices(deviceDocs.map((d) => ({ id: d.id, ...d.data() } as Device)));
+            setAllProducts(productDocs.map((d) => ({ id: d.id, ...d.data() } as ProductCode)));
         } catch (err) {
             console.error('Error fetching data:', err);
             toast({
@@ -186,7 +182,7 @@ export default function EjectedKitPanel() {
         } finally {
             setLoading(false);
         }
-    }, [toast]);
+    }, [currentCompanyId, isSuperAdmin, toast]);
 
     useEffect(() => {
         fetchData();
@@ -249,7 +245,6 @@ export default function EjectedKitPanel() {
         setSelectedLabId(labId);
         setSelectedDeviceId('');
         setSelectedProductId('');
-        setIsLabModalOpen(false);
     };
 
     const handleDeviceSelect = (deviceId: string) => {
@@ -337,7 +332,7 @@ export default function EjectedKitPanel() {
                 faultReportId,
             };
 
-            await addDoc(collection(db, 'ejectedKitRecords'), ejectedKitRecord);
+            await addDoc(collection(db, 'ejectedKitRecords'), withCompanyScope(ejectedKitRecord, currentCompanyId));
 
             toast({
                 title: 'Kayıt Oluşturuldu',
@@ -395,17 +390,13 @@ export default function EjectedKitPanel() {
 
                         <TabsContent value="kayit" className="space-y-6 pt-4">
                             {/* Lab Selection */}
-                            <div className="space-y-2">
-                                <label className="text-sm font-medium">Laboratuvar</label>
-                                <Button
-                                    variant="outline"
-                                    className="w-full justify-start"
-                                    onClick={() => setIsLabModalOpen(true)}
-                                >
-                                    <Building2 className="mr-2 h-4 w-4" />
-                                    {selectedLab ? selectedLab.name : 'Laboratuvar seçin...'}
-                                </Button>
-                            </div>
+                            <LabSelector
+                                label="Laboratuvar"
+                                labs={sortedHospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                                value={selectedLabId}
+                                onChange={(id) => handleLabSelect(id)}
+                                placeholder="Laboratuvar seçin..."
+                            />
 
                             {/* Device Selection */}
                             {selectedLabId && (
@@ -654,42 +645,6 @@ export default function EjectedKitPanel() {
                     </Tabs>
                 </CardContent>
             </Card>
-
-            {/* Lab Selection Modal */}
-            <Dialog open={isLabModalOpen} onOpenChange={setIsLabModalOpen}>
-                <DialogContent className="max-w-md">
-                    <DialogHeader>
-                        <DialogTitle>Laboratuvar Seçin</DialogTitle>
-                    </DialogHeader>
-                    <Command className="rounded-lg border shadow-md">
-                        <CommandInput placeholder="Laboratuvar ara..." />
-                        <CommandList>
-                            <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                            <CommandGroup>
-                                <ScrollArea className="h-[300px]">
-                                    {sortedHospitals.map((hospital) => (
-                                        <CommandItem
-                                            key={hospital.id}
-                                            value={hospital.name}
-                                            onSelect={() => handleLabSelect(hospital.id)}
-                                        >
-                                            <Check
-                                                className={cn(
-                                                    'mr-2 h-4 w-4',
-                                                    selectedLabId === hospital.id
-                                                        ? 'opacity-100'
-                                                        : 'opacity-0'
-                                                )}
-                                            />
-                                            {hospital.name}
-                                        </CommandItem>
-                                    ))}
-                                </ScrollArea>
-                            </CommandGroup>
-                        </CommandList>
-                    </Command>
-                </DialogContent>
-            </Dialog>
 
             {/* Device Selection Modal */}
             <Dialog open={isDeviceModalOpen} onOpenChange={setIsDeviceModalOpen}>

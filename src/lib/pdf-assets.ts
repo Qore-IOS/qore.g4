@@ -1,11 +1,12 @@
 import { collection, getDocs, doc, getDoc, query, where, type QueryConstraint } from 'firebase/firestore';
 import { buildPersonnelCode } from '@/lib/form-number';
 import { db } from '@/lib/firebase';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 let _fontBase64: string | null = null;
 let _headerLogo: string | null = null;
 let _sysLogo: string | null = null;
-let _labPools: { data: any[]; ts: number } | null = null;
+const _labPoolsByCompany: Map<string, { data: any[]; ts: number }> = new Map();
 const LAB_POOLS_TTL = 5 * 60_000;
 
 async function fetchDataUrl(url: string): Promise<string | null> {
@@ -57,18 +58,25 @@ export async function loadSysLogo(): Promise<string | null> {
   return _sysLogo;
 }
 
-async function loadLabPools(): Promise<any[]> {
-  if (_labPools && Date.now() - _labPools.ts < LAB_POOLS_TTL) return _labPools.data;
-  const snap = await getDocs(collection(db, 'labPools'));
+async function loadLabPools(companyId: string | null, isSuperAdmin: boolean): Promise<any[]> {
+  const key = isSuperAdmin ? '__super__' : (companyId || '__none__');
+  const cached = _labPoolsByCompany.get(key);
+  if (cached && Date.now() - cached.ts < LAB_POOLS_TTL) return cached.data;
+  const snap = await getDocs(scopedQuery('labPools', companyId, isSuperAdmin));
   const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  _labPools = { data, ts: Date.now() };
+  _labPoolsByCompany.set(key, { data, ts: Date.now() });
   return data;
 }
 
-export async function resolveLabDisplayName(hospitalId: string | undefined, hospitalName: string): Promise<string> {
+export async function resolveLabDisplayName(
+  hospitalId: string | undefined,
+  hospitalName: string,
+  companyId: string | null,
+  isSuperAdmin: boolean,
+): Promise<string> {
   if (!hospitalId) return hospitalName;
   try {
-    const allPools = await loadLabPools();
+    const allPools = await loadLabPools(companyId, isSuperAdmin);
     const match = allPools.find((p: any) => p.active && p.memberIds?.includes(hospitalId));
     if (match) {
       const pool = match as any;
@@ -92,12 +100,14 @@ export async function computeFormNo(
   currentDocId: string,
   personName: string,
   typeChar: string,
+  companyId: string | null,
+  isSuperAdmin: boolean,
   timestampField: string = 'createdAt',
   extraFilters: QueryConstraint[] = []
 ): Promise<string> {
   try {
     const initials = buildPersonnelCode(personName);
-    const q = query(collection(db, collectionName), where(uidField, '==', uid), ...extraFilters);
+    const q = scopedQuery(collectionName, companyId, isSuperAdmin, where(uidField, '==', uid), ...extraFilters);
     const snap = await getDocs(q);
     const sorted = snap.docs.slice().sort((a, b) => {
       const ta = a.data()[timestampField]?.toMillis?.() || 0;

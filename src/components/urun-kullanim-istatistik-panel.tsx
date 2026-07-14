@@ -12,6 +12,7 @@ import type { Hospital, ProductCode, ConsumptionRecord, DepoStokItem } from '@/l
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose, DialogFooter } from '@/components/ui/dialog';
@@ -273,18 +274,16 @@ export default function TuketimIstatistikleriPanel({
           </Button>
         </CardHeader>
         <CardContent>
-          <div className="mb-4">
-            <label htmlFor="laboratory-select-stats" className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-            <Select value={selectedHospitalId} onValueChange={setSelectedHospitalId}>
-              <SelectTrigger id="laboratory-select-stats" className="w-full md:w-1/2 lg:w-1/3 rounded-md" aria-label="Analiz için laboratuvar seçin">
-                <SelectValue placeholder="Analiz için laboratuvar seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {hospitals.map(h => (
-                  <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="mb-4 w-full md:w-1/2 lg:w-1/3">
+            <LabSelector
+              id="laboratory-select-stats"
+              ariaLabel="Analiz için laboratuvar seçin"
+              label="Laboratuvar Seçin"
+              labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+              value={selectedHospitalId}
+              onChange={setSelectedHospitalId}
+              placeholder="Analiz için laboratuvar seçin..."
+            />
           </div>
 
           {selectedHospitalId && (

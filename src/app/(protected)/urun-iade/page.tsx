@@ -20,13 +20,15 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot } from 'firebase/firestore';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import useHidScanner from '@/hooks/useHidScanner';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 
@@ -60,15 +62,15 @@ export default function UrunIadePanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [depotsSnap, hospitalsSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+      const [depotsSnap, hospitalsSnap, productDocs] = await Promise.all([
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
       ]);
       const depotList = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
       setDepots(depotList);
       setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setProductCodes(productsSnap.docs.map(p => ({ id: p.id, ...p.data() } as ProductCode)));
+      setProductCodes(productDocs.map(p => ({ id: p.id, ...p.data() } as ProductCode)));
 
       if (depotList.length > 0 && !selectedDepotId && depotList[0].id) {
         setSelectedDepotId(depotList[0].id);
@@ -83,7 +85,14 @@ export default function UrunIadePanel() {
   useEffect(() => {
     fetchData();
 
-    const q = query(collection(db, 'depoStok'));
+    // Sadece sevk edilmiş stoğu izle — iade için aday sadece bunlar.
+    // Composite index: (companyId, isShipped, miad).
+    const q = scopedQuery(
+      'depoStok',
+      currentCompanyId,
+      isSuperAdmin,
+      where('isShipped', '==', true),
+    );
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
         const stockItems = filterByCompanyScope(
           querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as DepoStokItem)),
@@ -227,7 +236,7 @@ export default function UrunIadePanel() {
     }
 
     const returnRecordRef = doc(collection(db, 'productReturns'));
-    batch.set(returnRecordRef, {
+    batch.set(returnRecordRef, withCompanyScope({
         returnId: returnRecordRef.id,
         itemCount: itemsToProcess.length,
         returnedToDepotId: selectedDepotId,
@@ -242,7 +251,7 @@ export default function UrunIadePanel() {
             lotNumarasi: item.lotNumarasi,
             returnedFrom: item.hedefKurum || 'Bilinmeyen'
         }))
-    });
+    }, currentCompanyId));
 
     itemsToProcess.filter(item => item.id).forEach(item => {
       const itemRef = doc(db, 'depoStok', item.id!);
@@ -299,13 +308,14 @@ export default function UrunIadePanel() {
                         </Select>
                     </div>
                      <div className="flex-1 max-w-sm">
-                        <Label className="block text-sm font-medium mb-1">Kaynak Laboratuvar</Label>
-                        <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={isLoading}>
-                            <SelectTrigger><SelectValue placeholder="Laboratuvar seçin..." /></SelectTrigger>
-                            <SelectContent>
-                                {hospitals.map(l => <SelectItem key={l.id!} value={l.id!}>{l.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
+                        <LabSelector
+                            label="Kaynak Laboratuvar"
+                            labs={hospitals.map(l => ({ id: l.id!, name: l.name, kod: l.kod }))}
+                            value={selectedLabId}
+                            onChange={setSelectedLabId}
+                            placeholder="Laboratuvar seçin..."
+                            disabled={isLoading}
+                        />
                     </div>
                 </div>
             </CardContent>

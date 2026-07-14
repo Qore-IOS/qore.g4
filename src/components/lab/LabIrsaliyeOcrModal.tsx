@@ -11,6 +11,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {
@@ -68,8 +69,10 @@ export default function LabIrsaliyeOcrModal({
   useEffect(() => {
     if (!isOpen) return;
     setLoadingFiles(true);
-    const q = query(
-      collection(db, 'irsaliyeDosyalari'),
+    const q = scopedQuery(
+      'irsaliyeDosyalari',
+      currentCompanyId,
+      isSuperAdmin,
       orderBy('uploadedAt', 'desc')
     );
     const unsubscribe = onSnapshot(q, (snapshot) => {

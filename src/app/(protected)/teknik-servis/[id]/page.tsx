@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import BackButton from '@/components/BackButton';
 import Image from 'next/image';
 import { cn } from '@/lib/utils';
-import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload } from 'lucide-react';
+import { AlertTriangle, CheckCircle, Loader2, Wrench, FilePenLine, FlaskConical, Building2, ChevronDown, ChevronUp, History, CalendarClock, RotateCcw, FileEdit, FilePlus, ClipboardList, Download, Upload, Calculator } from 'lucide-react';
 import {
   collection,
   onSnapshot,
@@ -29,8 +29,10 @@ import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
-import { withCompanyScope } from '@/lib/company-scope';
+import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
+import { getAffectedDeviceIds } from '@/lib/device-faults';
 import {
   Dialog,
   DialogContent,
@@ -50,7 +52,7 @@ export default function TeknikServisDetayPage() {
   const hospitalId = Array.isArray(params?.id) ? params.id[0] : (params?.id as string);
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [hospital, setHospital] = useState<Hospital | null>(null);
   const [devicesByHospital, setDevicesByHospital] = useState<Device[]>([]);
@@ -121,7 +123,7 @@ export default function TeknikServisDetayPage() {
       return;
     }
     setLoading(true);
-    const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', hospitalId));
+    const qDevices = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(
       qDevices,
       (snap) => {
@@ -157,21 +159,28 @@ export default function TeknikServisDetayPage() {
       const idsMap: Record<string, string[]> = {};
       snap.docs.forEach((d) => {
         const data = d.data();
-        if (data.deviceId && data.faultType && deviceIds.has(data.deviceId)) {
-          // Track all fault report IDs per device
-          if (!idsMap[data.deviceId]) idsMap[data.deviceId] = [];
-          idsMap[data.deviceId].push(d.id);
-          // For teknik servis panel: teknik_servis is primary (red), aplikasyon is secondary (amber)
-          // If device has both, prefer teknik_servis
-          if (map[data.deviceId] === 'teknik_servis') return;
-          map[data.deviceId] = data.faultType;
-        }
+        if (!data.faultType || !matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+
+        getAffectedDeviceIds(data).forEach((deviceId) => {
+          if (!deviceIds.has(deviceId)) return;
+
+          if (!idsMap[deviceId]) idsMap[deviceId] = [];
+          if (!idsMap[deviceId].includes(d.id)) {
+            if (data.faultType === 'teknik_servis') idsMap[deviceId].unshift(d.id);
+            else idsMap[deviceId].push(d.id);
+          }
+
+          // Cihazda iki tür arıza da varsa bu panelin kendi arıza türünü önceliklendir.
+          if (map[deviceId] !== 'teknik_servis') {
+            map[deviceId] = data.faultType;
+          }
+        });
       });
       setOpenFaultMap(map);
       setOpenFaultReportIds(idsMap);
     });
     return () => unsub();
-  }, [devicesByHospital]);
+  }, [devicesByHospital, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault history for all devices
   useEffect(() => {
@@ -212,7 +221,7 @@ export default function TeknikServisDetayPage() {
 
   useEffect(() => {
     if (!hospitalId) return;
-    const q = query(collection(db, 'deviceFaultReports'), where('hospitalId', '==', hospitalId));
+    const q = scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin, where('hospitalId', '==', hospitalId));
     const unsub = onSnapshot(q, (snap) => {
       const counts: Record<string, { e: number; s: number; n: number }> = {};
       snap.docs.forEach((d) => {
@@ -289,16 +298,20 @@ export default function TeknikServisDetayPage() {
         }
 
         // Fetch periodic part changes for this device
-        const partsQ = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQ = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partsSnap = await getDocs(partsQ);
         const parts = partsSnap.docs.map(d => ({ id: d.id, ...d.data() } as PeriodicPartChange));
 
         // Fetch periodic part change logs for this device
-        const partLogsQ = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const partLogsQ = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', device.id)
         );
         const partLogsSnap = await getDocs(partLogsQ);
@@ -363,8 +376,10 @@ export default function TeknikServisDetayPage() {
   const handleDeviceClick = async (device: Device) => {
     // Check for existing drafts for this device
     try {
-      const draftQuery = query(
-        collection(db, 'draftActionForms'),
+      const draftQuery = scopedQuery(
+        'draftActionForms',
+        currentCompanyId,
+        isSuperAdmin,
         where('deviceId', '==', device.id),
         where('formType', '==', 'teknik_servis')
       );
@@ -637,8 +652,8 @@ export default function TeknikServisDetayPage() {
 
   const fetchTemplateOptions = async () => {
     const [hospitalsSnap, devicesSnap] = await Promise.all([
-      getDocs(collection(db, 'hospitals')),
-      getDocs(collection(db, 'devices')),
+      getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
     ]);
 
     const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
@@ -743,8 +758,8 @@ export default function TeknikServisDetayPage() {
       }
 
       const [hospitalsSnap, devicesSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'devices')),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
       ]);
       const hospitals = hospitalsSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Hospital[];
       const devices = devicesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as Device[];
@@ -1185,7 +1200,7 @@ export default function TeknikServisDetayPage() {
             <DialogDescription>
               {selectedDeviceFaultType === 'teknik_servis'
                 ? 'Bu cihaz için bir teknik servis arıza kaydı bulunmaktadır. Yapmak istediğiniz işlemi seçin.'
-                : 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Bu arızayı yalnızca aplikasyon personeli yönetebilir.'}
+                : 'Bu cihaz için bir aplikasyon arıza kaydı bulunmaktadır. Arıza kaydı salt okunur görüntülenir; teknik servis işlem formu yine de oluşturabilirsiniz.'}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col sm:flex-col sm:space-x-0 gap-2 pt-4">
@@ -1204,6 +1219,12 @@ export default function TeknikServisDetayPage() {
                   >
                     <FilePenLine className="h-4 w-4" /> Yeni Servis İşlemi Oluştur
                   </button>
+                  <button
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <Calculator className="h-4 w-4" /> Kümülatif Hesapla
+                  </button>
                 </>
               ) : (
                 <>
@@ -1213,6 +1234,18 @@ export default function TeknikServisDetayPage() {
                     className="cihaz-tool-item px-4 py-2.5 text-sm font-medium bg-[var(--dashboard-surface-2)] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <FlaskConical className="h-4 w-4" /> Arıza Kaydını Görüntüle (Salt Okunur)
+                  </button>
+                  <button
+                    onClick={() => selectedDevice?.id && navigateToAction(`/teknik-servis/islem-formu/${selectedDevice.id}`)}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <FilePenLine className="h-4 w-4" /> Teknik Servis İşlem Formu Aç
+                  </button>
+                  <button
+                    onClick={() => navigateToAction('/kumulatif-hesaplama')}
+                    className="cihaz-tool-item px-4 py-2.5 text-sm font-medium flex items-center justify-center gap-2"
+                  >
+                    <Calculator className="h-4 w-4" /> Kümülatif Hesapla
                   </button>
                   <button
                     onClick={() => setIsModalOpen(false)}

@@ -41,6 +41,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -72,7 +73,7 @@ export default function DigerFirmaGecmisiPage() {
   const [records, setRecords] = useState<DigerFirmaArizaRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
-  const { isAdmin } = useAuth();
+  const { isAdmin, currentCompanyId, isSuperAdmin } = useAuth();
 
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
@@ -83,7 +84,7 @@ export default function DigerFirmaGecmisiPage() {
   const [creatorFilter, setCreatorFilter] = useState<string>('all');
 
   useEffect(() => {
-    const q = query(collection(db, 'digerFirmaArizalar'), orderBy('createdAt', 'desc'));
+    const q = scopedQuery('digerFirmaArizalar', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'));
 
     const unsubscribe = onSnapshot(
       q,

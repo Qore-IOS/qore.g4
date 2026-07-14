@@ -4,6 +4,8 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, orderBy, query, Timestamp } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Loader2, FileSpreadsheet, FileText, Search, X, History, User, ArrowUpDown, ArrowUp, ArrowDown, Filter, Check } from 'lucide-react';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import type { DateRange } from 'react-day-picker';
@@ -13,6 +15,7 @@ import type { DestroyedKitRecord, Hospital } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { exportDataToExcel, cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Input } from '@/components/ui/input';
 
@@ -26,6 +29,7 @@ type ColumnFiltersState = Record<ColumnFilterKey, Set<string>>;
 
 export default function ImhaEdilenKitlerListePanel() {
     const { toast } = useToast();
+    const { currentCompanyId, isSuperAdmin } = useAuth();
     const [records, setRecords] = useState<DestroyedKitRecord[]>([]);
     const [hospitals, setHospitals] = useState<Hospital[]>([]);
     const [loading, setLoading] = useState(true);
@@ -50,8 +54,8 @@ export default function ImhaEdilenKitlerListePanel() {
             setLoading(true);
             try {
                 const [recordsSnap, labsSnap] = await Promise.all([
-                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'))),
-                    getDocs(collection(db, 'hospitals'))
+                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'))),
+                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin))
                 ]);
 
                 setRecords(recordsSnap.docs.map(doc => {
@@ -650,18 +654,14 @@ export default function ImhaEdilenKitlerListePanel() {
                     </div>
 
                     {/* Laboratory */}
-                    <div className="space-y-1.5">
-                        <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)]">Laboratuvar</label>
-                        <Select value={labFilter} onValueChange={setLabFilter}>
-                            <SelectTrigger className="cihaz-pressed border-none h-10">
-                                <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectItem value="all">Tümü</SelectItem>
-                                {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                            </SelectContent>
-                        </Select>
-                    </div>
+                    <LabSelector
+                        label="Laboratuvar"
+                        labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                        value={labFilter}
+                        onChange={setLabFilter}
+                        placeholder="Laboratuvar"
+                        allOption={{ value: 'all', label: 'Tümü' }}
+                    />
 
                     {/* Source Type */}
                     <div className="space-y-1.5">

@@ -21,9 +21,72 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import fs from 'fs/promises';
 import path from 'path';
+
+// ─── Admin SDK scoping helper ────────────────────────────────────────────────
+// Mirrors getScopedDocs queries 1+2 (company + legacy) but skips the unscoped
+// fallback which reads entire collections through IndexedDB on the client.
+type AdminDocSnap = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
+
+/**
+ * Deep-convert Admin SDK Firestore values (Timestamp, GeoPoint, DocumentRef)
+ * into plain JSON-serializable values so they can cross the Next.js server
+ * action boundary. Admin `Timestamp` is a class instance — returning it raw
+ * throws "Only plain objects … can be passed to Client Components".
+ */
+function serializeFirestoreValue(value: any): any {
+  if (value === null || value === undefined) return value;
+  // Firestore Timestamp (admin or web): has toDate()
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    return value.toDate();
+  }
+  if (value instanceof Date) return value;
+  if (Array.isArray(value)) return value.map(serializeFirestoreValue);
+  if (typeof value === 'object') {
+    // Skip non-plain objects we don't expect (e.g. DocumentReference) by
+    // converting them to a path string when possible, otherwise dropping.
+    if (typeof value.path === 'string' && typeof value.id === 'string' && typeof value.collection === 'function') {
+      return value.path; // DocumentReference → path string
+    }
+    const out: Record<string, any> = {};
+    for (const key of Object.keys(value)) {
+      out[key] = serializeFirestoreValue(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Map an Admin doc snapshot to a plain serializable object. */
+function serializeDoc(d: AdminDocSnap): Record<string, any> {
+  return serializeFirestoreValue({ id: d.id, ...d.data() });
+}
+
+async function adminScopedDocs(
+  collectionPath: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean | undefined,
+): Promise<AdminDocSnap[]> {
+  const normalized = normalizeCompanyId(companyId);
+  const coll = adminDb.collection(collectionPath);
+  if (isSuperAdmin || normalized === '__legacy__') {
+    return (await coll.get()).docs as AdminDocSnap[];
+  }
+  // A `where('companyId', '==', x)` query CANNOT match documents that lack a
+  // companyId field. Pre‑multi‑tenancy master data (barkod formatları, ürün
+  // kodları) is untagged, and dropping it silently breaks barcode parsing for
+  // every panel. So we read the full collection and keep anything visible to
+  // this company via matchesCompanyScope — untagged/legacy records included.
+  // This mirrors the web‑SDK getScopedDocs backward‑compat path. Safe here
+  // because these are small master‑data collections and the Admin SDK read
+  // bypasses security rules.
+  const all = await coll.get();
+  return (all.docs as AdminDocSnap[]).filter(d =>
+    matchesCompanyScope(d.data(), companyId, isSuperAdmin),
+  );
+}
 
 
 // Helper: convert Firestore Timestamps → JS Dates
@@ -57,6 +120,282 @@ export async function getFullDepotStock(
   } catch (err) {
     console.error('Error fetching full depot stock:', err);
     throw new Error('Failed to fetch full depot stock.');
+  }
+}
+
+/**
+ * Compact serial index for a depot — used by Mal Kabul duplicate detection.
+ *
+ * Mal Kabul only needs the SET of serial numbers already present in a depot to
+ * reject duplicate scans; it does not need the full DepoStokItem documents.
+ * Previously the panel downloaded the entire `depoStok` collection for the
+ * selected depot (via the `useDepoStokByDepot` client hook) just to build this
+ * set. Running thousands of docs through the Firestore web SDK + IndexedDB
+ * persistence layer was the main cause of the panel's slow open and per-scan
+ * main-thread contention.
+ *
+ * This server action instead:
+ *   1. Reads `depoStok` with the Admin SDK (no client persistence layer), and
+ *   2. Projects ONLY `stokKodu` / `seriNumarasi` / `companyId` via `.select()`,
+ *      so Firestore returns a fraction of each document, and
+ *   3. Returns a de-duplicated `Record<stokKodu, string[]>` map — a tiny
+ *      payload compared to the full dataset.
+ *
+ * Behaviour matches the old client query (all stock for the depot, regardless
+ * of `isShipped`) so duplicate detection is unchanged.
+ */
+export type DepotSerialIndex = Record<string, string[]>;
+
+export async function getDepotSerialIndex(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepotSerialIndex> {
+  if (!depotId) return {};
+  try {
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .select('stokKodu', 'seriNumarasi', 'companyId')
+      .get();
+
+    const serialsByProduct = new Map<string, Set<string>>();
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as {
+        stokKodu?: string;
+        seriNumarasi?: string;
+        companyId?: string | null;
+      };
+      // Defense-in-depth company scoping (mirrors filterByCompanyScope, but
+      // per-item so we never materialize an intermediate array).
+      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      const stokKodu = data.stokKodu;
+      const serial = data.seriNumarasi;
+      if (!stokKodu || !serial) return;
+      let set = serialsByProduct.get(stokKodu);
+      if (!set) {
+        set = new Set<string>();
+        serialsByProduct.set(stokKodu, set);
+      }
+      set.add(serial);
+    });
+
+    const index: DepotSerialIndex = {};
+    for (const [stokKodu, serials] of serialsByProduct) {
+      index[stokKodu] = Array.from(serials);
+    }
+    return index;
+  } catch (err) {
+    console.error('[getDepotSerialIndex] Error for depot', depotId, ':', err);
+    return {};
+  }
+}
+
+/**
+ * Fetch depot stock for the Direkt Transfer panel using a single Admin SDK query
+ * with field projection. Replaces the 3-query `getScopedDocs` web SDK approach
+ * that was downloading full documents through IndexedDB, causing 10–15s load times.
+ *
+ * Only the 9 fields needed for scan lookup + transfer creation are fetched.
+ * `isShipped == true` items are filtered server-side to further cut payload.
+ */
+export async function getDepotStockForTransfer(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepoStokItem[]> {
+  if (!depotId) return [];
+  try {
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .select('stokKodu', 'stokAdi', 'seriNumarasi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'miad')
+      .get();
+
+    const items: DepoStokItem[] = [];
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Record<string, any>;
+      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      if (data.isShipped === true) return;
+      let miad = data.miad;
+      if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
+      items.push({
+        id: docSnap.id,
+        stokKodu: data.stokKodu ?? '',
+        stokAdi: data.stokAdi ?? '',
+        seriNumarasi: data.seriNumarasi,
+        lotNumarasi: data.lotNumarasi,
+        adet: data.adet,
+        isShipped: data.isShipped,
+        companyId: data.companyId,
+        miad: miad ?? '',
+      } as DepoStokItem);
+    });
+    return items;
+  } catch (err) {
+    console.error('[getDepotStockForTransfer] Error for depot', depotId, ':', err);
+    return [];
+  }
+}
+
+/**
+ * All depot stock with field projection for the Siparişler panel min/max qty maps.
+ * Uses two parallel Admin SDK queries (company + legacy) instead of the full-doc
+ * web SDK fetch through IndexedDB. Fetches only the 7 fields needed for quantity
+ * aggregation — no miad/stokAdi/seriNumarasi etc.
+ */
+export async function getDepoStokForOrders(
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepoStokItem[]> {
+  try {
+    const normalized = normalizeCompanyId(companyId);
+    const selectFields = ['stokKodu', 'adet', 'isShipped', 'depotId', 'hedefKurumId', 'hedefKurum', 'companyId'] as const;
+    let docs: AdminDocSnap[];
+
+    if (isSuperAdmin || normalized === '__legacy__') {
+      docs = (await adminDb.collection('depoStok').select(...selectFields).get()).docs as AdminDocSnap[];
+    } else {
+      const [cs, ls] = await Promise.all([
+        adminDb.collection('depoStok').where('companyId', '==', normalized).select(...selectFields).get(),
+        adminDb.collection('depoStok').where('companyId', '==', '__legacy__').select(...selectFields).get(),
+      ]);
+      const seen = new Set<string>();
+      docs = [];
+      for (const snap of [cs, ls]) {
+        for (const d of snap.docs as AdminDocSnap[]) {
+          if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); }
+        }
+      }
+    }
+
+    return docs.map(d => {
+      const data = d.data() as Record<string, any>;
+      return {
+        id: d.id,
+        stokKodu: data.stokKodu ?? '',
+        stokAdi: '',
+        miad: '',
+        adet: data.adet,
+        isShipped: data.isShipped,
+        depotId: data.depotId,
+        hedefKurumId: data.hedefKurumId,
+        hedefKurum: data.hedefKurum,
+        companyId: data.companyId,
+      } as DepoStokItem;
+    });
+  } catch (err) {
+    console.error('[getDepoStokForOrders] Error:', err);
+    return [];
+  }
+}
+
+/**
+ * Bootstrap data for the Sipariş Toplama page.
+ *
+ * Replaces 4× getScopedDocs calls (≈10 Firestore reads through IndexedDB) with
+ * 4–6 parallel Admin SDK queries — no IndexedDB, ~1–2 s instead of 10–15 s.
+ * depoStok uses field projection (10 fields); other collections are full-doc but
+ * fetched server-side so IndexedDB is never involved.
+ */
+export async function getToplamaBootstrapData(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+  // Toplama ekranı yalnızca siparişteki stok kodlarına ait depo stoğunu kullanır
+  // (bkz. availableWarehouseStock kullanımları). Tüm depo stoğunu (binlerce kayıt)
+  // RSC sınırından serialize edip taşımak açılışı 20 sn+ yavaşlatıyordu; sipariş
+  // kalemlerinin kodlarını verip stoğu sunucu tarafında daraltmak payload'ı
+  // küçültür ve açılışı saniyeler seviyesine indirir.
+  orderStokKodlari?: string[] | null,
+): Promise<{
+  depoStok: DepoStokItem[];
+  productCodes: Record<string, any>[];
+  deviceGroups: Record<string, any>[];
+  hospitals: Record<string, any>[];
+}> {
+  if (!depotId) throw new Error('depotId required');
+  try {
+    const codeSet = orderStokKodlari && orderStokKodlari.length > 0
+      ? new Set(orderStokKodlari.filter(Boolean))
+      : null;
+    const normalized = normalizeCompanyId(companyId);
+    const depoStokSelectFields = [
+      'stokKodu', 'stokAdi', 'lotNumarasi', 'miad', 'seriNumarasi',
+      'rafAdresi', 'adet', 'isShipped', 'companyId', 'depotId',
+    ] as const;
+
+    // Build depoStok queries (depot filter + field projection)
+    const makeDepoStokQuery = (extraWhere?: [string, FirebaseFirestore.WhereFilterOp, string]) => {
+      let q = adminDb.collection('depoStok').where('depotId', '==', depotId);
+      if (extraWhere) q = q.where(extraWhere[0], extraWhere[1], extraWhere[2]);
+      return q.select(...depoStokSelectFields);
+    };
+
+    const [depoStokDocs, productCodeDocs, deviceGroupDocs, hospitalDocs] = await Promise.all([
+      // depoStok: depot-filtered, company/legacy scoped, with field projection
+      (async (): Promise<AdminDocSnap[]> => {
+        if (isSuperAdmin || normalized === '__legacy__') {
+          return (await makeDepoStokQuery().get()).docs as AdminDocSnap[];
+        }
+        const [cs, ls] = await Promise.all([
+          makeDepoStokQuery(['companyId', '==', normalized]).get(),
+          makeDepoStokQuery(['companyId', '==', '__legacy__']).get(),
+        ]);
+        const seen = new Set<string>();
+        const out: AdminDocSnap[] = [];
+        for (const snap of [cs, ls]) {
+          for (const d of snap.docs as AdminDocSnap[]) {
+            if (!seen.has(d.id)) { seen.add(d.id); out.push(d); }
+          }
+        }
+        return out;
+      })(),
+      adminScopedDocs('productCodes', companyId, isSuperAdmin),
+      // def_deviceGroups is a global collection — no company scoping
+      adminDb.collection('def_deviceGroups').get().then(s => s.docs as AdminDocSnap[]),
+      adminScopedDocs('hospitals', companyId, isSuperAdmin),
+    ]);
+
+    const depoStok: DepoStokItem[] = [];
+    depoStokDocs.forEach(d => {
+      const data = d.data() as Record<string, any>;
+      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      if (data.isShipped === true) return;
+      // Yalnızca siparişteki kalemlerin stoğunu döndür (payload'ı küçült).
+      if (codeSet && !codeSet.has(data.stokKodu)) return;
+      let miad = data.miad;
+      if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
+      depoStok.push({
+        id: d.id,
+        stokKodu: data.stokKodu ?? '',
+        stokAdi: data.stokAdi ?? '',
+        lotNumarasi: data.lotNumarasi,
+        miad: miad ?? '',
+        seriNumarasi: data.seriNumarasi,
+        rafAdresi: data.rafAdresi,
+        adet: data.adet,
+        isShipped: data.isShipped,
+        companyId: data.companyId,
+        depotId: data.depotId,
+      } as DepoStokItem);
+    });
+
+    return {
+      depoStok,
+      // serializeDoc deep-converts Admin Timestamp/GeoPoint/Ref instances into
+      // plain values so the payload can cross the server-action boundary.
+      productCodes: productCodeDocs
+        .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
+        .map(serializeDoc),
+      deviceGroups: deviceGroupDocs.map(serializeDoc),
+      hospitals: hospitalDocs
+        .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
+        .map(serializeDoc),
+    };
+  } catch (err) {
+    console.error('[getToplamaBootstrapData] Error for depot', depotId, ':', err);
+    throw err;
   }
 }
 
@@ -259,6 +598,8 @@ export interface GroupedStockRow {
   rafAdresi: string;
   quantity: number;
   itemIds: string[];
+  /** Brand from productCodes — used by the marka column filter. */
+  marka?: string;
   // Server-computed risk metadata (populated when minMaxRules are available).
   miadDays?: number;
   miadSeverity?: 'normal' | 'notice' | 'caution' | 'warning' | 'critical' | 'expired';
@@ -267,6 +608,8 @@ export interface GroupedStockRow {
   coverageLabel?: string;
   dailyNeed?: number;
   riskyBoxes?: number;
+  /** True when an active minMax rule says quantity is at or below the minimum. */
+  belowMin?: boolean;
 }
 
 export interface PaginatedStockResult {
@@ -280,10 +623,15 @@ export interface PaginatedStockResult {
   riskyBoxesTotal: number;
   /** Unique values per column – used for Excel-like column filters */
   columnValues: {
-    stokAdi: string[];
+    /** Stok Adı options carry the matching stokKodu so the filter UI can show
+     *  the product code and search by it. The `value` field is what the server
+     *  matches against `r.stokAdi` when the filter is applied. */
+    stokAdi: Array<{ value: string; code: string }>;
     lotNumarasi: string[];
     miad: string[];
     rafAdresi: string[];
+    /** Distinct brands present in the depot, used by the marka filter. */
+    marka: string[];
   };
 }
 
@@ -316,7 +664,7 @@ export async function getPaginatedDepotStock(params: {
   const emptyResult: PaginatedStockResult = {
     rows: [], totalRows: 0, totalPages: 0, currentPage: 1,
     riskyRowsCount: 0, riskyBoxesTotal: 0,
-    columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [] },
+    columnValues: { stokAdi: [], lotNumarasi: [], miad: [], rafAdresi: [], marka: [] },
   };
 
   if (!depotId) {
@@ -387,7 +735,7 @@ export async function getPaginatedDepotStock(params: {
     if (rule.stokKodu) minMaxRules[rule.stokKodu] = rule;
   });
 
-  const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string }>();
+  const productByCode = new Map<string, { anaBirim?: string; trackingMode?: string; defaultTrackingMode?: string; marka?: string }>();
   const lotTrackedStokCodes = new Set<string>();
   productsSnap.forEach((d) => {
     const data = d.data() as Record<string, any>;
@@ -416,16 +764,18 @@ export async function getPaginatedDepotStock(params: {
     }
     const key = `${item.stokKodu}-${lot}-${miad}`;
     if (!grouped[key]) {
+      const product = productByCode.get(item.stokKodu || '');
       grouped[key] = {
         key,
         stokKodu: item.stokKodu || '',
         stokAdi: item.stokAdi || '',
         lotNumarasi: lot,
         miad,
-        anaBirim: productByCode.get(item.stokKodu || '')?.anaBirim || 'Adet',
+        anaBirim: product?.anaBirim || 'Adet',
         rafAdresi: item.rafAdresi || '',
         quantity: 0,
         itemIds: [],
+        marka: product?.marka || '',
       };
     }
     const qty = (item.adet && typeof item.adet === 'number') ? item.adet : 1;
@@ -500,6 +850,9 @@ export async function getPaginatedDepotStock(params: {
       riskyBoxes = Math.max(0, Math.ceil(riskyDays * dailyNeed));
     }
 
+    // Below-min flag — drives the "Min. Stok" legend chip and slate row stripe.
+    const belowMin = !!(rule && rule.min !== undefined && row.quantity <= rule.min);
+
     return {
       ...row,
       miadDays: Number.isFinite(miadDays) ? miadDays : undefined,
@@ -509,6 +862,7 @@ export async function getPaginatedDepotStock(params: {
       coverageLabel,
       dailyNeed,
       riskyBoxes,
+      belowMin,
     };
   });
 
@@ -516,12 +870,28 @@ export async function getPaginatedDepotStock(params: {
   const riskyRowsCount = rows.reduce((acc, r) => acc + ((r.riskyBoxes ?? 0) > 0 ? 1 : 0), 0);
   const riskyBoxesTotal = rows.reduce((acc, r) => acc + (r.riskyBoxes ?? 0), 0);
 
-  // Collect unique column values BEFORE filtering (so filter dropdowns show all options)
-  const columnValues = {
-    stokAdi: [...new Set(rows.map(r => r.stokAdi))].sort(),
+  // Collect unique column values BEFORE filtering (so filter dropdowns show all options).
+  // For stokAdi we also collect the matching stokKodu(s) so the filter dropdown can
+  // show the product code beside the name and let users search by either.
+  const stokAdiToCodes = new Map<string, Set<string>>();
+  for (const r of rows) {
+    if (!r.stokAdi) continue;
+    if (!stokAdiToCodes.has(r.stokAdi)) stokAdiToCodes.set(r.stokAdi, new Set());
+    if (r.stokKodu) stokAdiToCodes.get(r.stokAdi)!.add(r.stokKodu);
+  }
+  const stokAdiOptions = Array.from(stokAdiToCodes.entries())
+    .map(([stokAdi, codes]) => ({
+      value: stokAdi,
+      code: Array.from(codes).sort().join(', '),
+    }))
+    .sort((a, b) => a.value.localeCompare(b.value, 'tr'));
+
+  const columnValues: PaginatedStockResult['columnValues'] = {
+    stokAdi: stokAdiOptions,
     lotNumarasi: [...new Set(rows.map(r => r.lotNumarasi).filter(Boolean))].sort(),
     miad: [...new Set(rows.map(r => r.miad).filter(Boolean))].sort(),
     rafAdresi: [...new Set(rows.map(r => r.rafAdresi).filter(Boolean))].sort(),
+    marka: [...new Set(rows.map(r => r.marka).filter((m): m is string => !!m))].sort((a, b) => a.localeCompare(b, 'tr')),
   };
 
   // Apply column filters
@@ -546,11 +916,18 @@ export async function getPaginatedDepotStock(params: {
     const bVal = (b as any)[sortField] ?? '';
 
     if (sortField === 'miad') {
-      const dateA = parse(String(aVal), 'dd.MM.yyyy', new Date());
-      const dateB = parse(String(bVal), 'dd.MM.yyyy', new Date());
-      if (isValid(dateA) && isValid(dateB)) {
-        return sortDirection === 'asc' ? compareAsc(dateA, dateB) : compareAsc(dateB, dateA);
-      }
+      const aStr = String(aVal).trim();
+      const bStr = String(bVal).trim();
+      const dateA = aStr ? parse(aStr, 'dd.MM.yyyy', new Date()) : null;
+      const dateB = bStr ? parse(bStr, 'dd.MM.yyyy', new Date()) : null;
+      const validA = !!dateA && isValid(dateA);
+      const validB = !!dateB && isValid(dateB);
+      // "Blanks last": rows with no parseable miad sink to the bottom
+      // regardless of sort direction, so the nearest expiries always lead.
+      if (!validA && !validB) return 0;
+      if (!validA) return 1;
+      if (!validB) return -1;
+      return sortDirection === 'asc' ? compareAsc(dateA!, dateB!) : compareAsc(dateB!, dateA!);
     }
 
     if (sortField === 'quantity') {
@@ -635,5 +1012,442 @@ export async function getExpiringProductsCount(
   } catch (error) {
     console.error('Error counting expiring products:', error);
     return 0;
+  }
+}
+
+// ─── Static master-data fetchers (Admin SDK — bypasses IndexedDB) ────────────
+
+/**
+ * Returns all active productCodes visible to the given user.
+ * Uses Admin SDK to bypass the Firestore web SDK's IndexedDB persistence layer,
+ * cutting first-load time from 5–15 s to ~1 s.
+ */
+export async function getProductCodesAction(
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+): Promise<Record<string, any>[]> {
+  const docs = await adminScopedDocs('productCodes', companyId, isSuperAdmin);
+  return docs
+    .filter(d => matchesCompanyScope(d.data(), companyId, isSuperAdmin))
+    .map(serializeDoc);
+}
+
+/**
+ * Returns all active barcodeFormats visible to the given user.
+ * Uses Admin SDK to bypass IndexedDB, same as getProductCodesAction.
+ */
+export async function getBarcodeFormatsAction(
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+): Promise<Record<string, any>[]> {
+  const docs = await adminScopedDocs('barcodeFormats', companyId, isSuperAdmin);
+  return docs
+    .filter(d => {
+      const data = d.data();
+      return (data.active !== false) && matchesCompanyScope(data, companyId, isSuperAdmin);
+    })
+    .map(serializeDoc);
+}
+
+/** Cursor for archived-order pagination — a single time boundary (millis). */
+/** Cursor for archived-order pagination — a single time boundary (millis). */
+export type ArchivedOrdersCursor = { ms: number } | null;
+
+/** Filters for getArchivedOrders */
+export interface ArchivedOrdersFilters {
+  searchTerm?: string | null;
+  /** JS Date or ISO string — orders AT OR AFTER this date (archivedAt). */
+  dateFrom?: Date | string | null;
+  /** JS Date or ISO string — orders AT OR BEFORE this date (archivedAt). End of day is assumed. */
+  dateTo?: Date | string | null;
+  /** Substring match on kurumAdi (laboratory name). */
+  kurumAdi?: string | null;
+}
+
+/** Best-available completion timestamp (millis) for an order/archive doc. */
+function archivedDocMillis(data: Record<string, any>): number {
+  const pick = (v: any) => (v && typeof v.toMillis === 'function' ? v.toMillis() : (v instanceof Date ? v.getTime() : 0));
+  return pick(data?.archivedAt) || pick(data?.transferredAt) || pick(data?.completedAt) || pick(data?.createdAt) || pick(data?.timestamp) || 0;
+}
+
+/**
+ * Project an order/archive doc to a lightweight LIST summary.
+ *
+ * The heavy `items` array (the order detail) is NOT shipped to the client — the
+ * list only needs counts. Kalem/adet are computed server-side, then `items` is
+ * dropped. The detail screen re-reads the full doc by id when the user opens a
+ * specific order, so detail data is never downloaded until then.
+ */
+function summarizeArchivedDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+  const data = d.data();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const kalemCount = items.length;
+  const adetCount = items.reduce(
+    (s: number, i: any) => s + (Number(i?.adet ?? i?.quantity ?? 0) || 0),
+    0,
+  );
+  const { items: _omitItems, ...rest } = data;
+  return serializeFirestoreValue({ id: d.id, ...rest, kalemCount, adetCount });
+}
+
+/**
+ * Completed-order history for a depot, with TRUE server-side cursor pagination.
+ *
+ * Source of truth = `ordersArchive` (completed orders are moved here, newest
+ * first via `archivedAt`). Pre-archive completed orders that still live in
+ * `orders` (status == 'completed') are unioned in as a bounded supplement, so
+ * the full history shows even before a backfill. Because archived orders are
+ * strictly newer than those leftovers, the archive is paged first (indexed,
+ * only `pageSize` docs fetched) and the leftovers are read only once the
+ * archive is exhausted — keeping reads proportional to what is displayed.
+ *
+ * Supports date-range filters on archivedAt (applied server-side for the
+ * archive, in-memory for leftovers) and optional lab-name (kurumAdi) substring
+ * filter combined with the text search.
+ *
+ * Returns lightweight summaries (no `items`); the cursor is a single time
+ * boundary so "Daha Fazla Yükle" just passes back `nextCursor`.
+ */
+export async function getArchivedOrders(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+  pageSize: number = 20,
+  cursor?: ArchivedOrdersCursor,
+  filters?: ArchivedOrdersFilters | null,
+): Promise<{ orders: Record<string, any>[]; nextCursor: ArchivedOrdersCursor; hasMore: boolean }> {
+  if (!depotId) return { orders: [], nextCursor: null, hasMore: false };
+  const boundaryMs = cursor && Number.isFinite(cursor.ms) ? cursor.ms : Number.POSITIVE_INFINITY;
+  const isComplete = (data: Record<string, any>) => data?.status !== 'eksik';
+
+  const term = (filters?.searchTerm ?? '').trim().toLocaleLowerCase('tr');
+  const labTerm = (filters?.kurumAdi ?? '').trim().toLocaleLowerCase('tr');
+
+  // Resolve date boundaries (start-of-day from, end-of-day to).
+  const resolveDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const fromDate = resolveDate(filters?.dateFrom ?? null);
+  const toDate = resolveDate(filters?.dateTo ?? null);
+  if (toDate) {
+    // Treat dateTo as inclusive end-of-day in local time.
+    toDate.setHours(23, 59, 59, 999);
+  }
+  const fromMs = fromDate ? fromDate.getTime() : 0;
+  const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
+
+  type Cand = { doc: FirebaseFirestore.QueryDocumentSnapshot; ms: number };
+
+  const passesDateFilter = (ms: number) =>
+    (fromMs === 0 || ms >= fromMs) && (toMs === Number.POSITIVE_INFINITY || ms <= toMs);
+
+  const passesTextFilters = (data: Record<string, any>) => {
+    if (!isComplete(data)) return false;
+    if (term) {
+      const hay = `${data.kurumAdi ?? ''} ${data.createdBy ?? ''} ${data.transferredBy ?? ''}`.toLocaleLowerCase('tr');
+      if (!hay.includes(term)) return false;
+    }
+    if (labTerm) {
+      const labHay = (data.kurumAdi ?? '').toLocaleLowerCase('tr');
+      if (!labHay.includes(labTerm)) return false;
+    }
+    return true;
+  };
+
+  // Leftover completed orders still living in `orders` (pre-archive). Bounded
+  // read: filter status server-side when the composite index exists, else fall
+  // back to a depot-only read + in-memory status filter.
+  const fetchLeftoverCompleted = async (): Promise<Cand[]> => {
+    const base = adminDb.collection('orders').where('depotId', '==', depotId);
+    let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      docs = (await base.where('status', '==', 'completed').limit(1000).get())
+        .docs as FirebaseFirestore.QueryDocumentSnapshot[];
+    } catch {
+      docs = ((await base.limit(1000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .filter(d => d.data().status === 'completed');
+    }
+    return docs
+      .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }))
+      .filter(c => passesDateFilter(c.ms));
+  };
+
+  const hasFilters = !!(term || labTerm || fromDate || toDate);
+
+  try {
+    let archiveColl: FirebaseFirestore.Query = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
+
+    // Apply Firestore-side date range to the archive query when filters are set.
+    // This keeps the scanned set small before the in-memory text filter runs.
+    if (fromDate) archiveColl = archiveColl.where('archivedAt', '>=', fromDate);
+    if (toDate) archiveColl = archiveColl.where('archivedAt', '<=', toDate);
+
+    // When any filter is active (text, lab, or date), scan a capped window of
+    // BOTH sources, filter in memory, then page by cursor. This is the same
+    // approach as the text-search path — avoids the Firestore offset restriction
+    // while keeping the fetch bounded (SCAN_CAP docs max).
+    if (hasFilters) {
+      const SCAN_CAP = 1000;
+      let archiveDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+      try {
+        archiveDocs = (await archiveColl.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get()).docs as any;
+      } catch {
+        archiveDocs = (await archiveColl.limit(SCAN_CAP).get()).docs as any;
+      }
+      const leftover = await fetchLeftoverCompleted();
+      const seen = new Set<string>();
+      const all: Cand[] = [];
+      for (const d of archiveDocs) {
+        if (!seen.has(d.id)) { seen.add(d.id); all.push({ doc: d, ms: archivedDocMillis(d.data()) }); }
+      }
+      for (const c of leftover) {
+        if (!seen.has(c.doc.id)) { seen.add(c.doc.id); all.push(c); }
+      }
+      const matched = all
+        .filter(c => passesTextFilters(c.doc.data()))
+        .sort((a, b) => b.ms - a.ms);
+      const after = matched.filter(c => c.ms < boundaryMs);
+      const page = after.slice(0, pageSize);
+      return {
+        orders: page.map(c => summarizeArchivedDoc(c.doc)),
+        nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+        hasMore: after.length > pageSize,
+      };
+    }
+
+    // No filters: cursor pagination over archive first, then leftovers.
+    let archivePage: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      let q = archiveColl.orderBy('archivedAt', 'desc');
+      // Admin SDK, Timestamp alani icin JS Date'i kabul eder.
+      if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
+      archivePage = (await q.limit(pageSize + 1).get()).docs as any;
+    } catch {
+      // Composite index missing — read a capped window and page in memory.
+      const all = ((await archiveColl.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }))
+        .filter(c => c.ms < boundaryMs)
+        .sort((a, b) => b.ms - a.ms);
+      archivePage = all.slice(0, pageSize + 1).map(c => c.doc);
+    }
+
+    const candidates: Cand[] = archivePage
+      .filter(d => isComplete(d.data()))
+      .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }));
+    const archiveHasMore = archivePage.length > pageSize;
+
+    // Only reach for the (older) leftover orders once the archive page is not
+    // full — i.e. at the tail of the archive — so mid-archive pages stay a
+    // single indexed read of `pageSize` docs.
+    if (!archiveHasMore) {
+      const seen = new Set(candidates.map(c => c.doc.id));
+      const leftover = await fetchLeftoverCompleted();
+      for (const c of leftover) {
+        if (c.ms < boundaryMs && !seen.has(c.doc.id)) { seen.add(c.doc.id); candidates.push(c); }
+      }
+    }
+
+    candidates.sort((a, b) => b.ms - a.ms);
+    const page = candidates.slice(0, pageSize);
+    const hasMore = archiveHasMore || candidates.length > pageSize;
+    return {
+      orders: page.map(c => summarizeArchivedDoc(c.doc)),
+      nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+      hasMore,
+    };
+  } catch (err) {
+    console.error('getArchivedOrders error:', err);
+    return { orders: [], nextCursor: null, hasMore: false };
+  }
+}
+
+
+// ─── Tamamlanan sipariş geçmişi: SHIPMENTS tabanlı (tam geçmiş) ───────────────
+// `ordersArchive` yalnızca arşiv özelliği sonrası tamamlananları tutar (seyrek).
+// Her tamamlama bir `shipments` kaydı oluşturur; tam geçmiş buradadır. Eski
+// "Sipariş Geçmişi" paneli de bu koleksiyonu okurdu.
+
+export interface CompletedShipmentFilters {
+  /** JS Date or ISO string — AT OR AFTER (timestamp). */
+  dateFrom?: Date | string | null;
+  /** JS Date or ISO string — AT OR BEFORE (timestamp), gün sonuna tamamlanır. */
+  dateTo?: Date | string | null;
+  /** Laboratuvar (recipientHospital) tam eşleşme — seçici için. */
+  recipientHospital?: string | null;
+  /** recipientHospital / userName üzerinde substring araması. */
+  searchTerm?: string | null;
+}
+
+/** Bir shipment dokümanını hafif kart özetine indirger (items detayı taşınmaz). */
+function summarizeShipmentDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+  const data = d.data();
+  const items = Array.isArray(data.items) ? data.items : [];
+  const kalemCount = items.length;
+  const adetCount = items.reduce(
+    (s: number, i: any) => s + (Number(i?.quantity ?? i?.adet ?? 0) || 0),
+    0,
+  );
+  const ts = data.timestamp;
+  const tsDate = ts && typeof ts.toDate === 'function' ? ts.toDate() : (ts instanceof Date ? ts : null);
+  return serializeFirestoreValue({
+    id: d.id,
+    kurumAdi: data.recipientHospital ?? '',
+    createdBy: data.userName ?? '',
+    transferredBy: data.userName ?? '',
+    createdAt: tsDate,
+    transferredAt: tsDate,
+    status: 'completed',
+    depotId: data.depotId ?? '',
+    orderId: data.orderId ?? '',
+    kalemCount,
+    adetCount,
+    __shipment: true,
+  });
+}
+
+function shipmentMillis(data: Record<string, any>): number {
+  const ts = data?.timestamp;
+  if (ts && typeof ts.toMillis === 'function') return ts.toMillis();
+  if (ts instanceof Date) return ts.getTime();
+  return 0;
+}
+
+/**
+ * Tamamlanan sipariş geçmişi — `shipments` koleksiyonundan, gerçek server-side
+ * cursor sayfalama ile. Tarih aralığı (timestamp) ve laboratuvar (recipientHospital)
+ * filtreleri sunucu tarafında uygulanır; yalnızca `pageSize` kayıt çekilir ve
+ * items detayı istemciye taşınmaz.
+ */
+export async function getCompletedShipments(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+  pageSize: number = 20,
+  cursor?: { ms: number } | null,
+  filters?: CompletedShipmentFilters | null,
+): Promise<{ shipments: Record<string, any>[]; nextCursor: { ms: number } | null; hasMore: boolean }> {
+  if (!depotId) return { shipments: [], nextCursor: null, hasMore: false };
+  const boundaryMs = cursor && Number.isFinite(cursor.ms) ? cursor.ms : Number.POSITIVE_INFINITY;
+
+  const resolveDate = (v: Date | string | null | undefined): Date | null => {
+    if (!v) return null;
+    const d = v instanceof Date ? v : new Date(v);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const fromDate = resolveDate(filters?.dateFrom ?? null);
+  const toDate = resolveDate(filters?.dateTo ?? null);
+  if (toDate) toDate.setHours(23, 59, 59, 999);
+  const fromMs = fromDate ? fromDate.getTime() : 0;
+  const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
+
+  const lab = (filters?.recipientHospital ?? '').trim();
+  const term = (filters?.searchTerm ?? '').trim().toLocaleLowerCase('tr');
+
+  const passesDate = (ms: number) =>
+    (fromMs === 0 || ms >= fromMs) && (toMs === Number.POSITIVE_INFINITY || ms <= toMs);
+  const passesSearch = (data: Record<string, any>) => {
+    if (!term) return true;
+    const hay = `${data.recipientHospital ?? ''} ${data.userName ?? ''}`.toLocaleLowerCase('tr');
+    return hay.includes(term);
+  };
+
+  // Serbest-metin arama Firestore'da substring desteklemediği için TEK tarama
+  // gerektiren filtredir. Lab (eşitlik) ve tarih (aralık) filtreleri gerçek
+  // cursor sayfalamayla yapılabilir → her sayfada yalnızca pageSize kayıt çekilir
+  // ve "tüm geçmiş" 1500'lük bir cap'e takılmaz.
+  const needsScan = !!term;
+
+  try {
+    if (needsScan) {
+      // Arama: eşitlik filtreleriyle (depotId + lab) sınırlı geniş pencere tara,
+      // tarih/arama/cursor'ı bellekte uygula.
+      let scanBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      if (lab) scanBase = scanBase.where('recipientHospital', '==', lab);
+      const SCAN_CAP = 1500;
+      let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+      try {
+        docs = (await scanBase.orderBy('timestamp', 'desc').limit(SCAN_CAP).get()).docs as any;
+      } catch {
+        docs = (await scanBase.limit(SCAN_CAP).get()).docs as any;
+      }
+      const all = (docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
+        .filter(c => passesDate(c.ms) && passesSearch(c.doc.data()))
+        .sort((a, b) => b.ms - a.ms);
+      const after = all.filter(c => c.ms < boundaryMs);
+      const page = after.slice(0, pageSize);
+      return {
+        shipments: page.map(c => summarizeShipmentDoc(c.doc)),
+        nextCursor: page.length ? { ms: page[page.length - 1].ms } : null,
+        hasMore: after.length > pageSize,
+      };
+    }
+
+    // Filtresiz VEYA yalnızca lab/tarih: gerçek cursor sayfalama.
+    // base = depotId [+ recipientHospital==lab] [+ timestamp aralığı]
+    let base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+    if (lab) base = base.where('recipientHospital', '==', lab);
+    if (fromDate) base = base.where('timestamp', '>=', fromDate);
+    if (toDate) base = base.where('timestamp', '<=', toDate);
+
+    let pageDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+    try {
+      let q = base.orderBy('timestamp', 'desc');
+      if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
+      pageDocs = (await q.limit(pageSize + 1).get()).docs as any;
+    } catch {
+      // Bileşik indeks yoksa: yalnızca eşitlik filtreleriyle pencere çekip
+      // tarih + cursor'ı bellekte uygula (range+orderBy indeksi gerektirmez).
+      let eqBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      if (lab) eqBase = eqBase.where('recipientHospital', '==', lab);
+      const all = ((await eqBase.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+        .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
+        .filter(c => passesDate(c.ms) && c.ms < boundaryMs)
+        .sort((a, b) => b.ms - a.ms);
+      pageDocs = all.slice(0, pageSize + 1).map(c => c.doc);
+    }
+
+    const hasMore = pageDocs.length > pageSize;
+    const page = pageDocs.slice(0, pageSize);
+    const lastMs = page.length ? shipmentMillis(page[page.length - 1].data()) : null;
+    return {
+      shipments: page.map(d => summarizeShipmentDoc(d)),
+      nextCursor: lastMs != null ? { ms: lastMs } : null,
+      hasMore,
+    };
+  } catch (err) {
+    console.error('getCompletedShipments error:', err);
+    return { shipments: [], nextCursor: null, hasMore: false };
+  }
+}
+
+/**
+ * Bir deponun sevkiyat geçmişindeki ayrık laboratuvar (recipientHospital)
+ * adlarını döndürür — Tamamlanan sekmesindeki laboratuvar seçici için.
+ */
+export async function getShipmentLabs(
+  depotId: string,
+  companyId: string | null | undefined,
+  isSuperAdmin: boolean,
+): Promise<string[]> {
+  if (!depotId) return [];
+  try {
+    const snap = await adminDb
+      .collection('shipments')
+      .where('depotId', '==', depotId)
+      .select('recipientHospital')
+      .limit(5000)
+      .get();
+    const set = new Set<string>();
+    snap.forEach(d => {
+      const name = (d.data() as any)?.recipientHospital;
+      if (name && typeof name === 'string') set.add(name);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'tr'));
+  } catch (err) {
+    console.error('getShipmentLabs error:', err);
+    return [];
   }
 }

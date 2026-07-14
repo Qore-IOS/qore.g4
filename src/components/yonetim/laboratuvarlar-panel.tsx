@@ -2,10 +2,11 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem, EfficiencyPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc, where } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, Network, Plus, X, FlaskConical, Users, Star, FileSpreadsheet, BarChart3, ListOrdered, Mail, Upload, Download, CheckCircle2, AlertCircle, Search, ChevronUp, ChevronDown, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -24,7 +25,9 @@ import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { useHospitals, useProductCodes, useAddressDefinitions, useLabPools, useEfficiencyPools, useDepots } from '@/hooks/useFirebaseQueries';
 
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -36,11 +39,25 @@ const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
 export default function LaboratuvarPanel() {
   const { toast } = useToast();
   const { currentCompanyId, isSuperAdmin, currentUserProfile } = useAuth();
-  const [hospitals, setHospitals] = useState<Hospital[]>([]);
-  const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
-  const [addressDefinitions, setAddressDefinitions] = useState<AddressDefinition[]>([]);
-  const [depoStok, setDepoStok] = useState<DepoStokItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: hospitals = [], isLoading: isLoadingHospitals, refetch: refetchHospitals } = useHospitals();
+  const { data: productCodes = [], isLoading: isLoadingProducts, refetch: refetchProducts } = useProductCodes();
+  const { data: addressDefinitions = [], isLoading: isLoadingAddress, refetch: refetchAddress } = useAddressDefinitions();
+  const { data: depots = [], isLoading: isLoadingDepots, refetch: refetchDepots } = useDepots();
+  const { data: labPools = [], isLoading: isLoadingLabPools, refetch: refetchLabPools } = useLabPools();
+  const { data: efficiencyPools = [], isLoading: isLoadingEfficiencyPools, refetch: refetchEfficiencyPools } = useEfficiencyPools();
+
+  const handleRefreshData = () => {
+    refetchHospitals();
+    refetchProducts();
+    refetchAddress();
+    refetchDepots();
+    refetchLabPools();
+    refetchEfficiencyPools();
+  };
+
+  // Kaydet/sil gibi mutasyonlar için yerel meşguliyet durumu (sorgu yüklenmesinden bağımsız).
+  const [isMutating, setIsMutating] = useState(false);
+  const isLoading = isLoadingHospitals || isLoadingProducts || isLoadingAddress || isLoadingDepots || isLoadingLabPools || isLoadingEfficiencyPools || isMutating;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentHospital, setCurrentHospital] = useState<Partial<Hospital>>({});
   const [responsibleEmailsInput, setResponsibleEmailsInput] = useState('');
@@ -60,15 +77,12 @@ export default function LaboratuvarPanel() {
 
   const [isPoolModalOpen, setIsPoolModalOpen] = useState(false);
   const [isMapEditorOpen, setIsMapEditorOpen] = useState(false);
-  
-  const [labPools, setLabPools] = useState<LabPool[]>([]);
   const [isPoolListModalOpen, setIsPoolListModalOpen] = useState(false);
   const [poolDetailsModal, setPoolDetailsModal] = useState<{ open: boolean; pool: LabPool | null }>({ open: false, pool: null });
-
+  
   // Verimlilik Havuzu State
   const [isEfficiencyPoolModalOpen, setIsEfficiencyPoolModalOpen] = useState(false);
   const [isEfficiencyPoolListOpen, setIsEfficiencyPoolListOpen] = useState(false);
-  const [efficiencyPools, setEfficiencyPools] = useState<EfficiencyPool[]>([]);
   const [efficiencyPoolDetailsModal, setEfficiencyPoolDetailsModal] = useState<{ open: boolean; pool: EfficiencyPool | null }>({ open: false, pool: null });
 
   // Özel Sıralama Modal State
@@ -109,34 +123,7 @@ export default function LaboratuvarPanel() {
   };
 
 
-  const fetchHospitalsAndProducts = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const [hSnap, pSnap, addrSnap, poolsSnap, stokSnap, effPoolsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(query(collection(db, 'labPools'), orderBy('createdAt', 'desc'))),
-        getDocs(collection(db, 'depoStok')),
-        getDocs(query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))),
-      ]);
-      setHospitals(filterByCompanyScope(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
-      setProductCodes(pSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setAddressDefinitions(filterByCompanyScope(addrSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
-      setLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as LabPool)), currentCompanyId, isSuperAdmin));
-      setDepoStok(filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin));
-      setEfficiencyPools(filterByCompanyScope(effPoolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool)), currentCompanyId, isSuperAdmin));
 
-    } catch (e) {
-      toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [toast, currentCompanyId, isSuperAdmin]);
-
-  useEffect(() => {
-    fetchHospitalsAndProducts();
-  }, [fetchHospitalsAndProducts]);
 
   const filteredHospitals = useMemo(() => {
     if (!searchQuery) return hospitals;
@@ -227,13 +214,14 @@ export default function LaboratuvarPanel() {
       return;
     }
     
-    setIsLoading(true);
+    setIsMutating(true);
     try {
       const responsibleEmails = parseResponsibleEmails(responsibleEmailsInput);
       const dataToSave: Partial<Hospital> = {
         name: currentHospital.name.trim(),
         kod: (currentHospital.kod || '').trim().toUpperCase(),
         ceomedCariKodu: (currentHospital.ceomedCariKodu || '').trim().toUpperCase() || null,
+        mahalKodu: (currentHospital.mahalKodu || '').trim().toUpperCase() || null,
         ekHizmetLabIds: currentHospital.ekHizmetLabIds || [],
         sevkAdresi: (currentHospital.sevkAdresi || '').trim() || null,
         address: currentHospital.address || '',
@@ -245,7 +233,12 @@ export default function LaboratuvarPanel() {
         visualDeductionEnabled: (currentHospital.manualDeductionEnabled ?? false) ? (currentHospital.visualDeductionEnabled ?? false) : false,
         fefoEnabled: currentHospital.fefoEnabled ?? true,
         perifer: currentHospital.perifer ?? false,
+        defaultDepotId: currentHospital.defaultDepotId || null,
+        defaultDepotName: currentHospital.defaultDepotId ? (depots.find(d => d.id === currentHospital.defaultDepotId)?.name || null) : null,
+        acilStatusu: (currentHospital as any).acilStatusu ?? false,
+        calismaSaatleri: (currentHospital as any).acilStatusu ? null : ((currentHospital as any).calismaSaatleri || null),
         autoTutanak: (currentHospital as any).autoTutanak ?? false,
+        orderLimitEnabled: currentHospital.orderLimitEnabled ?? false,
         sorumluEmails: responsibleEmails,
         sorumluEmail: responsibleEmails[0] || '',
         updatedAt: new Date(),
@@ -274,7 +267,7 @@ export default function LaboratuvarPanel() {
         toast({ title: 'Başarılı', description: 'Laboratuvar ve alt tüketim noktaları oluşturuldu.' });
       }
       
-      fetchHospitalsAndProducts();
+      handleRefreshData();
       setIsModalOpen(false);
       setCurrentHospital({});
       setResponsibleEmailsInput('');
@@ -283,7 +276,7 @@ export default function LaboratuvarPanel() {
     } catch (error) {
       toast({ title: 'Hata', description: 'Kayıt sırasında bir sorun oluştu.', variant: 'destructive' });
     } finally {
-      setIsLoading(false);
+      setIsMutating(false);
     }
   };
 
@@ -291,7 +284,7 @@ export default function LaboratuvarPanel() {
     if (confirm('Bu laboratuvarı silmek istediğinizden emin misiniz?')) {
       await deleteDoc(doc(db, 'hospitals', id));
       toast({ title: 'Silindi', description: 'Laboratuvar silindi.', variant: 'destructive' });
-      fetchHospitalsAndProducts();
+      handleRefreshData();
     }
   };
 
@@ -347,71 +340,83 @@ export default function LaboratuvarPanel() {
   };
   
   const handleSetMainLab = async (pool: LabPool, mainLabId: string) => {
-    setIsLoading(true);
+    setIsMutating(true);
     try {
         await updateDoc(doc(db, 'labPools', pool.id), { mainLabId });
         setPoolDetailsModal({ open: true, pool: { ...pool, mainLabId }});
-        fetchHospitalsAndProducts(); // Refresh list to show change immediately
+        handleRefreshData(); // Refresh list to show change immediately
         toast({ title: "Başarılı", description: "Ana laboratuvar güncellendi." });
     } catch (e) {
         toast({ title: 'Hata', description: 'Ana laboratuvar güncellenemedi.', variant: 'destructive' });
     } finally {
-        setIsLoading(false);
+        setIsMutating(false);
     }
   };
 
   const handleDeleteEfficiencyPool = async (poolId: string) => {
     if (confirm('Bu verimlilik havuzunu silmek istediğinizden emin misiniz?')) {
-      setIsLoading(true);
+      setIsMutating(true);
       try {
         await deleteDoc(doc(db, 'efficiencyPools', poolId));
         toast({ title: 'Silindi', description: 'Verimlilik havuzu silindi.' });
         setEfficiencyPoolDetailsModal({ open: false, pool: null });
-        fetchHospitalsAndProducts();
+        handleRefreshData();
       } catch (error) {
         toast({ title: 'Hata', description: 'Havuz silinemedi.', variant: 'destructive' });
       } finally {
-        setIsLoading(false);
+        setIsMutating(false);
       }
     }
   };
 
   const handlePoolStockExport = async (pool: LabPool | null) => {
     if (!pool) return;
-    const labNamesInPool = new Set(
-      hospitals
-        .filter(h => pool.memberIds.includes(h.id))
-        .map(h => h.name)
-    );
+    
+    // We shouldn't use a global state to track local loading for this button to avoid page freezing UI
+    const loadingToast = toast({ title: 'Rapor Hazırlanıyor', description: 'Stok verileri çekiliyor...', duration: 5000 });
+    
+    try {
+      const labNamesInPool = new Set(
+        hospitals
+          .filter(h => pool.memberIds.includes(h.id))
+          .map(h => h.name)
+      );
 
-    const stockInPool = depoStok.filter(
-      item => item.isShipped && item.hedefKurum && labNamesInPool.has(item.hedefKurum)
-    );
+      // Sadece sevk edilmiş stoğu anlık çekiyoruz
+      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
+      const allShippedStock = filterByCompanyScope(stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin);
 
-    const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+      const stockInPool = allShippedStock.filter(
+        item => item.hedefKurum && labNamesInPool.has(item.hedefKurum)
+      );
 
-    stockInPool.forEach(item => {
-      if (!stockSummary[item.stokKodu]) {
-        stockSummary[item.stokKodu] = {
-          stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
-          quantity: 0
-        };
+      const stockSummary: Record<string, { stokAdi: string, quantity: number }> = {};
+
+      stockInPool.forEach(item => {
+        if (!stockSummary[item.stokKodu]) {
+          stockSummary[item.stokKodu] = {
+            stokAdi: productCodes.find(p => p.stokKodu === item.stokKodu)?.stokAdi || item.stokAdi,
+            quantity: 0
+          };
+        }
+        stockSummary[item.stokKodu].quantity += 1;
+      });
+
+      const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
+        'Stok Kodu': stokKodu,
+        'Stok Adı': data.stokAdi,
+        'Toplam Adet': data.quantity
+      })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
+
+      if (dataToExport.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
+        return;
       }
-      stockSummary[item.stokKodu].quantity += 1;
-    });
 
-    const dataToExport = Object.entries(stockSummary).map(([stokKodu, data]) => ({
-      'Stok Kodu': stokKodu,
-      'Stok Adı': data.stokAdi,
-      'Toplam Adet': data.quantity
-    })).sort((a,b) => a['Stok Adı'].localeCompare(b['Stok Adı']));
-
-    if (dataToExport.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Bu havuz için dışa aktarılacak stok verisi bulunamadı.', variant: 'default' });
-      return;
+      exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
+    } catch (e) {
+      toast({ title: 'Hata', description: 'Stok raporu alınırken bir hata oluştu.', variant: 'destructive' });
     }
-
-    exportDataToExcel(dataToExport, `Havuz_Stok_Raporu_${pool.name}`, "HavuzStok", toast);
   };
 
   const handleExcelFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -436,6 +441,9 @@ export default function LaboratuvarPanel() {
         manualDeductionEnabled: parseExcelBoolean(row['Manuel Düşüm'] ?? row['manualDeductionEnabled'], false),
         isConsumablesHospital: parseExcelBoolean(row['Hastane Sarf'] ?? row['isConsumablesHospital'], false),
         autoTutanak: parseExcelBoolean(row['Otomatik Tutanak'] ?? row['autoTutanak'], false),
+        // Hastane Sarf statüsündeki lablar mahal kodu, diğerleri Ceomed cari kodu kullanır.
+        mahalKodu: (row['Mahal Kodu'] || row['mahalKodu'] || '').toString().trim().toUpperCase(),
+        ceomedCariKodu: (row['Cari Kodu'] || row['Ceomed Cari Kodu'] || row['ceomedCariKodu'] || '').toString().trim().toUpperCase(),
       }));
 
       const validRows = mapped.filter((r: any) => r.name);
@@ -500,6 +508,9 @@ export default function LaboratuvarPanel() {
           manualDeductionEnabled: row.manualDeductionEnabled,
           isConsumablesHospital: row.isConsumablesHospital,
           autoTutanak: row.autoTutanak,
+          // Form ile aynı kural: Hastane Sarf statüsünde mahal kodu, diğerlerinde cari kodu geçerlidir.
+          mahalKodu: (row.isConsumablesHospital ? row.mahalKodu : '') || null,
+          ceomedCariKodu: (!row.isConsumablesHospital ? row.ceomedCariKodu : '') || null,
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -519,7 +530,7 @@ export default function LaboratuvarPanel() {
 
     if (success > 0) {
       toast({ title: 'İçe Aktarma Tamamlandı', description: `${success} laboratuvar başarıyla eklendi.` });
-      fetchHospitalsAndProducts();
+      handleRefreshData();
     }
   };
 
@@ -535,17 +546,21 @@ export default function LaboratuvarPanel() {
         'Manuel Düşüm': 'Hayır',
         'Hastane Sarf': 'Hayır',
         'Otomatik Tutanak': 'Hayır',
+        'Cari Kodu': 'M51001',
+        'Mahal Kodu': '',
       },
       {
-        'Laboratuvar Adı': 'Örnek Laboratuvar 2',
-        'Kod': 'OL2',
+        'Laboratuvar Adı': 'Örnek Sarf Polikliniği',
+        'Kod': 'OS1',
         'Adres': '',
         'E-posta': '',
         'Tüketim Takibi': 'Evet',
         'FEFO': 'Evet',
         'Manuel Düşüm': 'Hayır',
-        'Hastane Sarf': 'Hayır',
+        'Hastane Sarf': 'Evet',
         'Otomatik Tutanak': 'Hayır',
+        'Cari Kodu': '',
+        'Mahal Kodu': '152.06.A.001',
       },
     ];
     exportDataToExcel(templateData, 'Laboratuvar_Sablonu', 'Laboratuvarlar', toast);
@@ -569,18 +584,20 @@ export default function LaboratuvarPanel() {
   };
 
   return (
-    <div className="dashboard-neu-page p-3 sm:p-4 md:p-4 space-y-4 sm:space-y-6 pt-6 sm:pt-8 min-h-screen">
-      <div className="space-y-4">
-        <BackButton fallback="/yonetim" />
-        <Card className="cihaz-card shadow-lg">
-          <CardHeader className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div>
-              <CardTitle className="text-xl font-headline flex items-center text-slate-800 dark:text-slate-100">
-                <FlaskConical className="mr-2 h-6 w-6 text-green-500" />
-                Laboratuvar Yönetimi
-              </CardTitle>
-              <CardDescription>Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin.</CardDescription>
+    <YonetimShell>
+      <YonetimHeader
+        title="Laboratuvar Yönetimi"
+        description="Yeni laboratuvarlar ekleyin veya mevcutları düzenleyin."
+        backHref="/yonetim/tanimlar"
+      />
+      <YonetimCard>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 800, color: 'var(--mg-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <FlaskConical className="inline-block mr-2 h-4 w-4 text-emerald-500" />
+              Kayıtlar
             </div>
+          </div>
             <div className="flex flex-wrap items-center gap-2">
               <Button className="cihaz-action-tile text-xs" variant="outline" onClick={() => setIsEfficiencyPoolListOpen(true)} size="sm" disabled={isLoading}>
                 <BarChart3 className="mr-2 h-4 w-4" />
@@ -616,9 +633,10 @@ export default function LaboratuvarPanel() {
                 Yeni Laboratuvar
               </Button>
             </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center gap-2 max-w-sm">
+        </div>
+
+        <div className="space-y-4 pt-2">
+          <div className="flex items-center gap-2 max-w-sm">
                 <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -676,7 +694,7 @@ export default function LaboratuvarPanel() {
                             {h.sorumluEmails && h.sorumluEmails.length > 1 && ` (+${h.sorumluEmails.length - 1})`}
                         </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title="Min-Max Ayarları"><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
+                          <Button variant="ghost" size="icon" onClick={() => openMinMaxPanel(h)} title={h.isConsumablesHospital ? 'Otomatik Transfer Listesi' : 'Min-Max Ayarları'}><SlidersHorizontal className="h-4 w-4 text-primary" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => { setProductOrderTarget(h); setIsProductOrderModalOpen(true); }} title="Özel Sıralama"><ListOrdered className="h-4 w-4 text-amber-500" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => openModal(h)} title="Düzenle"><Edit3 className="h-4 w-4 text-muted-foreground group-hover:text-foreground" /></Button>
                           <Button variant="ghost" size="icon" onClick={() => handleDelete(h.id!)} title="Sil"><Trash2 className="h-4 w-4 text-destructive/70 group-hover:text-destructive" /></Button>
@@ -734,9 +752,8 @@ export default function LaboratuvarPanel() {
               </div>
               </>
             )}
-          </CardContent>
-        </Card>
-      </div>
+        </div>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
         <DialogContent className="max-w-3xl">
@@ -792,6 +809,72 @@ export default function LaboratuvarPanel() {
               </div>
 
               <div className="space-y-4">
+                {/* Çalışma Saatleri + Acil Statüsü — kapasite/atıl maliyet hesabı için */}
+                <div className="rounded-md border p-3 space-y-3">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="acil-status-switch"
+                      checked={!!(currentHospital as any).acilStatusu}
+                      onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, acilStatusu: checked })}
+                    />
+                    <Label htmlFor="acil-status-switch">
+                      Acil Statüsü (7/24)
+                      <p className="text-xs text-muted-foreground">
+                        Aktifse lab 7/24 çalışır kabul edilir (720 saat/ay), çalışma saatleri yok sayılır.
+                      </p>
+                    </Label>
+                  </div>
+                  {!(currentHospital as any).acilStatusu && (
+                    <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+                      <div>
+                        <Label className="text-xs font-semibold uppercase tracking-wider">Haftaiçi (Pzt-Cum)</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaIciStart || '08:00'}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaIciStart: e.target.value },
+                            })}
+                          />
+                          <span className="text-xs text-muted-foreground">→</span>
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaIciEnd || '17:00'}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaIciEnd: e.target.value },
+                            })}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <Label className="text-xs font-semibold uppercase tracking-wider">Haftasonu (Cmt-Pzr)</Label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaSonuStart || ''}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaSonuStart: e.target.value },
+                            })}
+                          />
+                          <span className="text-xs text-muted-foreground">→</span>
+                          <Input
+                            type="time"
+                            value={(currentHospital as any).calismaSaatleri?.haftaSonuEnd || ''}
+                            onChange={(e) => setCurrentHospital({
+                              ...currentHospital,
+                              calismaSaatleri: { ...(currentHospital as any).calismaSaatleri, haftaSonuEnd: e.target.value },
+                            })}
+                          />
+                        </div>
+                        <p className="text-[10px] text-muted-foreground mt-1">Kapalıysa her ikisini de boş bırakın.</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div className="flex items-center space-x-2 rounded-md border p-3">
                     <Switch
                     id="fefo-enabled-switch"
@@ -867,7 +950,7 @@ export default function LaboratuvarPanel() {
                     <Label htmlFor="is-consumables-hospital-switch">
                         Hastane Sarf Kategorisi
                         <p className="text-xs text-muted-foreground">
-                            Aktifse, bu laboratuvar sadece Sarf Dağıtım panelinde görünür.
+                            Aktifse, bu laboratuvar sadece Sarf Dağıtım panelinde görünür; mahal kodu tanımlanır ve Min-Max paneli otomatik transfer listesine dönüşür.
                         </p>
                     </Label>
                 </div>
@@ -884,6 +967,48 @@ export default function LaboratuvarPanel() {
                         </p>
                     </Label>
                 </div>
+
+                <div className="flex items-center space-x-2 rounded-md border p-3">
+                    <Switch
+                        id="order-limit-switch"
+                        checked={currentHospital.orderLimitEnabled ?? false}
+                        onCheckedChange={(checked) => setCurrentHospital({ ...currentHospital, orderLimitEnabled: checked })}
+                    />
+                    <Label htmlFor="order-limit-switch">
+                        Sipariş Kısıtlaması
+                        <p className="text-xs text-muted-foreground">
+                            Aktifse manuel ürün talebinde, mevcut laboratuvar stoğu + talep adedi tanımlı max adedi aşamaz.
+                        </p>
+                    </Label>
+                </div>
+
+                {!(currentHospital.perifer) && (
+                  <div className="rounded-md border p-3 space-y-2 bg-amber-50/30 dark:bg-amber-900/10">
+                      <Label className="text-sm font-medium flex items-center gap-2">
+                        <Warehouse className="h-4 w-4 text-amber-500" />
+                        Varsayılan Depo (Otomatik Yönlendirme)
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {currentHospital.isConsumablesHospital
+                          ? 'Hastane Sarf mahallerinde stok sorguları, transferler ve teslimatta stok düşümü atanan bu depodan yapılır.'
+                          : 'Bu laboratuvar için bir depo atandığında, ürün talebi oluştururken depo seçme adımı atlanır ve talepler otomatik olarak bu depoya yönlendirilir.'}
+                      </p>
+                      <Select 
+                        value={currentHospital.defaultDepotId || "none"} 
+                        onValueChange={(val) => setCurrentHospital({ ...currentHospital, defaultDepotId: val === "none" ? undefined : val })}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Depo Seçin (Opsiyonel)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Seçilmedi (Manuel Seçim)</SelectItem>
+                          {depots.map(d => (
+                            <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                  </div>
+                )}
               </div>
               <div className="mt-4 rounded-lg border border-white/10 bg-background/40 p-3">
                 <div className="flex items-center gap-2 mb-2">
@@ -1021,7 +1146,7 @@ export default function LaboratuvarPanel() {
       <EfficiencyPoolModal
         open={isEfficiencyPoolModalOpen}
         onOpenChange={setIsEfficiencyPoolModalOpen}
-        onPoolCreated={fetchHospitalsAndProducts}
+        onPoolCreated={handleRefreshData}
       />
 
       <Dialog open={isEfficiencyPoolListOpen} onOpenChange={setIsEfficiencyPoolListOpen}>
@@ -1105,7 +1230,7 @@ export default function LaboratuvarPanel() {
           }}
           hospital={productOrderTarget}
           productCodes={productCodes}
-          onSaved={fetchHospitalsAndProducts}
+          onSaved={handleRefreshData}
         />
       )}
 
@@ -1180,6 +1305,8 @@ export default function LaboratuvarPanel() {
                       <TableHead>E-posta</TableHead>
                       <TableHead className="text-center">FEFO</TableHead>
                       <TableHead className="text-center">Tüketim</TableHead>
+                      <TableHead className="text-center">Hastane Sarf</TableHead>
+                      <TableHead>Mahal/Cari Kodu</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1204,6 +1331,10 @@ export default function LaboratuvarPanel() {
                           <TableCell className="text-xs">{(row.sorumluEmails || []).join(', ')}</TableCell>
                           <TableCell className="text-center text-xs">{row.fefoEnabled ? 'Evet' : 'Hayır'}</TableCell>
                           <TableCell className="text-center text-xs">{row.consumptionTrackingEnabled ? 'Evet' : 'Hayır'}</TableCell>
+                          <TableCell className="text-center text-xs">{row.isConsumablesHospital ? 'Evet' : 'Hayır'}</TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {row.isConsumablesHospital ? (row.mahalKodu || '-') : (row.ceomedCariKodu || '-')}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -1224,6 +1355,6 @@ export default function LaboratuvarPanel() {
           )}
         </DialogContent>
       </Dialog>
-    </div>
+    </YonetimShell>
   );
 }

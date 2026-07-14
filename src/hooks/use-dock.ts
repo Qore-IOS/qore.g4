@@ -33,6 +33,7 @@ import {
   LogOut,
   Wrench,
   ShieldAlert,
+  AlertTriangle,
   ShoppingBag,
   Truck,
   Building,
@@ -215,44 +216,22 @@ const subItemMap: Record<string, DockSubItem[]> = {
       href: "/raporlama/gecmis-stok-raporu",
     },
     {
-      key: "kumulatif-islemleri",
-      label: "Kümülatif İşlemleri",
-      icon: Archive,
-      href: "/kumulatif-hesaplama",
-      subItems: [
-        {
-          key: "kumulatif-hesaplama",
-          label: "Kümülatif Hesaplama",
-          icon: Calculator,
-          href: "/kumulatif-hesaplama",
-        },
-        {
-          key: "kumulatif-gecmis",
-          label: "Kümülatif Geçmişi",
-          icon: History,
-          href: "/kumulatif-gecmis",
-        },
-      ],
+      key: "stock-risk-report",
+      label: "Stok Risk Raporu",
+      icon: AlertTriangle,
+      href: "/raporlama/stock-risk-report",
     },
     {
-      key: "cihaz-ustu-islemleri",
-      label: "Cihaz Üstü İşlemleri",
+      key: "kumulatif-hesaplama",
+      label: "Kümülatif Hesaplama",
+      icon: Calculator,
+      href: "/kumulatif-hesaplama",
+    },
+    {
+      key: "cihaz-ustu-hesaplama",
+      label: "Cihaz Üstü Hesaplama",
       icon: Activity,
-      href: "/raporlama/cihaz-ustu-ekle",
-      subItems: [
-        {
-          key: "cihaz-ustu-ekle",
-          label: "Cihaz Üstü Ekle",
-          icon: PlusCircle,
-          href: "/raporlama/cihaz-ustu-ekle",
-        },
-        {
-          key: "cihaz-ustu-gecmisi",
-          label: "Cihaz Üstü Geçmişi",
-          icon: History,
-          href: "/raporlama/cihaz-ustu-gecmisi",
-        },
-      ],
+      href: "/cihaz-ustu-hesaplama",
     },
   ],
   "urun-kullanim": [
@@ -288,7 +267,8 @@ const subItemMap: Record<string, DockSubItem[]> = {
       key: "siparis-gecmis",
       label: "Sipariş Geçmişi",
       icon: History,
-      href: "/siparis-gecmis",
+      // Sipariş geçmişi artık Siparişler sayfasındaki "Tamamlanan" sekmesi.
+      href: "/siparisler?tab=tamamlanan",
     },
     {
       key: "direkt-transfer",
@@ -320,6 +300,38 @@ const subItemMap: Record<string, DockSubItem[]> = {
     },
     // { key: 'masraf-bildirimi', label: 'Masraf Bildirimi', icon: Wallet, href: '/personel-islemleri/masraf' },
     // { key: 'izin-talebi', label: 'İzin Talebi', icon: CalendarCheck, href: '/personel-islemleri/izin' },
+  ],
+  "cari-odeme": [
+    {
+      key: "cari-odeme-genel",
+      label: "Gösterge Paneli",
+      icon: BarChart3,
+      href: "/cari-odeme",
+    },
+    {
+      key: "cari-odemeler",
+      label: "Ödemeler",
+      icon: Wallet,
+      href: "/cari-odeme/odemeler",
+    },
+    {
+      key: "cari-sablonlar",
+      label: "Ödeme Talimatları",
+      icon: ClipboardPlus,
+      href: "/cari-odeme/sablonlar",
+    },
+    {
+      key: "cari-firmalar",
+      label: "Cari Firmalar",
+      icon: Building,
+      href: "/cari-odeme/firmalar",
+    },
+    {
+      key: "cari-ayarlar",
+      label: "Ayarlar",
+      icon: Settings,
+      href: "/cari-odeme/ayarlar",
+    },
   ],
 };
 
@@ -504,6 +516,18 @@ export function useDock() {
     );
   };
 
+  useEffect(() => {
+    const onShow = () => {
+      setIsVisible(true);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+      timeoutRef.current = setTimeout(() => setIsVisible(false), 3000);
+    };
+    window.addEventListener('qore:dock-show', onShow);
+    return () => window.removeEventListener('qore:dock-show', onShow);
+  }, []);
+
   const currentViewKey = VIEWS.find((v) => v.href === pathname)?.key || "";
 
   const hasOnlyProductUsagePermission = (perms?: AppView[] | null): boolean => {
@@ -570,6 +594,12 @@ export function useDock() {
               icon: Boxes,
               href: ownStockHref,
             },
+            {
+              key: 'kumulatif-hesaplama-field',
+              label: 'Kümülatif Hesapla',
+              icon: Calculator,
+              href: '/kumulatif-hesaplama',
+            },
           ];
         }
 
@@ -607,6 +637,14 @@ export function useDock() {
             type: 'nav',
             href: stockHref,
             onClick: () => router.push(stockHref),
+          },
+          {
+            key: 'kumulatif-hesaplama-field-mobile',
+            label: 'Kümülatif Hesapla',
+            icon: Calculator,
+            type: 'nav',
+            href: '/kumulatif-hesaplama',
+            onClick: () => router.push('/kumulatif-hesaplama'),
           }
         );
       }

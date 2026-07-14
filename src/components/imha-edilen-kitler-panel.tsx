@@ -10,6 +10,7 @@ import type { Hospital, Depot, ProductCode, DepoStokItem, DestroyedKitRecord } f
 import BackButton from '@/components/BackButton';
 import { playFeedback, generateId } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -19,7 +20,8 @@ import { useBarcodeParser } from '@/hooks/useBarcodeParser';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
@@ -120,10 +122,10 @@ export default function ImhaEdilenKitlerPanel() {
             setLoading(true);
             try {
                 const [hospitalsSnap, depotsSnap, productsSnap, recentSnap] = await Promise.all([
-                    getDocs(collection(db, 'hospitals')),
-                    getDocs(collection(db, 'depots')),
-                    getDocs(collection(db, 'productCodes')),
-                    getDocs(query(collection(db, 'destroyedKitsReports'), orderBy('resolvedAt', 'desc'), limit(5))),
+                    getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+                    getDocs(scopedQuery('destroyedKitsReports', currentCompanyId, isSuperAdmin, orderBy('resolvedAt', 'desc'), limit(5))),
                 ]);
 
                 setHospitals(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
@@ -550,7 +552,7 @@ export default function ImhaEdilenKitlerPanel() {
                     });
 
                     const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
-                    currentBatch.set(destroyedKitRef, {
+                    currentBatch.set(destroyedKitRef, withCompanyScope({
                         id: destroyedKitRef.id,
                         ejectedKitRecordId: null,
                         faultReportId: null,
@@ -572,7 +574,7 @@ export default function ImhaEdilenKitlerPanel() {
                         resolvedByUid: currentUser?.uid || '',
                         resolvedByName: currentUserProfile?.name || '',
                         sourceType: item.sourceType,
-                    });
+                    }, currentCompanyId));
                     operationCount++;
                 }
             }
@@ -692,14 +694,12 @@ export default function ImhaEdilenKitlerPanel() {
                                 {selectedSourceType === 'laboratory' ? 'Laboratuvar' : 'Depo'}
                             </label>
                             {selectedSourceType === 'laboratory' ? (
-                                <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                                    <SelectTrigger className="cihaz-pressed border-none h-10">
-                                        <SelectValue placeholder="Laboratuvar seçin" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {hospitals.map(h => <SelectItem key={h.id} value={h.id}>{h.name}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
+                                <LabSelector
+                                    labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                                    value={selectedLabId}
+                                    onChange={setSelectedLabId}
+                                    placeholder="Laboratuvar seçin"
+                                />
                             ) : (
                                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
                                     <SelectTrigger className="cihaz-pressed border-none h-10">

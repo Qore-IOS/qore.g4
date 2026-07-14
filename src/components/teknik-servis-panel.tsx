@@ -8,10 +8,8 @@ import {
 import { cn } from '@/lib/utils';
 import BackButton from './BackButton';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '@/contexts/auth-context';
-import { matchesCompanyScope } from '@/lib/company-scope';
+import { useRealtimeOpenDeviceFaultReports } from '@/hooks/useRealtimeDeviceFaults';
+import { getFaultyDeviceIds } from '@/lib/device-faults';
 
 /* ─── Types ─── */
 
@@ -61,37 +59,44 @@ export default function TeknikServisPanel({
 }: TeknikServisPanelProps) {
   const router = useRouter();
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
-  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   /* ── Open fault reports ── */
-  const [faultyDeviceIds, setFaultyDeviceIds] = useState<Set<string>>(new Set());
+  const openFaults = useRealtimeOpenDeviceFaultReports();
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'deviceFaultReports'),
-      where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const ids = new Set<string>();
-      snap.docs.forEach((d) => {
-        const data = d.data();
-        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
-        if (data.deviceId) ids.add(data.deviceId);
-      });
-      setFaultyDeviceIds(ids);
-    }, (err) => {
-      console.error('Error listening open fault reports:', err);
-    });
-    return () => unsub();
-  }, [currentCompanyId, isSuperAdmin]);
+  // Her iki arıza türü de cihazı arızalı yapar; panel türü yalnızca yönetim yetkisini belirler.
+  const faultyDeviceIds = useMemo(() => getFaultyDeviceIds(openFaults), [openFaults]);
 
   /* ── Device helpers ── */
 
-  const getDevicesForHospital = (hospitalId: string): Device[] =>
-    devices.filter(d => (d as any).hospitalId === hospitalId).sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+  // Pre-group devices by hospital once per `devices` change so each card does an
+  // O(1) map lookup instead of re-filtering + re-sorting the full device list
+  // for every hospital/pool card on every render (including each realtime
+  // open-fault snapshot). Groups are pre-sorted by display order.
+  const devicesByHospitalId = useMemo(() => {
+    const map = new Map<string, Device[]>();
+    for (const d of devices) {
+      const hid = (d as any).hospitalId as string | undefined;
+      if (!hid) continue;
+      const group = map.get(hid);
+      if (group) group.push(d); else map.set(hid, [d]);
+    }
+    for (const group of map.values()) {
+      group.sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+    }
+    return map;
+  }, [devices]);
 
-  const getDevicesForHospitals = (hospitalIds: string[]): Device[] =>
-    devices.filter(d => hospitalIds.includes((d as any).hospitalId)).sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+  const getDevicesForHospital = (hospitalId: string): Device[] =>
+    devicesByHospitalId.get(hospitalId) ?? [];
+
+  const getDevicesForHospitals = (hospitalIds: string[]): Device[] => {
+    const out: Device[] = [];
+    for (const id of hospitalIds) {
+      const group = devicesByHospitalId.get(id);
+      if (group) out.push(...group);
+    }
+    return out.sort((a, b) => (Number(a.order ?? 99)) - (Number(b.order ?? 99)));
+  };
 
   const isAdmin = userRole === 'admin' || userRole === 'super_admin';
 

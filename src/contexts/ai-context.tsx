@@ -4,25 +4,25 @@ import React, { createContext, useContext, useState, useCallback, useRef, useEff
 
 interface AIContextType {
   isAIOpen: boolean;
-  openAI: () => void;
+  /** Open Qore AI. Pass a prompt to auto-send it once the panel mounts. */
+  openAI: (prompt?: string) => void;
   closeAI: () => void;
   toggleAI: () => void;
+  /** Read-and-clear a prompt queued by the launcher (e.g. Start menu search). */
+  consumePendingPrompt: () => string | null;
 }
 
 const AIContext = createContext<AIContextType | undefined>(undefined);
 
-// Preload audio for instant playback
+// Lazy loaded audio
 const useAISound = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  useEffect(() => {
-    // Create and preload audio
-    audioRef.current = new Audio('/ai-open.wav');
-    audioRef.current.volume = 0.5;
-    audioRef.current.preload = 'auto';
-  }, []);
-
   const play = useCallback(() => {
+    if (!audioRef.current && typeof window !== 'undefined') {
+      audioRef.current = new Audio('/ai-open.mp3');
+      audioRef.current.volume = 0.5;
+    }
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       audioRef.current.play().catch(() => {
@@ -36,9 +36,16 @@ const useAISound = () => {
 
 export function AIProvider({ children }: { children: React.ReactNode }) {
   const [isAIOpen, setIsAIOpen] = useState(false);
+  // A prompt queued by an external launcher (Start menu search bar). The
+  // chatbot reads it via consumePendingPrompt() right after it opens and sends
+  // it automatically, then clears it so it doesn't replay on the next open.
+  const pendingPromptRef = useRef<string | null>(null);
   const playSound = useAISound();
 
-  const openAI = useCallback(() => {
+  const openAI = useCallback((prompt?: string) => {
+    if (typeof prompt === 'string' && prompt.trim()) {
+      pendingPromptRef.current = prompt.trim();
+    }
     setIsAIOpen(true);
     playSound();
     // Haptic feedback for mobile
@@ -63,8 +70,14 @@ export function AIProvider({ children }: { children: React.ReactNode }) {
     });
   }, [playSound]);
 
+  const consumePendingPrompt = useCallback(() => {
+    const p = pendingPromptRef.current;
+    pendingPromptRef.current = null;
+    return p;
+  }, []);
+
   return (
-    <AIContext.Provider value={{ isAIOpen, openAI, closeAI, toggleAI }}>
+    <AIContext.Provider value={{ isAIOpen, openAI, closeAI, toggleAI, consumePendingPrompt }}>
       {children}
     </AIContext.Provider>
   );

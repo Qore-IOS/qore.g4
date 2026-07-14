@@ -1,28 +1,12 @@
-/**
- * @fileoverview Transfer History Panel Component
- * @description Displays historical transfer records with server-side filtering and pagination.
- * @module components/transfer-gecmis-panel
- * @version 3.0.0
- *
- * @requires Firestore composite index: transfers (sourceDepotId ASC, timestamp DESC)
- */
-
 'use client';
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import {
-  Accordion,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion';
-import { Building2, CalendarClock, Loader2, Package2 } from 'lucide-react';
+import { Building2, CalendarClock, ChevronLeft, ChevronRight, Eye, History, Loader2, Package2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
 import {
-  collection,
   onSnapshot,
   orderBy,
-  query,
   where,
   limit,
   startAfter,
@@ -34,6 +18,8 @@ import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Transfer, Depot, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import BackButton from '@/components/BackButton';
 import { transferGecmisLogger } from '@/lib/logger';
 import {
@@ -43,8 +29,8 @@ import {
   SelectContent,
   SelectItem,
 } from '@/components/ui/select';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { LabSelector } from '@/components/common/LabSelector';
+import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 import { useRowFocus } from '@/hooks/useRowFocus';
 
 export default function TransferGecmisPanel() {
@@ -53,6 +39,7 @@ export default function TransferGecmisPanel() {
   const depotIdFromUrl = searchParams.get('depotId') || '';
   const labIdFromUrl = searchParams.get('labId') || 'all';
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const [depots, setDepots] = useState<Depot[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
@@ -62,18 +49,15 @@ export default function TransferGecmisPanel() {
   const [loading, setLoading] = useState(true);
   const [totalCount, setTotalCount] = useState<number>(0);
 
-  // Pagination State
   const [rowsPerPage, setRowsPerPage] = useState<number>(20);
   const [page, setPage] = useState<number>(1);
 
-  // Cursor stack for navigation (each entry is the last doc of that page)
   const cursorStackRef = useRef<QueryDocumentSnapshot[]>([]);
 
   useRowFocus('focus');
 
-  // Fetch depots once
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'depots'), snap => {
+    const unsub = onSnapshot(scopedQuery('depots', currentCompanyId, isSuperAdmin), snap => {
       const depotList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
       setDepots(depotList);
       if (!selectedDepotId && depotList.length > 0) {
@@ -81,83 +65,46 @@ export default function TransferGecmisPanel() {
       }
     });
     return () => unsub();
-  }, [selectedDepotId]);
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
-  // Fetch labs once for target laboratory filter
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'hospitals'), snap => {
-      const labList = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-      setLabs(labList);
+    const unsub = onSnapshot(scopedQuery('hospitals', currentCompanyId, isSuperAdmin), snap => {
+      setLabs(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
     });
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
-  /**
-   * Fetch total count for the selected depot (server-side)
-   */
   const fetchTotalCount = useCallback(async (depotId: string, labId: string) => {
-    if (!depotId) {
-      setTotalCount(0);
-      return;
-    }
+    if (!depotId) { setTotalCount(0); return; }
     try {
       const filters = [where('sourceDepotId', '==', depotId)];
-      if (labId && labId !== 'all') {
-        filters.push(where('targetHospitalId', '==', labId));
-      }
-      const countQuery = query(collection(db, 'transfers'), ...filters);
-      const snapshot = await getCountFromServer(countQuery);
-      setTotalCount(snapshot.data().count);
+      if (labId && labId !== 'all') filters.push(where('targetHospitalId', '==', labId));
+      const snap = await getCountFromServer(scopedQuery('transfers', currentCompanyId, isSuperAdmin, ...filters));
+      setTotalCount(snap.data().count);
     } catch (error) {
-      transferGecmisLogger.error('Transfer sayısı alınamadı', error as Error, {
-        operation: 'fetchTotalCount',
-        depotId,
-        labId,
-      });
+      transferGecmisLogger.error('Transfer sayısı alınamadı', error as Error, { depotId, labId });
       setTotalCount(0);
     }
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
-  /**
-   * Fetch transfers for the given page (server-side with cursor pagination)
-   */
   const fetchTransfers = useCallback(async (
     depotId: string,
     labId: string,
     pageNum: number,
     pageSize: number,
-    cursors: QueryDocumentSnapshot[]
+    cursors: QueryDocumentSnapshot[],
   ) => {
-    if (!depotId) {
-      setTransfers([]);
-      setLoading(false);
-      return;
-    }
-
+    if (!depotId) { setTransfers([]); setLoading(false); return; }
     setLoading(true);
-
     try {
-      // Build query with server-side filtering
-      // Requires composite index: sourceDepotId ASC + timestamp DESC
       const filters = [where('sourceDepotId', '==', depotId)];
-      if (labId && labId !== 'all') {
-        filters.push(where('targetHospitalId', '==', labId));
-      }
-      let q = query(collection(db, 'transfers'), ...filters, orderBy('timestamp', 'desc'), limit(pageSize));
-
-      // If not first page, use cursor from previous page
-      if (pageNum > 1 && cursors[pageNum - 2]) {
-        q = query(
-          collection(db, 'transfers'),
-          ...filters,
-          orderBy('timestamp', 'desc'),
-          startAfter(cursors[pageNum - 2]),
-          limit(pageSize)
-        );
-      }
+      if (labId && labId !== 'all') filters.push(where('targetHospitalId', '==', labId));
+      const cursor = pageNum > 1 ? cursors[pageNum - 2] : undefined;
+      const q = cursor
+        ? scopedQuery('transfers', currentCompanyId, isSuperAdmin, ...filters, orderBy('timestamp', 'desc'), startAfter(cursor), limit(pageSize))
+        : scopedQuery('transfers', currentCompanyId, isSuperAdmin, ...filters, orderBy('timestamp', 'desc'), limit(pageSize));
 
       const snapshot = await getDocsFromServer(q);
-
       const data = snapshot.docs.map(d => {
         const docData = d.data();
         return {
@@ -167,179 +114,156 @@ export default function TransferGecmisPanel() {
         } as Transfer;
       });
 
-      // Store cursor for this page (last doc)
       if (snapshot.docs.length > 0) {
-        const newCursors = [...cursors];
-        newCursors[pageNum - 1] = snapshot.docs[snapshot.docs.length - 1];
-        cursorStackRef.current = newCursors;
+        const nc = [...cursors];
+        nc[pageNum - 1] = snapshot.docs[snapshot.docs.length - 1];
+        cursorStackRef.current = nc;
       }
-
       setTransfers(data);
-      transferGecmisLogger.info('Transfer geçmişi yüklendi (server-side)', {
-        depotId,
-        labId,
-        page: pageNum,
-        count: data.length,
-      });
+      transferGecmisLogger.info('Transfer geçmişi yüklendi', { depotId, labId, page: pageNum, count: data.length });
     } catch (error) {
-      transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error as Error, {
-        operation: 'fetchTransferHistory',
-        depotId,
-        labId,
-      });
+      transferGecmisLogger.error('Transfer geçmişi yüklenemedi', error as Error, { depotId, labId });
       toast({ title: 'Hata', description: 'Transfer geçmişi yüklenirken bir hata oluştu.', variant: 'destructive' });
       setTransfers([]);
     } finally {
       setLoading(false);
     }
-  }, [toast]);
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
-  // Reset pagination when depot or page size changes
   useEffect(() => {
     setPage(1);
     cursorStackRef.current = [];
-    if (selectedDepotId) {
-      fetchTotalCount(selectedDepotId, selectedLabId);
-    }
+    if (selectedDepotId) void fetchTotalCount(selectedDepotId, selectedLabId);
   }, [selectedDepotId, selectedLabId, rowsPerPage, fetchTotalCount]);
 
-  // Fetch transfers when page, depot, or page size changes
   useEffect(() => {
-    fetchTransfers(selectedDepotId, selectedLabId, page, rowsPerPage, cursorStackRef.current);
+    void fetchTransfers(selectedDepotId, selectedLabId, page, rowsPerPage, cursorStackRef.current);
   }, [selectedDepotId, selectedLabId, page, rowsPerPage, fetchTransfers]);
 
   const totalPages = Math.max(1, Math.ceil(totalCount / rowsPerPage));
 
-  return (
-    <div
-      className="p-4 md:p-6 space-y-6"
-      role="main"
-      aria-label="Transfer geçmişi sayfası"
-    >
-      <BackButton fallback="/direkt-transfer" aria-label="Geri dön" />
-      <Card className="border-0 shadow-xl bg-gradient-to-b from-background to-[var(--dashboard-surface-1)]/35">
-        <CardHeader className="space-y-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-[var(--dashboard-surface-2)] text-[var(--dashboard-primary)]">
-              <Package2 className="h-5 w-5" />
-            </div>
-            <CardTitle id="transfer-history-title" className="text-3xl font-semibold tracking-tight">Transfer Geçmişi</CardTitle>
-          </div>
-          <CardDescription>
-            Depodan yapılan tüm direkt transfer işlemlerini görüntüleyin.
-            {totalCount > 0 && <span className="ml-2 font-medium">({totalCount} kayıt)</span>}
-          </CardDescription>
-        </CardHeader>
-        <CardContent aria-labelledby="transfer-history-title">
-          <div className="grid gap-4 md:grid-cols-2 mb-5">
-            <div className="space-y-2">
-            <label htmlFor="depot-filter-select" className="text-sm font-medium flex items-center gap-2"><Building2 className="h-4 w-4 text-[var(--dashboard-primary)]" />Depo</label>
-            <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
-              <SelectTrigger
-                id="depot-filter-select"
-                className="w-full bg-[var(--dashboard-surface-1)] border-[var(--dashboard-border)]"
-                aria-label="Depo filtresi"
-              >
-                <SelectValue placeholder="Depo Seçin..." />
-              </SelectTrigger>
-              <SelectContent>
-                {depots.map(d => (
-                  <SelectItem key={d.id} value={d.id}>{d.name || d.id}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            </div>
+  const cols = '150px minmax(0,2fr) minmax(0,1.2fr) minmax(0,1fr) 80px 96px';
 
-            <div className="space-y-2">
-              <label htmlFor="lab-filter-select" className="text-sm font-medium flex items-center gap-2"><CalendarClock className="h-4 w-4 text-[var(--dashboard-primary)]" />Hedef Laboratuvar</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-                <SelectTrigger
-                  id="lab-filter-select"
-                  className="w-full bg-[var(--dashboard-surface-1)] border-[var(--dashboard-border)]"
-                  aria-label="Laboratuvar filtresi"
-                >
-                  <SelectValue placeholder="Laboratuvar Seçin..." />
+  return (
+    <>
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div className="mk-shell" style={{ padding: '20px 28px 40px', position: 'relative', zIndex: 1 }}>
+      <MkClayStyles />
+      <div style={{ maxWidth: 1680, margin: '0 auto' }}>
+        <div className="mb-4"><BackButton fallback="/direkt-transfer" /></div>
+
+        <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden' }}>
+
+          {/* Header */}
+          <div className="flex flex-wrap items-start gap-4" style={{ padding: '24px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: MK_C.accent, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: MK_C.clayFlat }}>
+              <Package2 className="h-5 w-5" />
+            </span>
+            <div className="flex-1" style={{ minWidth: 220 }}>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1 }}>Transfer Geçmişi</h1>
+              <p style={{ margin: '5px 0 0', fontSize: 14, color: MK_C.ink2, fontWeight: 500 }}>Depodan yapılan tüm direkt transfer işlemleri.</p>
+              <div style={{ fontSize: 13, color: MK_C.ink3, fontWeight: 600, marginTop: 8 }}>
+                {loading ? 'Yükleniyor…' : `Toplam ${totalCount} transfer · Sayfa ${page} / ${totalPages}`}
+              </div>
+            </div>
+            {/* Filters */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Building2 className="h-4 w-4 flex-shrink-0" style={{ color: MK_C.accent }} />
+                <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
+                  <SelectTrigger className="border-0" style={{ width: 180, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}>
+                    <SelectValue placeholder="Depo Seçin…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {depots.map(d => <SelectItem key={d.id} value={d.id}>{d.name || d.id}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <CalendarClock className="h-4 w-4 flex-shrink-0" style={{ color: MK_C.accent }} />
+                <div style={{ width: 200 }}>
+                  <LabSelector
+                    labs={labs.map(l => ({ id: l.id, name: l.name || l.id, kod: l.kod }))}
+                    value={selectedLabId}
+                    onChange={setSelectedLabId}
+                    placeholder="Tüm Laboratuvarlar"
+                    allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+                    icon={false}
+                  />
+                </div>
+              </div>
+              <Select value={String(rowsPerPage)} onValueChange={v => setRowsPerPage(Number(v))}>
+                <SelectTrigger className="border-0" style={{ width: 140, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}>
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-                  {labs.map(l => (
-                    <SelectItem key={l.id} value={l.id}>{l.name || l.id}</SelectItem>
-                  ))}
+                  {[20, 50, 100].map(n => <SelectItem key={n} value={String(n)}>{n} / sayfa</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
           </div>
-          
-          {loading ? (
-             <div
-               className="flex items-center justify-center h-64"
-               role="status"
-               aria-label="Transfer geçmişi yükleniyor"
-             >
-               <Loader2 className="h-8 w-8 animate-spin" aria-hidden="true" />
-               <span className="sr-only">Yükleniyor...</span>
-             </div>
-          ) : (
-             <Accordion type="single" collapsible className="w-full rounded-xl border border-[var(--dashboard-border)] bg-[var(--dashboard-surface-1)]/80 px-2">
-                {transfers.length === 0 ? (
-                  <p className="text-center text-muted-foreground py-8">Bu depo için transfer kaydı bulunamadı.</p>
-                ) : (
-                  transfers.map(t => {
-                    const transferPersonName = t.userName || t.createdByName || t.createdBy || 'Bilinmiyor';
-                    return (
-                    <AccordionItem key={t.id} value={t.id} data-row-id={t.id}>
-                        <AccordionTrigger
-                          className="flex justify-between items-center hover:no-underline p-4 rounded-lg hover:bg-[var(--dashboard-surface-2)]/60"
-                          onClick={() => router.push(`/transfer-gecmis/${t.id}?depotId=${selectedDepotId}&labId=${selectedLabId}`)}
-                        >
-                            <div className="text-left space-y-1">
-                                <p className="font-semibold">{t.targetName}</p>
-                                <p className="text-xs text-muted-foreground">{t.timestamp ? formatDate(t.timestamp, 'dd MMM yyyy, HH:mm', { locale: tr }) : '-'}</p>
-                            </div>
-                            <div className="text-center">
-                                <p className="font-mono text-sm">{t.itemCount} adet</p>
-                                <p className="text-xs text-muted-foreground">Personel: {transferPersonName}</p>
-                            </div>
-                        </AccordionTrigger>
-                    </AccordionItem>
-                  )})
-                )}
-             </Accordion>
-          )}
-        </CardContent>
-        {totalPages > 1 && (
-            <CardFooter className="flex items-center justify-between mt-4 pt-4 border-t border-[var(--dashboard-border)]">
-                 <div className="flex items-center space-x-2 text-sm">
-                    <span>Satır/sayfa:</span>
-                    <Select value={String(rowsPerPage)} onValueChange={val => { setRowsPerPage(Number(val)); setPage(1); }}>
-                    <SelectTrigger className="w-20"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                        {[20, 50, 100].map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
-                    </SelectContent>
-                    </Select>
-                </div>
-                <div className="flex items-center space-x-2">
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPage(p => Math.max(1, p - 1))}
-                        disabled={page <= 1 || loading}
-                    >
-                        Önceki
-                    </Button>
-                    <span className="text-sm">Sayfa {page} / {totalPages}</span>
-                    <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                        disabled={page >= totalPages || loading}
-                    >
-                        Sonraki
-                    </Button>
-                </div>
-            </CardFooter>
-        )}
-      </Card>
+
+          {/* Column headers */}
+          <div className="hidden md:grid" style={{ gridTemplateColumns: cols, gap: 16, padding: '16px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            {(['İşlem Zamanı', 'Hedef', 'Kaynak Depo', 'Personel', 'Adet', ''] as const).map((h, i) => (
+              <div key={i} style={{ fontSize: 11.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: i === 4 ? 'center' : 'left' }}>{h}</div>
+            ))}
+          </div>
+
+          {/* Rows */}
+          <div style={{ padding: '12px 18px', minHeight: '40vh' }}>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center" style={{ padding: '60px 0', color: MK_C.ink2 }}>
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="mt-2 text-sm">Yükleniyor...</span>
+              </div>
+            ) : !selectedDepotId ? (
+              <div style={{ padding: '60px 0', textAlign: 'center', color: MK_C.ink3, fontWeight: 600 }}>Depo seçin.</div>
+            ) : transfers.length === 0 ? (
+              <div style={{ padding: '60px 0', textAlign: 'center', color: MK_C.ink3, fontWeight: 600 }}>Bu depo için transfer kaydı bulunamadı.</div>
+            ) : (
+              <div className="flex flex-col" style={{ gap: 9 }}>
+                {transfers.map((t, idx) => {
+                  const personName = t.userName || (t as any).createdByName || (t as any).createdBy || '-';
+                  const ts = t.timestamp instanceof Date ? t.timestamp : (t.timestamp as any)?.toDate?.();
+                  const dateStr = ts ? formatDate(ts, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-';
+                  return (
+                    <div key={t.id} data-row-id={t.id} className="grid items-center"
+                      style={{ gridTemplateColumns: cols, gap: 16, padding: '14px 16px', borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: MK_C.clayFlat, animation: `mkPopIn ${240 + Math.min(idx, 8) * 30}ms ease` }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{dateStr}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 700, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.targetName || '-'}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.sourceDepotName || '-'}</div>
+                      <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{personName}</div>
+                      <div style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 36, height: 30, padding: '0 10px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 14, fontWeight: 800, color: MK_C.ink1 }}>{t.itemCount ?? 0}</span>
+                      </div>
+                      <button onClick={() => router.push(`/transfer-gecmis/${t.id}?depotId=${selectedDepotId}&labId=${selectedLabId}`)}
+                        style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 40, padding: '0 16px', justifySelf: 'end', borderRadius: MK_C.radiusSm, background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clay, color: MK_C.accent, fontSize: 13.5, fontWeight: 700 }}>
+                        <Eye className="h-[15px] w-[15px]" /> Detay
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Pagination */}
+          <div className="flex items-center" style={{ padding: '16px 28px', borderTop: `1px solid ${MK_C.line}` }}>
+            <button disabled={page <= 1 || loading} onClick={() => setPage(p => p - 1)}
+              style={{ all: 'unset', cursor: (page <= 1 || loading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page <= 1 ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page <= 1 ? MK_C.clayInset : MK_C.clay, color: page <= 1 ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page <= 1 ? 0.6 : 1 }}>
+              <ChevronLeft className="h-[15px] w-[15px]" /> Önceki
+            </button>
+            <div className="flex-1" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: MK_C.ink2 }}>Sayfa {page} / {totalPages}</div>
+            <button disabled={page >= totalPages || loading} onClick={() => setPage(p => p + 1)}
+              style={{ all: 'unset', cursor: (page >= totalPages || loading) ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page >= totalPages ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page >= totalPages ? MK_C.clayInset : MK_C.clay, color: page >= totalPages ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page >= totalPages ? 0.6 : 1 }}>
+              Sonraki <ChevronRight className="h-[15px] w-[15px]" />
+            </button>
+          </div>
+
+        </div>
+      </div>
     </div>
+    </>
   );
 }

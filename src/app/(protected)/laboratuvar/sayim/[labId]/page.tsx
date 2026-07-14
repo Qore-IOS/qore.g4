@@ -4,13 +4,16 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
-  collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc,
+  collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc, updateDoc,
 } from 'firebase/firestore';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
   Check,
@@ -26,10 +29,16 @@ import {
   X,
   PackageX,
   ArrowRight,
+  UploadCloud,
+  FileText,
+  FileSpreadsheet,
+  Download,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
 import { saveLabCountSession } from '@/lib/labCount';
+import { downloadLabCountTemplate, parseLabCountExcel } from '@/lib/labCountExcel';
+import { buildCalculationPeriod, savePendingCalculationFiles, type PendingCalculationKind } from '@/lib/qore-hesaplama/pending-calculation-files';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
 import useHidScanner from '@/hooks/useHidScanner';
@@ -355,6 +364,25 @@ export default function LaboratuvarSayimPage() {
 
   // Per-product count state
   const [countData, setCountData] = useState<Record<string, { enteredQty: string; counted: boolean }>>({});
+  const [countMonth, setCountMonth] = useState(new Date().getMonth());
+  const [countYear, setCountYear] = useState(new Date().getFullYear());
+  const [uploadFlow, setUploadFlow] = useState<{ sessionId: string; step: PendingCalculationKind } | null>(null);
+  const [modalFiles, setModalFiles] = useState<File[]>([]);
+  const [isUploadingCalcFile, setIsUploadingCalcFile] = useState(false);
+
+  // Excel-based count entry
+  const [isExcelBusy, setIsExcelBusy] = useState(false);
+  const excelInputRef = useRef<HTMLInputElement | null>(null);
+
+  const countPeriod = useMemo(() => buildCalculationPeriod(countMonth, countYear), [countMonth, countYear]);
+  const countMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
+    value: i,
+    label: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' }),
+  })), []);
+  const countYearOptions = useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 7 }, (_, i) => y - 3 + i);
+  }, []);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -366,9 +394,13 @@ export default function LaboratuvarSayimPage() {
     (async () => {
       try {
         const labRef = doc(db, 'hospitals', labId as string);
-        const [labSnap, productsSnap, rulesSnap] = await Promise.all([
+        // Legacy-aware: getScopedDocs companyId'si eksik ya da __legacy__
+        // etiketli ürün ve depoStok kayıtlarını da getirir. scopedQuery'nin
+        // server-side where('companyId', '==', X) filtresi eski kayıtları
+        // dışarıda bırakıyor ve sayım sayfası boş yükleniyordu.
+        const [labSnap, productDocs, rulesSnap] = await Promise.all([
           getDoc(labRef),
-          getDocs(collection(db, 'productCodes')),
+          getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
           getDocs(collection(db, 'hospitals', labId as string, 'minMaxRules')),
         ]);
 
@@ -380,19 +412,18 @@ export default function LaboratuvarSayimPage() {
         const { name } = labSnap.data() as any;
         if (!cancelled) {
           setLabName(name);
-          setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+          setProductCodes(productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
           setMinMaxRules(rulesSnap.docs.map(d => d.data() as MinMaxRule));
         }
 
         // Load lab stock — match by hedefKurumId, plus legacy by name
-        const stockRef = collection(db, 'depoStok');
-        const [byIdSnap, legacySnap] = await Promise.all([
-          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurumId', '==', labId))),
-          getDocs(query(stockRef, where('isShipped', '==', true), where('hedefKurum', '==', name))),
+        const [byIdDocs, legacyDocs] = await Promise.all([
+          getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurumId', '==', labId)),
+          getScopedDocs('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true), where('hedefKurum', '==', name)),
         ]);
 
-        const byId = byIdSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
-        const legacy = legacySnap.docs
+        const byId = byIdDocs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem));
+        const legacy = legacyDocs
           .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
           .filter(item => !item.hedefKurumId);
         const all = filterByCompanyScope([...byId, ...legacy], currentCompanyId, isSuperAdmin);
@@ -636,6 +667,81 @@ export default function LaboratuvarSayimPage() {
   }, [groupProgress, activeGroup]);
 
   // ------------------------------------------------------------------
+  // Excel-based count entry (template download + upload)
+  // ------------------------------------------------------------------
+  const handleDownloadExcelTemplate = useCallback(async () => {
+    const entries = Object.values(productEntries);
+    if (entries.length === 0) {
+      toast({ title: 'Ürün yok', description: 'Bu laboratuvarda sayıma dahil ürün bulunmuyor.' });
+      return;
+    }
+    setIsExcelBusy(true);
+    try {
+      const rows = entries
+        .map(e => ({
+          marka: e.marka || '',
+          stokKodu: e.stokKodu,
+          stokAdi: e.stokAdi,
+          mevcutAdet: e.existingTotal,
+        }))
+        .sort((a, b) => {
+          const byMarka = (a.marka || '').localeCompare(b.marka || '', 'tr');
+          if (byMarka !== 0) return byMarka;
+          return a.stokAdi.localeCompare(b.stokAdi, 'tr');
+        });
+      const safeName = (labName || 'Laboratuvar').replace(/[^\p{L}\p{N}]+/gu, '_');
+      await downloadLabCountTemplate(rows, `Sayim_Sablonu_${safeName}.xlsx`);
+      toast({ title: 'Şablon indirildi', description: 'Sayım şablonu Excel olarak indirildi.' });
+    } catch (err: any) {
+      console.error('Lab count template download error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Şablon oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+    }
+  }, [productEntries, labName, toast]);
+
+  const handleExcelFileSelected = useCallback(async (file: File | null | undefined) => {
+    if (!file) return;
+    setIsExcelBusy(true);
+    try {
+      const parsed = await parseLabCountExcel(file);
+      if (parsed.length === 0) {
+        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli "Sayım Adeti" girişi bulunamadı.', variant: 'destructive' });
+        return;
+      }
+
+      let applied = 0;
+      let unknown = 0;
+      setCountData(prev => {
+        const next = { ...prev };
+        parsed.forEach(({ stokKodu, sayimAdeti }) => {
+          if (!productEntries[stokKodu]) {
+            unknown++;
+            return;
+          }
+          next[stokKodu] = { enteredQty: String(sayimAdeti), counted: true };
+          applied++;
+        });
+        return next;
+      });
+
+      const parts: string[] = [`${applied} ürün için sayım girildi`];
+      if (unknown > 0) parts.push(`${unknown} tanımsız satır atlandı`);
+      toast({
+        title: applied > 0 ? 'Excel ile sayım yüklendi' : 'Eşleşen ürün yok',
+        description: parts.join(' · '),
+        variant: applied > 0 ? 'default' : 'destructive',
+      });
+    } catch (err: any) {
+      console.error('Lab count Excel import error:', err);
+      toast({ title: 'Hata', description: err?.message || 'Excel dosyası okunamadı.', variant: 'destructive' });
+    } finally {
+      setIsExcelBusy(false);
+      if (excelInputRef.current) excelInputRef.current.value = '';
+    }
+  }, [productEntries, toast]);
+
+  // ------------------------------------------------------------------
   // Barcode scanning
   // ------------------------------------------------------------------
   const flashFeedback = useCallback((type: 'success' | 'error', message: string) => {
@@ -781,10 +887,15 @@ export default function LaboratuvarSayimPage() {
       }
 
       // Persist a count history record
-      await saveLabCountSession({
+      const sessionId = await saveLabCountSession({
         laboratoryId: labId,
         laboratoryName: labName,
         user: { id: currentUserProfile.uid || '', name: currentUserProfile.name || currentUserProfile.email || 'Bilinmeyen' },
+        period: countPeriod,
+        month: countMonth,
+        year: countYear,
+        cihazUstuUploaded: false,
+        kumulatifUploaded: false,
         items: allCountedEntries.map(entry => {
           const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
           const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
@@ -809,15 +920,62 @@ export default function LaboratuvarSayimPage() {
       if (itemsAdded > 0) messages.push(`${itemsAdded} ürün eklendi`);
       const result = messages.length > 0 ? messages.join(', ') : 'Stok değişikliği yok';
 
-      toast({ title: 'Sayım Kaydedildi', description: `${labName} — ${result}.` });
-      router.push(`/laboratuvar/sayim/${labId}/history`);
+      toast({ title: 'Sayım Kaydedildi', description: `${labName} — ${result}. Dosya yükleme adımına geçiliyor.` });
+      setUploadFlow({ sessionId, step: 'cihazUstu' });
+      setModalFiles([]);
     } catch (err) {
       console.error('Save lab count error:', err);
       toast({ title: 'Hata', description: 'Sayım kaydedilirken hata oluştu.', variant: 'destructive' });
     } finally {
       setIsSaving(false);
     }
-  }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, isSaving, router, toast]);
+  }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, isSaving, countPeriod, countMonth, countYear, toast]);
+
+  const completeUploadStep = useCallback(() => {
+    setModalFiles([]);
+    if (uploadFlow?.step === 'cihazUstu') {
+      setUploadFlow({ ...uploadFlow, step: 'kumulatif' });
+      return;
+    }
+    setUploadFlow(null);
+    router.push(`/laboratuvar/sayim/${labId}/history`);
+  }, [labId, router, uploadFlow]);
+
+  const handleCalculationFileUpload = useCallback(async () => {
+    if (!uploadFlow || !labId || modalFiles.length === 0) return;
+    setIsUploadingCalcFile(true);
+    try {
+      await savePendingCalculationFiles({
+        kind: uploadFlow.step,
+        hospitalId: labId,
+        hospitalName: labName,
+        month: countMonth,
+        year: countYear,
+        stockCountSessionId: uploadFlow.sessionId,
+        files: modalFiles,
+        currentCompanyId,
+        user: {
+          id: currentUserProfile?.uid,
+          name: currentUserProfile?.name,
+          email: currentUserProfile?.email,
+        },
+      });
+      await updateDoc(doc(db, 'hospitals', labId, 'stockCounts', uploadFlow.sessionId), {
+        [uploadFlow.step === 'cihazUstu' ? 'cihazUstuUploaded' : 'kumulatifUploaded']: true,
+        [uploadFlow.step === 'cihazUstu' ? 'cihazUstuUploadedAt' : 'kumulatifUploadedAt']: Timestamp.now(),
+      });
+      toast({ title: 'Dosya kaydedildi', description: `${uploadFlow.step === 'cihazUstu' ? 'Cihaz üstü' : 'Kümülatif'} dosyaları ${countPeriod} dönemi için beklemeye alındı.` });
+      completeUploadStep();
+    } catch (err: any) {
+      toast({ title: 'Dosya kaydedilemedi', description: err?.message || 'Beklenmeyen hata oluştu.', variant: 'destructive' });
+    } finally {
+      setIsUploadingCalcFile(false);
+    }
+  }, [uploadFlow, labId, modalFiles, labName, countMonth, countYear, currentCompanyId, currentUserProfile, toast, countPeriod, completeUploadStep]);
+
+  const skipUploadStep = useCallback(() => {
+    completeUploadStep();
+  }, [completeUploadStep]);
 
   // ------------------------------------------------------------------
   // Render
@@ -852,7 +1010,29 @@ export default function LaboratuvarSayimPage() {
           <div className="flex items-center gap-2">
             <TestTube className="w-4 h-4 text-[var(--dashboard-accent)]" />
             <span className="text-sm font-semibold text-[var(--dashboard-text)]">{labName}</span>
+          </div>
 
+          <div className="flex items-center gap-2 rounded-full bg-[var(--dashboard-surface)] px-3 py-1.5 border border-[var(--dashboard-stroke)]">
+            <Label className="text-xs text-[var(--dashboard-muted)]">Dönem</Label>
+            <select
+              value={countMonth}
+              onChange={(e) => setCountMonth(Number(e.target.value))}
+              className="bg-transparent text-xs outline-none"
+              disabled={isSaving || totalCounted > 0}
+            >
+              {countMonthOptions.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <select
+              value={countYear}
+              onChange={(e) => setCountYear(Number(e.target.value))}
+              className="bg-transparent text-xs outline-none"
+              disabled={isSaving || totalCounted > 0}
+            >
+              {countYearOptions.map((y) => <option key={y} value={y}>{y}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setScannerActive(prev => !prev)}
               className={cn(
@@ -878,6 +1058,35 @@ export default function LaboratuvarSayimPage() {
                 {scanFeedback.message}
               </span>
             )}
+          </div>
+
+          {/* Excel ile sayım */}
+          <div className="flex items-center gap-1.5">
+            <input
+              ref={excelInputRef}
+              type="file"
+              accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+              className="sr-only"
+              onChange={(e) => handleExcelFileSelected(e.target.files?.[0])}
+            />
+            <button
+              onClick={handleDownloadExcelTemplate}
+              disabled={isExcelBusy}
+              title="Sayım şablonunu Excel olarak indir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+              <span className="hidden md:inline">Şablon İndir</span>
+            </button>
+            <button
+              onClick={() => excelInputRef.current?.click()}
+              disabled={isExcelBusy}
+              title="Doldurulmuş Excel şablonunu yükleyerek sayım gir"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 dark:text-emerald-400 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isExcelBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileSpreadsheet className="w-4 h-4" />}
+              <span className="hidden md:inline">Excel ile Sayım</span>
+            </button>
           </div>
 
           {/* Filter mode toggle */}
@@ -1132,6 +1341,83 @@ export default function LaboratuvarSayimPage() {
           )}
         </main>
       </div>
+
+      <Dialog open={!!uploadFlow} onOpenChange={(open) => { if (!open && !isUploadingCalcFile) skipUploadStep(); }}>
+        <DialogContent className="max-w-2xl rounded-3xl p-0 overflow-hidden">
+          <div className="bg-gradient-to-br from-sky-500 via-cyan-500 to-blue-600 px-6 py-5 text-white">
+            <DialogHeader className="text-left">
+              <DialogTitle className="text-xl font-bold">Sayım Dosyalarını Yükle</DialogTitle>
+              <DialogDescription className="text-white/85">
+                {labName} — {countPeriod}. Dosyaları şimdi yükleyebilir veya bu adımı geçip sayım geçmişinden daha sonra tamamlayabilirsiniz.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          <div className="grid gap-5 p-6 md:grid-cols-[1.1fr_0.9fr]">
+            <label className="flex min-h-56 cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-sky-200 bg-sky-50/60 p-6 text-center transition hover:bg-sky-50">
+              <UploadCloud className="mb-3 h-10 w-10 text-sky-500" />
+              <span className="text-sm font-semibold text-slate-800">Dosyaları seç veya buraya bırak</span>
+              <span className="mt-1 text-xs text-slate-500">PDF, TXT ve CSV dosyaları desteklenir.</span>
+              <Input
+                type="file"
+                multiple
+                accept=".pdf,.txt,.csv,application/pdf,text/*"
+                className="sr-only"
+                onChange={(event) => setModalFiles(Array.from(event.target.files || []))}
+              />
+            </label>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border bg-muted/30 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Akış</p>
+                <div className="mt-3 space-y-3">
+                  {[
+                    { key: 'cihazUstu', label: '1. Cihaz üstü dosyası' },
+                    { key: 'kumulatif', label: '2. Kümülatif dosyası' },
+                  ].map((step) => {
+                    const active = uploadFlow?.step === step.key;
+                    return (
+                      <div key={step.key} className="flex items-center gap-3">
+                        <span className={cn('h-3 w-3 rounded-full', active ? 'bg-sky-500 ring-4 ring-sky-100' : 'bg-slate-300')} />
+                        <span className={cn('text-sm', active ? 'font-semibold text-slate-900' : 'text-muted-foreground')}>{step.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border p-4">
+                <p className="text-sm font-semibold">Seçilen dosyalar</p>
+                {modalFiles.length > 0 ? (
+                  <div className="mt-3 max-h-36 space-y-2 overflow-y-auto pr-1">
+                    {modalFiles.map((file) => (
+                      <div key={`${file.name}-${file.size}`} className="flex items-center justify-between gap-3 rounded-lg bg-muted/50 px-3 py-2 text-xs">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0 text-sky-500" />
+                          <span className="truncate">{file.name}</span>
+                        </span>
+                        <span className="shrink-0 text-muted-foreground">{Math.ceil(file.size / 1024)} KB</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-xs text-muted-foreground">Henüz dosya seçilmedi.</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 border-t bg-muted/20 px-6 py-4">
+            <Button variant="outline" onClick={skipUploadStep} disabled={isUploadingCalcFile}>
+              {uploadFlow?.step === 'cihazUstu' ? 'Atla ve İleri' : 'Atla ve Bitir'}
+            </Button>
+            <Button onClick={handleCalculationFileUpload} disabled={isUploadingCalcFile || modalFiles.length === 0}>
+              {isUploadingCalcFile && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {uploadFlow?.step === 'cihazUstu' ? 'Yükle ve İleri' : 'Yükle ve Bitir'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

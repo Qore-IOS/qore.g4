@@ -11,12 +11,17 @@ import {
   orderBy,
   query,
   serverTimestamp,
-  setDoc
+  setDoc,
+  where,
+  limit,
+  Timestamp,
 } from 'firebase/firestore';
+import { subDays } from 'date-fns';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -26,6 +31,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { 
   useDepots, 
   useHospitals, 
@@ -221,7 +227,6 @@ export default function MerkezSiparisPanel() {
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
 
   const [depotSearch, setDepotSearch] = useState('');
-  const [labSearch, setLabSearch] = useState('');
   const [showSelectionPanel, setShowSelectionPanel] = useState(true);
   const [generatedItems, setGeneratedItems] = useState<GeneratedOrderItem[]>([]);
   const [tableFilters, setTableFilters] = useState<Record<string, string>>({});
@@ -235,9 +240,29 @@ export default function MerkezSiparisPanel() {
   useEffect(() => {
     const fetchAdditional = async () => {
       try {
-        const [centralOrdersSnap, cihazUstuSnap] = await Promise.all([
-          getDocs(query(collection(db, 'centralOrders'), orderBy('createdAt', 'desc'))),
-          getDocs(collection(db, 'cihazUstuGecmisi')),
+        // Açık siparişler genelde az (<200), tamamlananlar zamanla birikir.
+        // Açıkları tam çek, tamamlananları son 90 gün + limit(500) ile sınırla.
+        const completedSinceTs = Timestamp.fromDate(subDays(new Date(), 90));
+        const [openOrdersSnap, completedOrdersSnap, cihazUstuSnap] = await Promise.all([
+          getDocs(scopedQuery(
+            'centralOrders',
+            currentCompanyId,
+            isSuperAdmin,
+            where('status', '!=', 'completed'),
+            orderBy('status'),
+            orderBy('createdAt', 'desc'),
+            limit(500),
+          )),
+          getDocs(scopedQuery(
+            'centralOrders',
+            currentCompanyId,
+            isSuperAdmin,
+            where('status', '==', 'completed'),
+            where('createdAt', '>=', completedSinceTs),
+            orderBy('createdAt', 'desc'),
+            limit(500),
+          )),
+          getDocs(scopedQuery('cihazUstuGecmisi', currentCompanyId, isSuperAdmin)),
         ]);
 
         const cihazMap: Record<string, Record<string, number>> = {};
@@ -261,23 +286,23 @@ export default function MerkezSiparisPanel() {
         });
         setCihazUstuMap(cihazMap);
 
-        const orders = centralOrdersSnap.docs.map(d => {
+        const toOrder = (d: any): CentralOrder => {
           const data = d.data() as Record<string, unknown>;
           return {
             ...(data as CentralOrder),
             id: d.id,
             createdAt: toDate(data.createdAt),
           } as CentralOrder;
-        });
+        };
 
-        setOpenOrders(orders.filter(o => o.status !== 'completed'));
-        setCompletedOrders(orders.filter(o => o.status === 'completed'));
+        setOpenOrders(openOrdersSnap.docs.map(toOrder));
+        setCompletedOrders(completedOrdersSnap.docs.map(toOrder));
       } catch (error) {
         console.error(error);
       }
     };
     fetchAdditional();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
@@ -393,12 +418,35 @@ export default function MerkezSiparisPanel() {
     setter(prev => (prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value]));
   };
 
+  // PERF (Faz 4): Stok sayımlarını O(1) lookup'a indir. Önceden getCurrentStockCount
+  // ve getLinkedLaboratoryStockCount HER çağrıda tüm depoStok'u .filter ile tarıyordu;
+  // handleGenerate bunları kural×lokasyon kez çağırınca O(kural×lokasyon×|depoStok|)
+  // senkron yük oluşuyordu (Siparişler INP'sinin baş suçlusu). Stok BİR KEZ Map'e
+  // indekslenir; sayım sonuçları orijinal filtrelerle birebir aynıdır.
+  const { depotStockCountMap, labStockCountMap } = useMemo(() => {
+    const depotMap = new Map<string, number>();
+    const labMap = new Map<string, number>();
+    for (const st of depoStok) {
+      if (!st.stokKodu) continue;
+      if (!st.isShipped) {
+        if (st.depotId) {
+          const k = `${st.depotId}|${st.stokKodu}`;
+          depotMap.set(k, (depotMap.get(k) ?? 0) + 1);
+        }
+      } else if (st.hedefKurumId) {
+        const k = `${st.hedefKurumId}|${st.stokKodu}`;
+        labMap.set(k, (labMap.get(k) ?? 0) + 1);
+      }
+    }
+    return { depotStockCountMap: depotMap, labStockCountMap: labMap };
+  }, [depoStok]);
+
   const getCurrentStockCount = (locationType: LocationType, locationId: string, stokKodu: string) => {
     if (locationType === 'depot') {
-      return depoStok.filter(st => st.depotId === locationId && !st.isShipped && st.stokKodu === stokKodu).length;
+      return depotStockCountMap.get(`${locationId}|${stokKodu}`) ?? 0;
     }
 
-    return depoStok.filter(st => st.hedefKurumId === locationId && st.isShipped && st.stokKodu === stokKodu).length;
+    return labStockCountMap.get(`${locationId}|${stokKodu}`) ?? 0;
   };
 
   const getLinkedLaboratoryStockCount = (depotId: string, stokKodu: string) => {
@@ -409,12 +457,14 @@ export default function MerkezSiparisPanel() {
     const relevantLabIds = linkedLabIds.filter(labId => Boolean(hospitalRulesMap[labId]?.[stokKodu]));
     if (relevantLabIds.length === 0) return 0;
 
-    return depoStok.filter(st => (
-      st.isShipped
-      && Boolean(st.hedefKurumId)
-      && relevantLabIds.includes(st.hedefKurumId as string)
-      && st.stokKodu === stokKodu
-    )).length;
+    // labStockCountMap zaten hedefKurumId|stokKodu bazında sevk edilmiş stoğu sayıyor;
+    // ilgili lab'ların toplamı orijinal tek-filtre sonucuyla aynıdır (her sevk kaydının
+    // tek hedefKurumId'si var → çift sayım yok).
+    let total = 0;
+    for (const labId of relevantLabIds) {
+      total += labStockCountMap.get(`${labId}|${stokKodu}`) ?? 0;
+    }
+    return total;
   };
 
   const periodKey = normalizePeriodKey(`${String(selectedMonth).padStart(2, '0')}-${selectedYear}`);
@@ -634,7 +684,6 @@ export default function MerkezSiparisPanel() {
   };
 
   const filteredDepots = depots.filter(d => d.name?.toLowerCase().includes(depotSearch.toLowerCase()));
-  const filteredLabs = hospitals.filter(h => h.name?.toLowerCase().includes(labSearch.toLowerCase()));
 
   const handleGeneratedItemChange = (key: string, field: 'cihazUstuAdet' | 'siparisAdedi', value: string) => {
     const numericValue = Math.max(0, Number(value) || 0);
@@ -742,20 +791,15 @@ export default function MerkezSiparisPanel() {
                   </ScrollArea>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Laboratuvarlar</Label>
-                  <Input placeholder="Laboratuvar ara..." value={labSearch} onChange={e => setLabSearch(e.target.value)} />
-                  <ScrollArea className="h-52 border rounded-md p-2">
-                    <div className="space-y-2">
-                      {filteredLabs.map(hospital => (
-                        <label key={hospital.id} className="flex items-center gap-2 text-sm cursor-pointer">
-                          <Checkbox checked={selectedLabIds.includes(hospital.id)} onCheckedChange={() => toggleSelection(hospital.id, selectedLabIds, setSelectedLabIds)} />
-                          <span>{hospital.name}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </ScrollArea>
-                </div>
+                <LabSelector
+                  mode="multi"
+                  label="Laboratuvarlar"
+                  labs={hospitals.map(h => ({ id: h.id, name: h.name, kod: h.kod }))}
+                  values={selectedLabIds}
+                  onValuesChange={setSelectedLabIds}
+                  placeholder="Laboratuvar seçin"
+                  showChips
+                />
               </CardContent>
             </Card>
             )}

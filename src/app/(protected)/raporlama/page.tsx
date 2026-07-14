@@ -1,100 +1,73 @@
-
 'use client';
+
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { exportAllDataToJSON } from '@/lib/utils';
-import { Card, CardContent } from '@/components/ui/card';
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
-import {
-  FileSpreadsheet,
-  FileJson,
-  Loader2,
-  CalendarClock,
-  Calculator,
-  History as HistoryIcon,
-  Activity,
-  Archive,
-  Barcode,
-  Trash2,
-  Package,
-  ArrowLeftRight,
-  FolderOpen,
-  TrendingUp,
-  ChevronRight,
-  Download,
-  PlusCircle,
-  BarChart3,
-  DatabaseZap,
+  FileSpreadsheet, FileJson, FileText, Loader2, CalendarClock, Activity,
+  Archive, Barcode, Trash2, Package, ArrowLeftRight, FolderOpen, TrendingUp,
+  Download, DatabaseZap, AlertTriangle, BarChart3,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
+import {
+  C, AC, ClayPage, useMode, Card, FeatureCard, SoftBtn, Modal, ModalHead, ModalActionRow,
+} from '@/components/raporlama/rapor-kit';
 
-// ─── Action Card for Modals ────────────────────────────────────────────
-interface ActionCardProps {
-  icon: React.ElementType;
-  title: string;
-  description: string;
-  onClick: () => void;
-  primary?: boolean;
-}
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
-function ActionCard({ icon: Icon, title, description, onClick, primary }: ActionCardProps) {
+// ─── Export tile (matches demo ExportBtn) ───────────────────────────────────
+function ExportTile({
+  icon, title, sub, onClick, disabled, loading, tone,
+}: {
+  icon: React.ReactNode; title: string; sub: string; onClick: () => void;
+  disabled?: boolean; loading?: boolean; tone?: 'water';
+}) {
+  const [p, setP] = useState(false);
+  const col = tone === 'water' ? C.waterDeep : AC.primary;
   return (
     <button
-      onClick={onClick}
-      className={cn(
-        'dashboard-kpi-mini group flex items-center gap-4 w-full px-4 py-3.5 rounded-2xl text-left transition-all duration-150',
-        primary && 'border-orange-400/25'
-      )}
+      type="button" onClick={onClick} disabled={disabled}
+      onPointerDown={() => !disabled && setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+      style={{
+        all: 'unset', cursor: disabled ? 'not-allowed' : 'pointer', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 14,
+        padding: '16px 18px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: p ? C.clayPress : C.clayFlat,
+        opacity: disabled ? 0.55 : 1, transition: `transform 200ms ${EASE}, box-shadow 200ms ${EASE}`,
+        transform: p ? 'translateY(1px) scale(0.99)' : 'none',
+      }}
     >
-      <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0 transition group-hover:text-orange-500">
-        <Icon className="w-[18px] h-[18px] text-[var(--dashboard-muted)] group-hover:text-orange-500 transition-colors" />
+      <span style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 13, display: 'grid', placeItems: 'center', color: col, background: C.surface2, boxShadow: C.clayInset }}>
+        {loading ? <Loader2 size={20} style={{ animation: 'cySpin 1s linear infinite' }} /> : icon}
       </span>
-      <div className="flex-1 min-w-0">
-        <span className="text-sm font-semibold block leading-tight" style={{ color: 'var(--dashboard-text)' }}>{title}</span>
-        <span className="text-xs mt-0.5 block leading-relaxed" style={{ color: 'var(--dashboard-muted)' }}>{description}</span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 15.5, fontWeight: 800, color: C.ink1 }}>{title}</div>
+        <div style={{ fontSize: 13, color: C.ink2, fontWeight: 500, marginTop: 2 }}>{sub}</div>
       </div>
-      <ChevronRight className="w-4 h-4 shrink-0 transition-transform duration-150 group-hover:translate-x-0.5" style={{ color: 'var(--dashboard-muted)', opacity: 0.4 }} />
+      <span style={{ color: col, flexShrink: 0 }}><Download size={20} /></span>
     </button>
   );
 }
 
-// ─── Main Component ────────────────────────────────────────────────────
 export default function RaporlamaPage() {
   const router = useRouter();
   const { toast } = useToast();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
   const [isExporting, setIsExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState<'json' | 'xlsx' | null>(null);
-  const [isCumulativeModalOpen, setIsCumulativeModalOpen] = useState(false);
-  const [isCihazUstuModalOpen, setIsCihazUstuModalOpen] = useState(false);
-  const [isStokIslemleriModalOpen, setIsStokIslemleriModalOpen] = useState(false);
+  const [isStokModalOpen, setIsStokModalOpen] = useState(false);
 
   const handleExport = async (format: 'json' | 'xlsx') => {
     setIsExporting(true);
     setExportFormat(format);
-    toast({
-      title: "Dışa Aktarma Başlatıldı",
-      description: "Sunucu üzerinden veriler toplanıyor. Bu işlem biraz zaman alabilir..."
-    });
-
+    toast({ title: 'Dışa Aktarma Başlatıldı', description: 'Sunucu üzerinden veriler toplanıyor. Bu işlem biraz zaman alabilir...' });
     try {
       const response = await fetch('/api/raporlama/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ format }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format }),
       });
-
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.error || 'Sunucu hatası');
       }
-
       if (format === 'xlsx') {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
@@ -116,248 +89,88 @@ export default function RaporlamaPage() {
       }
     } catch (error: any) {
       console.error('Export error:', error);
-      toast({
-        title: 'Hata',
-        description: error.message || 'Veriler dışa aktarılırken bir sorun oluştu.',
-        variant: 'destructive'
-      });
+      toast({ title: 'Hata', description: error.message || 'Veriler dışa aktarılırken bir sorun oluştu.', variant: 'destructive' });
     } finally {
       setIsExporting(false);
       setExportFormat(null);
     }
   };
 
-  const handleCumulativeNavigation = (path: string) => {
-    router.push(path);
-    setIsCumulativeModalOpen(false);
-  };
+  const goStok = (path: string) => { router.push(path); setIsStokModalOpen(false); };
 
-  const navigateTo = (path: string) => {
-    router.push(path);
-    setIsCihazUstuModalOpen(false);
-  };
-
-  const handleStokIslemleriNavigation = (path: string) => {
-    router.push(path);
-    setIsStokIslemleriModalOpen(false);
-  };
-
-  const modules = [
+  const features = [
+    { icon: FileText, title: 'Oluşturulan Raporlar', desc: 'Kestirmelerden üretilen PDF/Excel raporları ve teslimat durumlarını görüntüleyin.', onClick: () => router.push('/raporlama/olusturulan-raporlar') },
     { icon: FolderOpen, title: 'Dosya Yönetimi', desc: 'İrsaliye PDF ve Excel dosyalarını yükleyin ve yönetin.', onClick: () => router.push('/dosya-yonetimi') },
     { icon: TrendingUp, title: 'Tüketim İstatistikleri', desc: 'Laboratuvar bazlı ürün tüketim verilerini analiz edin.', onClick: () => router.push('/tuketim-istatistikleri') },
-    { icon: Archive, title: 'Kümülatif', desc: 'Kümülatif test hesaplama, analiz ve geçmiş kayıtları.', onClick: () => setIsCumulativeModalOpen(true) },
-    { icon: Activity, title: 'Cihaz Üstü', desc: 'Cihaz üzerindeki stok ve test bilgilerini kaydedin.', onClick: () => setIsCihazUstuModalOpen(true) },
-    { icon: Package, title: 'Stok İşlemleri', desc: 'Transfer, imha, hareketsiz stok ve min-max raporları.', onClick: () => setIsStokIslemleriModalOpen(true) },
+    { icon: Archive, title: 'Kümülatif', desc: "'Cumulative Operation List' PDF/TXT dosyalarından test sayılarını hesaplayın.", onClick: () => router.push('/kumulatif-hesaplama') },
+    { icon: Activity, title: 'Cihaz Üstü', desc: "'Reagent Status' PDF/TXT dosyalarından kullanılabilir test sayılarını hesaplayın.", onClick: () => router.push('/cihaz-ustu-hesaplama') },
+    { icon: Package, title: 'Stok İşlemleri', desc: 'Transfer, imha, stok risk, hareketsiz stok ve min-max raporları.', onClick: () => setIsStokModalOpen(true) },
     { icon: Barcode, title: 'Seri No Format Tanımla', desc: 'Barkod seri numarası format kurallarını belirleyin.', onClick: () => router.push('/raporlama/seri-no-format') },
   ];
 
+  const stokReports = [
+    { icon: ArrowLeftRight, title: 'Transfer Raporu', desc: 'Depolar arası ve kurum bazlı transfer hareketlerini listeleyin.', path: '/raporlama/transfer-raporu' },
+    { icon: Trash2, title: 'İmha Edilen Kitler', desc: 'İmha kayıtlarını tarih, neden ve ürün bazında görüntüleyin.', path: '/raporlama/imha-edilen-kitler' },
+    { icon: CalendarClock, title: 'Hareketsiz Stok Raporu', desc: 'Belirli süre işlem görmemiş stokları analiz edin.', path: '/raporlama/hareketsiz-stok-raporu' },
+    { icon: DatabaseZap, title: 'Min-Max Ürün Grafiği', desc: 'Ürün bazında tanımlı sınırlar ve mevcut seviyeleri karşılaştırın.', path: '/raporlama/minmax-urun-grafik' },
+    { icon: AlertTriangle, title: 'Stok Risk Raporu', desc: 'Min-max altı, miad yaklaşımı, hareketsiz, kritik depo ve fazla stok otomasyonlarını tanımlayın.', path: '/raporlama/stock-risk-report' },
+  ];
+
   return (
-    <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
-      {/* ─── Header ───────────────────────────────────────── */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold tracking-tight" style={{ color: 'var(--dashboard-text)' }}>
-          Raporlama ve Veri Yönetimi
-        </h1>
-        <p className="text-sm mt-1" style={{ color: 'var(--dashboard-muted)' }}>
-          Stok raporları, veri analizi ve dosya yönetimi işlemlerine buradan ulaşabilirsiniz.
-        </p>
-      </div>
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        {/* Header */}
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{ margin: 0, fontSize: mobile ? 26 : 32, fontWeight: 800, letterSpacing: '-0.025em', color: C.ink1, lineHeight: 1.1 }}>
+            Raporlama ve Veri Yönetimi
+          </h1>
+          <p style={{ margin: '8px 0 0', fontSize: mobile ? 14 : 15.5, color: C.ink2, fontWeight: 500 }}>
+            Stok raporları, veri analizi ve dosya yönetimi işlemlerine buradan ulaşabilirsiniz.
+          </p>
+        </div>
 
-      {/* ─── Module Cards Grid ────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
-        {modules.map((mod) => {
-          const Icon = mod.icon;
-          return (
-            <button
-              key={mod.title}
-              onClick={mod.onClick}
-              className="dashboard-panel-tile group relative flex items-start gap-4 rounded-2xl p-5 text-left transition"
-            >
-              <span className="dashboard-panel-icon flex h-11 w-11 items-center justify-center rounded-full shrink-0 transition group-hover:text-orange-500">
-                <Icon className="h-5 w-5" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-semibold leading-tight" style={{ color: 'var(--dashboard-text)' }}>{mod.title}</h3>
-                <p className="text-xs mt-1 leading-relaxed" style={{ color: 'var(--dashboard-muted)' }}>{mod.desc}</p>
-              </div>
-              <ChevronRight className="w-4 h-4 shrink-0 mt-0.5 transition-transform duration-200 group-hover:translate-x-0.5" style={{ color: 'var(--dashboard-muted)', opacity: 0.3 }} />
-            </button>
-          );
-        })}
-      </div>
+        {/* Feature grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 14, marginBottom: 16 }}>
+          {features.map((f, i) => (
+            <FeatureCard key={f.title} icon={f.icon} title={f.title} desc={f.desc} onClick={f.onClick} delay={i * 40} />
+          ))}
+        </div>
 
-      {/* ─── Quick Actions: Export ────────────────────────── */}
-      <Card className="glass-card">
-        <CardContent className="p-5">
-          <div className="flex items-start gap-4 mb-4">
-            <span className="dashboard-panel-icon flex items-center justify-center h-10 w-10 rounded-full shrink-0">
-              <Download className="w-5 h-5" />
+        {/* Export all */}
+        <Card style={{ animation: `cyRise 460ms ${EASE} 240ms both` }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 15, marginBottom: 18 }}>
+            <span style={{ width: 50, height: 50, flexShrink: 0, borderRadius: 15, display: 'grid', placeItems: 'center', color: AC.primary, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: C.clayFlat }}>
+              <Download size={24} />
             </span>
-            <div>
-              <h3 className="text-base font-semibold" style={{ color: 'var(--dashboard-text)' }}>Tüm Verileri Dışa Aktar</h3>
-              <p className="text-sm mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 18.5, fontWeight: 800, color: C.ink1 }}>Tüm Verileri Dışa Aktar</h2>
+              <p style={{ margin: '5px 0 0', fontSize: 14, color: C.ink2, fontWeight: 500, lineHeight: 1.5 }}>
                 Sistemdeki tüm ana ve işlem verilerini JSON veya çok sayfalı Excel formatında indirin.
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => handleExport('json')}
-              disabled={isExporting}
-              className="dashboard-panel-tile flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="dashboard-panel-icon flex items-center justify-center w-8 h-8 rounded-full shrink-0">
-                {isExporting && exportFormat === 'json' ? (
-                  <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
-                ) : (
-                  <FileJson className="w-4 h-4" />
-                )}
-              </span>
-              <div className="min-w-0">
-                <span className="text-sm font-medium block" style={{ color: 'var(--dashboard-text)' }}>JSON Olarak Dışa Aktar</span>
-                <span className="text-xs block" style={{ color: 'var(--dashboard-muted)' }}>Yapılandırılmış veri formatı</span>
-              </div>
-            </button>
-            <button
-              onClick={() => handleExport('xlsx')}
-              disabled={isExporting}
-              className="dashboard-panel-tile flex items-center gap-3 rounded-2xl px-4 py-3 text-left transition disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <span className="dashboard-panel-icon flex items-center justify-center w-8 h-8 rounded-full shrink-0">
-                {isExporting && exportFormat === 'xlsx' ? (
-                  <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
-                ) : (
-                  <FileSpreadsheet className="w-4 h-4" />
-                )}
-              </span>
-              <div className="min-w-0">
-                <span className="text-sm font-medium block" style={{ color: 'var(--dashboard-text)' }}>Excel Olarak Dışa Aktar</span>
-                <span className="text-xs block" style={{ color: 'var(--dashboard-muted)' }}>Çok sayfalı XLSX dosyası</span>
-              </div>
-            </button>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 14 }}>
+            <ExportTile
+              icon={<FileJson size={22} />} title="JSON Olarak Dışa Aktar" sub="Yapılandırılmış veri formatı"
+              onClick={() => handleExport('json')} disabled={isExporting} loading={isExporting && exportFormat === 'json'}
+            />
+            <ExportTile
+              icon={<FileSpreadsheet size={22} />} title="Excel Olarak Dışa Aktar" sub="Çok sayfalı XLSX dosyası" tone="water"
+              onClick={() => handleExport('xlsx')} disabled={isExporting} loading={isExporting && exportFormat === 'xlsx'}
+            />
           </div>
-        </CardContent>
-      </Card>
+        </Card>
+      </div>
 
-      {/* ─── Kümülatif Modal ─────────────────────────────────── */}
-      <Dialog open={isCumulativeModalOpen} onOpenChange={setIsCumulativeModalOpen}>
-        <DialogContent className="max-w-[520px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full">
-                <Archive className="w-[18px] h-[18px]" />
-              </span>
-              <div>
-                <DialogTitle className="text-lg font-semibold">Kümülatif Paneli</DialogTitle>
-                <DialogDescription className="text-sm mt-0.5">
-                  Kümülatif analiz ve raporlama araçlarından birini seçin.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <ActionCard
-              icon={Calculator}
-              title="Kümülatif Hesaplama"
-              description="Laboratuvar bazlı kümülatif test sonuçlarını hesaplayın."
-              onClick={() => handleCumulativeNavigation('/kumulatif-hesaplama')}
-              primary
-            />
-            <ActionCard
-              icon={BarChart3}
-              title="Kümülatif Analiz"
-              description="Kümülatif verileri detaylı olarak analiz edin ve karşılaştırın."
-              onClick={() => handleCumulativeNavigation('/raporlama/kumulatif-analiz')}
-            />
-            <ActionCard
-              icon={HistoryIcon}
-              title="Kümülatif Geçmişi"
-              description="Önceki kümülatif raporları görüntüleyin ve arşivleyin."
-              onClick={() => handleCumulativeNavigation('/kumulatif-gecmis')}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Cihaz Üstü Modal ────────────────────────────────── */}
-      <Dialog open={isCihazUstuModalOpen} onOpenChange={setIsCihazUstuModalOpen}>
-        <DialogContent className="max-w-[480px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full">
-                <Activity className="w-[18px] h-[18px]" />
-              </span>
-              <div>
-                <DialogTitle className="text-lg font-semibold">Cihaz Üstü</DialogTitle>
-                <DialogDescription className="text-sm mt-0.5">
-                  Cihaz üzerindeki stok işlemlerini yönetin.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <ActionCard
-              icon={PlusCircle}
-              title="Yeni Cihaz Üstü Kaydı"
-              description="Cihaz üzerindeki mevcut stok ve test bilgisini ekleyin."
-              onClick={() => navigateTo('/raporlama/cihaz-ustu-ekle')}
-              primary
-            />
-            <ActionCard
-              icon={HistoryIcon}
-              title="Geçmiş Kayıtlar"
-              description="Önceki cihaz üstü hareketlerini görüntüleyin."
-              onClick={() => navigateTo('/raporlama/cihaz-ustu-gecmisi')}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* ─── Stok İşlemleri Modal ────────────────────────────── */}
-      <Dialog open={isStokIslemleriModalOpen} onOpenChange={setIsStokIslemleriModalOpen}>
-        <DialogContent className="max-w-[560px]">
-          <DialogHeader>
-            <div className="flex items-center gap-3 mb-1">
-              <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full">
-                <Package className="w-[18px] h-[18px]" />
-              </span>
-              <div>
-                <DialogTitle className="text-lg font-semibold">Stok İşlemleri</DialogTitle>
-                <DialogDescription className="text-sm mt-0.5">
-                  Stok raporları ve analiz araçlarından birini seçin.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
-          <div className="flex flex-col gap-2 pt-2">
-            <ActionCard
-              icon={ArrowLeftRight}
-              title="Transfer Raporu"
-              description="Depolar arası ve kurum bazlı transfer hareketlerini listeleyin."
-              onClick={() => handleStokIslemleriNavigation('/raporlama/transfer-raporu')}
-              primary
-            />
-            <ActionCard
-              icon={Trash2}
-              title="İmha Edilen Kitler"
-              description="İmha kayıtlarını tarih, neden ve ürün bazında görüntüleyin."
-              onClick={() => handleStokIslemleriNavigation('/raporlama/imha-edilen-kitler')}
-            />
-            <ActionCard
-              icon={CalendarClock}
-              title="Hareketsiz Stok Raporu"
-              description="Belirli süre işlem görmemiş stokları analiz edin."
-              onClick={() => handleStokIslemleriNavigation('/raporlama/hareketsiz-stok-raporu')}
-            />
-            <ActionCard
-              icon={DatabaseZap}
-              title="Min-Max Ürün Grafiği"
-              description="Ürün bazında tanımlı sınırlar ve mevcut seviyeleri karşılaştırın."
-              onClick={() => handleStokIslemleriNavigation('/raporlama/minmax-urun-grafik')}
-            />
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+      {/* Stok İşlemleri modal */}
+      <Modal open={isStokModalOpen} onClose={() => setIsStokModalOpen(false)} width={680}>
+        <ModalHead icon={Package} title="Stok İşlemleri" desc="Stok raporları ve analiz araçlarından birini seçin." onClose={() => setIsStokModalOpen(false)} />
+        <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 11, overflowY: 'auto' }}>
+          {stokReports.map((r) => (
+            <ModalActionRow key={r.path} icon={r.icon} title={r.title} desc={r.desc} onClick={() => goStok(r.path)} />
+          ))}
+        </div>
+      </Modal>
+    </ClayPage>
   );
 }

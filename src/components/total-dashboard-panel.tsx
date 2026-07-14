@@ -26,13 +26,18 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, limit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import type { Hospital, EfficiencyPool, DeviceFaultReport } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import {
   Loader2,
   TrendingUp,
@@ -79,6 +84,7 @@ import {
 } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { LabSelector } from '@/components/common/LabSelector';
 import { cn } from '@/lib/utils';
 
 // Types
@@ -97,8 +103,14 @@ interface EfficiencyRecord {
     stokDogrulukSkoru: number;
     kitVerimlilikSkoru: number;
     genelVerimlilik: number;
+    toplamEtkiDegeri?: number;
+    maliyetAgirlikli?: boolean;
+    hesaplananSatirSayisi?: number;
+    hakEdisVerisiGirildi?: boolean;
+    algoritma?: 'value-impact-efficiency-index';
   };
   rows?: any[];
+  isAraKayit?: boolean;
   createdAt?: any;
 }
 
@@ -563,6 +575,13 @@ const PoolRankCard = ({
 
 export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelProps) {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+
+  // Tarih penceresi — varsayılan son 180 gün (6 ay dashboard görünümüne uyumlu).
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 180,
+    storageKey: 'total-dashboard:range',
+  });
 
   // State
   const [isLoading, setIsLoading] = useState(true);
@@ -603,15 +622,25 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
       try {
         // Fetch efficiency pools
         const poolsSnap = await getDocs(
-          query(collection(db, 'efficiencyPools'), orderBy('createdAt', 'desc'))
+          scopedQuery('efficiencyPools', currentCompanyId, isSuperAdmin, orderBy('createdAt', 'desc'))
         );
         const pools = poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as EfficiencyPool));
         setEfficiencyPools(pools);
 
         // Fetch all efficiency records (without compound index - sort in JS)
-        const recordsSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        const recordsSnap = await getDocs(scopedQuery('totalEfficiencyRecords', currentCompanyId, isSuperAdmin));
         const records = recordsSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as EfficiencyRecord))
+          .map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              ...data,
+              efficiencyMetrics: data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+                ? calculateEfficiencyMetrics(data.rows)
+                : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined),
+              isAraKayit: data.isAraKayit === true,
+            } as EfficiencyRecord;
+          })
           .sort((a, b) => {
             // Sort by year desc, then month desc
             if (b.year !== a.year) return b.year - a.year;
@@ -619,9 +648,16 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           });
         setEfficiencyRecords(records);
 
-        // Fetch device fault reports
+        // Fetch device fault reports — tarih penceresi + hard cap
         const faultsSnap = await getDocs(
-          query(collection(db, 'deviceFaultReports'), orderBy('openedAt', 'desc'))
+          scopedQuery(
+            'deviceFaultReports',
+            currentCompanyId,
+            isSuperAdmin,
+            ...dateFilter.constraints('openedAt'),
+            orderBy('openedAt', 'desc'),
+            limit(2000),
+          )
         );
         const faults = faultsSnap.docs.map(d => {
           const data = d.data();
@@ -647,7 +683,7 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
     };
 
     fetchData();
-  }, [toast, last6Months]);
+  }, [toast, last6Months, currentCompanyId, isSuperAdmin, dateFilter.range]);
 
   // Fetch exchange rates
   useEffect(() => {
@@ -977,6 +1013,12 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
     <div className="p-6 space-y-6 min-h-screen bg-gray-50 dark:bg-gray-950" role="main" aria-label="Total Dashboard">
       <BackButton fallback="/total-verimlilik" />
 
+      <DateRangeFilterBar
+        range={dateFilter.range}
+        setRange={dateFilter.setRange}
+        label="Arıza geçmişi penceresi"
+      />
+
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
@@ -1008,18 +1050,17 @@ export default function TotalDashboardPanel({ hospitals }: TotalDashboardPanelPr
           </Select>
 
           {/* Lab Filter */}
-          <Select value={selectedLabId} onValueChange={setSelectedLabId}>
-            <SelectTrigger className="w-[200px] bg-background" aria-label="Laboratuvar seçin">
-              <FlaskConical className="h-4 w-4 mr-2 text-muted-foreground" aria-hidden="true" />
-              <SelectValue placeholder="Laboratuvar seçin..." />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Tüm Laboratuvarlar</SelectItem>
-              {poolLabs.map(lab => (
-                <SelectItem key={lab.id} value={lab.id}>{lab.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="w-[220px]">
+            <LabSelector
+              ariaLabel="Laboratuvar seçin"
+              labs={poolLabs.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+              value={selectedLabId}
+              onChange={setSelectedLabId}
+              placeholder="Laboratuvar seçin..."
+              allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
+              icon={<FlaskConical className="h-4 w-4" />}
+            />
+          </div>
 
           {/* Period Filter */}
           <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>

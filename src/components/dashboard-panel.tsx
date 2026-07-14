@@ -20,21 +20,24 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDocs, Timestamp, orderBy, limit as fsLimit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import { matchesCompanyScope } from '@/lib/company-scope';
-import { 
-  useDeviceFaultReports, 
-  usePurchasingTasks, 
-  useExpiringProductsCount 
+import {
+  useDeviceFaultReports,
+  usePurchasingTasks,
+  useExpiringProductsCount
 } from '@/hooks/useFirebaseQueries';
+import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
 
 const motionProps = {
@@ -113,6 +116,10 @@ export default function DashboardPanel({
   const { data: purchasingTasks = [], isLoading: tasksLoading } = usePurchasingTasks();
   const { data: expiringCountServer = 0, isLoading: expiringLoading } = useExpiringProductsCount();
 
+  // Faz 5: Pre-aggregated özet — anlık KPI değerleri (Cloud Function tarafından
+  // realtime güncellenir). Full koleksiyon scan'i tamamlanmadan önce gözükür.
+  const { data: companyStats } = useCompanyStats();
+
   const [trendPeriod, setTrendPeriod] = useState<TrendPeriod>('weekly');
   const [trendDate, setTrendDate] = useState(new Date());
 
@@ -160,12 +167,20 @@ export default function DashboardPanel({
         let stockDocs: any[] = [];
         let depotDocs: any[] = [];
 
-        try { const s = await getDocs(collection(db, 'productCodes')); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
         try {
-          const s = await getDocs(collection(db, 'depoStok'));
-          stockDocs = s.docs.filter((d) => matchesCompanyScope(d.data() as any, currentCompanyId, isSuperAdmin));
+          // Dashboard sadece "mevcut stok"u (sevk edilmemiş) saymak için
+          // depoStok'a bakıyor. isShipped=true kayıtlar büyür ama gerekmez.
+          // Composite index: (companyId, isShipped, miad).
+          const s = await getDocs(scopedQuery(
+            'depoStok',
+            currentCompanyId,
+            isSuperAdmin,
+            where('isShipped', '==', false),
+          ));
+          stockDocs = s.docs;
         } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-        try { const s = await getDocs(collection(db, 'depots')); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
         const depotNameMap = new Map<string, string>();
         depotDocs.forEach((d) => {
@@ -415,10 +430,14 @@ export default function DashboardPanel({
         let productDocs2: any[] = [];
         let consumptionDocs: any[] = [];
 
-        try { const s = await getDocs(collection(db, 'productCodes')); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
+        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs2 = s.docs; } catch (e) { console.warn('[Dashboard] yesterday productCodes fetch failed:', e); }
         try {
-          const s = await getDocs(query(
-            collection(db, 'tuketimKayitlari'),
+          // Scope bug fix: önceki sürüm companyId filtresiz tüm firmaların
+          // tüketimini görüyordu. scopedQuery ile firma izolasyonu.
+          const s = await getDocs(scopedQuery(
+            'tuketimKayitlari',
+            currentCompanyId,
+            isSuperAdmin,
             where('consumptionTimestamp', '>=', Timestamp.fromDate(dayStart)),
             where('consumptionTimestamp', '<=', Timestamp.fromDate(dayEnd)),
           ));
@@ -449,13 +468,22 @@ export default function DashboardPanel({
   useEffect(() => {
     (async () => {
       try {
-        const effSnap = await getDocs(collection(db, 'totalEfficiencyRecords'));
+        // Verimlilik geçmişi büyür; ortalama için son 200 kayıt yeter.
+        const effSnap = await getDocs(scopedQuery(
+          'totalEfficiencyRecords',
+          currentCompanyId,
+          isSuperAdmin,
+          fsLimit(200),
+        ));
         if (!effSnap) return;
         const efficiencies: number[] = [];
         effSnap.docs.forEach(d => {
           const data = d.data();
-          const genelVerimlilik = data.efficiencyMetrics?.genelVerimlilik;
-          if (typeof genelVerimlilik === 'number' && genelVerimlilik > 0) {
+          const metrics = data.rows?.length && data.efficiencyMetrics?.hakEdisVerisiGirildi === undefined
+            ? calculateEfficiencyMetrics(data.rows)
+            : data.efficiencyMetrics || (data.rows?.length ? calculateEfficiencyMetrics(data.rows) : undefined);
+          const genelVerimlilik = metrics?.genelVerimlilik;
+          if (typeof genelVerimlilik === 'number' && genelVerimlilik >= 0) {
             efficiencies.push(genelVerimlilik);
           }
         });

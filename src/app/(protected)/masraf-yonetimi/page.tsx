@@ -10,6 +10,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Upload, Download, Save, PlusCircle, Trash2, Loader2, History } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc, where, onSnapshot, Timestamp } from 'firebase/firestore';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
@@ -57,7 +59,7 @@ const YEARS = Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - i);
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({ value: i, label: format(new Date(2000, i, 1), 'LLLL', { locale: tr }) }));
 
 export default function MasrafYonetimiPanel() {
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
 
   const [month, setMonth] = useState<number>(new Date().getMonth());
@@ -166,10 +168,10 @@ export default function MasrafYonetimiPanel() {
         status: 'pending',
         total,
       };
-      await setDoc(doc(db, 'expensePeriods', periodId), {
+      await setDoc(doc(db, 'expensePeriods', periodId), withCompanyScope({
         ...periodDoc,
         receipts: rows,
-      }, { merge: true });
+      }, currentCompanyId), { merge: true });
 
       toast({ title: 'Kaydedildi', description: 'Masraf fişleri dönem bazında kaydedildi ve onaya gönderildi.' });
     } catch (e) {
@@ -183,8 +185,10 @@ export default function MasrafYonetimiPanel() {
   const loadExistingIfAny = useCallback(async () => {
     if (!currentUser?.uid) return;
     try {
-      const q = query(
-        collection(db, 'expensePeriods'),
+      const q = scopedQuery(
+        'expensePeriods',
+        currentCompanyId,
+        isSuperAdmin,
         where('ownerUid', '==', currentUser.uid),
         where('year', '==', year),
         where('month', '==', month),
@@ -228,7 +232,7 @@ export default function MasrafYonetimiPanel() {
     setHistoryLoading(true);
     setIsHistoryOpen(true);
     // Simple query without ordering to avoid composite index requirement
-    const q = query(collection(db, 'expensePeriods'), where('ownerUid', '==', currentUser.uid));
+    const q = scopedQuery('expensePeriods', currentCompanyId, isSuperAdmin, where('ownerUid', '==', currentUser.uid));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
         const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExpensePeriod));

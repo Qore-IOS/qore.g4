@@ -14,7 +14,7 @@ import type { Laboratory, DepoStokItem, ConsumptionRecord, Device, ProductCode, 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays, X } from 'lucide-react';
+import { Barcode, AlertTriangle, CheckCircle, PackageMinus, TrendingUp, Info, Clock, Camera, Loader2, Wrench, XCircle, ClipboardPlus, ChevronsUpDown, Check, Pencil, Play, Trash2, LogOut, FlaskConical, CalendarDays, X, ListChecks } from 'lucide-react';
 import { playFeedback, sanitizeGS1 } from '@/lib/utils';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
@@ -22,7 +22,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { compareAsc, parse as parseDate, format as formatDate } from 'date-fns';
 import { formatMiad } from '@/lib/date';
 import { tr } from 'date-fns/locale';
@@ -42,6 +43,7 @@ import QRCode from 'qrcode';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 import { useLightDashboardData } from './dashboard/useDashboardData';
 import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints, useInvalidateQueries, useMinMaxRules, useLabPools, useDevices, useUsers, useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
 import type { DutyShift } from '@/lib/types';
@@ -52,6 +54,27 @@ const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-ba
   ssr: false,
   loading: () => <div className="flex items-center justify-center p-8"><Loader2 className="h-8 w-8 animate-spin text-primary" /><p className="ml-2">Kamera Yükleniyor...</p></div>,
 });
+
+/**
+ * Ürün Kullanım paneli kartı — hafif, performanslı yüzey.
+ *
+ * Performans notu: Bu kartlarda kısa süre LiquidGlassSurface (canvas
+ * displacement + çoklu backdrop-filter katmanı) kullanıldı; panelde 5+ kart
+ * aynı anda render edildiği için eski/zayıf cihazlarda donma ve çökmeye yol
+ * açtı. Artık backdrop-filter/SVG/canvas KULLANMAYAN sade yarı saydam karta
+ * geçildi (stil .frosted-glass-card'da). Tüm DOM nitelikleri köke geçirilir.
+ */
+function PanelCard({
+  className,
+  children,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div className={cn('frosted-glass-card', className)} {...rest}>
+      {children}
+    </div>
+  );
+}
 
 /**
  * Formats a DutyShift date (Timestamp or Date) to a readable string
@@ -410,7 +433,7 @@ export default function UrunKullanimPanel() {
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
-  const { data: barcodeFormats = [] } = useBarcodeFormatsQuery();
+  const { data: barcodeFormats = [], isLoading: formatsLoading } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
   // Fetch min/max rules for selected lab (for trash bin product filtering)
@@ -467,7 +490,6 @@ export default function UrunKullanimPanel() {
   const [customFaultTitle, setCustomFaultTitle] = useState('');
   const [customFaultDescription, setCustomFaultDescription] = useState('');
   
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
   const [isManualDeductionOpen, setIsManualDeductionOpen] = useState(false);
   const [manualProductCode, setManualProductCode] = useState('');
   const [manualLotKey, setManualLotKey] = useState('');
@@ -512,7 +534,7 @@ export default function UrunKullanimPanel() {
   useEffect(() => {
     const fetchMainUnitModels = async () => {
       try {
-        const snap = await getDocs(collection(db, 'def_mainUnits'));
+        const snap = await getDocs(scopedQuery('def_mainUnits', currentCompanyId, isSuperAdmin));
         const modelMap: Record<string, string> = {};
         snap.docs.forEach((d) => {
           const data = d.data() as any;
@@ -526,14 +548,14 @@ export default function UrunKullanimPanel() {
       }
     };
     fetchMainUnitModels();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
 
   // Fetch device groups (small collection, rarely changes)
   useEffect(() => {
     const fetchDeviceGroups = async () => {
       try {
-        const dgsnap = await getDocs(collection(db, 'def_deviceGroups'));
+        const dgsnap = await getDocs(scopedQuery('def_deviceGroups', currentCompanyId, isSuperAdmin));
         setDeviceGroups(dgsnap.docs.map(d => ({id: d.id, ...d.data()} as DeviceGroup)));
         urunKullanimLogger.debug('Cihaz grupları yüklendi', { count: dgsnap.docs.length });
       } catch (e) {
@@ -542,13 +564,13 @@ export default function UrunKullanimPanel() {
       }
     };
     fetchDeviceGroups();
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   // Fetch fault definitions for fault modal
   useEffect(() => {
     const fetchFaultDefinitions = async () => {
       try {
-        const snap = await getDocs(collection(db, 'faultDefinitions'));
+        const snap = await getDocs(scopedQuery('faultDefinitions', currentCompanyId, isSuperAdmin));
         const definitions = snap.docs.map(d => ({
           id: d.id,
           ...d.data(),
@@ -636,7 +658,7 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
   // Wait for labPools to load before querying to ensure pool members are included
-  const { data: labStock = [] } = useLabStock(poolMemberIds, poolMemberNames, {
+  const { data: labStock = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
     enabled: !labPoolsLoading && poolMemberIds.length > 0
   });
 
@@ -700,8 +722,8 @@ export default function UrunKullanimPanel() {
     });
 
     const batch = writeBatch(db);
-    batch.set(newTuketimDocRef, newRec);
-    
+    batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
+
     const currentAdet = itemToConsume.adet ?? 1;
     if (currentAdet > 1) {
       // OPTIMIZED: If bulk document, just decrement quantity
@@ -730,16 +752,17 @@ export default function UrunKullanimPanel() {
     const consumedStokKodu = itemToConsume.stokKodu;
     const consumedLot = itemToConsume.lotNumarasi || '';
     
-    // Use local labStock to update UI immediately
-    const lotRemaining = labStock.filter(i =>
-      i.stokKodu === consumedStokKodu &&
-      (i.lotNumarasi || '') === consumedLot &&
-      i.id !== consumedId
-    ).length;
-    const totalRemaining = labStock.filter(i =>
-      i.stokKodu === consumedStokKodu &&
-      i.id !== consumedId
-    ).length;
+    // Use local labStock to update UI immediately. Lot-tracked items live in a
+    // single doc with `adet: N`, so we sum adet rather than counting docs and
+    // subtract the 1 unit we just consumed.
+    const lotTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu && (i.lotNumarasi || '') === consumedLot)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const codeTotalAdet = labStock
+      .filter(i => i.stokKodu === consumedStokKodu)
+      .reduce((sum, i) => sum + (((i as any).adet as number | undefined) ?? 1), 0);
+    const lotRemaining = Math.max(0, lotTotalAdet - 1);
+    const totalRemaining = Math.max(0, codeTotalAdet - 1);
     
     setLastScannedLotRemaining(lotRemaining);
     setLastScannedTotalRemaining(totalRemaining);
@@ -780,7 +803,7 @@ export default function UrunKullanimPanel() {
         invalidateConsumption();
 
         // Stats update
-        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        incrementTodayStats(selectedLab.id, currentCompanyId).catch(() => undefined);
         
         // Serial history
         logSerialHistory(itemToConsume.seriNumarasi || '', 'consumption', {
@@ -1063,10 +1086,23 @@ export default function UrunKullanimPanel() {
 
     // STEP 2: Duplicate check - use Firestore for recent consumption (more reliable than cache)
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        // First check cache (fast)
-        const cachedDuplicate = tuketimKayitlari.some(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        // First check cache (fast). NOT: Aynı seri farklı ürünlere tanımlı
+        // olabildiği için stokKodu da karşılaştırılıyor. Bu kontrol yanlış
+        // pozitif veriyorsa `matched` log'unda mismatch görünecek.
+        const matched = tuketimKayitlari.find(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+        const cachedDuplicate = !!matched;
 
         if (cachedDuplicate) {
+            urunKullanimLogger.warn('Cache mükerrer tüketim tespit edildi', {
+              stokKodu,
+              seriNumarasi: item.seriNumarasi,
+              matchedRecord: matched ? {
+                id: (matched as any).id,
+                stokKodu: matched.stokKodu,
+                seriNumarasi: matched.seriNumarasi,
+                consumptionTimestamp: (matched as any).consumptionTimestamp?.toString?.() || (matched as any).consumptionTimestamp,
+              } : null,
+            });
             toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
@@ -1172,7 +1208,7 @@ export default function UrunKullanimPanel() {
   }, [consumeByParsed, isExpiryWarningModalOpen, lotReplaceTarget, barcodeFormats, toast, findBySerial, recordConsumption]);
   
   useHidScanner({
-    enabled: !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen,
+    enabled: !isLoading && !formatsLoading && !isCameraScannerOpen && !isExpiryWarningModalOpen && !faultModalOpen && !isManualDeductionOpen,
     onScan: ({ raw }) => onProcess(raw)
   });
 
@@ -1180,7 +1216,17 @@ export default function UrunKullanimPanel() {
     onProcess(rawCode);
     setIsCameraScannerOpen(false);
   };
-  
+
+  // Readiness: 3 adım — formatlar / ürün+lab listesi / lab stoğu
+  // Her adım gerçekten veri yüklenince tamamlanır; hiçbiri sahte true döndürmez.
+  // Lab stoğu yalnızca bir laboratuvar seçilince yüklenir; seçili lab yokken
+  // "yükleniyor" değil "lab seçilmeyi bekliyor" durumundadır (takılı görünmez).
+  const labSelected = Boolean(selectedLabId);
+  const stepFmtOk   = !formatsLoading && barcodeFormats.length > 0;
+  const stepProdOk  = !isLoading;
+  const stepStockOk = labSelected && !labPoolsLoading && !labStockLoading;
+  const systemReady = stepFmtOk && stepProdOk && stepStockOk;
+
   const safeName = useCallback(
     (code: string, fallback: string) => productNames[code] || fallback || code,
     [productNames]
@@ -1212,7 +1258,7 @@ export default function UrunKullanimPanel() {
   const handleFaultOpened = useCallback(async (faultType: 'teknik_servis' | 'aplikasyon') => {
     if (selectedLab?.perifer && selectedLabId) {
       try {
-        const q = query(collection(db, 'users'), where('primaryLaboratories', 'array-contains', selectedLabId));
+        const q = scopedQuery('users', currentCompanyId, isSuperAdmin, where('primaryLaboratories', 'array-contains', selectedLabId));
         const snap = await getDocs(q);
         const allResponsible = snap.docs.map(d => ({ uid: d.id, ...d.data() }));
         const filtered = allResponsible.filter((u: any) => u.role === faultType);
@@ -1398,11 +1444,24 @@ export default function UrunKullanimPanel() {
       .forEach(item => {
         const key = `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`;
         const current = lots.get(key) || { miad: item.miad ?? 'N/A', count: 0 };
-        current.count += 1;
+        // Sum adet — lot batches transferred from depot live in a single doc.
+        current.count += resolveStockRowUnit(item);
         lots.set(key, current);
       });
     return Array.from(lots.entries()).map(([key, data]) => ({ key, label: `${key.split('|')[0]} / ${data.miad}`, count: data.count }));
   }, [labStock, manualProductCode]);
+
+  // PERF (Faz 4b): Önceden listDeductionItems döngüsünde her labStock satırı için
+  // products.find çalışıyordu → O(labStock × |products|), her tüketimde yeniden. Ürün
+  // kataloğu stokKodu→ürün Map'ine bir kez (yalnızca products değişince) indekslenir;
+  // first-match semantiği products.find ile aynı (aynı stokKodu'da ilk kayıt korunur).
+  const productByStokKodu = useMemo(() => {
+    const m = new Map<string, (typeof products)[number]>();
+    for (const p of products) {
+      if (p.stokKodu && !m.has(p.stokKodu)) m.set(p.stokKodu, p);
+    }
+    return m;
+  }, [products]);
 
   const listDeductionItems = useMemo(() => {
     if (!selectedLab?.visualDeductionEnabled) return [];
@@ -1420,7 +1479,7 @@ export default function UrunKullanimPanel() {
     }>();
 
     labStock.forEach((item) => {
-      const product = products.find((p) => p.stokKodu === item.stokKodu);
+      const product = productByStokKodu.get(item.stokKodu);
       const anaBirim = String(product?.anaBirim || 'Adet');
       const lotNumarasi = item.lotNumarasi || 'Lotsuz';
       const miadStr = formatMiad(item.miad);
@@ -1447,16 +1506,19 @@ export default function UrunKullanimPanel() {
 
     return Array.from(grouped.values())
       .map((row) => {
-        // Nihai adet her zaman canlı labStock belge sayısından türetilsin
-        const liveCount = labStock.filter((it) =>
-          it.stokKodu === row.stokKodu &&
-          (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
-          formatMiad(it.miad) === row.miad
-        ).length;
+        // Nihai adet canlı labStock belgelerinin `adet` toplamından türetilsin.
+        // Lot dokümanları tek satırda `adet: N` taşır; doküman sayısı yanlış olur.
+        const liveCount = labStock
+          .filter((it) =>
+            it.stokKodu === row.stokKodu &&
+            (it.lotNumarasi || 'Lotsuz') === row.lotNumarasi &&
+            formatMiad(it.miad) === row.miad
+          )
+          .reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
         return { ...row, count: liveCount };
       })
       .sort((a, b) => (a.stokAdi || '').localeCompare(b.stokAdi || '', 'tr') || (a.lotNumarasi || '').localeCompare(b.lotNumarasi || '', 'tr'));
-  }, [labStock, products, selectedLab?.visualDeductionEnabled, selectedLabId]);
+  }, [labStock, productByStokKodu, selectedLab?.visualDeductionEnabled, selectedLabId]);
 
   const labGroupCategories = useMemo(() => {
     const cats = new Set(listDeductionItems.map(i => i.laboratuvarGrubu));
@@ -1502,7 +1564,8 @@ export default function UrunKullanimPanel() {
     }
 
     const groupKey = buildManualDeductionKey(selectedLab.id, stokKodu, lotNumarasi === 'Lotsuz' ? '' : lotNumarasi, miadRaw || '');
-    const currentlyAvailable = matchingItems.length;
+    // Lot dokümanları tek satırda `adet: N` tutar — gerçek mevcut adet = adet toplamı.
+    const currentlyAvailable = matchingItems.reduce((sum, it) => sum + resolveStockRowUnit(it), 0);
     if (currentlyAvailable <= 0) {
       toast({ title: 'Stok Bulunamadı', description: 'Bu satırın kullanılabilir stoğu tükenmiş görünüyor.', variant: 'destructive' });
       return;
@@ -1512,7 +1575,19 @@ export default function UrunKullanimPanel() {
     const templateItem = matchingItems[0];
     const ownerId = templateItem.hedefKurumId || laboratories.find(l => l.name === templateItem.hedefKurum)?.id || selectedLab.id;
     const ownerName = laboratories.find(l => l.id === ownerId)?.name || templateItem.hedefKurum || selectedLab.name || '';
-    const itemsToConsume = matchingItems.slice(0, quantityToDeduct);
+    // Adet-aware düşüm planı: her doküman için ne kadar düşüleceği. Doküman
+    // tamamı düşülürse silinir; kısmi düşümde `adet` decrement edilir. Eski
+    // `batch.delete` mantığı `adet: 50` olan bir dokümanı 1 birim için tamamen
+    // silerek 49 birim sessiz veri kaybına yol açıyordu.
+    let remainingToDeduct = quantityToDeduct;
+    const itemsToConsume: Array<{ id: string; take: number; docAdet: number; ref: DepoStokItem }> = [];
+    for (const stockItem of matchingItems) {
+      if (remainingToDeduct <= 0) break;
+      const docAdet = resolveStockRowUnit(stockItem);
+      const take = Math.min(docAdet, remainingToDeduct);
+      itemsToConsume.push({ id: stockItem.id, take, docAdet, ref: stockItem });
+      remainingToDeduct -= take;
+    }
     const shouldFullyConsumeLot = quantityToDeduct >= currentlyAvailable;
 
     try {
@@ -1542,13 +1617,19 @@ export default function UrunKullanimPanel() {
           subPointName: selectedSubPoint?.name || '',
           quantity: 1,
         };
-        batch.set(newTuketimDocRef, newRec);
+        batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
       }
 
-      // Adet gerçekten düşsün: seçilen miktardaki gerçek depoStok satırlarını sil
-      itemsToConsume.forEach((stockItem) => {
-        const stokRef = doc(db, 'depoStok', stockItem.id);
-        batch.delete(stokRef);
+      // Adet-aware düşüm: tamamı düşülen doküman silinir; kısmi düşümde
+      // `adet` decrement edilir. Böylece bir lot dokümanından 1 birim
+      // düşerken kalan birimler kaybolmaz.
+      itemsToConsume.forEach((plan) => {
+        const stokRef = doc(db, 'depoStok', plan.id);
+        if (plan.take >= plan.docAdet) {
+          batch.delete(stokRef);
+        } else {
+          batch.update(stokRef, { adet: plan.docAdet - plan.take });
+        }
       });
 
       // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
@@ -1582,7 +1663,10 @@ export default function UrunKullanimPanel() {
 
       // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
       const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);
-      const totalForCode = labStock.filter((i) => i.stokKodu === stokKodu).length;
+      // Lot dokümanları `adet: N` formatında — doküman saymak yerine adet topla.
+      const totalForCode = labStock
+        .filter((i) => i.stokKodu === stokKodu)
+        .reduce((sum, i) => sum + resolveStockRowUnit(i), 0);
       const estimatedTotalRemaining = Math.max(0, totalForCode - quantityToDeduct);
       const manualRecordBase: ConsumptionRecord = {
         id: `manual-${Date.now()}`,
@@ -1627,7 +1711,7 @@ export default function UrunKullanimPanel() {
       invalidateDepoStok();
       invalidateConsumption();
       for (let i = 0; i < quantityToDeduct; i++) {
-        incrementTodayStats(selectedLab.id).catch(() => undefined);
+        incrementTodayStats(selectedLab.id, currentCompanyId).catch(() => undefined);
       }
       toast({
         title: 'Başarılı',
@@ -1665,7 +1749,7 @@ export default function UrunKullanimPanel() {
           sourceType: 'manual',
         };
 
-        batch.set(trashBinRef, trashBinRecord);
+        batch.set(trashBinRef, withCompanyScope(trashBinRecord, currentCompanyId));
       });
 
       await batch.commit();
@@ -1762,7 +1846,7 @@ export default function UrunKullanimPanel() {
       <div className="relative z-10 min-h-screen flex flex-col">
         {/* Full-width Header - spans entire screen */}
         <div className="w-full p-4 pb-0">
-          <div className="frosted-glass-card">
+          <PanelCard>
             <div className="px-4 py-2">
               {/* Use flex layout for natural flow */}
               <div className="flex items-center justify-between min-h-[44px]">
@@ -1772,16 +1856,6 @@ export default function UrunKullanimPanel() {
                     <h2 className="text-lg font-bold font-headline text-gradient-primary">{currentUserProfile?.name || 'Kullanıcı'}</h2>
                     <p className="text-xs text-foreground/70">Ürün Kullanım Kaydı</p>
                   </div>
-                  {currentUserProfile?.role === 'teknisyen' && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={logout}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 h-6 w-6 p-0"
-                    >
-                      <LogOut className="h-3 w-3" />
-                    </Button>
-                  )}
                 </div>
 
                 {/* Center: Duty info - always centered */}
@@ -1789,57 +1863,60 @@ export default function UrunKullanimPanel() {
                   <DutyInfo selectedLabId={selectedLabId} />
                 </div>
 
-                {/* Right: Lab selector */}
-                <div className="flex items-center gap-3 flex-shrink-0">
+                {/* Right: hızlı eylemler + Lab selector */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {/* Ürün Talep paneline git */}
+                  <button
+                    type="button"
+                    onClick={() => router.push('/urun-talep')}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-white/30 bg-white/15 hover:bg-white/30 text-foreground/90 transition-colors"
+                    title="Ürün Talep Paneli"
+                    aria-label="Ürün talep paneline git"
+                  >
+                    <ClipboardPlus className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Ürün Talep</span>
+                  </button>
 
-                  {/* Lab selector */}
-                  <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={isLabPopoverOpen}
-                        className="w-[160px] justify-between font-medium h-8 text-sm frosted-glass-btn"
-                        disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
-                      >
-                        <span className="truncate">
-                          {selectedLabId
-                            ? assignedLaboratories.find((lab) => lab.id === selectedLabId)?.name
-                            : "Lab seçin..."}
-                        </span>
-                        <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[200px] p-0">
-                      <Command>
-                        <CommandInput placeholder="Laboratuvar ara..." />
-                        <CommandList>
-                          {isLoading ? <div className="p-4 text-sm text-center">Yükleniyor...</div> :
-                           <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                          }
-                          <CommandGroup>
-                            {assignedLaboratories.sort((a, b) => (a.name || '').localeCompare(b.name || '')).map((lab) => (
-                              <CommandItem
-                                key={lab.id}
-                                value={lab.name}
-                                onSelect={() => {
-                                  onHospitalSelect(lab.id);
-                                  setIsLabPopoverOpen(false);
-                                }}
-                              >
-                                <Check className={cn("mr-2 h-4 w-4", selectedLabId === lab.id ? "opacity-100" : "opacity-0")} />
-                                {lab.name}
-                              </CommandItem>
-                            ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                  {/* Seçili laboratuvarın sayım oturumunu başlat */}
+                  <button
+                    type="button"
+                    onClick={() => selectedLabId && router.push(`/laboratuvar/sayim/${selectedLabId}`)}
+                    disabled={!selectedLabId}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-emerald-400/40 bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-700 dark:text-emerald-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Sayım Oturumu Başlat"
+                    aria-label="Seçili laboratuvarın sayım oturumunu başlat"
+                  >
+                    <ListChecks className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Sayım</span>
+                  </button>
+
+                  {/* Oturumdan çıkış */}
+                  <button
+                    type="button"
+                    onClick={logout}
+                    className="inline-flex items-center gap-1.5 h-8 px-3 rounded-xl text-xs font-semibold border border-red-400/40 bg-red-500/15 hover:bg-red-500/30 text-red-700 dark:text-red-300 transition-colors"
+                    title="Oturumdan Çıkış"
+                    aria-label="Oturumdan çıkış yap"
+                  >
+                    <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span className="hidden sm:inline">Çıkış</span>
+                  </button>
+
+                  <div className="w-[180px]">
+                    <LabSelector
+                      labs={assignedLaboratories.map(l => ({ id: l.id, name: l.name, kod: l.kod }))}
+                      value={selectedLabId}
+                      onChange={onHospitalSelect}
+                      placeholder="Lab seçin..."
+                      size="sm"
+                      disabled={isLoading || (assignedLaboratories.length <= 1 && currentUserProfile?.role !== 'admin')}
+                      loading={isLoading}
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          </PanelCard>
         </div>
 
         {/* Content area - Right 45% aligned */}
@@ -1847,7 +1924,7 @@ export default function UrunKullanimPanel() {
           {/* Left spacer/list deduction panel */}
           <div className="hidden lg:block lg:w-[55%] p-4">
             {selectedLab?.visualDeductionEnabled && (
-              <div className="h-full frosted-glass-card p-4 overflow-hidden flex flex-col">
+              <PanelCard className="h-full p-4 overflow-hidden flex flex-col">
                 <div className="frosted-header mb-3">
                   <span className="font-semibold text-base">Listeli Düşüm</span>
                 </div>
@@ -1952,7 +2029,7 @@ export default function UrunKullanimPanel() {
                     )}
                   </div>
                 </ScrollArea>
-              </div>
+              </PanelCard>
             )}
           </div>
 
@@ -1960,9 +2037,9 @@ export default function UrunKullanimPanel() {
           <div className="w-full lg:w-[45%] p-4 flex flex-col gap-3">
 
           {/* Card 2: Son Okutulan Ürün */}
-          <div
+          <PanelCard
             className={cn(
-              "frosted-glass-card transition-all",
+              "transition-all",
               scanStatus === 'success' && 'ring-2 ring-green-500/50',
               scanStatus === 'error' && 'ring-2 ring-destructive/50'
             )}
@@ -1971,13 +2048,32 @@ export default function UrunKullanimPanel() {
             aria-label="Son okutulan ürün bilgisi"
           >
             <div className="frosted-header flex items-center justify-between gap-2">
-              <div className={cn(
-                "flex items-center gap-2",
-                scanStatus === 'success' && 'text-green-500',
-                scanStatus === 'error' && 'text-destructive'
-              )}>
-                {scanStatus === 'success' ? <CheckCircle className="w-5 h-5" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-5 h-5" aria-hidden="true" /> : <Barcode className="w-5 h-5" aria-hidden="true" />}
-                <span className="font-semibold text-sm">Son Okutulan Ürün</span>
+              <div className="flex items-center gap-2 min-w-0 flex-1">
+                <div className={cn(
+                  "flex items-center gap-2 shrink-0",
+                  scanStatus === 'success' && 'text-green-500',
+                  scanStatus === 'error' && 'text-destructive'
+                )}>
+                  {scanStatus === 'success' ? <CheckCircle className="w-5 h-5" aria-hidden="true" /> : scanStatus === 'error' ? <XCircle className="w-5 h-5" aria-hidden="true" /> : <Barcode className="w-5 h-5" aria-hidden="true" />}
+                  <span className="font-semibold text-sm">Son Okutulan Ürün</span>
+                </div>
+                {/* Readiness status pill */}
+                {systemReady ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-green-500/15 text-green-600 dark:text-green-400 border border-green-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0" style={{ animation: 'pulse-warning 2s ease-in-out infinite' }} />
+                    SİSTEM HAZIR
+                  </span>
+                ) : !labSelected && stepFmtOk && stepProdOk ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+                    LAB SEÇİN
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold tracking-wide bg-foreground/5 text-foreground/50 border border-foreground/10">
+                    <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />
+                    YÜKLENİYOR
+                  </span>
+                )}
               </div>
               {/* Action buttons moved here */}
               <div className="flex items-center gap-1">
@@ -2066,14 +2162,54 @@ export default function UrunKullanimPanel() {
                     </div>
                   )}
                 </div>
+              ) : systemReady ? (
+                <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Barkod okutmaya hazır.</p>
               ) : (
-                <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Henüz ürün okutulmadı.</p>
+                /* Veriler yüklenirken 3-adım göstergesi.
+                   state: 'done' | 'loading' | 'waiting' (lab seçilmeyi bekliyor) */
+                <div className="py-2 space-y-2">
+                  {([
+                    { label: 'Barkod formatları', state: stepFmtOk ? 'done' : 'loading' },
+                    { label: 'Ürün & laboratuvar listesi', state: stepProdOk ? 'done' : 'loading' },
+                    {
+                      label: poolMemberIds.length > 1 ? 'Havuz stoğu' : 'Lab stoğu',
+                      state: !labSelected ? 'waiting' : (stepStockOk ? 'done' : 'loading'),
+                    },
+                  ] as const).map((step, i) => (
+                    <div key={i} className="flex items-center gap-2.5">
+                      <span className={cn(
+                        "w-4 h-4 rounded-full flex items-center justify-center shrink-0 border",
+                        step.state === 'done'
+                          ? "bg-green-500/20 border-green-500/40 text-green-500"
+                          : step.state === 'waiting'
+                            ? "bg-amber-500/15 border-amber-500/30 text-amber-500"
+                            : "bg-foreground/5 border-foreground/15"
+                      )}>
+                        {step.state === 'done'
+                          ? <CheckCircle className="w-2.5 h-2.5" />
+                          : step.state === 'waiting'
+                            ? <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            : <Loader2 className="w-2.5 h-2.5 animate-spin text-foreground/40" />}
+                      </span>
+                      <span className={cn(
+                        "text-xs",
+                        step.state === 'done' ? "text-foreground/70"
+                          : step.state === 'waiting' ? "text-amber-600/80 dark:text-amber-400/80"
+                          : "text-foreground/40"
+                      )}>
+                        {step.label}
+                        {step.state === 'waiting' && ' — önce laboratuvar seçin'}
+                      </span>
+                      {step.state === 'done' && <CheckCircle className="w-3 h-3 text-green-500 ml-auto shrink-0" />}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
-          </div>
+          </PanelCard>
 
           {/* Card 3: Son 10 Tüketim */}
-          <div className="frosted-glass-card">
+          <PanelCard>
             <div className="frosted-header flex items-center gap-2">
               <Clock className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
               <span className="font-semibold text-sm">Son 10 Tüketim</span>
@@ -2097,11 +2233,11 @@ export default function UrunKullanimPanel() {
                 )}
               </ScrollArea>
             </div>
-          </div>
+          </PanelCard>
 
           {/* Card 4: Cihazlar */}
           {selectedLabId && (
-            <div className="frosted-glass-card flex-1" role="region" aria-label="Laboratuvar cihazları">
+            <PanelCard className="flex-1" role="region" aria-label="Laboratuvar cihazları">
               <div className="frosted-header grid grid-cols-[1fr_auto_1fr] items-center gap-2">
                 <div className="flex items-center gap-2 min-w-0">
                   <Wrench className="w-4 h-4 text-foreground/70 dark:text-foreground/60"/>
@@ -2187,7 +2323,7 @@ export default function UrunKullanimPanel() {
                   </div>
                 )}
               </div>
-            </div>
+            </PanelCard>
           )}
           </div>
         </div>

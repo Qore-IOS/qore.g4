@@ -6,8 +6,11 @@ import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { WizardFormSkeleton } from '@/components/perf/PanelSkeletons';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -21,7 +24,6 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
-import TeknikServisTutanakPDFButton, { generateTeknikServisTutanakPDF } from '@/components/exports/TeknikServisTutanakPDFButton';
 import SignaturePad from '@/components/SignaturePad';
 import type { SignaturePadRef } from '@/components/SignaturePad';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -29,7 +31,6 @@ import { Textarea } from '@/components/ui/textarea';
 import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFormShell';
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
-import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -62,6 +63,7 @@ type ActionItem = {
   id: string;
   type: 'part_change' | 'operation' | 'hucre_degisimi';
   action: string;
+  productCodeId?: string;
   stokKodu?: string;
   stokAdi?: string;
   anaBirim?: string;
@@ -341,7 +343,7 @@ export default function IslemFormuPage() {
           }
 
           // Fetch all devices for this hospital
-          const qDevices = query(collection(db, 'devices'), where('hospitalId', '==', labHospitalId));
+          const qDevices = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', labHospitalId));
           const devicesSnap = await getDocs(qDevices);
           const list = devicesSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device));
           const sortedList = list.sort((a, b) => (String(a.order ?? 99)).localeCompare(String(b.order ?? 99)));
@@ -448,7 +450,7 @@ export default function IslemFormuPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         const items = snap.docs.map((d) => {
           const data = d.data();
           return {
@@ -474,7 +476,7 @@ export default function IslemFormuPage() {
         if (!hospitalId) return;
 
         // 2. Get all device lab pools that include this hospital
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const matchingPoolIds: string[] = [];
         const companyScopedPools = filterByCompanyScope(
           poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as DeviceLabPool),
@@ -489,7 +491,7 @@ export default function IslemFormuPage() {
         if (matchingPoolIds.length === 0) return;
 
         // 3. Get pool warehouses linked to these lab groups
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const poolWarehouseIds: string[] = [];
         const companyScopedDepots = filterByCompanyScope(
           depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as Depot),
@@ -506,8 +508,10 @@ export default function IslemFormuPage() {
         // 4. Fetch pool stock from these warehouses
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const pwId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', pwId),
             where('status', '==', 'in_stock')
           );
@@ -580,8 +584,10 @@ export default function IslemFormuPage() {
     (async () => {
       try {
         // Fetch periodic part changes for teknik_servis or both
-        const partsQuery = query(
-          collection(db, 'periodicPartChanges'),
+        const partsQuery = scopedQuery(
+          'periodicPartChanges',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const partsSnap = await getDocs(partsQuery);
@@ -591,8 +597,10 @@ export default function IslemFormuPage() {
         setPeriodicPartChanges(filteredParts);
 
         // Fetch periodic part change logs for this device
-        const logsQuery = query(
-          collection(db, 'periodicPartChangeLogs'),
+        const logsQuery = scopedQuery(
+          'periodicPartChangeLogs',
+          currentCompanyId,
+          isSuperAdmin,
           where('deviceId', '==', deviceId)
         );
         const logsSnap = await getDocs(logsQuery);
@@ -1171,7 +1179,7 @@ export default function IslemFormuPage() {
   };
 
   const refreshDepotStock = async () => {
-    const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+    const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
     const items = snap.docs.map((d) => {
       const data = d.data();
       return {
@@ -1180,7 +1188,7 @@ export default function IslemFormuPage() {
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
       } as YedekParcaDepoStokItem;
     });
-    setDepotStockItems(items);
+    setDepotStockItems(filterByCompanyScope(items, currentCompanyId, isSuperAdmin));
   };
 
   // Handle removed part image selection
@@ -1511,7 +1519,7 @@ export default function IslemFormuPage() {
         draftData.createdByName = currentUserProfile?.name || '';
       }
 
-      await setDoc(doc(db, 'draftActionForms', draftId), draftData, { merge: true });
+      await setDoc(doc(db, 'draftActionForms', draftId), withCompanyScope(draftData, currentCompanyId), { merge: true });
       setCurrentDraftId(draftId);
       setDraftActionLogs(updatedLogs);
 
@@ -1686,7 +1694,7 @@ export default function IslemFormuPage() {
   const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
     const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
     batch.set(borrowedRef, {
-      productCodeId: partChange.action || depotEntry.productCodeId || '',
+      productCodeId: partChange.productCodeId || depotEntry.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
       anaBirim: partChange.anaBirim || depotEntry.anaBirim || 'Adet',
@@ -1707,6 +1715,78 @@ export default function IslemFormuPage() {
       borrowedAt: Timestamp.fromDate(now),
       status: 'pending',
     });
+  };
+
+
+  const returnRemovedHucreToDepot = (hucreChange: ActionItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    const removedHucre = String(hucreChange.removedHucreNumarasi || '').trim().toUpperCase();
+    const installedHucre = String(hucreChange.hucreNumarasi || '').trim().toUpperCase();
+    if (!removedHucre || removedHucre === installedHucre) return;
+
+    const depotRef = doc(collection(db, 'yedekParcaDepoStok'));
+    batch.set(depotRef, withCompanyScope({
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.removedPartStokKodu || hucreChange.stokKodu || '',
+      stokAdi: hucreChange.removedPartStokAdi || hucreChange.stokAdi || '',
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: '',
+      hucreNumarasi: removedHucre,
+      quantity: 1,
+      source: 'device_removed_cell',
+      sourceDeviceId: currentDevice.id,
+      sourceDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      sourceFormId: formId,
+      sourceFormType: 'teknik_servis',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
+
+    batch.set(doc(collection(db, 'yedekParcaDepoLog')), withCompanyScope({
+      action: 'hucre_iade_giris',
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.removedPartStokKodu || hucreChange.stokKodu || '',
+      stokAdi: hucreChange.removedPartStokAdi || hucreChange.stokAdi || '',
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: '',
+      hucreNumarasi: removedHucre,
+      quantity: 1,
+      relatedDeviceId: currentDevice.id,
+      relatedDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      relatedPersonnelUid: currentUserProfile?.uid || '',
+      relatedPersonnelName: currentUserProfile?.name || '',
+      formId,
+      formType: 'teknik_servis',
+      notes: `Hücre değişimi: çıkan hücre ${removedHucre} depoya iade edildi, takılan hücre ${installedHucre || '-'} cihazda kullanıldı.`,
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
+  };
+
+  const logPersonalHucreUsage = (hucreChange: ActionItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
+    if (!hucreChange.personalStockId) return;
+
+    batch.set(doc(collection(db, 'sparePartTransferLogs')), withCompanyScope({
+      action: 'use_on_device',
+      personalStockId: hucreChange.personalStockId,
+      productCodeId: hucreChange.productCodeId || '',
+      stokKodu: hucreChange.stokKodu,
+      stokAdi: hucreChange.stokAdi,
+      anaBirim: hucreChange.anaBirim || 'Adet',
+      serialNumber: hucreChange.serialNumber || '',
+      hucreNumarasi: hucreChange.hucreNumarasi || '',
+      removedHucreNumarasi: hucreChange.removedHucreNumarasi || '',
+      quantity: 1,
+      deviceId: currentDevice.id,
+      deviceName: currentDevice.cihazAdi || currentDevice.model || '',
+      labName: hospital?.name || '',
+      formId,
+      formType: 'teknik_servis',
+      createdAt: Timestamp.fromDate(now),
+      createdByUid: currentUserProfile?.uid || '',
+      createdByName: currentUserProfile?.name || '',
+    }, currentCompanyId));
   };
 
   const handleSaveSignaturesAndFinish = (finalSignatures: { personnel?: string; technician?: string }, finalTechnicianName?: string) => {
@@ -1981,23 +2061,29 @@ export default function IslemFormuPage() {
             const removedStokKodu = partChange.removedPartStokKodu || partChange.stokKodu;
 
             if (removedSerial && removedSerial !== installedSerial) {
-              const removedStockRef = doc(collection(db, 'personalStock'));
+              const removedStockRef = doc(collection(db, 'yedekParcaDepoStok'));
               removedStockRefId = removedStockRef.id;
-              batch.set(removedStockRef, {
-                ownerUid: currentUserProfile?.uid || '',
-                ownerName: currentUserProfile?.name || '',
-                productCodeId: partChange.personalStockId ? partChange.action : null,
+              batch.set(removedStockRef, withCompanyScope({
+                productCodeId: partChange.productCodeId || '',
                 stokKodu: removedStokKodu,
                 stokAdi: partChange.removedPartStokAdi || partChange.stokAdi,
+                anaBirim: partChange.anaBirim || 'Adet',
                 serialNumber: removedSerial,
                 imageUrl: partChange.removedPartImageUrl || null,
-                source: 'device',
+                address: '',
+                quantity: 1,
+                partCondition: 'cihazdan_cikan',
+                partConditionNote: `Cihazdan çıkan parça: ${currentDevice.cihazAdi || currentDevice.model || currentDeviceId || ''}`.trim(),
+                sourceType: 'device_removed',
                 sourceDeviceId: currentDeviceId,
                 sourceDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
-                status: 'in_stock',
+                sourceFormId: formRef.id,
+                sourceFormType: 'teknik_servis',
                 createdAt: Timestamp.fromDate(now),
-                replacedPartId: partChange.personalStockId || null,
-              });
+                createdByUid: currentUserProfile?.uid || '',
+                createdByName: currentUserProfile?.name || '',
+                replacedPartId: partChange.personalStockId || partChange.poolStockId || null,
+              }, currentCompanyId));
             }
 
             if (partChange.personalStockId && !processedPersonalStockIdsGlobal.has(partChange.personalStockId)) {
@@ -2065,11 +2151,13 @@ export default function IslemFormuPage() {
                 usedOnFormId: formRef.id,
                 usedOnFormType: 'teknik_servis',
               });
+              logPersonalHucreUsage(hucreChange, batch, currentDevice, formRef.id, now);
             }
             if (hucreChange.isDepotSelection) {
               const depotEntry = await consumeDepotSelection(hucreChange, batch);
               createDepotBorrowRecord(hucreChange, depotEntry, batch, currentDevice, formRef.id, now);
             }
+            returnRemovedHucreToDepot(hucreChange, batch, currentDevice, formRef.id, now);
           }
 
           if (previousIslemTuru === 'periyodik_bakim' && previousSelectedMaintenanceTasks.length > 0 && isPrimaryDevice) {
@@ -2145,42 +2233,9 @@ export default function IslemFormuPage() {
           throw new Error('Kaydedilecek cihaz aksiyonu bulunamadı.');
         }
 
-        // Decoupled DB and PDF for maximum speed
-        const dbPromise = batch.commit();
-        
-        // Start PDF generation immediately
-        const pdfPromises = createdFormsData.map(data => 
-           generateTeknikServisTutanakPDF(data.device, data.hospital, data.actionRecord as any, true)
-        );
-
-        // Show WhatsApp button as soon as PDF is ready
-        Promise.all(pdfPromises).then(() => {
-          hapticDouble();
-          const firstForm = createdFormsData[0];
-          const waText = encodeURIComponent(
-            `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
-            `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
-            `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
-            `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
-            `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
-            `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
-          );
-
-          toast({
-            title: 'Başarılı',
-            description: isLabMode ? 'Laboratuvar geneli form oluşturuldu ve PDF hazır.' : 'İşlem formu kaydedildi ve PDF hazır.',
-            action: (
-              <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
-                <div className="flex items-center gap-1.5">
-                  <MessageCircle className="h-4 w-4" />
-                  <span>WhatsApp</span>
-                </div>
-              </ToastAction>
-            )
-          });
-        });
-
-        await dbPromise;
+        // İşlem formunu kaydet. (Otomatik PDF açma kaldırıldı — formlar zaten WhatsApp'a
+        // otomatik iletiliyor; her kayıtta PDF üretip yeni sekmede açmaya gerek yok.)
+        await batch.commit();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
 
@@ -2188,6 +2243,29 @@ export default function IslemFormuPage() {
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['deviceActionForms'] });
         queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] });
+
+        hapticDouble();
+        const firstForm = createdFormsData[0];
+        const waText = encodeURIComponent(
+          `🚀 *Teknik Servis İşlemi Tamamlandı*\n\n` +
+          `🏥 *Kurum:* ${firstForm.hospital?.name || '-'}\n` +
+          `🔬 *Cihaz:* ${firstForm.device.cihazAdi || firstForm.device.model || '-'}\n` +
+          `📋 *Form No:* ${firstForm.actionRecord.formNo || '-'}\n` +
+          `👨‍🔧 *Teknisyen:* ${currentUserProfile?.name || '-'}\n\n` +
+          `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`
+        );
+        toast({
+          title: 'Başarılı',
+          description: isLabMode ? 'Laboratuvar geneli form oluşturuldu.' : 'İşlem formu kaydedildi.',
+          action: (
+            <ToastAction altText="WhatsApp" onClick={() => window.open(`https://wa.me/?text=${waText}`, '_blank')}>
+              <div className="flex items-center gap-1.5">
+                <MessageCircle className="h-4 w-4" />
+                <span>WhatsApp</span>
+              </div>
+            </ToastAction>
+          )
+        });
 
       } catch (err) {
         console.error("Error saving action form (Optimistic):", err);
@@ -2490,14 +2568,8 @@ export default function IslemFormuPage() {
   ], [islemTipi, islemTuru, baslangicTarihi, baslangicSaati, bitisTarihi, bitisSaati, actions, aciklama]);
 
   if (loading) {
-    return (
-      <div className="cihaz-shell flex items-center justify-center min-h-screen">
-        <div className="flex flex-col items-center gap-4">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)]" />
-          <p className="text-sm text-[var(--dashboard-muted)]">Yükleniyor…</p>
-        </div>
-      </div>
-    );
+    // PERF (Faz 6 mobil): Spinner yerine form-layout skeleton → mobilde anında yapı.
+    return <WizardFormSkeleton />;
   }
   if (!device) {
     return (
@@ -3254,6 +3326,7 @@ export default function IslemFormuPage() {
               id: `hucre_${Date.now()}_${i}`,
               type: 'hucre_degisimi',
               action: `Hücre Değişimi: ${selectedItem.hucreNumarasi}`,
+              productCodeId: (selectedItem as any).productCodeId || '',
               stokKodu: selectedItem.stokKodu,
               stokAdi: selectedItem.stokAdi,
               anaBirim: selectedItem.anaBirim,

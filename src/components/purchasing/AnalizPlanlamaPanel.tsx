@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, onSnapshot, orderBy, query, where } from 'firebase/firestore';
@@ -28,7 +29,7 @@ function getHeatColor(value: number, max: number): string {
 }
 
 export default function AnalizPlanlamaPanel() {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
   const [labs, setLabs] = useState<Hospital[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -40,7 +41,7 @@ export default function AnalizPlanlamaPanel() {
   const [personalCalendarMode, setPersonalCalendarMode] = useState<'weekly' | 'monthly'>('weekly');
 
   useEffect(() => {
-    const q = query(collection(db, 'purchasingTasks'), orderBy('date', 'desc'));
+    const q = scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin, orderBy('date', 'desc'));
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -56,8 +57,8 @@ export default function AnalizPlanlamaPanel() {
   useEffect(() => {
     async function fetchRefs() {
       const [labSnap, usersSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'users'), where('role', 'in', ['admin', 'satin_alma']))),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin, where('role', 'in', ['admin', 'satin_alma']))),
       ]);
       setLabs(labSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Hospital)));
       setUsers(usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() } as User)));

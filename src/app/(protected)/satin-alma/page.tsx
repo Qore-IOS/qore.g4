@@ -1,7 +1,7 @@
 'use client';
 
-import SatinAlmaPanel from '@/components/purchasing/SatinAlmaPanel';
+import PlanlamaPanel from '@/components/purchasing/planlama/PlanlamaPanel';
 
 export default function SatinAlmaPage() {
-  return <SatinAlmaPanel />;
+  return <PlanlamaPanel />;
 }

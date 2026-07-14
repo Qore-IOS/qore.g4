@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -34,35 +44,84 @@ const nodemailer = __importStar(require("nodemailer"));
 const jspdf_1 = require("jspdf");
 const jspdf_autotable_1 = __importDefault(require("jspdf-autotable"));
 const node_fetch_1 = __importDefault(require("node-fetch"));
+const QRCode = __importStar(require("qrcode"));
+const whatsapp_1 = require("./lib/whatsapp");
 const db = admin.firestore();
-// --- Turkish font cache ---
+// --- Turkish -> ASCII transliteration for PDF (font does not support TR glyphs) ---
+const TR_ASCII_MAP = {
+    'ç': 'c', 'Ç': 'C',
+    'ğ': 'g', 'Ğ': 'G',
+    'ı': 'i', 'İ': 'I',
+    'ö': 'o', 'Ö': 'O',
+    'ş': 's', 'Ş': 'S',
+    'ü': 'u', 'Ü': 'U',
+};
+function tr(s) {
+    if (s === null || s === undefined)
+        return '';
+    return String(s).replace(/[çÇğĞıİöÖşŞüÜ]/g, (ch) => { var _a; return (_a = TR_ASCII_MAP[ch]) !== null && _a !== void 0 ? _a : ch; });
+}
+function trRows(rows) {
+    return rows.map((row) => row.map((cell) => tr(cell)));
+}
+// --- Assets cache ---
 let turkishFontBase64 = null;
-async function loadTurkishFont() {
-    if (turkishFontBase64)
-        return turkishFontBase64;
+let headerLogoBase64 = null;
+let systemLogoBase64 = null;
+async function loadAssetBase64(url) {
     try {
-        const fontUrl = 'https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf';
-        const response = await (0, node_fetch_1.default)(fontUrl);
+        const response = await (0, node_fetch_1.default)(url);
         if (!response.ok)
             return null;
         const buffer = await response.buffer();
-        turkishFontBase64 = buffer.toString('base64');
-        return turkishFontBase64;
+        return buffer.toString('base64');
     }
     catch (e) {
-        firebase_functions_1.logger.warn('[actionFormEmail] Could not load Turkish font:', e);
+        firebase_functions_1.logger.warn(`[actionFormEmail] Could not load asset from ${url}:`, e);
         return null;
     }
+}
+async function loadTurkishFont() {
+    if (turkishFontBase64)
+        return turkishFontBase64;
+    turkishFontBase64 = await loadAssetBase64('https://fonts.gstatic.com/s/notosans/v36/o-0IIpQlx3QUlC5A4PNr5TRA.ttf');
+    return turkishFontBase64;
+}
+async function loadHeaderLogo() {
+    if (headerLogoBase64)
+        return headerLogoBase64;
+    // Fallback chain for logos
+    headerLogoBase64 = await loadAssetBase64('https://qorengine.com/invlogo.png');
+    if (!headerLogoBase64) {
+        headerLogoBase64 = await loadAssetBase64('https://qorengine.com/invitrolab_LOGO__-_Kopya__1_-removebg.png');
+    }
+    return headerLogoBase64;
+}
+async function loadSystemLogo() {
+    if (systemLogoBase64)
+        return systemLogoBase64;
+    systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+    return systemLogoBase64;
 }
 function setupTurkishFont(doc, fontBase64) {
     try {
         doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
         doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
+        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'bold');
         return true;
     }
     catch (e) {
         firebase_functions_1.logger.warn('[actionFormEmail] Could not setup Turkish font:', e);
         return false;
+    }
+}
+async function generateQRCodeDataUrl(text) {
+    try {
+        return await QRCode.toDataURL(text, { margin: 1, width: 200 });
+    }
+    catch (e) {
+        firebase_functions_1.logger.warn('[actionFormEmail] Could not generate QR code:', e);
+        return null;
     }
 }
 // --- Labels ---
@@ -143,23 +202,59 @@ async function generateActionFormPDF(data, formType, formId) {
     const pageW = doc.internal.pageSize.getWidth();
     const pageH = doc.internal.pageSize.getHeight();
     const padX = 40;
-    // Load Turkish font for proper ş, ğ, ü, ö, ç, ı, İ support
-    const fontBase64 = await loadTurkishFont();
+    // --- PREFETCH ASSETS ---
+    const [fontBase64, headerLogo, sysLogo] = await Promise.all([
+        loadTurkishFont(),
+        loadHeaderLogo(),
+        loadSystemLogo()
+    ]);
     const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
     const FONT = useTurkish ? 'NotoSans' : 'helvetica';
     const ORANGE = { r: 199, g: 137, b: 65 };
     doc.setFont(FONT);
     // --- Orange page border ---
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-    doc.setLineWidth(2);
+    doc.setLineWidth(1.5);
     doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
-    // --- HEADER ---
-    const headerY = 30;
+    // --- HEADER SECTION ---
+    const headerY = 50;
+    // Left: Title
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(14);
     doc.setFont(FONT, 'bold');
     const title = formType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu';
-    doc.text(title, padX, headerY + 20);
+    doc.text(tr(title), padX, headerY);
+    // Center: Company Logo
+    if (headerLogo) {
+        try {
+            doc.addImage(`data:image/png;base64,${headerLogo}`, 'PNG', pageW / 2 - 60, headerY - 25, 120, 45, undefined, 'FAST');
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn('Header logo addImage failed', e);
+        }
+    }
+    // Right: QR Code
+    const detailUrl = `https://qorengine.com/forms/${formType === 'teknik_servis' ? 'technical' : 'application'}/${formId}`;
+    const qrBase64 = await generateQRCodeDataUrl(detailUrl);
+    if (qrBase64) {
+        try {
+            doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
+            doc.rect(pageW - padX - 70, headerY - 25, 70, 70);
+            doc.addImage(qrBase64, 'PNG', pageW - padX - 68, headerY - 23, 66, 66, undefined, 'FAST');
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn('QR code addImage failed', e);
+        }
+    }
+    // System Logo below QR
+    if (sysLogo) {
+        try {
+            doc.addImage(`data:image/png;base64,${sysLogo}`, 'PNG', pageW - padX - 55, headerY + 48, 40, 30, undefined, 'FAST');
+        }
+        catch (e) {
+            firebase_functions_1.logger.warn('System logo addImage failed', e);
+        }
+    }
     // --- FORM INFO SECTION ---
     doc.setFontSize(10);
     doc.setFont(FONT, 'normal');
@@ -182,14 +277,15 @@ async function generateActionFormPDF(data, formType, formId) {
             : (((_b = data.createdAt) === null || _b === void 0 ? void 0 : _b._seconds) ? formatDate(new Date(data.createdAt._seconds * 1000)) : '-');
     }
     const info = [
-        ['Form No:', formId],
+        ['Form No:', data.formNo || formId],
         ['Laboratuvar:', data.labName || '-'],
         ['Cihaz:', `${data.cihazAdi || '-'} (SN: ${data.seriNumarasi || '-'})`],
         ['İşlemi Yapan:', personnelStr],
-        ['Tarih / Saat:', dateStr],
+        ['Başlangıç:', data.baslangicTarihi ? `${data.baslangicTarihi.split('-').reverse().join('.')} ${data.baslangicSaati || ''}` : '-'],
+        ['Bitiş:', data.bitisTarihi ? `${data.bitisTarihi.split('-').reverse().join('.')} ${data.bitisSaati || ''}` : dateStr],
     ];
     (0, jspdf_autotable_1.default)(doc, {
-        body: info,
+        body: trRows(info),
         startY: currentY,
         theme: 'plain',
         styles: { font: FONT, fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
@@ -201,10 +297,10 @@ async function generateActionFormPDF(data, formType, formId) {
         doc.setFont(FONT, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text('Açıklama', padX, currentY + 12);
+        doc.text(tr('Açıklama'), padX, currentY + 12);
         currentY += 18;
         (0, jspdf_autotable_1.default)(doc, {
-            body: [[data.aciklama]],
+            body: [[tr(data.aciklama)]],
             startY: currentY,
             theme: 'grid',
             styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
@@ -219,7 +315,7 @@ async function generateActionFormPDF(data, formType, formId) {
         doc.setFont(FONT, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text('İşlem Türüne Özel Detaylar', padX, currentY + 12);
+        doc.text(tr('İşlem Türüne Özel Detaylar'), padX, currentY + 12);
         currentY += 18;
         const detailRows = [];
         if (hasPeriyodikDetay) {
@@ -241,7 +337,7 @@ async function generateActionFormPDF(data, formType, formId) {
             }
         }
         (0, jspdf_autotable_1.default)(doc, {
-            body: detailRows,
+            body: trRows(detailRows),
             startY: currentY,
             theme: 'grid',
             styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
@@ -255,7 +351,7 @@ async function generateActionFormPDF(data, formType, formId) {
     doc.setFontSize(10);
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('İşlem Tipi ve Türü', padX, currentY + 12);
+    doc.text(tr('İşlem Tipi ve Türü'), padX, currentY + 12);
     currentY += 18;
     doc.setFont(FONT, 'normal');
     const islemRows = [];
@@ -265,7 +361,7 @@ async function generateActionFormPDF(data, formType, formId) {
     const turuLabels = formType === 'teknik_servis' ? TEKNIK_ISLEM_TURU_LABELS : APLIKASYON_ISLEM_TURU_LABELS;
     islemRows.push(['İşlem Türü:', turuLabels[data.islemTuru || ''] || data.islemTuru || '-']);
     (0, jspdf_autotable_1.default)(doc, {
-        body: islemRows,
+        body: trRows(islemRows),
         startY: currentY,
         theme: 'plain',
         styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
@@ -280,14 +376,14 @@ async function generateActionFormPDF(data, formType, formId) {
         doc.setFont(FONT, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text('Yapılan İşlemler', padX, currentY + 12);
+        doc.text(tr('Yapılan İşlemler'), padX, currentY + 12);
         currentY += 18;
         (0, jspdf_autotable_1.default)(doc, {
-            head: [['İşlem', 'Adet']],
-            body: operations.map((act) => [
+            head: [[tr('İşlem'), tr('Adet')]],
+            body: trRows(operations.map((act) => [
                 operationLabels[act.action] || act.action,
                 String(act.quantity),
-            ]),
+            ])),
             startY: currentY,
             theme: 'grid',
             styles: { font: FONT, fontSize: 10 },
@@ -302,11 +398,11 @@ async function generateActionFormPDF(data, formType, formId) {
         doc.setFont(FONT, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text('Değişen Parçalar', padX, currentY + 12);
+        doc.text(tr('Değişen Parçalar'), padX, currentY + 12);
         currentY += 18;
         (0, jspdf_autotable_1.default)(doc, {
-            head: [['Parça', 'Kod', 'Adet', 'Birim']],
-            body: parts.map((act) => {
+            head: [[tr('Parça'), tr('Kod'), tr('Adet'), tr('Birim')]],
+            body: trRows(parts.map((act) => {
                 let partName = act.stokAdi || act.action;
                 if (act.isManualEntry && act.stokKodu && act.stokAdi) {
                     partName = `${act.stokKodu} - ${act.stokAdi}`;
@@ -317,7 +413,7 @@ async function generateActionFormPDF(data, formType, formId) {
                     String(act.quantity),
                     act.anaBirim ? act.anaBirim.toLowerCase() : 'adet',
                 ];
-            }),
+            })),
             startY: currentY,
             theme: 'grid',
             styles: { font: FONT, fontSize: 10 },
@@ -330,14 +426,14 @@ async function generateActionFormPDF(data, formType, formId) {
     doc.setFont(FONT, 'bold');
     doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
     doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text('Cihaz Durumu', padX, currentY + 12);
+    doc.text(tr('Cihaz Durumu'), padX, currentY + 12);
     currentY += 18;
     let cihazDurumuStr = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
     if (data.cihazDurumu === 'diger' && data.cihazDurumuAciklama) {
         cihazDurumuStr += ` (${data.cihazDurumuAciklama})`;
     }
     (0, jspdf_autotable_1.default)(doc, {
-        body: [['Durum:', cihazDurumuStr]],
+        body: trRows([['Durum:', cihazDurumuStr]]),
         startY: currentY,
         theme: 'plain',
         styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
@@ -351,13 +447,13 @@ async function generateActionFormPDF(data, formType, formId) {
         doc.setFont(FONT, 'bold');
         doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
         doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-        doc.text('İmzalar', padX, signatureY - 3);
+        doc.text(tr('İmzalar'), padX, signatureY - 3);
         doc.setFont(FONT, 'normal');
         doc.setFontSize(10);
         // Personnel signature with name
-        doc.text('İşlemi Yapan Personel', padX, signatureY + 15);
+        doc.text(tr('İşlemi Yapan Personel'), padX, signatureY + 15);
         doc.setFont(FONT, 'bold');
-        doc.text(data.createdByName || '-', padX, signatureY + 28);
+        doc.text(tr(data.createdByName || '-'), padX, signatureY + 28);
         doc.setFont(FONT, 'normal');
         doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
         if (data.personnelSignature) {
@@ -367,9 +463,9 @@ async function generateActionFormPDF(data, formType, formId) {
             catch (e) { /* signature image may fail in server context */ }
         }
         // Technician signature with name
-        doc.text('Teknisyen', pageW / 2 + 20, signatureY + 15);
+        doc.text(tr('Teknisyen'), pageW / 2 + 20, signatureY + 15);
         doc.setFont(FONT, 'bold');
-        doc.text(data.technicianName || '-', pageW / 2 + 20, signatureY + 28);
+        doc.text(tr(data.technicianName || '-'), pageW / 2 + 20, signatureY + 28);
         doc.setFont(FONT, 'normal');
         doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
         if (data.technicianSignature) {
@@ -410,12 +506,15 @@ async function handleActionFormCreated(snap, context, formType) {
         steps: [],
         error: null,
         emailSentTo: null,
+        whatsappSent: false,
+        whatsappError: null,
         smtpConfigured: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     try {
         // 1. Get hospital's sorumluEmail
         const hospitalId = data.hospitalId;
+        firebase_functions_1.logger.info(`[actionFormEmail] hospitalId: ${hospitalId}`);
         if (!hospitalId) {
             logEntry.status = 'skipped';
             logEntry.error = 'Form üzerinde hospitalId bulunamadı';
@@ -436,68 +535,171 @@ async function handleActionFormCreated(snap, context, formType) {
         }
         logEntry.steps.push('Hospital dokümanı sorgusu: OK');
         const hospitalData = hospitalDoc.data();
-        const sorumluEmail = hospitalData.sorumluEmail;
+        const sorumluEmailRaw = hospitalData.sorumluEmail;
+        const sorumluEmail = (sorumluEmailRaw && typeof sorumluEmailRaw === 'string') ? sorumluEmailRaw.trim() : '';
         logEntry.labName = hospitalData.name || data.labName || null;
-        if (!sorumluEmail || !sorumluEmail.trim()) {
-            logEntry.status = 'skipped';
-            logEntry.error = `Hospital ${hospitalId} için sorumluEmail tanımlı değil`;
-            logEntry.steps.push('sorumluEmail kontrolü: BAŞARISIZ - email tanımlı değil');
-            firebase_functions_1.logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email.`);
-            await db.collection('emailNotificationLogs').add(logEntry);
-            return;
+        let emailEnabled = true;
+        if (!sorumluEmail) {
+            emailEnabled = false;
+            logEntry.steps.push('sorumluEmail kontrolü: ATLANDI - email tanımlı değil (WhatsApp denenecek)');
+            firebase_functions_1.logger.info(`[actionFormEmail] No sorumluEmail for hospital ${hospitalId}, skipping email but continuing with WhatsApp.`);
         }
-        logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail.trim()})`);
-        logEntry.emailSentTo = sorumluEmail.trim();
-        // 2. Get transporter
-        const transporter = getTransporter();
-        if (!transporter) {
-            logEntry.status = 'failed';
+        else {
+            logEntry.steps.push(`sorumluEmail kontrolü: OK (${sorumluEmail})`);
+            logEntry.emailSentTo = sorumluEmail;
+            firebase_functions_1.logger.info(`[actionFormEmail] sorumluEmail: ${sorumluEmail}`);
+        }
+        // 2. Get transporter (only required for email; WhatsApp still proceeds without SMTP)
+        const transporter = emailEnabled ? getTransporter() : null;
+        if (emailEnabled && !transporter) {
+            emailEnabled = false;
             logEntry.smtpConfigured = false;
-            logEntry.error = 'SMTP yapılandırması eksik. SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS ortam değişkenlerini kontrol edin.';
-            logEntry.steps.push('SMTP yapılandırma kontrolü: BAŞARISIZ - ortam değişkenleri eksik');
-            firebase_functions_1.logger.error(`[actionFormEmail] SMTP not configured, cannot send email for form ${formId}.`);
-            await db.collection('emailNotificationLogs').add(logEntry);
-            return;
+            logEntry.steps.push('SMTP yapılandırma kontrolü: BAŞARISIZ - ortam değişkenleri eksik (WhatsApp denenecek)');
+            firebase_functions_1.logger.error(`[actionFormEmail] SMTP not configured, skipping email for form ${formId} but continuing with WhatsApp.`);
         }
-        logEntry.smtpConfigured = true;
-        logEntry.steps.push('SMTP yapılandırma kontrolü: OK');
+        else if (transporter) {
+            logEntry.smtpConfigured = true;
+            logEntry.steps.push('SMTP yapılandırma kontrolü: OK');
+        }
         // 3. Generate PDF
         logEntry.steps.push('PDF oluşturma: başladı');
+        firebase_functions_1.logger.info('[actionFormEmail] PDF generation starting...');
         const pdfBuffer = await generateActionFormPDF(data, formType, formId);
         logEntry.steps.push(`PDF oluşturma: OK (${pdfBuffer.length} byte)`);
-        // 4. Compose email
-        const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
-        const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
-        const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
-        const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
-        const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
-        const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
-        const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
-        const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
-        logEntry.steps.push(`Email hazırlandı: from=${senderEmail}, to=${sorumluEmail.trim()}, subject=${subject}`);
-        try {
-            await transporter.sendMail({
-                from: senderEmail,
-                to: sorumluEmail.trim(),
-                subject,
-                text: body,
-                attachments: [
-                    {
-                        filename: pdfFileName,
-                        content: pdfBuffer,
-                        contentType: 'application/pdf',
+        firebase_functions_1.logger.info(`[actionFormEmail] PDF generation OK: ${pdfBuffer.length} bytes`);
+        // 4. WhatsApp Notification
+        const waConfig = functions.config().whatsapp;
+        firebase_functions_1.logger.info('[WhatsApp] Config check...', {
+            hasConfig: !!waConfig,
+            hasInstanceId: !!(waConfig === null || waConfig === void 0 ? void 0 : waConfig.instance_id),
+            hasToken: !!(waConfig === null || waConfig === void 0 ? void 0 : waConfig.token),
+            hasGroupId: !!(waConfig === null || waConfig === void 0 ? void 0 : waConfig.group_id)
+        });
+        if (waConfig && waConfig.instance_id && waConfig.token && waConfig.group_id) {
+            logEntry.steps.push('WhatsApp gönderimi: başladı');
+            firebase_functions_1.logger.info(`[WhatsApp] Attempting to send to: ${waConfig.group_id}`);
+            const labName = data.labName || 'Bilinmeyen Laboratuvar';
+            const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
+            const personnelName = data.createdByName || 'Bilinmeyen Kullanıcı';
+            const formTypeLabel = formType === 'teknik_servis' ? 'Teknik Servis' : 'Aplikasyon';
+            let cihazDurumuCaption = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
+            if (data.cihazDurumu === 'diger' && data.cihazDurumuAciklama) {
+                cihazDurumuCaption += ` (${data.cihazDurumuAciklama})`;
+            }
+            const caption = `*${formTypeLabel} İşlemi Tamamlandı*\n\n` +
+                `- *Kurum:* ${labName}\n` +
+                `- *Cihaz:* ${cihazAdi}\n` +
+                `- *Form No:* ${data.formNo || formId}\n` +
+                `- *Personel:* ${personnelName}\n` +
+                `- *Cihaz Durumu:* ${cihazDurumuCaption}\n\n` +
+                `QORE Sistemi üzerinden detaylara ulaşabilirsiniz.`;
+            const waFileName = `IslemFormu_${formType === 'teknik_servis' ? 'Teknik' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+            try {
+                // --- 4.1 Upload to Storage to get a URL ---
+                firebase_functions_1.logger.info('[WhatsApp] Uploading PDF to storage for URL-based sending...');
+                const bucket = admin.storage().bucket();
+                const storagePath = `actionFormPDFs/${formId}_${Date.now()}.pdf`;
+                const file = bucket.file(storagePath);
+                await file.save(pdfBuffer, {
+                    contentType: 'application/pdf',
+                    metadata: {
+                        cacheControl: 'public, max-age=3600',
                     },
-                ],
-            });
-            logEntry.status = 'sent';
-            logEntry.steps.push('Email gönderimi: BAŞARILI');
-            firebase_functions_1.logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
+                });
+                // Make the file public so UltraMsg can access it
+                await file.makePublic();
+                // Construct the public URL
+                const publicUrl = `https://storage.googleapis.com/${bucket.name}/${storagePath}`;
+                firebase_functions_1.logger.info(`[WhatsApp] PDF uploaded and made public. URL: ${publicUrl}`);
+                // --- 4.2 Send via WhatsApp ---
+                const waResult = await (0, whatsapp_1.sendWhatsAppDocument)(publicUrl, waFileName, caption, waConfig.group_id, waConfig.instance_id, waConfig.token);
+                firebase_functions_1.logger.info(`[WhatsApp] Result: ${JSON.stringify(waResult)}`);
+                if (waResult.success) {
+                    logEntry.whatsappSent = true;
+                    logEntry.steps.push(`WhatsApp gönderimi: OK (MsgID: ${waResult.messageId})`);
+                }
+                else {
+                    logEntry.whatsappError = waResult.error || 'Unknown error';
+                    logEntry.steps.push(`WhatsApp gönderimi: BAŞARISIZ - ${waResult.error}`);
+                }
+                // --- 4.3 Send to parts group too if form contains part changes ---
+                const hasPartChanges = Array.isArray(data.actions) && data.actions.some((a) => (a === null || a === void 0 ? void 0 : a.type) === 'part_change');
+                const partsGroupId = waConfig.parts_group_id || '905362835871-1624522639@g.us';
+                if (hasPartChanges && partsGroupId) {
+                    firebase_functions_1.logger.info(`[WhatsApp] Form has part changes; also sending to parts group: ${partsGroupId}`);
+                    try {
+                        const partsResult = await (0, whatsapp_1.sendWhatsAppDocument)(publicUrl, waFileName, caption, partsGroupId, waConfig.instance_id, waConfig.token);
+                        firebase_functions_1.logger.info(`[WhatsApp] Parts group result: ${JSON.stringify(partsResult)}`);
+                        if (partsResult.success) {
+                            logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: OK (MsgID: ${partsResult.messageId})`);
+                        }
+                        else {
+                            logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: BAŞARISIZ - ${partsResult.error}`);
+                        }
+                    }
+                    catch (partsErr) {
+                        firebase_functions_1.logger.error('[WhatsApp] Parts group send error', partsErr);
+                        logEntry.steps.push(`WhatsApp (parça grubu) gönderimi: HATA - ${(partsErr === null || partsErr === void 0 ? void 0 : partsErr.message) || partsErr}`);
+                    }
+                }
+            }
+            catch (waErr) {
+                firebase_functions_1.logger.error('[WhatsApp] Fatal error in notification flow:', waErr);
+                logEntry.whatsappError = waErr.message || String(waErr);
+                logEntry.steps.push(`WhatsApp gönderimi: HATA - ${waErr.message}`);
+            }
         }
-        catch (error) {
-            logEntry.status = 'failed';
-            logEntry.error = (error === null || error === void 0 ? void 0 : error.message) || String(error);
-            logEntry.steps.push(`Email gönderimi: BAŞARISIZ - ${(error === null || error === void 0 ? void 0 : error.message) || error}`);
-            firebase_functions_1.logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, (error === null || error === void 0 ? void 0 : error.message) || error);
+        else {
+            firebase_functions_1.logger.warn('[WhatsApp] Skipping: Configuration is incomplete.');
+            logEntry.steps.push('WhatsApp gönderimi: ATLADI (Yapılandırma eksik)');
+        }
+        // 5. Compose email (only if email is enabled)
+        if (emailEnabled && transporter) {
+            const labName = hospitalData.name || data.labName || 'Bilinmeyen Laboratuvar';
+            const cihazAdi = data.cihazAdi || 'Bilinmeyen Cihaz';
+            const personnelName = data.createdByName || 'Bilinmeyen Kullanici';
+            const formTypeLabel = formType === 'teknik_servis' ? 'teknik servis' : 'aplikasyon';
+            const subject = `Islem Formu - ${labName} - ${cihazAdi}`;
+            const body = `Sorumlusu oldugunuz ${labName} laboratuvarindaki ${cihazAdi} cihazina ${formTypeLabel} personeli ${personnelName} tarafindan islem formu kaydedilmistir. Ilgili belge ektedir.`;
+            const senderEmail = process.env.SMTP_FROM || process.env.SMTP_USER;
+            const pdfFileName = `IslemFormu_${formType === 'teknik_servis' ? 'TeknikServis' : 'Aplikasyon'}_${formId.substring(0, 8)}.pdf`;
+            logEntry.steps.push(`Email hazırlandı: from=${senderEmail}, to=${sorumluEmail}, subject=${subject}`);
+            try {
+                await transporter.sendMail({
+                    from: senderEmail,
+                    to: sorumluEmail,
+                    subject,
+                    text: body,
+                    attachments: [
+                        {
+                            filename: pdfFileName,
+                            content: pdfBuffer,
+                            contentType: 'application/pdf',
+                        },
+                    ],
+                });
+                logEntry.status = 'sent';
+                logEntry.steps.push('Email gönderimi: BAŞARILI');
+                firebase_functions_1.logger.info(`[actionFormEmail] Email sent to ${sorumluEmail} for form ${formId}`);
+            }
+            catch (error) {
+                logEntry.status = 'failed';
+                logEntry.error = (error === null || error === void 0 ? void 0 : error.message) || String(error);
+                logEntry.steps.push(`Email gönderimi: BAŞARISIZ - ${(error === null || error === void 0 ? void 0 : error.message) || error}`);
+                firebase_functions_1.logger.error(`[actionFormEmail] Failed to send email for form ${formId}:`, (error === null || error === void 0 ? void 0 : error.message) || error);
+            }
+        }
+        else {
+            // Email skipped; reflect final status based on WhatsApp result
+            if (logEntry.whatsappSent) {
+                logEntry.status = 'sent';
+                logEntry.steps.push('Email gönderimi: ATLANDI (sorumluEmail/SMTP yok), WhatsApp ile bildirildi');
+            }
+            else {
+                logEntry.status = 'skipped';
+                logEntry.steps.push('Email gönderimi: ATLANDI (sorumluEmail/SMTP yok)');
+            }
+            firebase_functions_1.logger.info(`[actionFormEmail] Email step skipped for form ${formId} (emailEnabled=false).`);
         }
     }
     catch (outerError) {

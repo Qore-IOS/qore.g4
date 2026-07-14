@@ -28,9 +28,12 @@ import {
   Package,
   X,
   ShoppingCart,
+  Warehouse,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
+import { withCompanyScope } from '@/lib/company-scope';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -38,8 +41,11 @@ import {
   doc,
   setDoc,
   serverTimestamp,
+  where,
 } from 'firebase/firestore';
-import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem } from '@/lib/types';
+import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency, User } from '@/lib/types';
+import { Textarea } from '@/components/ui/textarea';
+import { AlertTriangle, AlertCircle, Flame } from 'lucide-react';
 import { generateId, playNotificationSound, cn } from '@/lib/utils';
 import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
@@ -62,6 +68,7 @@ import {
   CommandItem,
   CommandList,
 } from '@/components/ui/command';
+import { LabSelector } from '@/components/common/LabSelector';
 
 /* =======================================================
    DUTY SCHEDULE HELPERS (preserved from original)
@@ -70,6 +77,12 @@ import {
 function formatShiftDate(date: unknown): string {
   const d = date instanceof Date ? date : new Date(date as any);
   return formatDate(d, 'd MMM yyyy', { locale: tr });
+}
+
+
+function getStockQuantityForLimit(item: any): number {
+  const value = Number(item?.adet);
+  return Number.isFinite(value) && value > 0 ? value : 1;
 }
 
 function DutyScheduleModal({ open, onOpenChange, selectedLabId }: { open: boolean; onOpenChange: (open: boolean) => void; selectedLabId: string | null }) {
@@ -224,7 +237,7 @@ interface QuantityDialogProps {
   onOpenChange: (open: boolean) => void;
   product: ProductCode | null;
   existingQty: number;
-  onConfirm: (productId: string, qty: number) => void;
+  onConfirm: (productId: string, qty: number) => boolean | void | Promise<boolean | void>;
 }
 
 function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }: QuantityDialogProps) {
@@ -246,10 +259,10 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
     }
   }, [open, product?.id]);
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (product && numericQty > 0) {
-      onConfirm(product.id, numericQty);
-      onOpenChange(false);
+      const result = await onConfirm(product.id, numericQty);
+      if (result !== false) onOpenChange(false);
     }
   };
 
@@ -366,13 +379,198 @@ function QuantityDialog({ open, onOpenChange, product, existingQty, onConfirm }:
 
 
 /* =======================================================
+   URGENCY + NOTE DIALOG (peripheral flow only)
+   ======================================================= */
+
+interface UrgencyDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  totalItems: number;
+  totalAdet: number;
+  loading: boolean;
+  onConfirm: (urgency: OrderUrgency, note: string) => void;
+}
+
+const URGENCY_OPTIONS: Array<{
+  value: OrderUrgency;
+  label: string;
+  description: string;
+  icon: React.ComponentType<{ className?: string }>;
+  classes: { ring: string; bg: string; text: string; dot: string };
+}> = [
+  {
+    value: 'normal',
+    label: 'Normal',
+    description: 'Standart süreçte karşılansın',
+    icon: AlertCircle,
+    classes: {
+      ring: 'ring-emerald-500 border-emerald-500',
+      bg: 'bg-emerald-500/10',
+      text: 'text-emerald-700 dark:text-emerald-400',
+      dot: 'bg-emerald-500',
+    },
+  },
+  {
+    value: 'acil',
+    label: 'Acil',
+    description: 'Mümkün olan en kısa sürede',
+    icon: AlertTriangle,
+    classes: {
+      ring: 'ring-amber-500 border-amber-500',
+      bg: 'bg-amber-500/10',
+      text: 'text-amber-700 dark:text-amber-400',
+      dot: 'bg-amber-500',
+    },
+  },
+  {
+    value: 'cok_acil',
+    label: 'Çok Acil',
+    description: 'Aynı gün — kritik',
+    icon: Flame,
+    classes: {
+      ring: 'ring-red-500 border-red-500',
+      bg: 'bg-red-500/10',
+      text: 'text-red-700 dark:text-red-400',
+      dot: 'bg-red-500',
+    },
+  },
+];
+
+function UrgencyDialog({ open, onOpenChange, totalItems, totalAdet, loading, onConfirm }: UrgencyDialogProps) {
+  const [urgency, setUrgency] = useState<OrderUrgency>('normal');
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    if (open) {
+      setUrgency('normal');
+      setNote('');
+    }
+  }, [open]);
+
+  const handleSubmit = () => {
+    if (loading) return;
+    onConfirm(urgency, note.trim());
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!loading) onOpenChange(o); }}>
+      <DialogContent className="max-w-md sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="text-xl font-bold text-[var(--dashboard-text)]">
+            Talebi Onayla
+          </DialogTitle>
+          <DialogDescription className="text-sm text-[var(--dashboard-muted)]">
+            Aciliyet durumunu seçin ve dilerseniz kısa bir açıklama ekleyin. Talep onaylandıktan sonra ofis lojistiğine iletilecek ve otomatik e-posta gönderilecek.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-5 py-2">
+          {/* Summary */}
+          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-[var(--dashboard-surface-2)] text-xs">
+            <ShoppingCart className="h-4 w-4 text-[var(--dashboard-muted)]" />
+            <span className="text-[var(--dashboard-muted)]">
+              <span className="font-bold text-[var(--dashboard-text)]">{totalItems}</span> kalem
+              {' · '}
+              <span className="font-bold text-[var(--dashboard-text)]">{totalAdet}</span> adet
+            </span>
+          </div>
+
+          {/* Urgency chips */}
+          <div>
+            <div className="text-xs font-semibold text-[var(--dashboard-text)] mb-2">
+              Aciliyet Durumu <span className="text-red-500">*</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {URGENCY_OPTIONS.map(opt => {
+                const Icon = opt.icon;
+                const selected = urgency === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setUrgency(opt.value)}
+                    disabled={loading}
+                    className={cn(
+                      'group flex flex-col items-center gap-1.5 px-2 py-3 rounded-xl border-2 transition-all text-center',
+                      selected
+                        ? cn('ring-2', opt.classes.ring, opt.classes.bg)
+                        : 'border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] hover:border-[var(--dashboard-accent)]/60'
+                    )}
+                    aria-pressed={selected}
+                  >
+                    <div className={cn('p-1.5 rounded-lg', selected ? opt.classes.bg : 'bg-[var(--dashboard-surface-2)]')}>
+                      <Icon className={cn('h-4 w-4', selected ? opt.classes.text : 'text-[var(--dashboard-muted)]')} />
+                    </div>
+                    <div className={cn('text-sm font-bold', selected ? opt.classes.text : 'text-[var(--dashboard-text)]')}>
+                      {opt.label}
+                    </div>
+                    <div className="text-[10px] text-[var(--dashboard-muted)] leading-tight">
+                      {opt.description}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Note */}
+          <div>
+            <div className="text-xs font-semibold text-[var(--dashboard-text)] mb-2">
+              Açıklama <span className="text-[var(--dashboard-muted)] font-normal">(opsiyonel)</span>
+            </div>
+            <Textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="Örn. Hafta sonu nöbeti için kritik..."
+              maxLength={500}
+              rows={3}
+              disabled={loading}
+              className="resize-none"
+            />
+            <div className="text-[10px] text-[var(--dashboard-muted)] text-right mt-1">
+              {note.length}/500
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 pt-2">
+          <button
+            type="button"
+            onClick={() => onOpenChange(false)}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl text-sm font-semibold bg-[var(--dashboard-surface-2)] text-[var(--dashboard-text)] hover:bg-[var(--dashboard-surface)] shadow-[var(--dashboard-pressed)] disabled:opacity-50"
+          >
+            İptal
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading}
+            className={cn(
+              'flex-[1.5] flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all',
+              loading
+                ? 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] cursor-not-allowed'
+                : 'bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0'
+            )}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+            {loading ? 'Gönderiliyor...' : 'Onayla ve Gönder'}
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/* =======================================================
    MAIN PANEL
    ======================================================= */
 
-export default function UrunTalepPanel() {
+export default function UrunTalepPanel({ depotRequestId }: { depotRequestId?: string } = {}) {
   const router = useRouter();
   const { toast } = useToast();
-  const { currentUser, currentUserProfile } = useAuth();
+  const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
 
   // Master Data
@@ -384,6 +582,13 @@ export default function UrunTalepPanel() {
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [labMinMaxRules, setLabMinMaxRules] = useState<MinMaxRule[]>([]);
+  const [managerUsers, setManagerUsers] = useState<User[]>([]);
+  const [selectedManagerIds, setSelectedManagerIds] = useState<string[]>([]);
+  const [managerDialogOpen, setManagerDialogOpen] = useState(false);
+  const [autoFillDialogOpen, setAutoFillDialogOpen] = useState(false);
+  const [autoFillTargetDays, setAutoFillTargetDays] = useState<number | string>(30);
+  const [autoFillProductGroup, setAutoFillProductGroup] = useState<string>('all');
+  const [autoFillExplanations, setAutoFillExplanations] = useState<Record<string, string>>({});
 
   // Order Basket
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -396,11 +601,11 @@ export default function UrunTalepPanel() {
   const [qtyDialogOpen, setQtyDialogOpen] = useState(false);
   const [qtyDialogProduct, setQtyDialogProduct] = useState<ProductCode | null>(null);
 
+  // Urgency confirmation dialog (peripheral flow only)
+  const [urgencyDialogOpen, setUrgencyDialogOpen] = useState(false);
+
   // More menu
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-
-  // Lab popover for multi-lab users
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
 
   // -- Derived Data --
@@ -414,7 +619,21 @@ export default function UrunTalepPanel() {
     [userHospitals, selectedLabId]
   );
 
+  const isDepotRequestFlow = !!depotRequestId;
+  const selectedDepotForRequest = useMemo(() => depots.find(d => d.id === (depotRequestId || selectedDepotId)) ?? null, [depots, depotRequestId, selectedDepotId]);
+
   const isPeripheralFlow = selectedLab?.perifer === true;
+  const orderLimitEnabled = isDepotRequestFlow
+    ? selectedDepotForRequest?.orderLimitEnabled === true
+    : selectedLab?.orderLimitEnabled === true;
+
+  const minMaxRuleByCode = useMemo(() => {
+    const map = new Map<string, MinMaxRule>();
+    labMinMaxRules.forEach(rule => {
+      if (rule.stokKodu) map.set(rule.stokKodu, rule);
+    });
+    return map;
+  }, [labMinMaxRules]);
 
   // Auto-select: if the user is assigned to exactly one lab, pick it immediately.
   // (expanded from original: now works for ALL single-lab users, not just perifer)
@@ -430,8 +649,8 @@ export default function UrunTalepPanel() {
   }, [singleAutoLab, selectedLabId]);
 
   // Show/hide logic
-  const showLabPicker = !singleAutoLab;
-  const showDepotPicker = !isPeripheralFlow;
+  const showLabPicker = !isDepotRequestFlow && !singleAutoLab;
+  const showDepotPicker = !isDepotRequestFlow && !isPeripheralFlow && !selectedLab?.defaultDepotId;
 
   // Available products (min-max defined)
   const availableProducts = useMemo(() => {
@@ -472,6 +691,13 @@ export default function UrunTalepPanel() {
   // Cart summary
   const totalDraftItems = orderItems.length;
   const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
+  const orderQuantityByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    orderItems.forEach(item => {
+      if (item.stokKodu) map.set(item.stokKodu, Number(item.adet) || 0);
+    });
+    return map;
+  }, [orderItems]);
 
   const selectedLabName = useMemo(
     () => userHospitals.find(h => h.id === selectedLabId)?.name ?? '',
@@ -485,21 +711,28 @@ export default function UrunTalepPanel() {
     return map;
   }, [allProducts]);
 
-  const isCreateReady = !!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId);
+  const isCreateReady = isDepotRequestFlow ? !!depotRequestId && orderItems.length > 0 : (!!selectedLabId && orderItems.length > 0 && (isPeripheralFlow || !!selectedDepotId));
 
 
   // -- Data Fetching --
+  // Legacy-aware: getScopedDocs eski/__legacy__ etiketli kayıtları da getirir.
+  // Aksi halde min-max kuralları (hospitals/{id}/minMaxRules subkoleksiyonunda)
+  // legacy bir stokKodu referanslıyorsa, allProducts içinde eşleşen ürün
+  // bulunmadığı için availableProducts boş kalıyor ve hiçbir kullanıcı
+  // ürünleri göremiyor.
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [depotSnap, hospitalSnap, productSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'productCodes')),
+      const [depotDocs, hospitalDocs, productDocs] = await Promise.all([
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
       ]);
-      setDepots(depotSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
-      setAllHospitals(hospitalSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
-      setAllProducts(productSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setDepots(depotDocs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setAllHospitals(hospitalDocs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
+      setAllProducts(productDocs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      const userDocs = await getScopedDocs('users', currentCompanyId, isSuperAdmin);
+      setManagerUsers(userDocs.map(d => ({ uid: d.id, ...d.data() } as User)).filter(u => ['admin', 'lojistik_sorumlusu'].includes(u.role || '') && !!u.email));
     } catch (err) {
       console.error('Error fetching initial data:', err);
       toast({ title: 'Hata', description: 'Gerekli veriler yüklenemedi.', variant: 'destructive' });
@@ -512,13 +745,43 @@ export default function UrunTalepPanel() {
     fetchData();
   }, [fetchData]);
 
-  // Fetch Min-Max rules when a lab is selected
+  // Fetch Min-Max rules and handle automated depot selection when a lab/depot is selected
   useEffect(() => {
+    if (isDepotRequestFlow) {
+      if (!depotRequestId) return;
+      setSelectedDepotId(depotRequestId);
+      setSelectedLabId('');
+      const fetchDepotRules = async () => {
+        setLoading(true);
+        try {
+          const rulesSnap = await getDocs(collection(db, 'depots', depotRequestId, 'minMaxRules'));
+          setLabMinMaxRules(rulesSnap.docs.map(d => ({ stokKodu: d.id, ...d.data() } as MinMaxRule)));
+        } catch (err) {
+          console.error('Error fetching depot min-max rules:', err);
+          setLabMinMaxRules([]);
+          toast({ title: 'Hata', description: 'Bu depo için tanımlı ürünler alınamadı.', variant: 'destructive' });
+        } finally { setLoading(false); }
+      };
+      fetchDepotRules();
+      return;
+    }
+
     if (!selectedLabId) {
       setLabMinMaxRules([]);
       setOrderItems([]);
+      setAutoFillExplanations({});
+      setSelectedDepotId('');
       return;
     }
+
+    // Auto-select depot if laboratory has a default assignment
+    const lab = allHospitals.find(h => h.id === selectedLabId);
+    if (lab?.defaultDepotId) {
+      setSelectedDepotId(lab.defaultDepotId);
+    } else if (!isPeripheralFlow) {
+      setSelectedDepotId('');
+    }
+
     const fetchRules = async () => {
       setLoading(true);
       try {
@@ -535,19 +798,141 @@ export default function UrunTalepPanel() {
       }
     };
     fetchRules();
-  }, [selectedLabId, toast]);
+  }, [selectedLabId, toast, allHospitals, isPeripheralFlow, isDepotRequestFlow, depotRequestId]);
+
 
 
   // -- Handlers --
+
+  const openAutoFillDialog = () => {
+    setAutoFillTargetDays(30);
+    setAutoFillProductGroup('all');
+    setAutoFillDialogOpen(true);
+  };
+
+  const handleAutoFillDepotRequest = async () => {
+    if (!isDepotRequestFlow || !depotRequestId) return;
+    if (labMinMaxRules.length === 0) {
+      toast({ title: 'Min/Max Yok', description: 'Bu depo için tanımlı min/max kuralı bulunamadı.', variant: 'destructive' });
+      return;
+    }
+
+    const hedefIsGunu = Math.ceil(Number(autoFillTargetDays));
+    if (!Number.isFinite(hedefIsGunu) || hedefIsGunu <= 0) {
+      toast({ title: 'Geçersiz Gün', description: 'Lütfen 1 veya daha büyük bir iş günü hedefi girin.', variant: 'destructive' });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await fetch('/api/urun-talep/depo-auto-fill', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          depotId: depotRequestId,
+          hedefIsGunu,
+          urunGrubu: autoFillProductGroup,
+          companyId: currentCompanyId,
+          isSuperAdmin,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || 'Depo talep hesaplaması yapılamadı.');
+      }
+
+      const nextItems: OrderItem[] = Array.isArray(payload.items)
+        ? payload.items.map((item: any) => ({
+          id: String(item.id || item.stokKodu),
+          stokKodu: String(item.stokKodu || ''),
+          stokAdi: String(item.stokAdi || item.stokKodu || ''),
+          adet: Number(item.adet) || 0,
+        })).filter((item: OrderItem) => item.stokKodu && item.adet > 0)
+        : [];
+      const explanations: Record<string, string> = payload.explanations && typeof payload.explanations === 'object'
+        ? payload.explanations
+        : Object.fromEntries((payload.items || []).filter((item: any) => item?.stokKodu && item?.explanation).map((item: any) => [item.stokKodu, item.explanation]));
+      const toplamIhtiyac = Number(payload.totalNeeded) || nextItems.reduce((sum, item) => sum + (Number(item.adet) || 0), 0);
+
+      setOrderItems(nextItems);
+      setAutoFillExplanations(explanations);
+      setAutoFillDialogOpen(false);
+      toast({
+        title: nextItems.length > 0 ? 'Talep Listesi Oluşturuldu' : 'Talep İhtiyacı Yok',
+        description: nextItems.length > 0
+          ? `${hedefIsGunu} iş günü için ${nextItems.length} kalemde ${toplamIhtiyac} adet ihtiyaç listeye eklendi.`
+          : `${hedefIsGunu} iş günü için kullanılabilir depo stoğu yeterli görünüyor.`,
+      });
+    } catch (err) {
+      console.error('Error auto-filling depot request:', err);
+      toast({ title: 'Hata', description: err instanceof Error ? err.message : 'Depo stokları okunarak otomatik talep listesi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleProductClick = (product: ProductCode) => {
     setQtyDialogProduct(product);
     setQtyDialogOpen(true);
   };
 
-  const handleQtyConfirm = (productId: string, qty: number) => {
+  const getCurrentStockForLimit = useCallback(async (product: ProductCode): Promise<number> => {
+    const stokKodu = product.stokKodu;
+    if (!stokKodu) return 0;
+
+    const docs = isDepotRequestFlow
+      ? await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('depotId', '==', depotRequestId || selectedDepotId),
+        where('isShipped', '==', false),
+        where('stokKodu', '==', stokKodu)
+      )
+      : await getScopedDocs(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
+        where('hedefKurumId', '==', selectedLabId),
+        where('isShipped', '==', true),
+        where('stokKodu', '==', stokKodu)
+      );
+
+    return docs.reduce((sum, docSnap) => sum + getStockQuantityForLimit(docSnap.data()), 0);
+  }, [currentCompanyId, depotRequestId, isDepotRequestFlow, isSuperAdmin, selectedDepotId, selectedLabId]);
+
+  const validateManualOrderLimit = useCallback(async (product: ProductCode, requestedTotal: number): Promise<boolean> => {
+    if (!orderLimitEnabled) return true;
+    const rule = minMaxRuleByCode.get(product.stokKodu);
+    const maxAdet = Number(rule?.max) || 0;
+    if (!rule || maxAdet <= 0) return true;
+
+    const currentStock = await getCurrentStockForLimit(product);
+    const maxOrderable = Math.max(0, maxAdet - currentStock);
+    if (requestedTotal <= maxOrderable) return true;
+
+    const locationLabel = isDepotRequestFlow ? 'depo' : 'laboratuvar';
+    toast({
+      title: 'Sipariş kısıtlaması',
+      description: `${product.stokAdi} için tanımlı max ${maxAdet} adet. Mevcut ${locationLabel} stoğu ${currentStock} adet olduğu için en fazla ${maxOrderable} adet talep edilebilir.`,
+      variant: 'destructive',
+    });
+    return false;
+  }, [getCurrentStockForLimit, isDepotRequestFlow, minMaxRuleByCode, orderLimitEnabled, toast]);
+
+  const handleQtyConfirm = async (productId: string, qty: number) => {
     const product = allProducts.find(p => p.id === productId);
-    if (!product || qty <= 0) return;
+    if (!product || qty <= 0) return false;
+    const existingQty = orderItems.find(item => item.stokKodu === product.stokKodu)?.adet ?? 0;
+    const requestedTotal = existingQty + qty;
+    const isValid = await validateManualOrderLimit(product, requestedTotal);
+    if (!isValid) return false;
+    setAutoFillExplanations(prev => {
+      if (!prev[product.stokKodu]) return prev;
+      const next = { ...prev };
+      delete next[product.stokKodu];
+      return next;
+    });
 
     setOrderItems(prev => {
       const existing = prev.find(item => item.stokKodu === product.stokKodu);
@@ -563,13 +948,52 @@ export default function UrunTalepPanel() {
         { id: product.id, stokKodu: product.stokKodu, stokAdi: product.stokAdi, adet: qty },
       ];
     });
+    return true;
+  };
+
+  const updateOrderItemQuantity = async (item: OrderItem, nextQty: number) => {
+    const normalizedQty = Math.max(1, Number(nextQty) || 1);
+    const product = allProducts.find(p => p.stokKodu === item.stokKodu || p.id === item.id);
+    if (product) {
+      const isValid = await validateManualOrderLimit(product, normalizedQty);
+      if (!isValid) return;
+    }
+    setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: normalizedQty } : i));
+    if (item.stokKodu) {
+      setAutoFillExplanations(current => {
+        if (!current[item.stokKodu!]) return current;
+        const next = { ...current };
+        delete next[item.stokKodu!];
+        return next;
+      });
+    }
   };
 
   const removeOrderItem = (productId: string) => {
+    const removedItem = orderItems.find(item => item.id === productId);
+    if (removedItem?.stokKodu) {
+      setAutoFillExplanations(current => {
+        if (!current[removedItem.stokKodu]) return current;
+        const next = { ...current };
+        delete next[removedItem.stokKodu];
+        return next;
+      });
+    }
     setOrderItems(prev => prev.filter(item => item.id !== productId));
   };
 
-  const createOrderRequest = async () => {
+  // Entry point bound to both "Talep Oluştur" buttons. For peripheral labs we
+  // open the urgency/note dialog and let it call submitOrderRequest after
+  // confirmation; for non-peripheral flow we submit immediately.
+  const handleCreateClick = () => {
+    if (isDepotRequestFlow) {
+      if (orderItems.length === 0) {
+        toast({ title: 'Eksik Bilgi', description: 'En az bir ürün seçmelisiniz.', variant: 'destructive' });
+        return;
+      }
+      setManagerDialogOpen(true);
+      return;
+    }
     if (!selectedLabId || orderItems.length === 0) {
       toast({ title: 'Eksik Bilgi', description: 'Laboratuvar ve en az bir ürün seçmelisiniz.', variant: 'destructive' });
       return;
@@ -579,70 +1003,131 @@ export default function UrunTalepPanel() {
       return;
     }
 
-    // --- OPTIMISTIC UI ---
-    // 1. Durumu Yedekle
-    const previousOrderItems = [...orderItems];
-    const previousLabId = selectedLabId;
-    const previousDepotId = selectedDepotId;
-    const labName = allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum';
-    const depotName = depots.find(d => d.id === selectedDepotId)?.name || 'Bilinmeyen Depo';
+    if (isPeripheralFlow) {
+      setUrgencyDialogOpen(true);
+      return;
+    }
+    submitOrderRequest();
+  };
 
-    // 2. Hemen Ekranı Temizle (0 ms tepki)
-    setOrderItems([]);
-    if (!singleAutoLab) {
-      setSelectedLabId('');
-      setLabMinMaxRules([]);
+  const submitOrderRequest = async (urgency?: OrderUrgency, note?: string, managerIds: string[] = []) => {
+    if (isDepotRequestFlow) {
+      if (!depotRequestId || orderItems.length === 0 || managerIds.length === 0) return;
+    } else {
+      if (!selectedLabId || orderItems.length === 0) return;
+      if (!isPeripheralFlow && !selectedDepotId) return;
     }
 
-    toast({ 
-      title: 'Talep Kaydediliyor...', 
-      description: `${previousOrderItems.length} kalem ürün talebi arka planda işleniyor.`,
-      duration: 3000
-    });
+    setLoading(true);
+    try {
+      const orderId = generateId();
+      const labName = isDepotRequestFlow ? (selectedDepotForRequest?.name || 'Bilinmeyen Depo') : (allHospitals.find(h => h.id === selectedLabId)?.name || 'Bilinmeyen Kurum');
+      const depotName = depots.find(d => d.id === (isDepotRequestFlow ? depotRequestId : selectedDepotId))?.name || '';
 
-    // 3. Arka Planda Kaydet
-    (async () => {
-      try {
-        const orderId = generateId();
-        const newOrder: Record<string, any> = {
-          id: orderId,
-          labId: previousLabId,
-          kurumAdi: labName,
-          items: previousOrderItems,
-          status: 'pending' as const,
-          createdAt: serverTimestamp(),
-          createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
-          createdById: currentUser?.uid || 'unknown',
-          requestSource: isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const),
-          isPeripheral: isPeripheralFlow,
-          targetDepotId: isPeripheralFlow ? null : previousDepotId,
-          targetDepotName: isPeripheralFlow ? null : depotName,
+      // Perifer talepleri depo ataması yapmadan kayıt edilir; hangi depoya
+      // yönlendirileceğine ofis lojistik sorumlusu karar verir.
+      const newOrder: Record<string, any> = {
+        id: orderId,
+        labId: isDepotRequestFlow ? null : selectedLabId,
+        kurumAdi: labName,
+        items: orderItems,
+        status: 'pending' as const,
+        createdAt: serverTimestamp(),
+        createdBy: currentUserProfile?.name || currentUser?.email || 'Unknown User',
+        createdById: currentUser?.uid || 'unknown',
+        requestSource: isDepotRequestFlow ? ('depot_to_office' as const) : (isPeripheralFlow ? ('lab_to_office' as const) : ('lab_to_depot' as const)),
+        isPeripheral: isPeripheralFlow || isDepotRequestFlow,
+        isDepotRequest: isDepotRequestFlow,
+        transferredAt: null,
+      };
+      if (isDepotRequestFlow) {
+        newOrder.depotId = depotRequestId;
+        newOrder.depotName = depotName || 'Bilinmeyen Depo';
+        newOrder.requestedManagerIds = managerIds;
+        newOrder.requestedManagerEmails = managerUsers.filter(u => managerIds.includes(u.uid)).map(u => u.email).filter(Boolean);
+        newOrder.depotFulfillment = {
+          items: orderItems.map(item => ({
+            itemId: item.id,
+            stokKodu: item.stokKodu,
+            requestedAdet: Number(item.adet) || 0,
+            deliveredAdet: 0,
+            missingAdet: Number(item.adet) || 0,
+            fulfilled: false,
+          })),
+          appliedDepoStokIds: [],
+          partialDeliveries: [],
         };
+      } else if (!isPeripheralFlow) {
+        newOrder.depotId = selectedDepotId;
+        newOrder.depotName = depotName || 'Bilinmeyen Depo';
+      } else {
+        newOrder.depotId = null;
+        newOrder.depotName = null;
+      }
+      if (isPeripheralFlow) {
+        newOrder.urgency = urgency ?? 'normal';
+        if (note && note.length > 0) newOrder.note = note;
+      }
 
-        await setDoc(doc(db, 'orders', orderId), newOrder);
+      await setDoc(doc(db, 'orders', orderId), withCompanyScope(newOrder, currentCompanyId));
 
-        // Notify other systems if needed (events etc)
-        // await emitOrderCreatedFromRequest(...) 
-        
-        playNotificationSound();
-        toast({
-          title: 'Talep Oluşturuldu',
-          description: isPeripheralFlow
+      // Bildirim için kısa ürün özeti: ilk 3 ürünü "Ad x adet" formatıyla, fazlasını "+N kalem" olarak göster.
+      const totalAdetForNotif = orderItems.reduce((s, it) => s + (Number(it.adet) || 0), 0);
+      const preview = orderItems
+        .slice(0, 3)
+        .map(it => `${it.stokAdi} x${it.adet}`)
+        .join(', ');
+      const extra = orderItems.length > 3 ? ` (+${orderItems.length - 3} kalem)` : '';
+      const itemsSummary = `${preview}${extra}`;
+
+      await emitOrderCreatedFromRequest({
+        actor: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' },
+        orderId: orderId,
+        labId: isDepotRequestFlow ? undefined : selectedLabId,
+        labName,
+        depotId: isDepotRequestFlow ? undefined : (isPeripheralFlow ? '' : selectedDepotId),
+        isPeripheral: isPeripheralFlow,
+        itemsSummary,
+        itemsCount: orderItems.length,
+        totalAdet: totalAdetForNotif,
+        urgency: (isPeripheralFlow || isDepotRequestFlow) ? (urgency ?? 'normal') : undefined,
+        extraTargets: isDepotRequestFlow ? managerIds.map(id => `user:${id}`) : undefined,
+        audienceHint: {
+          userId: currentUserProfile?.uid,
+          role: currentUserProfile?.role,
+          views: currentUserProfile?.accessibleViews,
+          labIds: currentUserProfile?.assignedLaboratories,
+          depotIds: currentUserProfile?.assignedDepots,
+        }
+      });
+
+      playNotificationSound();
+      toast({
+        title: 'Talep Oluşturuldu',
+        description: isDepotRequestFlow
+          ? 'Talebiniz seçtiğiniz yöneticilere iletildi.'
+          : isPeripheralFlow
             ? 'Talebiniz ofis lojistiğine iletildi.'
             : `Siparişiniz "${depotName}" deposuna iletildi.`,
-        });
-      } catch (err) {
-        console.error('Error creating order (Optimistic):', err);
-        // 4. ROLLBACK
-        setOrderItems(previousOrderItems);
-        setSelectedLabId(previousLabId);
-        toast({ 
-          title: 'Hata', 
-          description: 'Talep oluşturulurken bir sorun oluştu. Liste geri yüklendi.', 
-          variant: 'destructive' 
-        });
+      });
+
+      // Reset form — but keep the auto-selected lab so the user can
+      // immediately create another request without re-picking it.
+      setOrderItems([]);
+      setAutoFillExplanations({});
+      setManagerDialogOpen(false);
+      setSelectedManagerIds([]);
+      if (!isDepotRequestFlow && !singleAutoLab) {
+        setSelectedLabId('');
+        setLabMinMaxRules([]);
       }
-    })();
+      setUrgencyDialogOpen(false);
+    } catch (err) {
+      console.error('Error creating order request:', err);
+      toast({ title: 'Hata', description: 'Sipariş talebi oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setLoading(false);
+    }
   };
 
 
@@ -663,17 +1148,35 @@ export default function UrunTalepPanel() {
             Ürün Talep
           </h1>
           <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-            {selectedLabName
-              ? `${selectedLabName}${isPeripheralFlow ? ' · Perifer' : ''}`
-              : 'Yetkili laboratuvarlar için ürün talebi oluşturun'}
+            {isDepotRequestFlow
+              ? `${selectedDepotForRequest?.name || 'Depo'} · Depo Talebi`
+              : selectedLabName
+                ? `${selectedLabName}${isPeripheralFlow ? ' · Perifer' : ''}`
+                : 'Yetkili laboratuvarlar için ürün talebi oluşturun'}
           </p>
         </div>
 
-        <DutyInfo selectedLabId={selectedLabId || null} />
+        {!isDepotRequestFlow && <DutyInfo selectedLabId={selectedLabId || null} />}
+
+        {isDepotRequestFlow && (
+          <button
+            onClick={openAutoFillDialog}
+            disabled={loading || labMinMaxRules.length === 0}
+            className={cn(
+              "hidden sm:flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all",
+              !loading && labMinMaxRules.length > 0
+                ? "cihaz-tool-item text-[var(--dashboard-text)]"
+                : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+            )}
+          >
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+            Eksikleri Listele
+          </button>
+        )}
 
         {/* CTA — Create Order (top right) */}
         <button
-          onClick={createOrderRequest}
+          onClick={handleCreateClick}
           disabled={!isCreateReady || loading}
           className={cn(
             "hidden sm:flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
@@ -701,7 +1204,7 @@ export default function UrunTalepPanel() {
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-56 p-1" align="end">
-            <button onClick={() => { router.push('/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
+            <button onClick={() => { router.push(isDepotRequestFlow && depotRequestId ? `/urun-talep/depo/${depotRequestId}/gecmis` : selectedLabId ? `/urun-talep/gecmis?labId=${selectedLabId}` : '/urun-talep/gecmis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
               <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Geçmiş
             </button>
             <button onClick={() => { router.push('/cihazdan-cikan-kit'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
@@ -732,67 +1235,59 @@ export default function UrunTalepPanel() {
         {/* Lab selector — hidden for single-lab users */}
         {showLabPicker && (
           <div className="cihaz-card p-3 sm:p-4 flex-1 min-w-[220px]">
-            <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Hedef Laboratuvar</label>
-            <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-              <PopoverTrigger asChild>
-                <button
-                  className={cn(
-                    "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
-                    selectedLabId
-                      ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                      : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                  )}
-                  disabled={loading || userHospitals.length === 0}
-                >
-                  <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                <Command>
-                  <CommandInput placeholder="Laboratuvar ara..." />
-                  <CommandList>
-                    <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                    <CommandGroup>
-                      {userHospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
-                        <CommandItem
-                          key={hospital.id}
-                          value={hospital.name ?? ''}
-                          onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
-                        >
-                          <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
-                          <span>{hospital.name}</span>
-                          {hospital.perifer && (
-                            <span className="ml-auto text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">Perifer</span>
-                          )}
-                        </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
+            <LabSelector
+              label="Hedef Laboratuvar"
+              labs={userHospitals.map(h => ({
+                id: h.id ?? '',
+                name: h.name,
+                kod: h.kod,
+                meta: h.perifer ? 'Perifer' : undefined,
+              }))}
+              value={selectedLabId}
+              onChange={(id) => setSelectedLabId(id)}
+              placeholder="Laboratuvar seçin..."
+              disabled={loading || userHospitals.length === 0}
+            />
           </div>
         )}
 
         {/* Single-lab info banner */}
         {singleAutoLab && (
-          <div className="cihaz-card p-3 sm:p-4 flex items-center gap-2 flex-1">
-            <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
-            <span className="text-sm font-semibold text-[var(--dashboard-text)]">{singleAutoLab.name}</span>
-            {singleAutoLab.perifer && (
-              <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
-                Perifer
-              </span>
+          <div className="cihaz-card p-3 sm:p-4 flex flex-col justify-center gap-1 flex-1 min-w-[200px]">
+            <div className="flex items-center gap-2">
+              <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-[var(--dashboard-text)]">{singleAutoLab.name}</span>
+              {singleAutoLab.perifer && (
+                <span className="text-[10px] font-bold uppercase tracking-wide text-purple-500 px-1.5 py-0.5 rounded bg-purple-500/10">
+                  Perifer
+                </span>
+              )}
+            </div>
+            {singleAutoLab.defaultDepotId && !singleAutoLab.perifer && (
+              <div className="flex items-center gap-1.5 text-amber-500/80">
+                <Warehouse className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">Otomatik Yönlendirme: {singleAutoLab.defaultDepotName || 'Depo'}</span>
+              </div>
             )}
+          </div>
+        )}
+
+        {/* Selected lab info if not single-lab but depot is auto-selected */}
+        {!singleAutoLab && selectedLabId && !showDepotPicker && !isPeripheralFlow && (
+          <div className="cihaz-card p-3 sm:p-4 flex flex-col justify-center gap-1 flex-1 min-w-[200px]">
+            <div className="flex items-center gap-1.5 text-amber-500/80">
+                <Warehouse className="h-3.5 w-3.5" />
+                <span className="text-[11px] font-medium">Hedef Depo: {selectedLab?.defaultDepotName || 'Varsayılan Depo'}</span>
+            </div>
+            <p className="text-[10px] text-[var(--dashboard-muted)]">Laboratuvara özel varsayılan depo atandığı için seçim adımı atlandı.</p>
           </div>
         )}
       </div>
 
 
       {/* ====================== MAIN SPLIT VIEW ====================== */}
-      {selectedLabId && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-4 sm:gap-5">
+      {(selectedLabId || isDepotRequestFlow) && (
+        <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] gap-4 sm:gap-5">
 
           {/* -- LEFT: Product Catalog -- */}
           <div className="cihaz-card-strong flex flex-col overflow-hidden">
@@ -873,14 +1368,14 @@ export default function UrunTalepPanel() {
                 </div>
               ) : (
                 filteredProducts.map((product) => {
-                  const inCart = orderItems.find(item => item.stokKodu === product.stokKodu);
+                  const inCartQty = orderQuantityByCode.get(product.stokKodu) || 0;
                   return (
                     <button
                       key={product.id}
                       onClick={() => handleProductClick(product)}
                       className={cn(
                         "w-full text-left px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)] last:border-b-0 transition-all hover:bg-[var(--dashboard-surface-2)] active:bg-[var(--dashboard-surface-2)] group",
-                        inCart && "bg-[var(--dashboard-accent)]/5"
+                        inCartQty > 0 && "bg-[var(--dashboard-accent)]/5"
                       )}
                     >
                       <div className="flex items-center gap-3">
@@ -897,10 +1392,10 @@ export default function UrunTalepPanel() {
                             )}
                           </div>
                         </div>
-                        {inCart ? (
+                        {inCartQty > 0 ? (
                           <div className="flex items-center gap-1.5 shrink-0">
                             <span className="text-xs font-bold text-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10 px-2 py-1 rounded-lg">
-                              {inCart.adet} adet
+                              {inCartQty} adet
                             </span>
                             <Plus className="h-4 w-4 text-[var(--dashboard-accent)]" />
                           </div>
@@ -940,7 +1435,7 @@ export default function UrunTalepPanel() {
               <div className="flex-1" />
               {orderItems.length > 0 && (
                 <button
-                  onClick={() => setOrderItems([])}
+                  onClick={() => { setOrderItems([]); setAutoFillExplanations({}); }}
                   className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -959,7 +1454,7 @@ export default function UrunTalepPanel() {
             )}
 
             {/* Cart items */}
-            <div className="flex-1 overflow-auto max-h-[40vh] sm:max-h-[50vh]">
+            <div className="flex-1 overflow-auto max-h-[55vh] sm:max-h-[60vh]">
               {orderItems.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-[30vh] sm:h-[35vh] text-center px-4">
                   <div className="w-14 h-14 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
@@ -976,6 +1471,7 @@ export default function UrunTalepPanel() {
                   const itemAmbalaj = meta?.ambalajDegeri ?? 0;
                   const itemBirim = meta?.anaBirim || '';
                   const itemTotalUnits = itemAmbalaj > 0 ? itemAmbalaj * (item.adet ?? 0) : 0;
+                  const autoFillExplanation = autoFillExplanations[item.stokKodu || ''];
                   return (
                     <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
                       {/* Desktop row */}
@@ -990,23 +1486,23 @@ export default function UrunTalepPanel() {
                               </span>
                             )}
                           </p>
+                          {autoFillExplanation && (
+                            <p className="mt-1.5 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">
+                              {autoFillExplanation}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center justify-center">
                           <div className="flex items-center gap-0.5">
                             <button
-                              onClick={() => {
-                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
-                              }}
+                              onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) - 1); }}
                               className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
                             >
                               <Minus className="h-3 w-3" />
                             </button>
                             <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[32px]">{item.adet}</span>
                             <button
-                              onClick={() => {
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
-                              }}
+                              onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) + 1); }}
                               className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
                             >
                               <Plus className="h-3 w-3" />
@@ -1035,13 +1531,18 @@ export default function UrunTalepPanel() {
                                 </span>
                               )}
                             </p>
+                            {autoFillExplanation && (
+                              <p className="mt-1.5 rounded-lg bg-amber-500/10 px-2 py-1 text-[10px] leading-relaxed text-amber-800 dark:text-amber-300">
+                                {autoFillExplanation}
+                              </p>
+                            )}
                           </div>
                           <div className="flex items-center gap-1">
-                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <button onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) - 1); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Minus className="h-3 w-3" />
                             </button>
                             <span className="text-center text-sm font-bold min-w-[28px]">{item.adet}</span>
-                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
+                            <button onClick={() => { updateOrderItemQuantity(item, (item.adet ?? 1) + 1); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
                               <Plus className="h-3 w-3" />
                             </button>
                             <button onClick={() => removeOrderItem(item.id)} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
@@ -1068,9 +1569,24 @@ export default function UrunTalepPanel() {
                 </div>
               </div>
               <div className="flex-1" />
+              {isDepotRequestFlow && (
+                <button
+                  onClick={openAutoFillDialog}
+                  disabled={loading || labMinMaxRules.length === 0}
+                  className={cn(
+                    "sm:hidden flex items-center gap-2 px-3 py-2.5 rounded-2xl text-xs font-bold transition-all",
+                    !loading && labMinMaxRules.length > 0
+                      ? "cihaz-tool-item text-[var(--dashboard-text)]"
+                      : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
+                  )}
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />}
+                  Eksikleri Listele
+                </button>
+              )}
               {/* Mobile CTA */}
               <button
-                onClick={createOrderRequest}
+                onClick={handleCreateClick}
                 disabled={!isCreateReady || loading}
                 className={cn(
                   "sm:hidden flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold transition-all",
@@ -1089,7 +1605,7 @@ export default function UrunTalepPanel() {
       )}
 
       {/* Empty state when no lab selected */}
-      {!selectedLabId && !loading && (
+      {!selectedLabId && !isDepotRequestFlow && !loading && (
         <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
           <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
             <FlaskConical className="h-6 w-6 text-[var(--dashboard-muted)]" />
@@ -1100,7 +1616,7 @@ export default function UrunTalepPanel() {
       )}
 
       {/* Loading state */}
-      {loading && !selectedLabId && (
+      {loading && !selectedLabId && !isDepotRequestFlow && (
         <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20">
           <Loader2 className="h-8 w-8 animate-spin text-[var(--dashboard-accent)] mb-3" />
           <p className="text-sm text-[var(--dashboard-muted)]">Veriler yükleniyor...</p>
@@ -1115,6 +1631,99 @@ export default function UrunTalepPanel() {
         product={qtyDialogProduct}
         existingQty={qtyDialogProduct ? (orderItems.find(i => i.stokKodu === qtyDialogProduct.stokKodu)?.adet ?? 0) : 0}
         onConfirm={handleQtyConfirm}
+      />
+
+
+      <Dialog open={autoFillDialogOpen} onOpenChange={(open) => { if (!loading) setAutoFillDialogOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Eksikleri Listele</DialogTitle>
+            <DialogDescription>
+              Talep listesinin kaç iş günlük yeterlilik için hazırlanacağını girin. Hesaplama açıklamaları oluşan sipariş satırlarının altında gösterilir.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Hedef iş günü</label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={autoFillTargetDays}
+                  onChange={(event) => setAutoFillTargetDays(event.target.value)}
+                  className="mt-2"
+                  placeholder="Örn. 30"
+                  disabled={loading}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-[var(--dashboard-muted)]">Ürün grubu</label>
+                <Select value={autoFillProductGroup} onValueChange={setAutoFillProductGroup} disabled={loading}>
+                  <SelectTrigger className="mt-2 bg-[var(--dashboard-surface)] border-[var(--dashboard-stroke)] rounded-xl">
+                    <SelectValue placeholder="Ürün grubu" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Her ikisi de</SelectItem>
+                    <SelectItem value="kit">Kit</SelectItem>
+                    <SelectItem value="sarf">Sarf</SelectItem>
+                    <SelectItem value="yedek_parca">Yedek Parça</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <p className="mt-2 text-xs text-[var(--dashboard-muted)]">
+              Örnek: Max 50 adet / 60 iş günü tanımlı bir ürün için 30 iş günü hedefi 25 adet stok hedefi oluşturur.
+            </p>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={() => setAutoFillDialogOpen(false)} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] font-semibold">
+              Vazgeç
+            </button>
+            <button type="button" onClick={handleAutoFillDepotRequest} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-accent)] text-white font-bold">
+              {loading ? 'Hesaplanıyor...' : 'Eksikleri Listele'}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+
+      <Dialog open={managerDialogOpen} onOpenChange={setManagerDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Talebin İletileceği Yönetici</DialogTitle>
+            <DialogDescription>Firma adminleri ve lojistik yöneticileri arasından bir veya daha fazla alıcı seçin.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-72 overflow-auto py-2">
+            {managerUsers.length === 0 ? (
+              <p className="text-sm text-[var(--dashboard-muted)]">Uygun yönetici bulunamadı.</p>
+            ) : managerUsers.map(user => {
+              const checked = selectedManagerIds.includes(user.uid);
+              return (
+                <button key={user.uid} type="button" onClick={() => setSelectedManagerIds(prev => checked ? prev.filter(id => id !== user.uid) : [...prev, user.uid])} className={cn("w-full flex items-center gap-3 rounded-xl border p-3 text-left", checked ? "border-[var(--dashboard-accent)] bg-[var(--dashboard-accent)]/10" : "border-[var(--dashboard-stroke)]")}>
+                  <span className={cn("w-5 h-5 rounded-md border flex items-center justify-center", checked ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface)]")}>{checked && <Check className="h-3.5 w-3.5" />}</span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold truncate">{user.name || user.email}</span>
+                    <span className="block text-xs text-[var(--dashboard-muted)] truncate">{user.email} · {user.role === 'admin' ? 'Admin' : 'Lojistik Yöneticisi'}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button type="button" onClick={() => setManagerDialogOpen(false)} disabled={loading} className="flex-1 py-2.5 rounded-xl bg-[var(--dashboard-surface-2)] font-semibold">İptal</button>
+            <button type="button" onClick={() => submitOrderRequest('normal', undefined, selectedManagerIds)} disabled={loading || selectedManagerIds.length === 0} className={cn("flex-1 py-2.5 rounded-xl font-bold text-white", selectedManagerIds.length > 0 ? "bg-green-600" : "bg-gray-400")}>{loading ? 'Gönderiliyor...' : 'Talebi İlet'}</button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ====================== URGENCY DIALOG (peripheral) ====================== */}
+      <UrgencyDialog
+        open={urgencyDialogOpen}
+        onOpenChange={setUrgencyDialogOpen}
+        totalItems={totalDraftItems}
+        totalAdet={totalDraftAdet}
+        loading={loading}
+        onConfirm={(urgency, note) => { submitOrderRequest(urgency, note); }}
       />
     </div>
   );

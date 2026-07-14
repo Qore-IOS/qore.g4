@@ -2,9 +2,14 @@
 # https://firebase.google.com/docs/app-hosting/configure
 
 runConfig:
-  # Increase this value if you'd like to automatically spin up
-  # more instances in response to increased traffic.
-  maxInstances: 1
+  # En az 1 örnek her zaman SICAK kalsın → Cloud Run cold-start ortadan kalkar.
+  # Sayfa açılışındaki ~7s'lik gecikmenin (statik JS/CSS chunk'larının TTFB'si)
+  # asıl sebebi buydu: backend boştayken sıfıra iniyor, ilk istekte container
+  # yeniden ayağa kalkıyor ve tüm istekleri ısınana kadar tutuyordu.
+  minInstances: 1
+  # Tek örnek tüm kullanıcıları + bir sayfada açılan ~40 eşzamanlı chunk
+  # isteğini darboğaza sokuyordu. Yük altında yatay ölçeklenmeye izin ver.
+  maxInstances: 10
 # Set the startup timeout to 180 seconds to allow for longer build/start times.
 startupTimeoutSeconds: 180
 
@@ -36,3 +41,38 @@ env:
     value: "europe-west1"
   - variable: NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
     value: "AIzaSyDW59zZ7YY_z-Vg_M-FjZ4i1i7F-P0KQqQ"
+
+  # --- TAKVİM ENTEGRASYONU (Satın-Alma Planlama → Google Takvim / Outlook) ---
+  # NOT: Değerler düz metin (value) olarak girildi; böylece Secret Manager +
+  # grantaccess adımına gerek kalmadan deploy çalışır. GÜVENLİK: client secret
+  # bu dosyada/depoda açık durur. Daha güvenli yöntem Secret Manager'dır
+  # (bkz. aşağıdaki yorumlu alternatif). Secret'ın gizliliği önemliyse Google
+  # Cloud'dan rotate edip Secret Manager'a geçmeniz önerilir.
+  # Google Cloud OAuth kaydına eklenecek redirect URI:
+  #   https://qorengine.com/api/calendar/google/callback
+  - variable: GOOGLE_CALENDAR_CLIENT_ID
+    value: "929852527053-kl2dvlrvvh54ulg0s6kgkf2h1raajlpj.apps.googleusercontent.com"
+  - variable: GOOGLE_CALENDAR_CLIENT_SECRET
+    value: "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"
+  # Güvenli alternatif (Secret Manager kullanmak isterseniz yukarıdaki iki
+  # 'value' satırını silip bunları açın; secret'ları oluşturup grantaccess verin):
+  # - variable: GOOGLE_CALENDAR_CLIENT_ID
+  #   secret: GOOGLE_CALENDAR_CLIENT_ID
+  # - variable: GOOGLE_CALENDAR_CLIENT_SECRET
+  #   secret: GOOGLE_CALENDAR_CLIENT_SECRET
+
+  # Etkinliklerin saat dilimi (opsiyonel; varsayılan Europe/Istanbul):
+  - variable: CALENDAR_TIMEZONE
+    value: "Europe/Istanbul"
+
+  # --- SONRA EKLENECEK (secret'ları oluşturunca yorumu kaldırın) ---
+  # Microsoft Outlook:
+  #   redirect URI: https://qorengine.com/api/calendar/microsoft/callback
+  # - variable: MICROSOFT_CALENDAR_CLIENT_ID
+  #   secret: MICROSOFT_CALENDAR_CLIENT_ID
+  # - variable: MICROSOFT_CALENDAR_CLIENT_SECRET
+  #   secret: MICROSOFT_CALENDAR_CLIENT_SECRET
+  # Refresh token'ları AES-256-GCM ile şifrelemek için (önerilir):
+  #   openssl rand -hex 32 | gcloud secrets create CALENDAR_TOKEN_SECRET --data-file=- --project=invpilot
+  # - variable: CALENDAR_TOKEN_SECRET
+  #   secret: CALENDAR_TOKEN_SECRET

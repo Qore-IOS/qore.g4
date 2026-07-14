@@ -1,1185 +1,933 @@
-/**
- * @fileoverview Orders Panel Component
- * @description Main orders management panel for creating, viewing, and managing
- * orders in the medical supply chain system. Supports manual order creation,
- * Min/Max based automatic ordering, and bulk order Excel generation.
- * @module components/siparisler-panel
- * @version 2.0.0
- *
- * @features
- * - Order creation with laboratory selection
- * - Min/Max rule-based automatic order calculation
- * - Bulk order Excel generation for multiple depots/labs
- * - Real-time order status updates via Firestore listeners
- * - Order picking process initiation
- * - Order deletion with confirmation
- *
- * @accessibility
- * - ARIA labels for all interactive elements
- * - Keyboard navigation support
- * - Screen reader announcements for status changes
- */
-
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef, Suspense, ChangeEvent, useMemo } from 'react';
-import dynamic from 'next/dynamic';
-import { useRouter } from 'next/navigation';
-import type {
-  Depot,
-  Hospital,
-  ProductCode,
-  DepoStokItem,
-  MinMaxRule,
-  Order,
-  OrderItem,
-  PickingListItem,
-  Shipment,
-  ShipmentItem,
-  DeviceGroup,
-} from '@/lib/types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import type { Order } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import {
-  collection,
-  getDocs,
-  query,
-  where,
-  writeBatch,
-  doc,
-  setDoc,
-  orderBy,
-  Timestamp,
-  limit,
-  onSnapshot,
-  updateDoc,
-  serverTimestamp,
-  deleteDoc,
+  collection, query, where, orderBy, limit,
+  onSnapshot, updateDoc, doc, deleteDoc,
+  serverTimestamp, Timestamp,
 } from 'firebase/firestore';
-import { generateId, parseBarcode, exportDataToExcel, readExcelData, playFeedback, sanitizeGS1 } from '@/lib/utils';
-import { Input } from '@/components/ui/input';
-import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { useToast } from '@/hooks/use-toast';
-import { format as formatDate, parse, compareAsc, isValid } from 'date-fns';
-import { tr } from 'date-fns/locale';
-import { Loader2, PlusCircle, Trash2, Check, FileSpreadsheet, History, Calculator, ChevronsUpDown, Undo, ClipboardPlus, ShoppingCart, Package, Plus, Minus, MoreHorizontal, ArrowRight, Search, CheckCircle2, Edit3, Save, Send, Share2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useHospitals, useProductCodes, useDepoStok, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
-import { filterByCompanyScope } from '@/lib/company-scope';
-import * as XLSX from 'xlsx';
-import { useRowFocus } from '@/hooks/useRowFocus';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { formatMiad, toDateFromAny } from '@/lib/date';
-
-type LojRowState = {
-  itemId: string;
-  stokKodu: string;
-  stokAdi: string;
-  requestedAdet: number;
-  sentAdet: number;
-  fulfilled: boolean;
-};
-
-type PeripheralFulfillmentItem = {
-  itemId: string;
-  stokKodu: string;
-  requestedAdet: number;
-  sentAdet: number;
-  fulfilled: boolean;
-};
-import { emitOrderCreatedFromRequest } from '@/lib/notifications';
+import { useDepots } from '@/hooks/useFirebaseQueries';
+import { useToast } from '@/hooks/use-toast';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
-import { siparislerLogger } from '@/lib/logger';
 import LojistikSiparisView from '@/components/LojistikSiparisView';
-import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
+import { siparislerLogger } from '@/lib/logger';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { format as formatDate } from 'date-fns';
+import { tr } from 'date-fns/locale';
+import {
+  Loader2, Plus, ArrowRight, Trash2, MoreHorizontal, ChevronRight,
+  ClipboardPlus, Undo, FileSpreadsheet, ShoppingCart,
+  Package, CheckCircle2, Search, X, Filter,
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
+// ─── Design tokens (exact match to demo) ─────────────────────────────────────
+const C = {
+  surface: '#FCFAF5',
+  surface2: '#F5F1E8',
+  surfaceHi: '#FFFFFF',
+  bg: '#EFEAE0',
+  ink1: '#3D382F',
+  ink2: '#908872',
+  ink3: '#BBB2A0',
+  line: 'rgba(90,72,40,0.07)',
+  accent: '#C98A57',
+  accentLight: '#E0B776',
+  accentGlow: 'rgba(201,138,87,0.24)',
+  water: 'rgba(124,191,140,0.30)',
+  waterSolid: '#6FB585',
+  waterDeep: '#4E9E6B',
+  amber: '#E0A33E',
+  danger: '#C0796A',
+  violet: '#9B86D6',
+  violetLight: '#C5B8EE',
+  violetGlow: 'rgba(155,134,214,0.30)',
+  clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
+  clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
+  clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+  ease: 'cubic-bezier(.22, 1, .36, 1)',
+  r: '24px',
+  rsm: '16px',
+  rpill: '999px',
+};
 
-function SiparislerSkeleton() {
+const ACTIVE_ORDERS_LISTEN_LIMIT = 300;
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatChip({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-6 p-6 animate-pulse">
-      <div className="flex justify-between items-center mb-4">
-        <div className="h-10 w-48 bg-muted rounded" />
-        <div className="h-10 w-64 bg-muted rounded" />
-      </div>
-      <div className="h-20 bg-muted rounded-xl mb-4" />
-      <div className="flex gap-1 h-12 bg-muted/20 rounded-xl mb-6" />
-      <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
-        <div className="h-[500px] bg-muted rounded-xl" />
-        <div className="h-[700px] bg-muted rounded-xl" />
-      </div>
+    <div style={{
+      display: 'inline-flex', flexDirection: 'column', alignItems: 'center',
+      padding: '8px 14px', borderRadius: C.rsm,
+      background: C.surface2, boxShadow: C.clayInset,
+      minWidth: 52,
+    }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</span>
+      <span style={{ fontSize: 17, fontWeight: 800, color: C.ink1, lineHeight: 1.2 }}>{value}</span>
     </div>
   );
 }
 
-/**
- * Orders Panel Component
- * @description Main panel for order management including creation, viewing,
- * and processing of orders in the medical supply chain system
- * @returns {JSX.Element} The rendered orders panel
- */
-export default function SiparislerPanel(): JSX.Element {
+function StatusBadge({ status, label, tone }: { status: string; label: string; tone: string }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '5px 12px', borderRadius: C.rpill,
+      background: tone + '22', color: tone,
+      fontSize: 12, fontWeight: 700,
+    }}>
+      <span style={{ width: 7, height: 7, borderRadius: '50%', background: tone, display: 'inline-block' }} />
+      {label}
+    </span>
+  );
+}
+
+// Returns theme-consistent gradient pair + glow for any clay button color.
+function clayGrad(color: string): { top: string; glow: string; pressedShadow: string } {
+  if (color === C.violet) return { top: C.violetLight, glow: C.violetGlow, pressedShadow: 'inset 0 3px 7px rgba(80,50,130,0.26)' };
+  if (color === C.waterSolid) return { top: '#8FD3A6', glow: 'rgba(111,181,133,0.34)', pressedShadow: 'inset 0 3px 7px rgba(30,100,60,0.26)' };
+  return { top: C.accentLight, glow: C.accentGlow, pressedShadow: 'inset 0 3px 7px rgba(120,80,30,0.28)' };
+}
+
+function PrimaryBtn({
+  onClick, disabled, loading, children, color = C.accent,
+}: {
+  onClick?: () => void; disabled?: boolean; loading?: boolean;
+  children: React.ReactNode; color?: string;
+}) {
+  const [pressed, setPressed] = useState(false);
+  const grad = clayGrad(color);
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled || loading}
+      onPointerDown={() => !disabled && setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => setPressed(false)}
+      style={{
+        all: 'unset', cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+        width: '100%', height: 52, borderRadius: C.rsm,
+        background: disabled
+          ? C.surface2
+          : `linear-gradient(180deg, ${grad.top} 0%, ${color} 100%)`,
+        boxShadow: disabled
+          ? C.clayInset
+          : pressed
+            ? grad.pressedShadow
+            : `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${grad.glow}`,
+        color: disabled ? C.ink3 : '#fff',
+        fontWeight: 800, fontSize: 14.5,
+        transition: `all 240ms ${C.ease}`,
+        transform: pressed ? 'translateY(1px)' : 'none',
+      }}
+    >
+      {loading ? <Loader2 style={{ width: 16, height: 16, animation: 'sipSpin 1s linear infinite' }} /> : children}
+    </button>
+  );
+}
+
+function GhostBtn({ onClick, children }: { onClick?: () => void; children: React.ReactNode }) {
+  const [p, setP] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+      style={{
+        all: 'unset', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9,
+        width: '100%', height: 48, borderRadius: C.rsm,
+        background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+        boxShadow: p ? 'inset 0 2px 5px rgba(178,160,128,0.32)' : C.clayFlat,
+        color: C.ink2, fontWeight: 700, fontSize: 14,
+        transition: `all 240ms ${C.ease}`,
+        transform: p ? 'translateY(1px)' : 'none',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+// ─── Order card ───────────────────────────────────────────────────────────────
+
+function OrderCard({
+  order,
+  isProcessing,
+  onStart,
+  onView,
+  onDelete,
+  variant = 'acik',
+}: {
+  order: Order;
+  isProcessing: boolean;
+  onStart: (o: Order) => void;
+  onView: (o: Order) => void;
+  onDelete: (id: string) => void;
+  variant?: 'acik' | 'kismi' | 'tamamlanan';
+}) {
+  // Tamamlanan listesinde items taşınmaz; sunucu kalem/adet sayısını hesaplar.
+  const totalAdet = (order as any).adetCount ?? (order.items ?? []).reduce((s, i) => s + (Number(i.adet) || 0), 0);
+  const totalKalem = (order as any).kalemCount ?? (order.items ?? []).length;
+  const isPicking = order.status === 'toplaniyor';
+  const isPerifer = !order.depotId || order.isPeripheral;
+
+  const statusMap: Record<string, { label: string; tone: string }> = {
+    pending:    { label: 'Bekliyor',  tone: C.accent },
+    toplaniyor: { label: 'Toplanıyor', tone: '#7CA8DE' },
+    kismi:      { label: 'Kısmi',     tone: C.amber },
+    eksik:      { label: 'Eksik',     tone: '#C0796A' },
+    completed:  { label: 'Tamamlandı', tone: C.waterSolid },
+  };
+  const badge = statusMap[order.status] ?? { label: order.status, tone: C.ink3 };
+
+  const createdStr = order.createdAt instanceof Date
+    ? formatDate(order.createdAt, 'dd.MM.yyyy HH:mm', { locale: tr })
+    : '';
+  const transferredStr = order.transferredAt instanceof Date
+    ? formatDate(order.transferredAt, 'dd.MM.yyyy', { locale: tr })
+    : '';
+
+  // Partial fill % for kismi cards (original adet might not be stored,
+  // so we don't show a bar — just show remaining items)
+  const isKismi = variant === 'kismi';
+
+  const [hovered, setHovered] = useState(false);
+  return (
+    <article
+      onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)}
+      style={{
+        borderRadius: C.r,
+        background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`,
+        boxShadow: hovered ? `inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 18px 36px -14px rgba(150,128,96,0.42), 0 4px 10px -3px rgba(150,128,96,0.22), 0 0 0 1px rgba(201,138,87,0.12)` : C.clay,
+        padding: '22px 24px',
+        display: 'flex', flexDirection: 'column', gap: 14,
+        animation: 'sipPopIn 320ms var(--sip-ease, cubic-bezier(.22,1,.36,1))',
+        transition: `box-shadow 280ms ${C.ease}, transform 280ms ${C.ease}`,
+        transform: hovered ? 'translateY(-2px)' : 'none',
+      }}>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em', color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {order.kurumAdi}
+          </h3>
+          <p style={{ margin: 0, marginTop: 3, fontSize: 12.5, color: C.ink2, fontWeight: 600 }}>
+            {order.createdBy || '—'} · {createdStr}
+          </p>
+          {variant === 'tamamlanan' && transferredStr && (
+            <p style={{ margin: 0, marginTop: 2, fontSize: 12, color: C.waterDeep, fontWeight: 600 }}>
+              Teslim: {transferredStr}
+            </p>
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <StatusBadge status={order.status} label={isPerifer ? 'Perifer' : badge.label} tone={isPerifer ? '#9B86D6' : badge.tone} />
+          {variant !== 'tamamlanan' && (
+            <button
+              onClick={() => window.confirm('Siparişi silmek istediğinizden emin misiniz?') && onDelete(order.id ?? '')}
+              aria-label="Sil"
+              style={{
+                all: 'unset', cursor: 'pointer',
+                width: 34, height: 34, borderRadius: '50%',
+                display: 'grid', placeItems: 'center',
+                background: C.surface2, boxShadow: C.clayFlat, color: '#C0796A',
+              }}
+            >
+              <Trash2 style={{ width: 14, height: 14 }} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* KPI chips */}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <StatChip label="Kalem" value={totalKalem} />
+        <StatChip label="Adet" value={totalAdet} />
+        {isKismi && (
+          <div style={{
+            flex: 1, display: 'flex', alignItems: 'center', padding: '8px 14px',
+            borderRadius: C.rsm, background: C.amber + '14', color: C.amber,
+            fontSize: 12, fontWeight: 700,
+          }}>
+            Kalan kalemler gösteriliyor
+          </div>
+        )}
+      </div>
+
+      {/* CTA */}
+      {variant !== 'tamamlanan' ? (
+        isPerifer ? (
+          <PrimaryBtn onClick={() => onView(order)} disabled={isProcessing} color="#9B86D6">
+            <ArrowRight style={{ width: 16, height: 16 }} />
+            Siparişi Gör
+          </PrimaryBtn>
+        ) : (
+          <PrimaryBtn onClick={() => onStart(order)} disabled={isProcessing} loading={isProcessing}>
+            <ArrowRight style={{ width: 16, height: 16 }} />
+            {isKismi ? 'Kalan Kısmı Topla' : isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başla'}
+          </PrimaryBtn>
+        )
+      ) : (
+        <GhostBtn onClick={() => onView(order)}>
+          <ArrowRight style={{ width: 16, height: 16 }} />
+          Siparişi Görüntüle
+        </GhostBtn>
+      )}
+    </article>
+  );
+}
+
+// ─── Empty state ──────────────────────────────────────────────────────────────
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      gap: 14, padding: '56px 24px', borderRadius: C.r,
+      background: C.surface2, boxShadow: C.clayInset,
+      color: C.ink3, textAlign: 'center',
+    }}>
+      <div style={{
+        width: 56, height: 56, borderRadius: '28%', display: 'grid', placeItems: 'center',
+        background: C.surface, boxShadow: C.clay,
+      }}>
+        <Package style={{ width: 26, height: 26 }} />
+      </div>
+      <span style={{ fontSize: 15, fontWeight: 700, color: C.ink2 }}>{label}</span>
+    </div>
+  );
+}
+
+// ─── Main panel ───────────────────────────────────────────────────────────────
+
+export default function SiparislerPanel() {
   const { toast } = useToast();
   const router = useRouter();
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
-  useRowFocus('focus');
 
-  // Optimized Fetching
-  const { data: allDepotsData = [], isLoading: depotsLoading } = useDepots();
-  const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
-  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
-  const { data: depoStok = [], isLoading: stokLoading } = useDepoStok();
-
-  const depots = useMemo(() => filterOperationalSourceDepots(allDepotsData, currentUserProfile), [allDepotsData, currentUserProfile]);
+  const { data: allDepotsData = [] } = useDepots();
+  const depots = useMemo(
+    // id'siz depo → Radix SelectItem boş value ile patlar; ele.
+    () => filterOperationalSourceDepots(allDepotsData, currentUserProfile).filter(d => !!d.id),
+    [allDepotsData, currentUserProfile],
+  );
 
   const [allOrders, setAllOrders] = useState<Order[]>([]);
   const [peripheralOrders, setPeripheralOrders] = useState<Order[]>([]);
-
   const [selectedDepotId, setSelectedDepotId] = useState<string>('');
-  const [selectedLabId, setSelectedLabId] = useState<string>('');
-  const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
-  const [manualStockCode, setManualStockCode] = useState<string>('');
-  const [manualQty, setManualQty] = useState<number | string>(1);
-
-  const isLoading = depotsLoading || hospitalsLoading || productsLoading || stokLoading;
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  const [showBulk, setShowBulk] = useState(false);
-  const [selectedBulkDepots, setSelectedBulkDepots] = useState<string[]>([]);
-  const [selectedBulkLabs, setSelectedBulkLabs] = useState<string[]>([]);
-  
-  const [isLabPopoverOpen, setIsLabPopoverOpen] = useState(false);
 
-  // Listen to orders in real-time for the selected depot
+  // Aktif sekme URL'den okunur (?tab=) — Tamamlanan'a geçince URL değişir.
+  const searchParams = useSearchParams();
+  const tabFromUrl = searchParams?.get('tab');
+  const initialTab: 'acik' | 'kismi' | 'tamamlanan' =
+    tabFromUrl === 'kismi' || tabFromUrl === 'tamamlanan' ? tabFromUrl : 'acik';
+  const [activeTab, setActiveTab] = useState<'acik' | 'kismi' | 'tamamlanan'>(initialTab);
+  const [tamamlananOrders, setTamamlananOrders] = useState<Record<string, any>[]>([]);
+  const [tamamlananHasMore, setTamamlananHasMore] = useState(false);
+  const [tamamlananLoading, setTamamlananLoading] = useState(false);
+  // Cursor (sonraki sayfa için zaman sınırı) ref'te tutulur: yalnızca görüntülenen
+  // satır kadar veri çekilir, "Daha Fazla Yükle" bu cursor'ı geri gönderir.
+  const tamamlananCursorRef = useRef<{ ms: number } | null>(null);
+  const tamamlananReqRef = useRef(0);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+
+  // Tamamlanan filtreleri: metin arama, tarih aralığı, laboratuvar seçimi.
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState(''); // YYYY-MM-DD string (input[type=date])
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [filterKurum, setFilterKurum] = useState(''); // seçili laboratuvar (recipientHospital tam eşleşme)
+  const [labOptions, setLabOptions] = useState<string[]>([]); // seçici için ayrık lab listesi
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  // Sekme değiştir + URL'i güncelle (geçmişi kirletmeden replace).
+  const changeTab = useCallback((tab: 'acik' | 'kismi' | 'tamamlanan') => {
+    setActiveTab(tab);
+    const qs = tab === 'acik' ? '/siparisler' : `/siparisler?tab=${tab}`;
+    router.replace(qs, { scroll: false });
+  }, [router]);
+
+  // URL sekme parametresi dışarıdan değişirse (geri/ileri) state'i eşitle.
   useEffect(() => {
-    if (!selectedDepotId) {
-      setAllOrders([]);
-      return;
-    }
+    if (initialTab !== activeTab) setActiveTab(initialTab);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabFromUrl]);
+
+  // Metin aramasını debounce ederek uygulanan terime aktar.
+  useEffect(() => {
+    const t = setTimeout(() => { setSearchQuery(searchInput.trim()); }, 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Filtre durumu hesapla (badge için).
+  const activeFilterCount = [filterDateFrom, filterDateTo, filterKurum].filter(Boolean).length;
+
+  const clearFilters = useCallback(() => {
+    setFilterDateFrom('');
+    setFilterDateTo('');
+    setFilterKurum('');
+    setSearchInput('');
+    setSearchQuery('');
+  }, []);
+
+  // Seçili depo için ayrık laboratuvar listesini (sevkiyat geçmişinden) yükle —
+  // laboratuvar seçici bu listeden beslenir.
+  useEffect(() => {
+    if (activeTab !== 'tamamlanan' || !selectedDepotId) { setLabOptions([]); return; }
+    let canceled = false;
+    import('@/actions/stokActions')
+      .then(m => m.getShipmentLabs(selectedDepotId, currentCompanyId, isSuperAdmin ?? false))
+      .then(labs => { if (!canceled) setLabOptions(labs); })
+      .catch(() => { if (!canceled) setLabOptions([]); });
+    return () => { canceled = true; };
+  }, [activeTab, selectedDepotId, currentCompanyId, isSuperAdmin]);
+
+  // Lojistik sorumlusu: only perifer orders, no create/depot flow
+  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
+
+  const assignedLabIdSet = useMemo(() => {
+    const s = new Set<string>();
+    (currentUserProfile?.assignedLaboratories ?? []).forEach(id => { if (id) s.add(id); });
+    return s;
+  }, [currentUserProfile?.assignedLaboratories]);
+
+  // ── Real-time order listener for selected depot ──
+  useEffect(() => {
+    if (!selectedDepotId) { setAllOrders([]); return; }
     const mapSnapshot = (snap: any) => {
-      const updatedOrders = snap.docs.map((d: any) => {
+      const rows = snap.docs.map((d: any) => {
         const data = d.data();
         return {
-          ...data,
-          id: d.id,
+          ...data, id: d.id,
           createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
           transferredAt: data.transferredAt ? (data.transferredAt as Timestamp).toDate() : null,
         } as Order;
       });
-      updatedOrders.sort((a: Order, b: Order) => {
-        const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
-        const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
-        return bTime - aTime;
+      rows.sort((a: Order, b: Order) => {
+        const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        const at = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        return bt - at;
       });
-      setAllOrders(updatedOrders);
+      setAllOrders(rows);
     };
-  
-    let unsubscribe: (() => void) | null = null;
-  
-    const startListener = () => {
+
+    let unsub: (() => void) | null = null;
+    const start = () => {
       try {
-        const q1 = query(
-          collection(db, 'orders'),
+        const q1 = scopedQuery(
+          'orders', currentCompanyId, isSuperAdmin,
           where('depotId', '==', selectedDepotId),
-          orderBy('createdAt', 'desc')
+          orderBy('createdAt', 'desc'),
+          limit(ACTIVE_ORDERS_LISTEN_LIMIT),
         );
-        unsubscribe = onSnapshot(
-          q1,
-          (snapshot) => mapSnapshot(snapshot),
-          (error) => {
-            siparislerLogger.warn('Sipariş dinleyici index olmadan fallback yapıyor', {
-              depotId: selectedDepotId,
-              errorMessage: error instanceof Error ? error.message : String(error),
-            });
-            if (unsubscribe) unsubscribe();
-            const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
-            unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
-          }
-        );
-      } catch (e) {
-        siparislerLogger.warn('Sipariş dinleyici başlatma hatası', {
-          depotId: selectedDepotId,
-          error: e instanceof Error ? e.message : String(e),
+        unsub = onSnapshot(q1, mapSnapshot, (err: any) => {
+          siparislerLogger.warn('Sipariş dinleyici index olmadan fallback yapıyor', { depotId: selectedDepotId, errorMessage: String(err) });
+          if (unsub) unsub();
+          const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), limit(ACTIVE_ORDERS_LISTEN_LIMIT));
+          unsub = onSnapshot(q2, mapSnapshot);
         });
-        const q2 = query(collection(db, 'orders'), where('depotId', '==', selectedDepotId));
-        unsubscribe = onSnapshot(q2, (snapshot) => mapSnapshot(snapshot));
+      } catch {
+        const q2 = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), limit(ACTIVE_ORDERS_LISTEN_LIMIT));
+        unsub = onSnapshot(q2, mapSnapshot);
       }
     };
-  
-    startListener();
-    return () => { if (unsubscribe) unsubscribe(); };
-  }, [selectedDepotId]);
+    start();
+    return () => { if (unsub) unsub(); };
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin]);
 
-  // Perifer — depo atanmamış siparişleri dinle. Bu liste, seçili depodan
-  // bağımsız olarak ofis lojistik görünümünde her zaman gösterilir.
+  // ── Peripheral order listener ──
   useEffect(() => {
     const mapSnap = (snap: any) => {
       const rows = snap.docs
         .map((d: any) => {
           const data = d.data();
-          return {
-            ...data,
-            id: d.id,
-            createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date(),
-            transferredAt: data.transferredAt ? (data.transferredAt as Timestamp).toDate() : null,
-          } as Order;
+          return { ...data, id: d.id, createdAt: (data.createdAt as Timestamp)?.toDate?.() ?? new Date() } as Order;
         })
-        // Only un-routed peripheral orders; routed ones already appear under
-        // their destination depot via the depot-filtered listener above.
         .filter((o: Order) => !o.depotId);
       rows.sort((a: Order, b: Order) => {
-        const bTime = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
-        const aTime = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
-        return bTime - aTime;
+        const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
+        const at = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
+        return bt - at;
       });
       setPeripheralOrders(rows);
     };
-
-    const qPerif = query(collection(db, 'orders'), where('isPeripheral', '==', true));
-    const unsub = onSnapshot(qPerif, mapSnap, (err) => {
-      siparislerLogger.warn('Perifer sipariş dinleyici hatası', {
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
-    });
+    const q = scopedQuery('orders', currentCompanyId, isSuperAdmin, where('isPeripheral', '==', true));
+    const unsub = onSnapshot(q, mapSnap, () => {});
     return () => unsub();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
-
-  // Auto-select first depot
+  // ── Auto-select first depot ──
   useEffect(() => {
-    if (depots.length > 0 && !selectedDepotId && currentUserProfile?.role !== 'lojistik_sorumlusu') {
+    if (depots.length > 0 && !selectedDepotId && !isLojistikSorumlusu) {
       setSelectedDepotId(depots[0].id);
     }
-  }, [depots, selectedDepotId, currentUserProfile]);
+  }, [depots, selectedDepotId, isLojistikSorumlusu]);
 
-
-  const addManualItem = () => {
-    if (!manualStockCode || !(Number(manualQty) > 0)) {
-      toast({ title: 'Hata', description: 'Stok kodu ve geçerli bir adet girin.', variant: 'destructive' });
-      return;
+  // ── Tamamlanan (sipariş geçmişi): SHIPMENTS tabanlı server-side cursor sayfalama ──
+  // Tam geçmiş `shipments` koleksiyonundan gelir (her tamamlama bir sevkiyat
+  // oluşturur). `reset` true ise baştan, false ise mevcut cursor'dan sonrasını
+  // yükler. Yalnızca pageSize kayıt çekilir; items detayı listede taşınmaz.
+  const loadTamamlanan = useCallback(async (reset: boolean) => {
+    if (!selectedDepotId) return;
+    const reqId = ++tamamlananReqRef.current;
+    if (reset) tamamlananCursorRef.current = null;
+    setTamamlananLoading(true);
+    try {
+      const m = await import('@/actions/stokActions');
+      const res = await m.getCompletedShipments(
+        selectedDepotId, currentCompanyId, isSuperAdmin ?? false,
+        20, tamamlananCursorRef.current,
+        {
+          searchTerm: searchQuery || null,
+          dateFrom: filterDateFrom || null,
+          dateTo: filterDateTo || null,
+          recipientHospital: filterKurum || null,
+        },
+      );
+      if (reqId !== tamamlananReqRef.current) return; // stale isteği yoksay
+      const mapped = res.shipments.map((o: any) => ({
+        ...o,
+        createdAt: o.createdAt instanceof Date ? o.createdAt : o.createdAt ? new Date(o.createdAt) : new Date(),
+        transferredAt: o.transferredAt instanceof Date ? o.transferredAt : o.transferredAt ? new Date(o.transferredAt) : null,
+      }));
+      tamamlananCursorRef.current = res.nextCursor ?? null;
+      setTamamlananOrders(prev => (reset ? mapped : [...prev, ...mapped]));
+      setTamamlananHasMore(res.hasMore);
+    } catch {
+      /* yut: liste boş kalır */
+    } finally {
+      if (reqId === tamamlananReqRef.current) setTamamlananLoading(false);
     }
-    const prod = productCodes.find(p => p.stokKodu === manualStockCode);
-    if (!prod) {
-      toast({ title: 'Hata', description: 'Geçersiz stok kodu.', variant: 'destructive' });
-      return;
-    }
-    setOrderItems(prev => [
-      ...prev,
-      { id: generateId(), stokKodu: manualStockCode, stokAdi: prod.stokAdi, adet: Number(manualQty) },
-    ]);
-    setManualStockCode('');
-    setManualQty(1);
-  };
+  }, [selectedDepotId, currentCompanyId, isSuperAdmin, searchQuery, filterDateFrom, filterDateTo, filterKurum]);
 
-  const removeItem = (id: string) => setOrderItems(prev => prev.filter(i => i.id !== id));
+  // Depo değişince filtreleri ve listeyi sıfırla.
+  useEffect(() => {
+    clearFilters();
+    setTamamlananOrders([]);
+    tamamlananCursorRef.current = null;
+  }, [selectedDepotId, clearFilters]);
 
-  const prepareOrder = async () => {
-    if (!selectedDepotId || !selectedLabId || orderItems.length === 0) {
-      toast({ title: 'Hata', description: 'Depo, laboratuvar seçimi ve sipariş kalemleri eksiksiz olmalıdır.', variant: 'destructive' });
-      return;
-    }
-    const orderId = generateId();
-    const selectedHospital = hospitals.find(h => h.id === selectedLabId);
-    const hospitalName = selectedHospital?.name || 'Bilinmeyen Kurum';
-    const newOrder: Omit<Order, 'id'> = {
-      depotId: selectedDepotId,
-      labId: selectedLabId,
-      kurumAdi: hospitalName,
-      items: orderItems,
-      createdAt: new Date(),
-      status: 'pending',
-      isPeripheral: selectedHospital?.perifer ?? false,
-      createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen Kullanıcı',
-      createdById: currentUser?.uid || 'unknown',
-      transferredAt: null,
-    };
-    await setDoc(doc(db, 'orders', orderId), {
-      ...newOrder,
-      id: orderId,
-      createdAt: Timestamp.fromDate(newOrder.createdAt as Date),
-    });
-    
-    await emitOrderCreatedFromRequest({
-      actor: { uid: currentUserProfile?.uid ?? '', name: currentUserProfile?.name ?? ''},
-      orderId: orderId,
-      labId: selectedLabId,
-      depotId: selectedDepotId,
-      audienceHint: {
-        userId: currentUserProfile?.uid ?? undefined,
-        role: currentUserProfile?.role ?? undefined,
-        views: currentUserProfile?.accessibleViews ?? undefined,
-        labIds: currentUserProfile?.assignedLaboratories ?? undefined,
-        depotIds: currentUserProfile?.assignedDepots ?? undefined,
-      }
-    });
-    
-    toast({ title: 'Sipariş Oluşturuldu', description: 'Siparişiniz "Bekleyen Siparişler" listesine eklendi.' });
-    
-    setOrderItems([]);
-    setSelectedLabId('');
+  // Sekme/depo/filtre değişince baştan yükle.
+  useEffect(() => {
+    if (activeTab !== 'tamamlanan' || !selectedDepotId) return;
+    setTamamlananOrders([]);
+    loadTamamlanan(true);
+  }, [activeTab, selectedDepotId, searchQuery, filterDateFrom, filterDateTo, filterKurum, loadTamamlanan]);
 
-  };
-  
-  const startPickingProcess = async (order: Order) => {
+  // ── Order actions ──
+  const startPickingProcess = useCallback(async (order: Order) => {
     if (!order.id) return;
     setIsProcessing(true);
     try {
-        await updateDoc(doc(db, "orders", order.id), {
-          status: 'toplaniyor',
-          pickingStartedAt: serverTimestamp(),
-          pickingStartedById: currentUser?.uid ?? null,
-          pickingStartedBy: currentUserProfile?.name ?? currentUser?.email ?? null,
-        });
-        router.push(`/siparisler/${order.id}/toplama`);
-    } catch (e) {
-        toast({ title: 'Hata', description: 'Toplama işlemi başlatılamadı.', variant: 'destructive' });
+      await updateDoc(doc(db, 'orders', order.id), {
+        status: 'toplaniyor',
+        pickingStartedAt: serverTimestamp(),
+        pickingStartedById: currentUser?.uid ?? null,
+        pickingStartedBy: currentUserProfile?.name ?? currentUser?.email ?? null,
+      });
+      router.push(`/siparisler/${order.id}/toplama`);
+    } catch {
+      toast({ title: 'Hata', description: 'Toplama işlemi başlatılamadı.', variant: 'destructive' });
     } finally {
-        setIsProcessing(false);
+      setIsProcessing(false);
     }
-  };
-  
-  const toggleSelect = (id: string, list: string[], setList: React.Dispatch<React.SetStateAction<string[]>>) => {
-    setList(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    );
-  };
-
-  const generateBulkOrder = async () => {
-    if (selectedBulkDepots.length === 0 && selectedBulkLabs.length === 0) {
-      return toast({ title: 'Hata', description: 'En az bir depo veya laboratuvar seçin.', variant: 'destructive' });
-    }
-
-    const sheets: Record<string, any[]> = {};
-
-    const fetchRules = async (path: 'depots' | 'hospitals', id: string): Promise<Record<string, MinMaxRule>> => {
-      const snap = await getDocs(collection(db, path, id, 'minMaxRules'));
-      const rules: Record<string, MinMaxRule> = {};
-      snap.forEach(doc => {
-        const d = doc.data() as MinMaxRule;
-        const stokKodu = d.stokKodu;
-        if (stokKodu) rules[stokKodu] = d;
-      });
-      return rules;
-    };
-
-    for (const depotId of selectedBulkDepots) {
-      const depot = depots.find(d => d.id === depotId)!;
-      const rules = await fetchRules('depots', depotId);
-      const rows = Object.values(rules).map(rule => {
-        const have = depoStok.filter(
-          st => st.depotId === depotId && !st.isShipped && st.stokKodu === rule.stokKodu
-        ).length;
-        const maxValue = rule.max ?? 0;
-        const need = maxValue - have;
-        return {
-          'Stok Kodu': rule.stokKodu,
-          'Stok Adı': productCodes.find(p => p.stokKodu === rule.stokKodu)?.stokAdi || rule.stokKodu,
-          'Mevcut Stok': have,
-          'Max Adedi': maxValue,
-          'Sipariş Adeti': need > 0 ? need : 0,
-        };
-      }).filter(r => r['Sipariş Adeti'] > 0);
-      const depotName = depot.name ?? depot.id ?? 'Depot';
-      sheets[depotName] = rows;
-    }
-
-    for (const labId of selectedBulkLabs) {
-      const lab = hospitals.find(h => h.id === labId)!;
-      const rules = await fetchRules('hospitals', labId);
-      const rows = Object.values(rules).map(rule => {
-        const have = depoStok.filter(
-          st => st.isShipped && (st.hedefKurumId === lab.id || (!st.hedefKurumId && st.hedefKurum === lab.name)) && st.stokKodu === rule.stokKodu
-        ).length;
-        const maxValue = rule.max ?? 0;
-        const need = maxValue - have;
-        return {
-          'Stok Kodu': rule.stokKodu,
-          'Stok Adı': productCodes.find(p => p.stokKodu === rule.stokKodu)?.stokAdi || rule.stokKodu,
-          'Mevcut Stok': have,
-          'Max Adedi': maxValue,
-          'Sipariş Adeti': need > 0 ? need : 0,
-        };
-      }).filter(r => r['Sipariş Adeti'] > 0);
-      const labName = lab.name ?? lab.id ?? 'Lab';
-      sheets[labName] = rows;
-    }
-
-    const workbook = XLSX.utils.book_new();
-    Object.entries(sheets).forEach(([name, data]) => {
-      const ws = XLSX.utils.json_to_sheet(data, {
-        header: ['Stok Kodu','Stok Adı','Mevcut Stok','Max Adedi','Sipariş Adeti']
-      });
-      XLSX.utils.book_append_sheet(workbook, ws, name.substring(0, 31)); // Sheet names have a 31-char limit
-    });
-    XLSX.writeFile(workbook, 'Toplu_Siparis.xlsx');
-  };
-
-  const handleMinMaxOrder = async () => {
-    if (!selectedLabId) {
-      return toast({ title: 'Hata', description: 'Lütfen siparişin oluşturulacağı hedef laboratuvarı seçin.', variant: 'destructive' });
-    }
-  
-    const hospital = hospitals.find(h => h.id === selectedLabId);
-    if (!hospital || !hospital.id) return;
-
-    const rulesSnap = await getDocs(collection(db, 'hospitals', hospital.id, 'minMaxRules'));
-    const rules: Record<string, MinMaxRule> = {};
-    rulesSnap.forEach(doc => {
-        const d = doc.data() as MinMaxRule;
-        const stokKodu = d.stokKodu;
-        if (stokKodu) rules[stokKodu] = d;
-    });
-  
-    const neededItems: OrderItem[] = [];
-  
-    for (const rule of Object.values(rules)) {
-      const labStockCount = depoStok.filter(
-        st => st.isShipped && (st.hedefKurumId === hospital.id || (!st.hedefKurumId && st.hedefKurum === hospital.name)) && st.stokKodu === rule.stokKodu
-      ).length;
-      const maxValue = rule.max ?? 0;
-      const need = maxValue - labStockCount;
-  
-      if (need > 0) {
-        const product = productCodes.find(p => p.stokKodu === rule.stokKodu);
-        if (product) {
-          const depotStockCount = depoStok.filter(
-            st => st.depotId === selectedDepotId && !st.isShipped && st.stokKodu === rule.stokKodu
-          ).length;
-          
-          neededItems.push({
-            id: generateId(),
-            stokKodu: rule.stokKodu,
-            stokAdi: `${product.stokAdi} (Depo: ${depotStockCount})`,
-            adet: need,
-          });
-        }
-      }
-    }
-  
-    if (neededItems.length > 0) {
-      const consolidatedItems: Record<string, OrderItem> = {};
-      [...orderItems, ...neededItems].forEach(item => {
-        const key = item.stokKodu;
-        if (!key) return;
-        const existing = consolidatedItems[key];
-        if (existing) {
-          existing.adet = (existing.adet ?? 0) + (item.adet ?? 0);
-        } else {
-          consolidatedItems[key] = { ...item };
-        }
-      });
-      setOrderItems(Object.values(consolidatedItems));
-      toast({
-        title: 'Sipariş Kalemleri Eklendi',
-        description: `${neededItems.length} kalem Min/Max kurallarına göre siparişe eklendi/güncellendi.`
-      });
-    } else {
-      toast({
-        title: 'Sipariş Gerekmiyor',
-        description: 'Seçili laboratuvar için Min/Max kurallarına göre sipariş gerektiren ürün bulunamadı.',
-        variant: 'default'
-      });
-    }
-  };
-  
-  /**
-   * Handles order deletion with confirmation
-   * @param orderId - ID of the order to delete
-   */
-  const handleDeleteOrder = async (orderId: string): Promise<void> => {
-    if (window.confirm('Bu siparişi silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.')) {
-      try {
-        siparislerLogger.info('Sipariş silme işlemi başlatıldı', { orderId });
-        await deleteDoc(doc(db, 'orders', orderId));
-        siparislerLogger.info('Sipariş başarıyla silindi', { orderId });
-        toast({ title: 'Başarılı', description: 'Sipariş silindi.' });
-      } catch (error) {
-        siparislerLogger.error('Sipariş silme hatası', error, { orderId });
-        toast({ title: 'Hata', description: 'Sipariş silinirken bir hata oluştu.', variant: 'destructive' });
-      }
-    }
-  };
-
-  // ── Computed state ──
-  const [activeTab, setActiveTab] = useState<'create' | 'pending'>('create');
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [isProductPopoverOpen, setIsProductPopoverOpen] = useState(false);
-
-  // Lojistik sorumlusu rolü: sipariş oluşturma ve depo seçim akışları gizlenir,
-  // yalnızca kendisine atanan laboratuvarların perifer siparişlerini görür.
-  const isLojistikSorumlusu = currentUserProfile?.role === 'lojistik_sorumlusu';
-
-  const assignedLabIdSet = useMemo(() => {
-    const set = new Set<string>();
-    (currentUserProfile?.assignedLaboratories ?? []).forEach(id => { if (id) set.add(id); });
-    return set;
-  }, [currentUserProfile?.assignedLaboratories]);
-
-  useEffect(() => {
-    if (isLojistikSorumlusu && activeTab !== 'pending') {
-      setActiveTab('pending');
-    }
-  }, [isLojistikSorumlusu, activeTab]);
-
-  const selectedLabName = useMemo(
-    () => hospitals.find(h => h.id === selectedLabId)?.name ?? '',
-    [hospitals, selectedLabId]
-  );
-
-  const depotName = useMemo(
-    () => depots.find(d => d.id === selectedDepotId)?.name ?? '',
-    [depots, selectedDepotId]
-  );
-
-  const pendingOrders = useMemo(() => {
-    const seen = new Set<string>();
-    const merged: Order[] = [];
-    // Lojistik sorumlusu sadece perifer akışını yönetir; depo bazlı
-    // listeden gelen siparişler gösterilmez.
-    const sources = isLojistikSorumlusu ? [peripheralOrders] : [allOrders, peripheralOrders];
-    sources.flat().forEach(o => {
-      if (!o?.id || seen.has(o.id)) return;
-      if (o.status === 'completed') return;
-      if (isLojistikSorumlusu) {
-        // Kullanıcı yönetiminde atanan laboratuvarların dışındaki perifer
-        // siparişleri bu kullanıcıya görünmez.
-        if (!o.labId || !assignedLabIdSet.has(o.labId)) return;
-      }
-      seen.add(o.id);
-      merged.push(o);
-    });
-    merged.sort((a, b) => {
-      const at = a.createdAt instanceof Date ? a.createdAt.getTime() : 0;
-      const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : 0;
-      return bt - at;
-    });
-    return merged;
-  }, [allOrders, peripheralOrders, isLojistikSorumlusu, assignedLabIdSet]);
-
-  const peripheralLabIds = useMemo(() => {
-    const set = new Set<string>();
-    hospitals.forEach(h => { if (h?.perifer && h.id) set.add(h.id); });
-    return set;
-  }, [hospitals]);
-
-  // Bir sipariş "perifer UI" gösterir ancak HENÜZ bir depoya yönlendirilmediyse:
-  // - Ofisin "Siparişi Gör"/"Depoya Yönlendir" akışına uygundur
-  // - Depoya yönlendirildiyse (`depotId` set edilmişse) normal toplama akışına geçer
-  const isOrderPeripheral = useCallback((order: Order) => {
-    if (order.depotId) return false;
-    if (order.isPeripheral === true) return true;
-    if (order.labId && peripheralLabIds.has(order.labId)) return true;
-    return false;
-  }, [peripheralLabIds]);
+  }, [currentUser, currentUserProfile, router, toast]);
 
   const openPeripheralOrder = useCallback((order: Order) => {
     if (!order.id) return;
     router.push(`/siparisler/${order.id}/perifer`);
   }, [router]);
 
-  const totalDraftItems = orderItems.length;
-  const totalDraftAdet = orderItems.reduce((sum, i) => sum + (Number(i.adet) || 0), 0);
-  const productMetaByCode = useMemo(() => {
-    const map = new Map<string, ProductCode>();
-    productCodes.forEach((p) => {
-      if (p.stokKodu) map.set(p.stokKodu, p);
+  const handleDeleteOrder = useCallback(async (orderId: string) => {
+    try {
+      await deleteDoc(doc(db, 'orders', orderId));
+      toast({ title: 'Başarılı', description: 'Sipariş silindi.' });
+    } catch {
+      toast({ title: 'Hata', description: 'Sipariş silinemedi.', variant: 'destructive' });
+    }
+  }, [toast]);
+
+  const isOrderPeripheral = useCallback((order: Order) => {
+    if (order.depotId) return false;
+    return order.isPeripheral === true || (order as any).perifer === true;
+  }, []);
+
+  // ── Computed tab data ──
+  const { acikOrders, kismiOrders } = useMemo(() => {
+    const seen = new Set<string>();
+    const acik: Order[] = [];
+    const kismi: Order[] = [];
+
+    const sources = isLojistikSorumlusu ? [peripheralOrders] : [allOrders, peripheralOrders];
+    sources.flat().forEach(o => {
+      if (!o?.id || seen.has(o.id) || o.status === 'completed') return;
+      if (isLojistikSorumlusu && o.labId && !assignedLabIdSet.has(o.labId)) return;
+      seen.add(o.id);
+      if (o.status === 'kismi') kismi.push(o);
+      else acik.push(o);
     });
-    return map;
-  }, [productCodes]);
 
-  const isCreateReady = !!selectedDepotId && !!selectedLabId && orderItems.length > 0;
+    return { acikOrders: acik, kismiOrders: kismi };
+  }, [allOrders, peripheralOrders, isLojistikSorumlusu, assignedLabIdSet]);
 
-  // ── Stepper state ──
-  const stepperState = useMemo(() => ({
-    hasDepot: !!selectedDepotId,
-    hasLab: !!selectedLabId,
-    hasItems: orderItems.length > 0,
-  }), [selectedDepotId, selectedLabId, orderItems]);
+  const depotName = useMemo(
+    () => depots.find(d => d.id === selectedDepotId)?.name ?? '',
+    [depots, selectedDepotId],
+  );
 
-  // ── Lojistik Sorumlusu: completely different UI ──
-  if (isLojistikSorumlusu) {
-    return <LojistikSiparisView />;
-  }
+  // ── Lojistik sorumlusu: hand off to dedicated view ──
+  if (isLojistikSorumlusu) return <LojistikSiparisView />;
 
-  if (isLoading && pendingOrders.length === 0 && orderItems.length === 0) {
-    return <SiparislerSkeleton />;
-  }
+  const tabDef = [
+    { id: 'acik' as const, label: 'Açık', count: acikOrders.length, tone: C.accent },
+    { id: 'kismi' as const, label: 'Kısmi Tamamlanan', count: kismiOrders.length, tone: C.amber },
+    { id: 'tamamlanan' as const, label: 'Tamamlanan', count: null, tone: C.waterSolid },
+  ];
+
+  const currentList = activeTab === 'acik'
+    ? acikOrders
+    : activeTab === 'kismi'
+      ? kismiOrders
+      : (tamamlananOrders as unknown as Order[]);
 
   return (
-    <div
-      className="cihaz-shell px-3 py-4 sm:px-5 sm:py-6 space-y-4 sm:space-y-5 min-h-screen"
-      role="main"
-      aria-label="Sipariş yönetimi paneli"
-    >
-      {/* ══════════════════════ HEADER ══════════════════════ */}
-      <div className="flex items-center gap-3">
-        <div className="flex-1 min-w-0">
-          <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)] flex items-center gap-2">
-            <ShoppingCart className="h-5 w-5 text-[var(--dashboard-accent)]" />
-            Siparişler
-          </h1>
-          <p className="text-[11px] sm:text-xs text-[var(--dashboard-muted)] truncate">
-            {isLojistikSorumlusu
-              ? `Perifer siparişler · ${pendingOrders.length}`
-              : `${depotName || 'Depo seçin'}${selectedLabName ? ` · ${selectedLabName}` : ''}`}
-          </p>
-        </div>
-        {/* Secondary actions - more menu */}
-        <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
-          <PopoverTrigger asChild>
-            <button className="cihaz-tool-item flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10">
-              <MoreHorizontal className="h-4 w-4 text-[var(--dashboard-muted)]" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-56 p-1" align="end">
-            <button onClick={() => { router.push('/urun-talep'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
-              <ClipboardPlus className="h-4 w-4 text-[var(--dashboard-muted)]" /> Ürün Talep
-            </button>
-            <button onClick={() => { router.push(`/siparis-gecmis?depotId=${selectedDepotId}`); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]" disabled={!selectedDepotId}>
-              <History className="h-4 w-4 text-[var(--dashboard-muted)]" /> Sipariş Geçmişi
-            </button>
-            <button onClick={() => { router.push('/urun-iade'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
-              <Undo className="h-4 w-4 text-[var(--dashboard-muted)]" /> Ürün İade
-            </button>
-            <button onClick={() => { router.push('/merkez-siparis'); setMoreMenuOpen(false); }} className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--dashboard-surface-2)]">
-              <FileSpreadsheet className="h-4 w-4 text-[var(--dashboard-muted)]" /> Toplu Sipariş
-            </button>
-          </PopoverContent>
-        </Popover>
-      </div>
+    <>
+      <style>{`
+        @keyframes sipPopIn { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+        @keyframes sipSpin { to { transform: rotate(360deg); } }
+        @keyframes sipHeaderIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+      `}</style>
 
-      {/* ══════════════════════ DEPOT SELECTOR ══════════════════════ */}
-      {!isLojistikSorumlusu && (
-        <div className="cihaz-card p-3 sm:p-4">
-          <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1.5">Çalışma Deposu</label>
-          <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={isLoading}>
-            <SelectTrigger className="w-full bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)] shadow-[var(--dashboard-pressed)] rounded-xl h-10">
-              <SelectValue placeholder="Depo seçin..." />
-            </SelectTrigger>
-            <SelectContent>
-              {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
 
-      {/* ══════════════════════ TAB SWITCHER ══════════════════════ */}
-      {!isLojistikSorumlusu && (
-        <div className="flex rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] p-1 gap-1">
-          <button
-            onClick={() => setActiveTab('create')}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-              activeTab === 'create'
-                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-            )}
-          >
-            <PlusCircle className="h-4 w-4" />
-            Oluştur
-            {totalDraftItems > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-[var(--dashboard-accent)] text-white text-[10px] font-bold">{totalDraftItems}</span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('pending')}
-            className={cn(
-              "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs sm:text-sm font-semibold transition-all",
-              activeTab === 'pending'
-                ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] text-[var(--dashboard-text)]"
-                : "text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]"
-            )}
-          >
-            <Package className="h-4 w-4" />
-            Bekleyen
-            {pendingOrders.length > 0 && (
-              <span className="ml-1 px-1.5 py-0.5 rounded-md bg-amber-500 text-white text-[10px] font-bold">{pendingOrders.length}</span>
-            )}
-          </button>
-        </div>
-      )}
+      <div className="sp-shell" style={{
+        position: 'relative', zIndex: 1,
+        maxWidth: 1280, margin: '0 auto',
+        padding: '28px clamp(16px, 3vw, 40px) 90px',
+        minHeight: '100vh',
+      }}>
 
-      {/* ══════════════════════ CREATE TAB ══════════════════════ */}
-      {!isLojistikSorumlusu && activeTab === 'create' && (
-        <div className="space-y-4">
-          {/* ── Stepper ── */}
-          <div className="flex items-center justify-center gap-0 px-2">
-            {[
-              { label: 'Lab Seç', done: stepperState.hasLab, num: 1 },
-              { label: 'Ürün Ekle', done: stepperState.hasItems, num: 2 },
-              { label: 'Oluştur', done: false, num: 3 },
-            ].map((step, i) => (
-              <React.Fragment key={step.num}>
-                {i > 0 && (
-                  <div className={cn(
-                    "flex-1 h-[2px] max-w-[60px] sm:max-w-[80px] transition-colors",
-                    step.done || (i === 1 && stepperState.hasLab)
-                      ? "bg-[var(--dashboard-accent)]"
-                      : "bg-[var(--dashboard-stroke)]"
-                  )} />
-                )}
-                <div className="flex flex-col items-center gap-1">
-                  <div className={cn(
-                    "w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-bold transition-all",
-                    step.done
-                      ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)]"
-                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)]"
-                  )}>
-                    {step.done ? <Check className="h-4 w-4" /> : step.num}
-                  </div>
-                  <span className="text-[10px] sm:text-xs font-medium text-[var(--dashboard-muted)]">{step.label}</span>
-                </div>
-              </React.Fragment>
-            ))}
+        {/* ── Header ── */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 22 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, letterSpacing: '-0.02em', color: C.ink1, display: 'flex', alignItems: 'center', gap: 10 }}>
+              <ShoppingCart style={{ width: 22, height: 22, color: C.accent }} />
+              Siparişler
+            </h1>
+            <p style={{ margin: 0, marginTop: 2, fontSize: 13, color: C.ink2, fontWeight: 600 }}>
+              {depotName || 'Depo seçin'}
+            </p>
           </div>
 
-          {/* ── 2-Column Layout ── */}
-          <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-4 sm:gap-5">
-            {/* ── LEFT: Config + Add ── */}
-            <div className="space-y-4">
-              {/* Lab selector */}
-              <div className="cihaz-card-strong p-4 sm:p-5 space-y-3">
-                <p className="cihaz-section-label">Hedef Laboratuvar</p>
-                <Popover open={isLabPopoverOpen} onOpenChange={setIsLabPopoverOpen}>
-                  <PopoverTrigger asChild>
-                    <button
-                      className={cn(
-                        "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
-                        selectedLabId
-                          ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                          : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                      )}
-                      disabled={!selectedDepotId || hospitals.length === 0}
-                    >
-                      <span className="truncate">{selectedLabName || 'Laboratuvar seçin...'}</span>
-                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                    <Command>
-                      <CommandInput placeholder="Laboratuvar ara..." />
-                      <CommandList>
-                        <CommandEmpty>Laboratuvar bulunamadı.</CommandEmpty>
-                        <CommandGroup>
-                          {hospitals.sort((a, b) => (a.name ?? '').localeCompare(b.name ?? '')).map((hospital) => (
-                            <CommandItem
-                              key={hospital.id}
-                              value={hospital.name ?? ''}
-                              onSelect={() => { setSelectedLabId(hospital.id ?? ''); setIsLabPopoverOpen(false); }}
-                            >
-                              <Check className={cn("mr-2 h-4 w-4", selectedLabId === hospital.id ? "opacity-100" : "opacity-0")} />
-                              {hospital.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
-                      </CommandList>
-                    </Command>
-                  </PopoverContent>
-                </Popover>
-
-                {/* Min/Max button */}
-                <button
-                  onClick={handleMinMaxOrder}
-                  disabled={!selectedLabId}
-                  className={cn(
-                    "w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all",
-                    selectedLabId
-                      ? "cihaz-action-tile text-[var(--dashboard-text)]"
-                      : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                  )}
-                  title={!selectedLabId ? 'Min/Max hesaplamak için laboratuvar seçmelisiniz' : undefined}
+          {/* More menu */}
+          <Popover open={moreMenuOpen} onOpenChange={setMoreMenuOpen}>
+            <PopoverTrigger asChild>
+              <button style={{
+                all: 'unset', cursor: 'pointer',
+                width: 40, height: 40, borderRadius: '50%', display: 'grid', placeItems: 'center',
+                background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+                boxShadow: C.clayFlat, color: C.ink2,
+              }}>
+                <MoreHorizontal style={{ width: 18, height: 18 }} />
+              </button>
+            </PopoverTrigger>
+            <PopoverContent className="w-52 p-1" align="end">
+              {[
+                { label: 'Ürün Talep', icon: <ClipboardPlus className="h-4 w-4" />, href: '/urun-talep' },
+                { label: 'Ürün İade', icon: <Undo className="h-4 w-4" />, href: '/urun-iade' },
+                { label: 'Toplu Sipariş', icon: <FileSpreadsheet className="h-4 w-4" />, href: '/merkez-siparis' },
+              ].map(item => (
+                <button key={item.href}
+                  onClick={() => { router.push(item.href); setMoreMenuOpen(false); }}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[#F5F1E8] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <Calculator className="h-4 w-4 text-[var(--dashboard-accent)]" />
-                  Min/Max'a Göre Hesapla
+                  {item.icon} {item.label}
                 </button>
-              </div>
+              ))}
+            </PopoverContent>
+          </Popover>
+        </div>
 
-              {/* Manual product add */}
-              <div className="cihaz-card p-4 sm:p-5 space-y-3">
-                <p className="cihaz-section-label">Ürün Ekle</p>
+        {/* ── Depot selector ── */}
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ fontSize: 10, fontWeight: 700, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 6 }}>
+            Çalışma Deposu
+          </label>
+          <div style={{
+            background: C.surface2, boxShadow: C.clayInset,
+            borderRadius: C.rsm, overflow: 'hidden',
+          }}>
+            <Select value={selectedDepotId} onValueChange={setSelectedDepotId}>
+              <SelectTrigger className="w-full border-0 shadow-none bg-transparent h-11 text-sm font-semibold">
+                <SelectValue placeholder="Depo seçin..." />
+              </SelectTrigger>
+              <SelectContent>
+                {depots.map(d => <SelectItem key={d.id} value={d.id ?? ''}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
-                {/* Product combobox */}
-                <div>
-                  <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Ürün Seç</label>
-                  <Popover open={isProductPopoverOpen} onOpenChange={setIsProductPopoverOpen}>
-                    <PopoverTrigger asChild>
-                      <button
-                        className={cn(
-                          "w-full flex items-center justify-between px-3 h-10 rounded-xl text-sm transition-all border border-[var(--dashboard-stroke)]",
-                          manualStockCode
-                            ? "bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] font-medium text-[var(--dashboard-text)]"
-                            : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)]"
-                        )}
-                      >
-                        <span className="truncate">
-                          {manualStockCode ? productCodes.find(p => p.stokKodu === manualStockCode)?.stokAdi : 'Ürün seçin...'}
-                        </span>
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
-                      <Command>
-                        <CommandInput placeholder="Ürün ara..." />
-                        <CommandList>
-                          <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
-                          <CommandGroup>
-                            {productCodes
-                              .sort((a, b) => (a.stokAdi ?? '').localeCompare(b.stokAdi ?? ''))
-                              .map(p => (
-                                <CommandItem
-                                  key={p.id ?? p.stokKodu}
-                                  value={`${p.stokAdi ?? ''} ${p.stokKodu ?? ''}`}
-                                  onSelect={() => { setManualStockCode(p.stokKodu ?? ''); setIsProductPopoverOpen(false); }}
-                                >
-                                  <Check className={cn("mr-2 h-4 w-4", manualStockCode === p.stokKodu ? "opacity-100" : "opacity-0")} />
-                                  <div className="flex flex-col">
-                                    <span className="text-sm">{p.stokAdi}</span>
-                                    <span className="text-[10px] text-[var(--dashboard-muted)]">{p.stokKodu}</span>
-                                  </div>
-                                </CommandItem>
-                              ))}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                </div>
+        {/* ── Yeni Sipariş button ── */}
+        <button
+          onClick={() => router.push('/siparisler/olustur')}
+          style={{
+            all: 'unset', cursor: 'pointer', boxSizing: 'border-box', width: '100%',
+            display: 'flex', alignItems: 'center', gap: 16,
+            padding: '18px 22px', marginBottom: 22, borderRadius: C.r,
+            background: `linear-gradient(180deg, ${C.accentLight} 0%, ${C.accent} 100%)`,
+            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.4), inset 0 -5px 12px rgba(120,80,30,0.18), 0 14px 28px -10px ${C.accentGlow}`,
+            color: '#fff',
+            transition: `transform 260ms ${C.ease}`,
+          }}
+          onPointerDown={(e) => { e.currentTarget.style.transform = 'translateY(1px) scale(0.992)'; }}
+          onPointerUp={(e) => { e.currentTarget.style.transform = ''; }}
+          onPointerLeave={(e) => { e.currentTarget.style.transform = ''; }}
+        >
+          <span style={{
+            width: 44, height: 44, borderRadius: 14, flexShrink: 0,
+            background: 'rgba(255,255,255,0.22)', display: 'grid', placeItems: 'center',
+            boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.4)',
+          }}>
+            <Plus style={{ width: 22, height: 22 }} />
+          </span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 17, fontWeight: 800, letterSpacing: '-0.01em' }}>Yeni Sipariş Oluştur</div>
+            <div style={{ fontSize: 13, fontWeight: 500, opacity: 0.9 }}>Lab seç, ürün ekle ve siparişi başlat</div>
+          </div>
+          <ArrowRight style={{ width: 20, height: 20, opacity: 0.9 }} />
+        </button>
 
-                {/* Qty + Add row */}
-                <div className="flex items-end gap-2">
-                  <div className="flex-1">
-                    <label className="text-[10px] sm:text-xs font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] block mb-1">Adet</label>
-                    <div className="flex items-center gap-0.5">
-                      <button
-                        onClick={() => setManualQty(Math.max(1, Number(manualQty) - 1))}
-                        className="w-8 h-10 rounded-l-xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                      >
-                        <Minus className="h-3 w-3" />
-                      </button>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={manualQty}
-                        onChange={e => setManualQty(e.target.value)}
-                        className="h-10 text-center text-sm font-bold border-y border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] rounded-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      />
-                      <button
-                        onClick={() => setManualQty(Number(manualQty) + 1)}
-                        className="w-8 h-10 rounded-r-xl bg-[var(--dashboard-surface-2)] border border-[var(--dashboard-stroke)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                      >
-                        <Plus className="h-3 w-3" />
-                      </button>
-                    </div>
-                  </div>
-                  <button
-                    onClick={addManualItem}
-                    disabled={!manualStockCode || !(Number(manualQty) > 0)}
-                    className={cn(
-                      "h-10 px-4 rounded-xl text-sm font-bold transition-all flex items-center gap-2",
-                      manualStockCode && Number(manualQty) > 0
-                        ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                        : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                    )}
-                  >
-                    <Plus className="h-4 w-4" />
-                    Ekle
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* ── RIGHT: Draft List ── */}
-            <div className="cihaz-card-strong flex flex-col overflow-hidden">
-              {/* Toolbar */}
-              <div className="flex items-center gap-2 sm:gap-3 px-4 py-3 sm:px-5 border-b border-[var(--dashboard-stroke)]">
-                <div className="flex-shrink-0">
-                  <h2 className="text-sm sm:text-base font-semibold text-[var(--dashboard-text)]">
-                    Sipariş Kalemleri
-                    <span className="ml-1.5 text-[var(--dashboard-muted)]">({totalDraftItems})</span>
-                  </h2>
-                  <p className="text-[10px] sm:text-xs text-[var(--dashboard-muted)]">
-                    {totalDraftAdet} adet ürün sipariş edilecek
-                  </p>
-                </div>
-                <div className="flex-1" />
-                {orderItems.length > 0 && (
-                  <button
-                    onClick={() => setOrderItems([])}
-                    className="cihaz-tool-item flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    <span className="hidden sm:inline">Temizle</span>
-                  </button>
+        {/* ── Tabs ── */}
+        <div style={{
+          display: 'inline-flex', gap: 4, padding: 4, marginBottom: 20,
+          borderRadius: C.rpill, background: C.surface2, boxShadow: C.clayInset,
+          flexWrap: 'wrap',
+        }}>
+          {tabDef.map(tb => {
+            const on = activeTab === tb.id;
+            return (
+              <button
+                key={tb.id}
+                onClick={() => changeTab(tb.id)}
+                style={{
+                  all: 'unset', cursor: 'pointer',
+                  display: 'inline-flex', alignItems: 'center', gap: 8,
+                  height: 42, padding: '0 18px', borderRadius: C.rpill,
+                  background: on ? `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})` : 'transparent',
+                  boxShadow: on ? C.clay : 'none',
+                  color: on ? C.ink1 : C.ink2, fontSize: 14, fontWeight: 700,
+                  transition: `color 200ms ${C.ease}`,
+                }}
+              >
+                {tb.label}
+                {tb.count !== null && (
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    minWidth: 22, height: 22, padding: '0 7px', borderRadius: 999,
+                    background: on ? tb.tone : 'rgba(150,128,96,0.16)',
+                    color: on ? '#fff' : C.ink2, fontSize: 12, fontWeight: 800,
+                  }}>
+                    {tb.count}
+                  </span>
                 )}
-              </div>
+              </button>
+            );
+          })}
+        </div>
 
-              {/* Table header (desktop) */}
-              {orderItems.length > 0 && (
-                <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 px-4 sm:px-5 py-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--dashboard-muted)] border-b border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)]">
-                  <span>Ürün</span>
-                  <span>Stok Kodu</span>
-                  <span className="text-center">Adet</span>
-                  <span className="text-center">Birim</span>
-                  <span></span>
-                </div>
+        {/* ── Tamamlanan: arama + filtreler ── */}
+        {activeTab === 'tamamlanan' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
+            {/* Arama + filtre toggle */}
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '0 14px', height: 50, borderRadius: C.rsm,
+              background: C.surface2, boxShadow: C.clayInset,
+            }}>
+              <Search style={{ width: 17, height: 17, color: C.ink3, flexShrink: 0 }} />
+              <input
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Kuruma, kişiye göre ara…"
+                style={{ all: 'unset', flex: 1, height: '100%', fontSize: 14, fontWeight: 600, color: C.ink1 }}
+              />
+              {searchInput && (
+                <button onClick={() => setSearchInput('')} aria-label="Aramayı temizle" style={{
+                  all: 'unset', cursor: 'pointer', flexShrink: 0,
+                  width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center',
+                  background: C.surface, boxShadow: C.clayFlat, color: C.ink2,
+                }}>
+                  <X style={{ width: 13, height: 13 }} />
+                </button>
               )}
+              {/* Filtre toggle butonu */}
+              <button
+                onClick={() => setFiltersOpen(o => !o)}
+                aria-label="Filtreler"
+                style={{
+                  all: 'unset', cursor: 'pointer', flexShrink: 0, position: 'relative',
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  padding: '5px 12px', borderRadius: C.rsm,
+                  background: filtersOpen || activeFilterCount > 0 ? C.accent + '18' : 'transparent',
+                  color: activeFilterCount > 0 ? C.accent : C.ink2,
+                  fontSize: 13, fontWeight: 700,
+                }}
+              >
+                <Filter style={{ width: 14, height: 14 }} />
+                Filtre
+                {activeFilterCount > 0 && (
+                  <span style={{
+                    position: 'absolute', top: -4, right: -4,
+                    width: 16, height: 16, borderRadius: '50%',
+                    background: C.accent, color: '#fff',
+                    fontSize: 10, fontWeight: 800,
+                    display: 'grid', placeItems: 'center',
+                  }}>{activeFilterCount}</span>
+                )}
+              </button>
+            </div>
 
-              {/* Table body */}
-              <div className="flex-1 overflow-auto max-h-[50vh]">
-                {orderItems.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-[35vh] sm:h-[40vh] text-center px-4">
-                    <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
-                      <Search className="h-6 w-6 text-[var(--dashboard-muted)]" />
-                    </div>
-                    <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Sipariş listesi boş</p>
-                    <p className="text-xs text-[var(--dashboard-muted)] mb-4">Başlamak için:</p>
-                    <div className="space-y-2 text-xs text-[var(--dashboard-muted)]">
-                      <div className="flex items-center gap-2">
-                        <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", stepperState.hasLab ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]")}>1</span>
-                        <span className={stepperState.hasLab ? "line-through" : ""}>Laboratuvar seçin</span>
-                        {stepperState.hasLab && <Check className="h-3 w-3 text-green-600" />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold", stepperState.hasItems ? "bg-[var(--dashboard-accent)] text-white" : "bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]")}>2</span>
-                        <span>Ürün ekleyin veya Min/Max hesaplatın</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center text-[10px] font-bold">3</span>
-                        <span>Siparişi oluşturun</span>
-                      </div>
-                    </div>
+            {/* Genişletilebilir filtre satırı */}
+            {filtersOpen && (
+              <div style={{
+                display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10,
+                padding: '14px 16px', borderRadius: C.rsm,
+                background: C.surface, boxShadow: C.clayFlat,
+              }}>
+                {/* Laboratuvar seçici */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>LABORATUVAR</label>
+                  <select
+                    value={filterKurum}
+                    onChange={e => setFilterKurum(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none', appearance: 'none',
+                      fontSize: 13, fontWeight: 600, color: filterKurum ? C.ink1 : C.ink3,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <option value="">Tüm laboratuvarlar</option>
+                    {labOptions.map(lab => (
+                      <option key={lab} value={lab}>{lab}</option>
+                    ))}
+                  </select>
+                </div>
+                {/* Başlangıç tarihi */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>BAŞLANGIÇ</label>
+                  <input
+                    type="date"
+                    value={filterDateFrom}
+                    onChange={e => setFilterDateFrom(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none',
+                      fontSize: 13, fontWeight: 600, color: C.ink1,
+                    }}
+                  />
+                </div>
+                {/* Bitiş tarihi */}
+                <div>
+                  <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: C.ink3, marginBottom: 5, letterSpacing: '0.05em' }}>BİTİŞ</label>
+                  <input
+                    type="date"
+                    value={filterDateTo}
+                    onChange={e => setFilterDateTo(e.target.value)}
+                    style={{
+                      width: '100%', boxSizing: 'border-box',
+                      padding: '0 10px', height: 38, borderRadius: C.rsm,
+                      background: C.surface2, boxShadow: C.clayInset,
+                      border: 'none', outline: 'none',
+                      fontSize: 13, fontWeight: 600, color: C.ink1,
+                    }}
+                  />
+                </div>
+                {/* Filtreleri sıfırla */}
+                {activeFilterCount > 0 && (
+                  <div style={{ gridColumn: '1 / -1', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={clearFilters} style={{
+                      all: 'unset', cursor: 'pointer',
+                      fontSize: 12, fontWeight: 700, color: C.ink3,
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      <X style={{ width: 12, height: 12 }} /> Filtreleri Temizle
+                    </button>
                   </div>
-                ) : (
-                  orderItems.map((item, idx) => {
-                    const meta = productMetaByCode.get(item.stokKodu || '');
-                    const multiplier = formatUnitMultiplier(meta);
-                    return (
-                    <div key={item.id} className="border-b border-[var(--dashboard-stroke)] last:border-b-0">
-                      {/* Desktop row */}
-                      <div className="hidden sm:grid grid-cols-[2fr_1fr_80px_90px_40px] gap-1 items-center px-4 sm:px-5 py-2.5">
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                          <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</span>
-                        </div>
-                        <div className="flex items-center justify-center">
-                          <div className="flex items-center gap-0.5">
-                            <button
-                              onClick={() => {
-                                const newQty = Math.max(1, (item.adet ?? 1) - 1);
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i));
-                              }}
-                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                            >
-                              <Minus className="h-3 w-3" />
-                            </button>
-                            <span className="text-center text-sm font-bold text-[var(--dashboard-text)] min-w-[72px]">{item.adet}</span>
-                            <button
-                              onClick={() => {
-                                setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i));
-                              }}
-                              className="w-6 h-6 rounded-md bg-[var(--dashboard-surface-2)] flex items-center justify-center hover:bg-[var(--dashboard-surface)] transition-colors"
-                            >
-                              <Plus className="h-3 w-3" />
-                            </button>
-                          </div>
-                        </div>
-                        <div className="flex justify-center">
-                          <span className="text-[11px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                        </div>
-                        <div className="flex justify-center">
-                          <button
-                            onClick={() => removeItem(item.id ?? '')}
-                            className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 transition-colors"
-                          >
-                            <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                          </button>
-                        </div>
-                      </div>
-                      {/* Mobile row */}
-                      <div className="sm:hidden px-3 py-2.5">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">{item.stokAdi}</p>
-                            <p className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</p>
-                            <p className="text-[11px] text-[var(--dashboard-muted)]">{item.stokKodu}</p>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => { const newQty = Math.max(1, (item.adet ?? 1) - 1); setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: newQty } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                              <Minus className="h-3 w-3" />
-                            </button>
-                            <span className="text-center text-sm font-bold min-w-[92px]">{item.adet}</span>
-                            <button onClick={() => { setOrderItems(prev => prev.map(i => i.id === item.id ? { ...i, adet: (i.adet ?? 1) + 1 } : i)); }} className="w-7 h-7 rounded-lg bg-[var(--dashboard-surface-2)] flex items-center justify-center">
-                              <Plus className="h-3 w-3" />
-                            </button>
-                            <span className="text-[10px] text-[var(--dashboard-muted)]">{normalizeUnitLabel(meta?.anaBirim)}{multiplier ? ` (${multiplier})` : ''}</span>
-                            <button onClick={() => removeItem(item.id ?? '')} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-100 ml-1">
-                              <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    );
-                  })
                 )}
               </div>
-
-              {/* Sticky CTA bar */}
-              <div className="sticky bottom-0 border-t border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-4 sm:px-5 py-3 flex items-center gap-3">
-                <div className="flex gap-3 sm:gap-4 text-xs">
-                  <div>
-                    <span className="text-[var(--dashboard-muted)]">Kalem</span>
-                    <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftItems}</span>
-                  </div>
-                  <div>
-                    <span className="text-[var(--dashboard-muted)]">Adet</span>
-                    <span className="ml-1 font-bold text-[var(--dashboard-text)]">{totalDraftAdet}</span>
-                  </div>
-                </div>
-                <div className="flex-1" />
-                <button
-                  onClick={prepareOrder}
-                  disabled={!isCreateReady || isProcessing}
-                  className={cn(
-                    "flex items-center gap-2 px-5 py-2.5 rounded-2xl text-sm font-bold transition-all",
-                    isCreateReady && !isProcessing
-                      ? "bg-green-600 text-white shadow-[var(--dashboard-raised)] hover:shadow-[var(--dashboard-raised-soft)] active:shadow-[var(--dashboard-pressed)] hover:-translate-y-0.5 active:translate-y-0"
-                      : "cihaz-pressed text-[var(--dashboard-muted)] cursor-not-allowed"
-                  )}
-                >
-                  {isProcessing ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ShoppingCart className="h-4 w-4" />
-                  )}
-                  {totalDraftItems > 0 ? `Siparişi Oluştur (${totalDraftItems})` : 'Siparişi Oluştur'}
-                </button>
-              </div>
-            </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ══════════════════════ PENDING TAB ══════════════════════ */}
-      {(isLojistikSorumlusu || activeTab === 'pending') && (
-        <div className="space-y-3">
-          {pendingOrders.length === 0 ? (
-            <div className="cihaz-card-strong flex flex-col items-center justify-center py-16 sm:py-20 text-center px-4">
-              <div className="w-16 h-16 rounded-2xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] flex items-center justify-center mb-4">
-                <Package className="h-6 w-6 text-[var(--dashboard-muted)]" />
-              </div>
-              <p className="text-sm font-medium text-[var(--dashboard-text)] mb-1">Bekleyen sipariş yok</p>
-              <p className="text-xs text-[var(--dashboard-muted)]">Yeni sipariş oluşturmak için &quot;Oluştur&quot; sekmesine geçin.</p>
+        {/* ── Order list ── */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {activeTab === 'tamamlanan' && tamamlananLoading && tamamlananOrders.length === 0 ? (
+            <div style={{ padding: '40px', textAlign: 'center', color: C.ink3 }}>
+              <Loader2 style={{ width: 28, height: 28, margin: '0 auto 8px', animation: 'sipSpin 1s linear infinite' }} />
             </div>
+          ) : currentList.length === 0 ? (
+            <EmptyState label={
+              activeTab === 'acik' ? 'Açık sipariş yok' :
+              activeTab === 'kismi' ? 'Kısmi tamamlanan sipariş yok' :
+              (searchQuery || activeFilterCount > 0) ? 'Filtreyle eşleşen sipariş yok' :
+              'Tamamlanan sipariş bulunamadı'
+            } />
           ) : (
-            pendingOrders.map(order => {
-              const totalAdet = (order.items ?? []).reduce((sum, it) => sum + (Number(it.adet) || 0), 0);
-              const totalKalem = (order.items ?? []).length;
-              const isPicking = order.status === 'toplaniyor';
-              const isEksik = order.status === 'eksik';
-              const isPerifer = isOrderPeripheral(order);
-
-              const statusLabel = isEksik
-                ? 'Eksik'
-                : isPicking
-                  ? 'Toplanıyor'
-                  : isPerifer
-                    ? 'Perifer'
-                    : 'Bekliyor';
-              const statusClass = isEksik
-                ? "bg-red-100 text-red-700"
-                : isPicking
-                  ? "bg-blue-100 text-blue-700"
-                  : isPerifer
-                    ? "bg-purple-100 text-purple-700"
-                    : "bg-amber-100 text-amber-700";
-
-              return (
-                <article
+            <>
+              {currentList.map(order => (
+                <OrderCard
                   key={order.id}
-                  data-row-id={order.id}
-                  className="cihaz-card-strong overflow-hidden"
+                  order={order}
+                  isProcessing={isProcessing}
+                  variant={activeTab}
+                  onStart={startPickingProcess}
+                  onView={
+                    activeTab === 'tamamlanan'
+                      // Tamamlanan kayıtları sevkiyattır → sevkiyat detayına git.
+                      ? (o) => router.push(`/siparis-gecmis/${o.id}?depotId=${selectedDepotId}`)
+                      : order.isPeripheral ? openPeripheralOrder : (o) => router.push(`/siparisler/${o.id}/toplama`)
+                  }
+                  onDelete={handleDeleteOrder}
+                />
+              ))}
+              {activeTab === 'tamamlanan' && tamamlananHasMore && (
+                <button
+                  onClick={() => loadTamamlanan(false)}
+                  disabled={tamamlananLoading}
+                  style={{
+                    all: 'unset', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    height: 50, borderRadius: C.rsm,
+                    background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+                    boxShadow: C.clay, color: C.accent,
+                    fontSize: 14, fontWeight: 800,
+                    letterSpacing: '0.01em',
+                  }}
                 >
-                  <div className="p-4 sm:p-5 space-y-3">
-                    {/* Header row */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex-1 min-w-0">
-                        <h3 className="text-sm sm:text-base font-bold text-[var(--dashboard-text)] truncate">{order.kurumAdi}</h3>
-                        <p className="text-[11px] text-[var(--dashboard-muted)]">
-                          {order.createdBy || '-'} · {order.createdAt ? formatDate(order.createdAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
-                        </p>
-                      </div>
-                      {/* Status badge */}
-                      <span className={cn(
-                        "shrink-0 inline-flex items-center px-2.5 py-1 rounded-lg text-[10px] sm:text-xs font-semibold",
-                        statusClass
-                      )}>
-                        {statusLabel}
-                      </span>
-                    </div>
-
-                    {/* KPI chips */}
-                    <div className="flex gap-3">
-                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
-                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Kalem</span>
-                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalKalem}</span>
-                      </div>
-                      <div className="cihaz-pressed px-3 py-1.5 rounded-lg">
-                        <span className="text-[10px] text-[var(--dashboard-muted)] block">Adet</span>
-                        <span className="text-sm font-bold text-[var(--dashboard-text)]">{totalAdet}</span>
-                      </div>
-                    </div>
-
-                    {/* Actions */}
-                    <div className="flex items-center gap-2 pt-1">
-                      {isPerifer ? (
-                        <button
-                          onClick={() => openPeripheralOrder(order)}
-                          disabled={isProcessing}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                            !isProcessing
-                              ? "bg-purple-600 text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                          )}
-                        >
-                          <ArrowRight className="h-4 w-4" />
-                          Siparişi Gör
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => startPickingProcess(order)}
-                          disabled={isProcessing}
-                          className={cn(
-                            "flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold transition-all",
-                            !isProcessing
-                              ? "bg-[var(--dashboard-accent)] text-white shadow-[var(--dashboard-raised-soft)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-[var(--dashboard-pressed)]"
-                              : "bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] shadow-[var(--dashboard-pressed)] cursor-not-allowed"
-                          )}
-                        >
-                          {isProcessing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                          {isPicking ? 'Toplamaya Devam Et' : 'Toplamayı Başlat'}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleDeleteOrder(order.id ?? '')}
-                        disabled={isProcessing}
-                        className="w-10 h-10 rounded-xl flex items-center justify-center hover:bg-red-100 transition-colors cihaz-tool-item"
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              );
-            })
+                  {tamamlananLoading
+                    ? <Loader2 style={{ width: 16, height: 16, animation: 'sipSpin 1s linear infinite', color: C.ink3 }} />
+                    : <><ChevronRight style={{ width: 16, height: 16 }} /> Daha Fazla Yükle</>}
+                </button>
+              )}
+            </>
           )}
         </div>
-      )}
-    </div>
+      </div>
+    </>
   );
 }

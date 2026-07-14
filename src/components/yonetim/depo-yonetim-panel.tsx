@@ -2,10 +2,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin, Database } from 'lucide-react';
@@ -16,6 +17,7 @@ import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/auth-context';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {
@@ -46,17 +48,21 @@ export default function DepoYonetimPanel() {
     setIsLoading(true);
     try {
       const [depotsSnap, productsSnap, hospitalsSnap, addressesSnap, poolsSnap] = await Promise.all([
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'addressDefinitions')),
-        getDocs(query(collection(db, 'deviceLabPools'), orderBy('createdAt', 'desc'))),
+        getScopedDocs('depots', currentCompanyId, isSuperAdmin),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
+        getScopedDocs('addressDefinitions', currentCompanyId, isSuperAdmin),
+        getScopedDocs('deviceLabPools', currentCompanyId, isSuperAdmin),
       ]);
-      setDepots(filterByCompanyScope(depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
-      setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
-      setHospitals(filterByCompanyScope(hospitalsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
-      setAddressDefinitions(filterByCompanyScope(addressesSnap.docs.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
-      setDeviceLabPools(filterByCompanyScope(poolsSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)), currentCompanyId, isSuperAdmin));
+      setDepots(filterByCompanyScope(depotsSnap.map(d => ({ id: d.id, ...d.data() } as Depot)), currentCompanyId, isSuperAdmin));
+      setProductCodes(productsSnap.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setHospitals(filterByCompanyScope(hospitalsSnap.map(d => ({ id: d.id, ...d.data() } as Hospital)), currentCompanyId, isSuperAdmin));
+      setAddressDefinitions(filterByCompanyScope(addressesSnap.map(d => ({ id: d.id, ...d.data() } as AddressDefinition)), currentCompanyId, isSuperAdmin));
+      setDeviceLabPools(filterByCompanyScope(poolsSnap.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)), currentCompanyId, isSuperAdmin).sort((a, b) => {
+        const aMs = (a as any).createdAt?.toMillis?.() ?? (a as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
+        const bMs = (b as any).createdAt?.toMillis?.() ?? (b as any).createdAt?.toDate?.()?.getTime?.() ?? 0;
+        return bMs - aMs;
+      }));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
@@ -157,21 +163,19 @@ export default function DepoYonetimPanel() {
   };
 
   return (
-    <>
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-row justify-between items-center">
-          <div>
-            <CardTitle className="text-xl font-headline flex items-center">
-              <Warehouse className="mr-2 h-6 w-6 text-orange-500" />
-              Depo Yönetimi
-            </CardTitle>
-            <CardDescription>Yeni depolar ekleyin veya mevcutları düzenleyin.</CardDescription>
-          </div>
-          <Button onClick={openNewDepotModal} size="sm" disabled={isLoading}>
-            <PlusCircle className="mr-2 h-4 w-4" />Yeni Depo
+    <YonetimShell>
+      <YonetimHeader
+        title="Depo Yönetimi"
+        description="Yeni depolar ekleyin veya mevcutları düzenleyin."
+        backHref="/yonetim/tanimlar"
+        rightAction={
+          <Button onClick={openNewDepotModal} size="sm" disabled={isLoading} style={{ background: 'var(--mg-accent)', color: '#0a0a0c', border: 'none', fontWeight: 700 }}>
+            <PlusCircle className="mr-2 h-4 w-4" />
+            Yeni Depo
           </Button>
-        </CardHeader>
-        <CardContent>
+        }
+      />
+      <YonetimCard>
           {isLoading ? (
             <div className="flex justify-center p-4"><Loader2 className="h-6 w-6 animate-spin" /></div>
           ) : (
@@ -233,8 +237,7 @@ export default function DepoYonetimPanel() {
               </Table>
             </ScrollArea>
           )}
-        </CardContent>
-      </Card>
+      </YonetimCard>
 
       <Dialog open={isDepotModalOpen} onOpenChange={setIsDepotModalOpen}>
         <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -282,6 +285,7 @@ export default function DepoYonetimPanel() {
                 />
               </div>
               {currentDepot.ceomedEnabled && (
+                <>
                 <div>
                   <label className="text-sm text-muted-foreground">Ceomed Depo Kodu *</label>
                   <p className="text-xs text-muted-foreground mb-1">
@@ -294,6 +298,7 @@ export default function DepoYonetimPanel() {
                     className="mt-1"
                   />
                 </div>
+                </>
               )}
 
               {/* Total Verimlilik sevkiyat kaynağı */}
@@ -436,6 +441,6 @@ export default function DepoYonetimPanel() {
           onClose={() => setIsMapEditorOpen(false)}
         />
       )}
-    </>
+    </YonetimShell>
   );
 }

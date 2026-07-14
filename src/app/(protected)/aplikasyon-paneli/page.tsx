@@ -8,12 +8,12 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useHospitals,
-  useDevices,
-  useHospitalDeviceAssignments,
+  useDevicesForLabs,
   useDeviceLabPools,
 } from '@/hooks/useFirebaseQueries';
 import AplikasyonPanel from '@/components/aplikasyon-panel';
-import { Loader2, Download, Upload } from 'lucide-react';
+import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
+import { Download, Upload } from 'lucide-react';
 import { reserveActionFormNumber } from '@/lib/form-number';
 import { format } from 'date-fns';
 
@@ -27,29 +27,31 @@ export default function AplikasyonPaneliPage() {
   // TanStack Query — cache shared with cihaz-yonetimi-host, teknik-servis ve stok panels.
   // Static data (hospitals, devices, assignments, lab pools) rarely changes; 30 min staleTime
   // + refetchOnWindowFocus keeps the list fresh without permanent realtime listeners.
+  // PERF (Faz 6 mobil): Lab-scoped teknisyen YALNIZCA atandığı lab'ların cihazlarını çeker
+  // (tüm şirket koleksiyonu yerine) → panel açılışındaki 15+ sn'lik veri beklemesi biter.
+  // Admin/superadmin (atanmış lab yok) → null = tüm liste (eski davranış).
+  const assignedLabIds = currentUserProfile?.assignedLaboratories ?? [];
+  const labScope = isAdminRole || assignedLabIds.length === 0 ? null : assignedLabIds;
+
   const hospitalsQuery = useHospitals();
-  const devicesQuery = useDevices();
-  const assignmentsQuery = useHospitalDeviceAssignments();
+  const devicesQuery = useDevicesForLabs(labScope);
   const labPoolsQuery = useDeviceLabPools();
 
   const isLoading =
     hospitalsQuery.isLoading ||
     devicesQuery.isLoading ||
-    assignmentsQuery.isLoading ||
     labPoolsQuery.isLoading;
 
   useEffect(() => {
     const anyError =
-      hospitalsQuery.isError || devicesQuery.isError ||
-      assignmentsQuery.isError || labPoolsQuery.isError;
+      hospitalsQuery.isError || devicesQuery.isError || labPoolsQuery.isError;
     if (anyError) {
       toast({ title: 'Veri Hatası', description: 'Aplikasyon paneli verileri yüklenemedi.', variant: 'destructive' });
     }
-  }, [hospitalsQuery.isError, devicesQuery.isError, assignmentsQuery.isError, labPoolsQuery.isError, toast]);
+  }, [hospitalsQuery.isError, devicesQuery.isError, labPoolsQuery.isError, toast]);
 
   const hospitals = (hospitalsQuery.data ?? []) as Hospital[];
   const devices = (devicesQuery.data ?? []) as Device[];
-  const hospitalDeviceAssignments = (assignmentsQuery.data ?? []) as AssignedDevice[];
   const deviceLabPools = (labPoolsQuery.data ?? []) as DeviceLabPool[];
 
   // Preserve previous orderBy('name', 'asc') ordering.
@@ -62,14 +64,14 @@ export default function AplikasyonPaneliPage() {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['hospitals'] }),
       queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['hospitalDeviceAssignments'] }),
       queryClient.invalidateQueries({ queryKey: ['deviceLabPools'] }),
     ]);
   }, [queryClient]);
 
 
   if (isLoading) {
-    return <div className="flex items-center justify-center h-full"><Loader2 className="h-10 w-10 animate-spin text-primary" /><p className="ml-4 text-lg">Aplikasyon Paneli Yükleniyor...</p></div>
+    // PERF (Faz 6 mobil): Spinner yerine layout-eşleşen skeleton → mobilde anında yapı.
+    return <HospitalGridPanelSkeleton />;
   }
 
   const buildScopedOptions = () => {
@@ -228,7 +230,8 @@ export default function AplikasyonPaneliPage() {
     // Cached devices come from TanStack Query; AplikasyonPanel does not destructure
     // setDevices, but the prop interface still requires it. No-op keeps the contract.
     setDevices: (() => {}) as React.Dispatch<React.SetStateAction<Device[]>>,
-    hospitalDeviceAssignments,
+    // Panel kullanmıyor (destructure edilmiyor); ölü assignments sorgusu kaldırıldı.
+    hospitalDeviceAssignments: [] as AssignedDevice[],
     labPools: deviceLabPools,
     userAssignedLabs: currentUserProfile?.assignedLaboratories || [],
     userRole: currentUserProfile?.role || '',

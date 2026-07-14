@@ -8,12 +8,15 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert, Building2 } from 'lucide-react';
 import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { getAuth } from 'firebase/auth';
+import { db, app } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
-import type { User as AppUser, Hospital, Depot, AppView, ProductCode } from '@/lib/types';
+import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
+import { LEGACY_COMPANY_ID } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
@@ -68,11 +71,13 @@ function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> 
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup, currentUserProfile, isSuperAdmin } = useAuth();
+  const { signup, currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
   const [brands, setBrands] = useState<string[]>([]);
+  const [labGroups, setLabGroups] = useState<{ id: string; name: string }[]>([]);
+  const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
@@ -81,32 +86,59 @@ export default function KullaniciPanel() {
   const fetchData = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [uSnap, hSnap, dSnap, pSnap] = await Promise.all([
-        getDocs(collection(db, 'users')),
-        getDocs(collection(db, 'hospitals')),
-        getDocs(collection(db, 'depots')),
-        getDocs(collection(db, 'productCodes'))
+      // Token'ı yenileyerek custom claim'lerin (companyId, isSuperAdmin) güncel
+      // olduğundan emin ol. Firestore Security Rules bu claim'leri kontrol eder.
+      if (isSuperAdmin) {
+        const auth = getAuth(app);
+        if (auth.currentUser) await auth.currentUser.getIdToken(true);
+      }
+
+      const [uSnap, hSnap, dSnap, pSnap, lgSnap] = await Promise.all([
+        getDocs(scopedQuery('users', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('def_labGroups', currentCompanyId, isSuperAdmin))
       ]);
       setUsers(uSnap.docs.map(d => ({ id: d.id, ...d.data() } as AppUser)));
       setHospitals(hSnap.docs.map(d => ({ id: d.id, ...d.data() } as Hospital)));
       setDepots(dSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot)));
+      setLabGroups(lgSnap.docs.map(d => ({ id: d.id, name: (d.data() as any).name || d.id })));
       const productCodes = pSnap.docs.map(d => d.data() as ProductCode);
       const uniqueBrands = Array.from(new Set(productCodes.map(p => p.marka).filter(Boolean) as string[]));
       setBrands(uniqueBrands);
+
+      // Süper Admin ise firma listesini çek (kullanıcıya firma atayabilmek için)
+      if (isSuperAdmin) {
+        const cSnap = await getDocs(collection(db, 'companies'));
+        setCompanies(cSnap.docs.map(d => ({ id: d.id, ...d.data() } as Company)));
+      }
 
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   const openModal = (user?: AppUser) => {
-    setCurrentUser(user || { notificationsEnabled: false, notificationPreferences: [] });
+    if (user) {
+      setCurrentUser({
+        ...user,
+        assignedLabGroups: user.assignedLabGroups || [],
+        notificationPreferences: (user.notificationPreferences || []) as NotificationTypeUI[],
+      });
+    } else {
+      setCurrentUser({
+        notificationsEnabled: false,
+        notificationPreferences: [],
+        assignedLabGroups: [],
+      });
+    }
     setPassword('');
     setIsModalOpen(true);
   };
@@ -132,12 +164,14 @@ export default function KullaniciPanel() {
     const userData: Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }> = {
       name: currentUser.name,
       role: currentUser.role || 'user',
+      companyId: currentUser.companyId,
       nfcId: (currentUser.nfcId || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase(),
       accessibleViews: currentUser.accessibleViews,
       assignedLaboratories: currentUser.assignedLaboratories,
       primaryLaboratories: validPrimaryLabs,
       assignedDepots: currentUser.assignedDepots,
       assignedBrands: currentUser.assignedBrands,
+      assignedLabGroups: currentUser.assignedLabGroups,
       phoneNumber: currentUser.phoneNumber || '',
       notificationsEnabled: currentUser.notificationsEnabled ?? false,
       notificationPreferences: currentUser.notificationsEnabled ? (currentUser.notificationPreferences || []) : [],
@@ -306,6 +340,7 @@ export default function KullaniciPanel() {
                       <SelectItem value="lojistik_sorumlusu">Lojistik Sorumlusu</SelectItem>
                       <SelectItem value="teknik_lojistik">Teknik Lojistik</SelectItem>
                       <SelectItem value="satin_alma">Satın Alma</SelectItem>
+                      <SelectItem value="sarf_dagitim_personeli">Sarf Dağıtım Personeli</SelectItem>
                       <SelectItem value="user">User</SelectItem>
                       <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
                       <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
@@ -313,19 +348,39 @@ export default function KullaniciPanel() {
                       <SelectItem value="teknisyen">Teknisyen</SelectItem>
                     </SelectContent>
                 </Select>
+                {isSuperAdmin && (
+                  <div className="space-y-1">
+                    <label className="text-sm font-medium flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-orange-500" />
+                      Firma Ataması
+                    </label>
+                    <Select
+                      value={currentUser.companyId || LEGACY_COMPANY_ID}
+                      onValueChange={(value) => setCurrentUser({ ...currentUser, companyId: value })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Firma seçin" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={LEGACY_COMPANY_ID}>Legacy Firma (Varsayılan)</SelectItem>
+                        {companies.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
                 <Input
                   placeholder="NFC Kart ID (XXXXXXXX)"
                   value={currentUser.nfcId || ''}
                   onChange={handleNfcIdChange}
                   maxLength={8}
                 />
-                {(currentUser.role === 'teknik_servis' || currentUser.role === 'aplikasyon' || currentUser.role === 'teknisyen') && (
-                  <Input
-                    placeholder="Telefon Numarası (örn: +905xxxxxxxxx)"
-                    value={currentUser.phoneNumber || ''}
-                    onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
-                  />
-                )}
+                <Input
+                  placeholder="WhatsApp Telefon Numarası (örn: +905xxxxxxxxx)"
+                  value={currentUser.phoneNumber || ''}
+                  onChange={(e) => setCurrentUser({ ...currentUser, phoneNumber: e.target.value })}
+                />
                  <ScrollArea className="h-40 border rounded-md p-2">
                     <h4 className="font-medium text-sm mb-2">Atanan Markalar</h4>
                     {brands.map(b => (
@@ -387,6 +442,15 @@ export default function KullaniciPanel() {
                             <label htmlFor={view.key} className="text-sm">{view.label}</label>
                         </div>
                     ))}
+                    {/* Cari Ödeme onay yetkisi: bir nav paneli değil, bir kabiliyet (ödeme durum/onay değişikliği). */}
+                    <div className="mt-2 pt-2 border-t flex items-center space-x-2 mb-1">
+                        <Checkbox
+                            id="cari-odeme-onay"
+                            checked={currentUser.accessibleViews?.includes('cari-odeme-onay' as AppView)}
+                            onCheckedChange={(checked) => handleCheckboxChange('cari-odeme-onay' as AppView, !!checked)}
+                        />
+                        <label htmlFor="cari-odeme-onay" className="text-sm">Cari Ödeme · Onay Yetkisi</label>
+                    </div>
                 </ScrollArea>
                 <div className="flex flex-col gap-4 h-[calc(70vh-100px)]">
                     <ScrollArea className="flex-1 min-h-0 border rounded-md p-2">
@@ -449,6 +513,34 @@ export default function KullaniciPanel() {
                             </div>
                         ))}
                     </ScrollArea>
+                    {currentUser.role === 'lojistik_sorumlusu' && (
+                        <ScrollArea className="flex-1 min-h-0 border rounded-md p-2 bg-teal-50/50 dark:bg-teal-950/20">
+                            <h4 className="font-medium text-sm mb-2 text-teal-700 dark:text-teal-400">Atanan Laboratuvar Grupları</h4>
+                            {labGroups.length === 0 ? (
+                                <p className="text-xs text-muted-foreground italic">Henüz laboratuvar grubu tanımlanmamış</p>
+                            ) : (
+                                labGroups.map(lg => {
+                                    const isChecked = currentUser.assignedLabGroups?.includes(lg.name)
+                                        || currentUser.assignedLabGroups?.includes(lg.id);
+                                    return (
+                                        <div key={lg.id} className="flex items-center space-x-2 mb-1">
+                                            <Checkbox
+                                                id={`lg-${lg.id}`}
+                                                checked={isChecked}
+                                                onCheckedChange={(checked) => {
+                                                    const currentGroups = (currentUser.assignedLabGroups || [])
+                                                        .filter(k => k !== lg.id && k !== lg.name);
+                                                    const newGroups = checked ? [...currentGroups, lg.name] : currentGroups;
+                                                    setCurrentUser({ ...currentUser, assignedLabGroups: newGroups });
+                                                }}
+                                            />
+                                            <label htmlFor={`lg-${lg.id}`} className="text-sm">{lg.name}</label>
+                                        </div>
+                                    );
+                                })
+                            )}
+                        </ScrollArea>
+                    )}
                 </div>
             </div>
           </div>

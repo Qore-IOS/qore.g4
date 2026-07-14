@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useRouter } from 'next/navigation';
-import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch } from 'firebase/firestore';
+import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, updateDoc, where, writeBatch, orderBy, limit as fsLimit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
@@ -24,7 +24,10 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
-import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
+import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
+import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
@@ -117,14 +120,36 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const [filterPersonnel, setFilterPersonnel] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Tarih penceresi — varsayılan son 180 gün. Tutanaklar zamanla birikir.
+  const dateFilter = useDateRangeFilter({
+    defaultDays: 180,
+    storageKey: `action-forms:${moduleType}:range`,
+  });
+
   const FORMS_PER_PAGE = 20;
 
   useEffect(() => {
     const fetchForms = async () => {
       setLoading(true);
+      // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
+      const dateConstraints = dateFilter.constraints('createdAt');
       const [teknikSnap, aplikasyonSnap] = await Promise.all([
-        getDocs(collection(db, getCollectionName('teknik-servis'))),
-        getDocs(collection(db, getCollectionName('aplikasyon-paneli'))),
+        getDocs(scopedQuery(
+          getCollectionName('teknik-servis'),
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateConstraints,
+          orderBy('createdAt', 'desc'),
+          fsLimit(2000),
+        )),
+        getDocs(scopedQuery(
+          getCollectionName('aplikasyon-paneli'),
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateConstraints,
+          orderBy('createdAt', 'desc'),
+          fsLimit(2000),
+        )),
       ]);
       const merged = [
         ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
@@ -143,7 +168,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       console.error('Form list fetch error', error);
       setLoading(false);
     });
-  }, [moduleType, currentCompanyId, isSuperAdmin, currentUserProfile?.assignedLaboratories, currentUserProfile?.role]);
+  }, [moduleType, currentCompanyId, isSuperAdmin, currentUserProfile?.assignedLaboratories, currentUserProfile?.role, dateFilter.range]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -195,22 +220,34 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
           </div>
         </div>
 
+        <div className="cihaz-card-strong p-3">
+          <DateRangeFilterBar
+            range={dateFilter.range}
+            setRange={dateFilter.setRange}
+            label="Tutanak penceresi"
+          />
+        </div>
+
         <div className="cihaz-card-strong p-2 sm:p-3">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 p-2">
+          {/* Mobilde: arama tam genişlik + 3 filtre YAN YANA (grid-cols-3, alt alta değil).
+              Masaüstünde: md:contents ile 3 select üst grid'e akar → eski 4'lü tek satır korunur. */}
+          <div className="p-2 flex flex-col gap-2 md:grid md:grid-cols-4">
             <Input placeholder="Cihaz, seri, lab, personel ara..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterModuleType} onChange={(e) => setFilterModuleType(e.target.value as any)}>
-              <option value="all">Tüm Modüller</option>
-              <option value="teknik-servis">Teknik Servis</option>
-              <option value="aplikasyon-paneli">Aplikasyon</option>
-            </select>
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterLab} onChange={(e) => setFilterLab(e.target.value)}>
-              <option value="all">Tüm Lablar</option>
-              {availableLabs.map(lab => <option key={lab} value={lab}>{lab}</option>)}
-            </select>
-            <select className="h-10 rounded-md border bg-background px-3 text-sm" value={filterPersonnel} onChange={(e) => setFilterPersonnel(e.target.value)}>
-              <option value="all">Tüm Personeller</option>
-              {availablePersonnel.map(name => <option key={name} value={name}>{name}</option>)}
-            </select>
+            <div className="grid grid-cols-3 gap-2 md:contents">
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterModuleType} onChange={(e) => setFilterModuleType(e.target.value as any)}>
+                <option value="all">Tüm Modüller</option>
+                <option value="teknik-servis">Teknik Servis</option>
+                <option value="aplikasyon-paneli">Aplikasyon</option>
+              </select>
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterLab} onChange={(e) => setFilterLab(e.target.value)}>
+                <option value="all">Tüm Lablar</option>
+                {availableLabs.map(lab => <option key={lab} value={lab}>{lab}</option>)}
+              </select>
+              <select className="h-10 min-w-0 rounded-md border bg-background px-2 text-sm" value={filterPersonnel} onChange={(e) => setFilterPersonnel(e.target.value)}>
+                <option value="all">Tüm Personeller</option>
+                {availablePersonnel.map(name => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
           </div>
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-[var(--dashboard-muted)]">
@@ -381,7 +418,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       }
 
       if (nextForm?.hospitalId) {
-        const q = query(collection(db, 'devices'), where('hospitalId', '==', nextForm.hospitalId));
+        const q = scopedQuery('devices', currentCompanyId, isSuperAdmin, where('hospitalId', '==', nextForm.hospitalId));
         const devicesSnap = await getDocs(q);
         const candidates = devicesSnap.docs
           .map((item) => ({ id: item.id, ...item.data() } as Device))
@@ -414,11 +451,14 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   }, [form, moduleType]);
 
   useEffect(() => {
-    if (!currentUserProfile?.uid) return;
+    // PERF (Faz 3): Şahsi stok yalnızca parça-ekle modalı açıkken gerekli.
+    if (!isAddPartModalOpen || !currentUserProfile?.uid) return;
     (async () => {
       try {
-        const q = query(
-          collection(db, 'personalStock'),
+        const q = scopedQuery(
+          'personalStock',
+          currentCompanyId,
+          isSuperAdmin,
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -428,13 +468,15 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching personal stock:', error);
       }
     })();
-  }, [currentUserProfile?.uid]);
+  }, [isAddPartModalOpen, currentUserProfile?.uid]);
 
   useEffect(() => {
-    if (!form?.hospitalId) return;
+    // PERF (Faz 3): Havuz stok yürüyüşü (deviceLabPools → depots → poolWarehouseStock)
+    // yalnızca parça-ekle modalı açıkken gerekli.
+    if (!isAddPartModalOpen || !form?.hospitalId) return;
     (async () => {
       try {
-        const poolsSnap = await getDocs(collection(db, 'deviceLabPools'));
+        const poolsSnap = await getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin));
         const allPools = poolsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DeviceLabPool));
         const scopedPools = filterByCompanyScope(allPools, currentCompanyId, isSuperAdmin);
         const matchingPoolIds = scopedPools
@@ -446,7 +488,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           return;
         }
 
-        const depotsSnap = await getDocs(collection(db, 'depots'));
+        const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
         const allDepots = depotsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Depot));
         const scopedDepots = filterByCompanyScope(allDepots, currentCompanyId, isSuperAdmin);
         const poolWarehouseIds = scopedDepots
@@ -460,8 +502,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
         const allPoolStock: PoolWarehouseStockItem[] = [];
         for (const warehouseId of poolWarehouseIds) {
-          const stockQ = query(
-            collection(db, 'poolWarehouseStock'),
+          const stockQ = scopedQuery(
+            'poolWarehouseStock',
+            currentCompanyId,
+            isSuperAdmin,
             where('poolWarehouseId', '==', warehouseId),
             where('status', '==', 'in_stock')
           );
@@ -478,12 +522,16 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching pool stock:', error);
       }
     })();
-  }, [form?.hospitalId, currentCompanyId, isSuperAdmin]);
+  }, [isAddPartModalOpen, form?.hospitalId, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => {
+    // PERF (Faz 3): Limitsiz yedekParcaDepoStok koleksiyonu yalnızca "Değişen Parça
+    // Ekle" modalı açıkken gerekli. Önceden form-detayı HER açıldığında (modal
+    // açılmasa bile) tüm koleksiyon mount'ta çekiliyordu.
+    if (!isAddPartModalOpen) return;
     (async () => {
       try {
-        const snap = await getDocs(collection(db, 'yedekParcaDepoStok'));
+        const snap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
         setDepotStockItems(
           snap.docs.map((d) => {
             const data = d.data();
@@ -498,7 +546,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         console.error('Error fetching depot stock:', error);
       }
     })();
-  }, []);
+  }, [isAddPartModalOpen, currentCompanyId, isSuperAdmin]);
 
   const filteredStock = useMemo(() => {
     if (!partSearchQuery) return personalStock;
@@ -579,7 +627,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedAt: serverTimestamp(),
       });
 
-      await addDoc(collection(db, 'actionFormPartReassignLogs'), {
+      await addDoc(collection(db, 'actionFormPartReassignLogs'), withCompanyScope({
         formId: form.id,
         moduleType,
         actionIndex: selectedActionIndex,
@@ -596,7 +644,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       setForm((prev) => (prev ? { ...prev, actions: updatedActions as any } : prev));
       setPartTransferModalOpen(false);
@@ -776,7 +824,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
       // Log in actionFormHistoryLogs for full audit trail
       const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
-      batch.set(historyRef, {
+      batch.set(historyRef, withCompanyScope({
         formId: form.id,
         moduleType,
         type: 'part_usage_cancelled',
@@ -808,7 +856,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       await batch.commit();
 
@@ -829,8 +877,10 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         }
       }
       if (action.isDepotSelection) {
-        const restoredDepotSnap = await getDocs(query(
-          collection(db, 'yedekParcaDepoStok'),
+        const restoredDepotSnap = await getDocs(scopedQuery(
+          'yedekParcaDepoStok',
+          currentCompanyId,
+          isSuperAdmin,
           where('stokKodu', '==', action.stokKodu || ''),
           where('stokAdi', '==', action.stokAdi || '')
         ));
@@ -957,7 +1007,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
       });
 
       const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
-      batch.set(historyRef, {
+      batch.set(historyRef, withCompanyScope({
         formId: form.id,
         moduleType,
         type: 'part_added_after_save',
@@ -975,7 +1025,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         updatedByUid: currentUserProfile?.uid || '',
         updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
         updatedAt: serverTimestamp(),
-      });
+      }, currentCompanyId));
 
       if (appendedAction.personalStockId) {
         const stockRef = doc(db, 'personalStock', appendedAction.personalStockId);

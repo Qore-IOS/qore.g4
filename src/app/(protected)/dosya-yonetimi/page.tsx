@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import { useDepots, useHospitals } from '@/hooks/useFirebaseQueries';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
@@ -16,10 +17,9 @@ import {
   Timestamp,
   where,
   getDocs,
+  updateDoc,
 } from 'firebase/firestore';
-import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { Progress } from '@/components/ui/progress';
 import {
   FileText,
   Trash2,
@@ -28,12 +28,24 @@ import {
   FolderOpen,
   Clock,
   Download,
-  FileUp,
   AlertCircle,
+  Scan,
+  CheckCircle2,
+  Wand2,
+  Pencil,
+  Info,
 } from 'lucide-react';
-import BackButton from '@/components/BackButton';
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import IrsaliyeScanModal from '@/components/dosya-yonetimi/IrsaliyeScanModal';
+import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { matchLocationFromFileName, type LocationCandidate } from '@/lib/match-location-from-filename';
+import { autoScanIrsaliyeFile } from '@/lib/irsaliye-auto-scan';
+import {
+  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, FieldLabel,
+  Dropdown, Toggle, UploadZone, EmptyBlock,
+} from '@/components/raporlama/rapor-kit';
+
+const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
 interface IrsaliyeDosya {
   id: string;
@@ -55,6 +67,8 @@ interface IrsaliyeDosya {
 export default function DosyaYonetimiPage() {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
+  const mode = useMode();
+  const mobile = mode === 'mobile';
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { data: depots = [] } = useDepots();
   const { data: hospitals = [] } = useHospitals();
@@ -66,12 +80,29 @@ export default function DosyaYonetimiPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [selectedLocationType, setSelectedLocationType] = useState<'hospital' | 'depot' | ''>('');
-  const [selectedLocationId, setSelectedLocationId] = useState<string>('');
+  /** Eşleşmeyen dosyalar için kullanıcı isterse manuel varsayılan konum. */
+  const [defaultLocationId, setDefaultLocationId] = useState<string>('');
+  const [scanningFile, setScanningFile] = useState<IrsaliyeDosya | null>(null);
+  const [pendingScannedDosyaIds, setPendingScannedDosyaIds] = useState<Set<string>>(new Set());
+  /** Yüklemeden sonra arka planda otomatik tarama başlatılsın mı. */
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
+  /** Şu an arka planda taranan dosya kimliği (UI feedback için). */
+  const [autoScanningId, setAutoScanningId] = useState<string | null>(null);
+  /** Sırada taranmak için bekleyen dosya kimlikleri. */
+  const [autoScanQueue, setAutoScanQueue] = useState<string[]>([]);
+  /** Otomatik eşleşen bir dosyada inline konum değiştirme kontrolü açık mı. */
+  const [changingLocationFileId, setChangingLocationFileId] = useState<string | null>(null);
+  const { data: productCodes = [] } = useProductCodes();
+  const isScanningRef = useRef(false);
+  const queueRef = useRef<string[]>([]);
+  queueRef.current = autoScanQueue;
 
   // Listen to irsaliye files in real-time
   useEffect(() => {
-    const q = query(
-      collection(db, 'irsaliyeDosyalari'),
+    const q = scopedQuery(
+      'irsaliyeDosyalari',
+      currentCompanyId,
+      isSuperAdmin,
       orderBy('uploadedAt', 'desc')
     );
 
@@ -93,13 +124,120 @@ export default function DosyaYonetimiPage() {
     return () => unsubscribe();
   }, [currentCompanyId, isSuperAdmin]);
 
+  // Track which uploaded files already have a pending scanned invoice waiting
+  // for transfer — so we can show a "Onaylandı, lab stoğa gönderildi" badge.
+  useEffect(() => {
+    const q = scopedQuery('bekleyenIrsaliyeler', currentCompanyId, isSuperAdmin);
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const ids = new Set<string>();
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data() as any;
+        if (!matchesCompanyScope(data, currentCompanyId, isSuperAdmin)) return;
+        if (data?.status === 'pending' && data?.dosyaId) ids.add(String(data.dosyaId));
+      });
+      setPendingScannedDosyaIds(ids);
+    }, (error) => {
+      console.error('Bekleyen irsaliyeler dinlenemiyor:', error);
+    });
+    return () => unsubscribe();
+  }, [currentCompanyId, isSuperAdmin]);
+
+  /**
+   * Background queue: kuyrukta dosya varsa ve şu an taranan biri yoksa,
+   * baştaki dosyayı al → Vision ile tara → `bekleyenIrsaliyeler`'e yaz.
+   * Tek seferde tek dosya tarar (rate-limit dostu).
+   */
+  useEffect(() => {
+    if (isScanningRef.current || autoScanQueue.length === 0) return;
+    if (productCodes.length === 0) return;
+
+    const runQueue = async () => {
+      isScanningRef.current = true;
+      while (queueRef.current.length > 0) {
+        const fileId = queueRef.current[0];
+        const file = dosyalar.find(d => d.id === fileId);
+        if (!file) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+        if (file.fileType !== 'pdf' || !file.locationType || !file.locationId) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+        if (pendingScannedDosyaIds.has(fileId)) {
+          setAutoScanQueue(q => q.slice(1));
+          continue;
+        }
+
+        setAutoScanningId(fileId);
+        try {
+          const outcome = await autoScanIrsaliyeFile({
+            fileId: file.id,
+            fileName: file.fileName,
+            storagePath: file.storagePath,
+            downloadURL: file.downloadURL,
+            locationType: (file.locationType || 'hospital') as 'hospital' | 'depot',
+            locationId: file.locationId || '',
+            locationName: file.locationName || '',
+            productCodes,
+            companyId: currentCompanyId,
+            user: {
+              uid: currentUser?.uid || null,
+              name: currentUserProfile?.displayName || currentUserProfile?.email || null,
+            },
+          });
+
+          if (outcome.ok) {
+            toast({
+              title: 'Otomatik tarandı',
+              description: `${file.fileName}: ${outcome.matchedCount} ürün eşleşti, bekleyen irsaliyelere eklendi.`,
+            });
+          } else if (outcome.error) {
+            toast({
+              title: 'Otomatik tarama başarısız',
+              description: `${file.fileName}: ${outcome.error}. Manuel "Tara" ile tekrar deneyebilirsiniz.`,
+              variant: 'destructive',
+            });
+          }
+        } catch (err: any) {
+          console.error('[auto-scan] error in queue loop:', err);
+        } finally {
+          setAutoScanningId(null);
+          setAutoScanQueue(q => q.slice(1));
+        }
+      }
+      isScanningRef.current = false;
+    };
+
+    void runQueue();
+  }, [autoScanQueue, dosyalar, productCodes, currentCompanyId, currentUser, currentUserProfile, pendingScannedDosyaIds, toast]);
+
+  /** Eşleşen ama taranmamış dosyalar için "Tümünü Otomatik Tara" butonu. */
+  const queueAutoScanForUnscannedMatched = useCallback(() => {
+    const ids: string[] = [];
+    for (const f of dosyalar) {
+      if (f.fileType !== 'pdf') continue;
+      if (!f.locationId) continue;
+      if (pendingScannedDosyaIds.has(f.id)) continue;
+      ids.push(f.id);
+    }
+    if (ids.length === 0) {
+      toast({ title: 'Tarama gerekmez', description: 'Eşleşen tüm dosyalar zaten taranmış görünüyor.' });
+      return;
+    }
+    setAutoScanQueue(prev => [...prev, ...ids.filter(id => !prev.includes(id))]);
+    toast({ title: 'Kuyruğa eklendi', description: `${ids.length} dosya arka planda taranıyor.` });
+  }, [dosyalar, pendingScannedDosyaIds, toast]);
+
   // Clean up expired files on mount
   useEffect(() => {
     const cleanupExpired = async () => {
       try {
         const now = Timestamp.now();
-        const expiredQuery = query(
-          collection(db, 'irsaliyeDosyalari'),
+        const expiredQuery = scopedQuery(
+          'irsaliyeDosyalari',
+          currentCompanyId,
+          isSuperAdmin,
           where('expiresAt', '<=', now)
         );
         const snapshot = await getDocs(expiredQuery);
@@ -137,28 +275,77 @@ export default function DosyaYonetimiPage() {
     cleanupExpired();
   }, [toast, currentCompanyId, isSuperAdmin]);
 
-  const processFile = useCallback(async (file: File) => {
-    if (!currentUser) return;
-    if (!selectedLocationType || !selectedLocationId) {
-      toast({
-        title: 'Konum seçimi gerekli',
-        description: 'Yükleme öncesinde dosyanın bağlı olduğu hastane veya depoyu seçin.',
-        variant: 'destructive',
+  const getLocationOptions = useCallback((type: 'hospital' | 'depot' | '') => {
+    if (type === 'hospital') return hospitals;
+    if (type === 'depot') return depots;
+    return [];
+  }, [hospitals, depots]);
+
+  const locationCandidates: LocationCandidate[] = useMemo(() => {
+    return getLocationOptions(selectedLocationType).map((loc: any) => ({
+      id: loc.id,
+      name: loc.name || loc.ad || '',
+      kod: loc.kod,
+    }));
+  }, [selectedLocationType, getLocationOptions]);
+
+  const findLocationName = useCallback((locId: string, type: 'hospital' | 'depot' | '' = selectedLocationType): string => {
+    const loc = getLocationOptions(type).find((x: any) => x.id === locId);
+    return (loc?.name || loc?.ad || '') as string;
+  }, [selectedLocationType, getLocationOptions]);
+
+  /** Konum atanmamış veya otomatik eşleşmiş bir dosyayı manuel olarak konumla eşleştir. */
+  const assignLocationToFile = useCallback(async (dosya: IrsaliyeDosya, locId: string) => {
+    const locationType = dosya.locationType || selectedLocationType;
+    const name = findLocationName(locId, locationType);
+    if (!locationType || !name) return;
+    try {
+      await updateDoc(doc(db, 'irsaliyeDosyalari', dosya.id), {
+        locationType,
+        locationId: locId,
+        locationName: name,
+        autoMatchedLocation: false,
+        autoMatchConfidence: null,
+        autoMatchReason: 'manuel_degistirildi',
       });
-      return;
+
+      const pendingSnapshot = await getDocs(scopedQuery(
+        'bekleyenIrsaliyeler',
+        currentCompanyId,
+        isSuperAdmin,
+        where('dosyaId', '==', dosya.id)
+      ));
+      const pendingDocs = pendingSnapshot.docs.filter((docSnap) => docSnap.data()?.status === 'pending');
+      await Promise.all(pendingDocs.map((docSnap) => updateDoc(doc(db, 'bekleyenIrsaliyeler', docSnap.id), {
+        locationType,
+        locationId: locId,
+        locationName: name,
+      })));
+
+      setChangingLocationFileId(null);
+      toast({
+        title: 'Konum güncellendi',
+        description: pendingDocs.length === 0
+          ? `${dosya.fileName} → ${name}`
+          : `${dosya.fileName} ve bekleyen irsaliye kaydı → ${name}`,
+      });
+      if (autoScanEnabled && dosya.fileType === 'pdf' && pendingDocs.length === 0) {
+        setAutoScanQueue(prev => prev.includes(dosya.id) ? prev : [...prev, dosya.id]);
+      }
+    } catch (err: any) {
+      toast({ title: 'Hata', description: err?.message || 'Konum atanamadı.', variant: 'destructive' });
     }
+  }, [findLocationName, selectedLocationType, autoScanEnabled, toast, currentCompanyId, isSuperAdmin]);
 
-    const selectedLocationName = selectedLocationType === 'hospital'
-      ? (hospitals.find((h) => h.id === selectedLocationId)?.name || hospitals.find((h) => h.id === selectedLocationId)?.ad || '')
-      : (depots.find((d) => d.id === selectedLocationId)?.name || '');
-
-    if (!selectedLocationName) {
+  const processFile = useCallback(async (file: File): Promise<{ ok: boolean; matched: boolean; docId?: string; locationId?: string; locationName?: string }> => {
+    if (!currentUser) return { ok: false, matched: false };
+    if (!selectedLocationType) {
       toast({
-        title: 'Geçersiz konum',
-        description: 'Seçilen konum bulunamadı. Lütfen tekrar seçin.',
+        title: 'Kategori seçimi gerekli',
+        description: 'Yükleme öncesinde dosyanın bağlı olduğu kategoriyi (Hastane veya Depo) seçin.',
         variant: 'destructive',
       });
-      return;
+      return { ok: false, matched: false };
     }
 
     const allowedTypes = [
@@ -166,59 +353,50 @@ export default function DosyaYonetimiPage() {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'application/vnd.ms-excel',
     ];
-
     if (!allowedTypes.includes(file.type)) {
       toast({
         title: 'Geçersiz Dosya',
-        description: 'Sadece PDF ve Excel (.xlsx, .xls) dosyaları yüklenebilir.',
+        description: `${file.name} desteklenmiyor. Sadece PDF ve Excel (.xlsx, .xls).`,
         variant: 'destructive',
       });
-      return;
+      return { ok: false, matched: false };
     }
 
     const maxSize = 20 * 1024 * 1024;
     if (file.size > maxSize) {
       toast({
         title: 'Dosya Çok Büyük',
-        description: 'Maksimum dosya boyutu 20 MB olabilir.',
+        description: `${file.name} 20 MB sınırını aşıyor.`,
         variant: 'destructive',
       });
-      return;
+      return { ok: false, matched: false };
     }
 
-    setUploading(true);
-    setUploadProgress(0);
+    // 1. Dosya adından otomatik eşleştirme; eşleşmediyse varsayılan konum (varsa).
+    const match = matchLocationFromFileName(file.name, locationCandidates);
+    const locId = match?.id || defaultLocationId || '';
+    const locName = match?.name || (defaultLocationId ? findLocationName(defaultLocationId) : '');
+    const wasAutoMatched = !!match;
 
     try {
-      setUploadProgress(25);
-
       const formData = new FormData();
       formData.append('file', file);
       formData.append('folder', 'irsaliyeler');
       formData.append('userUid', currentUser.uid);
-
       const uploadResponse = await fetch('/api/storage/upload-file', {
         method: 'POST',
         body: formData,
       });
-
       const uploadPayload = await uploadResponse.json().catch(() => ({}));
       if (!uploadResponse.ok || !uploadPayload?.url || !uploadPayload?.path) {
         throw new Error(uploadPayload?.error || 'Dosya yüklenirken bir hata oluştu.');
       }
 
-      setUploadProgress(80);
-
-      const fileType = file.name.endsWith('.pdf')
-        ? 'pdf'
-        : file.name.endsWith('.xlsx')
-        ? 'xlsx'
-        : 'xls';
-
+      const fileType = file.name.endsWith('.pdf') ? 'pdf' : file.name.endsWith('.xlsx') ? 'xlsx' : 'xls';
       const now = Timestamp.now();
       const oneWeekLater = Timestamp.fromMillis(now.toMillis() + 7 * 24 * 60 * 60 * 1000);
 
-      await addDoc(collection(db, 'irsaliyeDosyalari'), {
+      const newDoc = await addDoc(collection(db, 'irsaliyeDosyalari'), {
         companyId: normalizeCompanyId(currentCompanyId),
         fileName: file.name,
         fileType,
@@ -230,50 +408,112 @@ export default function DosyaYonetimiPage() {
         uploadedAt: now,
         expiresAt: oneWeekLater,
         locationType: selectedLocationType,
-        locationId: selectedLocationId,
-        locationName: selectedLocationName,
+        locationId: locId,
+        locationName: locName,
+        // Auto-match teşhisi için (UI'da rozet ve kullanım istatistikleri için):
+        autoMatchedLocation: wasAutoMatched,
+        autoMatchConfidence: match?.confidence ?? null,
+        autoMatchReason: match?.reason ?? null,
       });
 
-      setUploadProgress(100);
-      toast({
-        title: 'Başarılı',
-        description: `${file.name} başarıyla yüklendi.`,
-      });
-      setUploading(false);
-      setUploadProgress(0);
+      return {
+        ok: true,
+        matched: !!locId,
+        docId: newDoc.id,
+        locationId: locId || undefined,
+        locationName: locName || undefined,
+      };
     } catch (error: any) {
       console.error('Dosya yükleme hatası:', error);
       toast({
         title: 'Hata',
-        description: error.message || 'Dosya yüklenirken bir sorun oluştu.',
+        description: `${file.name}: ${error.message || 'Yüklenemedi.'}`,
         variant: 'destructive',
       });
-      setUploading(false);
+      return { ok: false, matched: false };
     }
   }, [
     currentUser,
     currentUserProfile,
     toast,
     selectedLocationType,
-    selectedLocationId,
-    depots,
-    hospitals,
+    defaultLocationId,
+    locationCandidates,
+    findLocationName,
     currentCompanyId,
   ]);
 
+  /**
+   * Çoklu dosya yükleyici. Drop ve input event'leri buradan geçer; eşleşen
+   * dosyalar varsa autoScan kuyruğuna eklenir.
+   */
+  const processManyFiles = useCallback(async (files: File[]) => {
+    if (!files || files.length === 0) return;
+    if (!selectedLocationType) {
+      toast({
+        title: 'Kategori seçimi gerekli',
+        description: 'Yükleme öncesinde Hastane veya Depo kategorisini seçin.',
+        variant: 'destructive',
+      });
+      return;
+    }
+    setUploading(true);
+    setUploadProgress(0);
+
+    let matchedCount = 0;
+    let unmatchedCount = 0;
+    let errorCount = 0;
+    const queueForAutoScan: string[] = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      setUploadProgress(Math.round(((i) / files.length) * 100));
+      const result = await processFile(file);
+      if (!result.ok) { errorCount += 1; continue; }
+      if (result.matched) {
+        matchedCount += 1;
+        // PDF değilse otomatik tarama anlamlı değil.
+        if (autoScanEnabled && result.docId && file.name.toLowerCase().endsWith('.pdf')) {
+          queueForAutoScan.push(result.docId);
+        }
+      } else {
+        unmatchedCount += 1;
+      }
+    }
+
+    setUploadProgress(100);
+    setUploading(false);
+    setUploadProgress(0);
+
+    const parts: string[] = [];
+    if (matchedCount > 0) parts.push(`${matchedCount} dosya otomatik konum ile atandı`);
+    if (unmatchedCount > 0) parts.push(`${unmatchedCount} dosya için konum bulunamadı (manuel atama gerekli)`);
+    if (errorCount > 0) parts.push(`${errorCount} dosya yüklenemedi`);
+    if (parts.length > 0) {
+      toast({
+        title: 'Yükleme tamamlandı',
+        description: parts.join(' · '),
+      });
+    }
+
+    if (queueForAutoScan.length > 0) {
+      setAutoScanQueue(prev => [...prev, ...queueForAutoScan]);
+    }
+  }, [selectedLocationType, autoScanEnabled, processFile, toast]);
+
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    await processFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    await processManyFiles(files);
     e.target.value = '';
-  }, [processFile]);
+  }, [processManyFiles]);
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    const file = e.dataTransfer.files?.[0];
-    if (file) await processFile(file);
-  }, [processFile]);
+    const files = Array.from(e.dataTransfer.files || []);
+    if (files.length > 0) await processManyFiles(files);
+  }, [processManyFiles]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -284,6 +524,12 @@ export default function DosyaYonetimiPage() {
     e.preventDefault();
     setIsDragging(false);
   }, []);
+
+  /** UploadZone'dan gelen gerçek FileList'i mevcut yükleyiciye bağlar. */
+  const handleZoneFiles = useCallback(async (fileList: FileList) => {
+    const files = Array.from(fileList || []);
+    if (files.length > 0) await processManyFiles(files);
+  }, [processManyFiles]);
 
   const handleDelete = useCallback(async (dosya: IrsaliyeDosya) => {
     if (!currentUser) return;
@@ -339,244 +585,330 @@ export default function DosyaYonetimiPage() {
     return `${days} gün kaldı`;
   };
 
-  const konumSecenekleri = selectedLocationType === 'hospital' ? hospitals : depots;
-  const gorunenDosyalar =
-    selectedLocationType && selectedLocationId
-      ? dosyalar.filter((d) => d.locationType === selectedLocationType && d.locationId === selectedLocationId)
-      : dosyalar;
+  const konumSecenekleri = getLocationOptions(selectedLocationType);
+  /**
+   * Liste filtresi: yalnızca seçili kategori türüne ait dosyalar gösterilir.
+   * Konum-ID bazlı filtre artık yok — listeye seçili kategorideki tüm dosyalar
+   * gelir (her satırda zaten kendi konum etiketi var).
+   */
+  const gorunenDosyalar = selectedLocationType
+    ? dosyalar.filter((d) => d.locationType === selectedLocationType)
+    : dosyalar;
+
+  // ── small clay status pill helper (matches demo FileRow pills) ──────────────
+  const Pill = ({ children, bg, color, icon }: { children: React.ReactNode; bg: string; color: string; icon?: React.ReactNode }) => (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: C.radiusPill,
+      background: bg, color, fontSize: 11.5, fontWeight: 700, whiteSpace: 'nowrap',
+    }}>
+      {icon}{children}
+    </span>
+  );
 
   return (
-    <div className="dashboard-neu-page min-h-screen p-4 md:p-6 lg:p-8">
-      {/* ─── Header ───────────────────────────────────────── */}
-      <div className="flex items-center gap-4 mb-6">
-        <BackButton />
-        <div className="flex items-center gap-3">
-          <span className="dashboard-panel-icon flex items-center justify-center w-10 h-10 rounded-full shrink-0">
-            <FolderOpen className="w-5 h-5" />
-          </span>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--dashboard-text)' }}>
-              Dosya Yönetimi
-            </h1>
-            <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
-              Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir.
-            </p>
-          </div>
-        </div>
-      </div>
+    <ClayPage>
+      <div style={{ animation: `cyRise 360ms ${EASE} both` }}>
+        {/* ─── Header ───────────────────────────────────────── */}
+        <RaporHead
+          icon={FolderOpen}
+          title="Dosya Yönetimi"
+          desc="Dosyalarınızı yükleyin ve yönetin. Yüklenen dosyalar 1 hafta sonra otomatik olarak silinir."
+          onBack={() => window.history.back()}
+          mobile={mobile}
+        />
 
-      {/* ─── İrsaliye Yönetimi Section ──────────────────────── */}
-      <div className="glass-card rounded-3xl overflow-hidden" style={{ borderRadius: '24px' }}>
-        {/* Section Header */}
-        <div className="px-6 pt-6 pb-4">
-          <div className="flex items-center gap-3 mb-1">
-            <span className="dashboard-panel-icon flex items-center justify-center w-8 h-8 rounded-full shrink-0">
-              <FileText className="w-4 h-4" />
+        {/* ─── İrsaliye Yönetimi ─────────────────────────────── */}
+        <Card style={{ marginBottom: 16 }}>
+          {/* Section head */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 13, marginBottom: 20 }}>
+            <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: AC.primary, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: C.clayFlat }}>
+              <FileText size={22} />
             </span>
-            <div>
-              <h2 className="text-lg font-semibold" style={{ color: 'var(--dashboard-text)' }}>İrsaliye Yönetimi</h2>
-              <p className="text-sm" style={{ color: 'var(--dashboard-muted)' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: C.ink1, letterSpacing: '-0.01em' }}>İrsaliye Yönetimi</h2>
+              <p style={{ margin: '4px 0 0', fontSize: 13.5, color: C.ink2, fontWeight: 500, lineHeight: 1.5 }}>
                 İrsaliye PDF veya Excel dosyalarını yükleyin. Bu dosyalar Mal Kabul &gt; İrsaliye OCR panelinden &quot;Dosyalardan Seç&quot; seçeneği ile kullanılabilir.
               </p>
             </div>
           </div>
-        </div>
 
-        {/* ─── Konum Seçimi ───────────────────────────────── */}
-        <div className="px-6 pb-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div>
-            <p className="text-xs font-medium mb-1" style={{ color: 'var(--dashboard-muted)' }}>Konum Türü</p>
-            <Select
-              value={selectedLocationType}
-              onValueChange={(value: 'hospital' | 'depot') => {
-                setSelectedLocationType(value);
-                setSelectedLocationId('');
-              }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Hastane veya depo seçin" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="hospital">Hastane</SelectItem>
-                <SelectItem value="depot">Depo</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <p className="text-xs font-medium mb-1" style={{ color: 'var(--dashboard-muted)' }}>Konum</p>
-            <Select
-              value={selectedLocationId}
-              onValueChange={setSelectedLocationId}
-              disabled={!selectedLocationType}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={selectedLocationType ? 'Konum seçin' : 'Önce konum türü seçin'} />
-              </SelectTrigger>
-              <SelectContent>
-                {konumSecenekleri.map((loc: any) => (
-                  <SelectItem key={loc.id} value={loc.id}>
-                    {loc.name || loc.ad}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-
-        {/* ─── Upload Area ────────────────────────────────── */}
-        <div className="px-6 pb-4">
-          <label
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            className="flex flex-col items-center justify-center w-full py-10 px-6 rounded-2xl cursor-pointer transition-all duration-200"
-            style={{
-              background: 'var(--dashboard-surface-2)',
-              border: isDragging ? '2px dashed var(--dashboard-accent)' : '2px dashed var(--dashboard-stroke)',
-              boxShadow: isDragging ? 'var(--dashboard-pressed)' : 'none',
-              transform: isDragging ? 'scale(1.005)' : 'scale(1)',
-              pointerEvents: uploading ? 'none' : 'auto',
-              opacity: !selectedLocationType || !selectedLocationId ? 0.65 : 1,
-            }}
-          >
-            {uploading ? (
-              <div className="flex flex-col items-center gap-3">
-                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
-                  <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--dashboard-accent)' }} />
-                </span>
-                <div className="text-center">
-                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>Yükleniyor... %{Math.round(uploadProgress)}</p>
-                  <Progress value={uploadProgress} className="w-48 mt-2" />
+          {/* Kategori + varsayılan + otomatik tarama */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 18, marginBottom: 20, alignItems: 'start' }}>
+            <div>
+              <FieldLabel>Kategori</FieldLabel>
+              <Dropdown
+                value={selectedLocationType}
+                onChange={(v) => {
+                  setSelectedLocationType(v as 'hospital' | 'depot');
+                  setDefaultLocationId('');
+                }}
+                placeholder="Hastane veya Depo havuzu seçin"
+                options={[
+                  { value: 'hospital', label: 'Hastaneler / Laboratuvarlar' },
+                  { value: 'depot', label: 'Depolar' },
+                ]}
+              />
+            </div>
+            <div>
+              <FieldLabel hint>Eşleşmeyenler için varsayılan</FieldLabel>
+              <Dropdown
+                value={defaultLocationId}
+                onChange={setDefaultLocationId}
+                disabled={!selectedLocationType}
+                placeholder={selectedLocationType ? 'Otomatik eşleşmeyenler için (opsiyonel)' : 'Önce kategori seçin'}
+                options={konumSecenekleri.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 13, padding: '12px 14px', borderRadius: C.radiusSm, background: C.surface2, boxShadow: C.clayInset }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 13.5, fontWeight: 800, color: C.ink1 }}>
+                  <Wand2 size={15} style={{ color: AC.primary }} /> Otomatik Tarama
+                </div>
+                <div style={{ fontSize: 12, color: C.ink2, marginTop: 4, lineHeight: 1.45 }}>
+                  Yüklenen PDF irsaliyeler Vision ile arka planda taranıp Bekleyen İrsaliyelere düşer.
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col items-center gap-3">
-                <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full">
-                  <FileUp className="w-6 h-6" style={{ color: isDragging ? 'var(--dashboard-accent)' : 'var(--dashboard-muted)' }} />
+              <Toggle on={autoScanEnabled} onChange={setAutoScanEnabled} />
+            </div>
+          </div>
+
+          {/* Upload zone */}
+          <UploadZone
+            accept={['PDF', 'XLSX', 'XLS', 'Maks. 20MB / dosya']}
+            hint="Birden fazla dosya seçebilirsiniz; konumlar dosya adından otomatik eşleşir."
+            onFiles={handleZoneFiles}
+            acceptAttr=".pdf,.xlsx,.xls"
+            multiple
+          />
+
+          {/* Upload progress (clay inset bar) */}
+          {uploading && (
+            <div style={{ marginTop: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, fontWeight: 700, color: C.ink2, marginBottom: 6 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                  <Loader2 size={14} style={{ color: AC.primary, animation: 'cySpin 1s linear infinite' }} /> Yükleniyor...
                 </span>
-                <div className="text-center">
-                  <p className="text-sm font-medium" style={{ color: 'var(--dashboard-text)' }}>
-                    Dosya yüklemek için tıklayın veya sürükleyin
-                  </p>
-                  <div className="flex items-center justify-center gap-2 mt-2">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>PDF</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLSX</span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium" style={{ background: 'var(--dashboard-surface)', color: 'var(--dashboard-muted)', border: '1px solid var(--dashboard-stroke)' }}>XLS</span>
-                    <span className="text-xs ml-1" style={{ color: 'var(--dashboard-muted)' }}>Maks. 20MB</span>
-                  </div>
-                </div>
+                <span>%{Math.round(uploadProgress)}</span>
               </div>
-            )}
-            <input
-              type="file"
-              ref={fileInputRef}
-              className="hidden"
-              accept=".pdf,.xlsx,.xls"
-              onChange={handleFileUpload}
-              disabled={uploading}
-            />
-          </label>
-          {(!selectedLocationType || !selectedLocationId) && (
-            <p className="mt-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-              Dosya yüklemek için önce irsaliyenin bağlı olduğu hastane/depo konumunu seçin.
-            </p>
+              <div style={{ height: 8, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%', width: `${uploadProgress}%`, borderRadius: 99,
+                  background: `linear-gradient(90deg, ${AC.accent}, ${AC.primary})`,
+                  transition: `width 240ms ${EASE}`,
+                }} />
+              </div>
+            </div>
           )}
-        </div>
 
-        {/* ─── File List ──────────────────────────────────── */}
-        <div style={{ borderTop: '1px solid var(--dashboard-stroke)' }}>
-          <div className="px-6 py-3 flex items-center justify-between">
-            <h3 className="text-sm font-semibold" style={{ color: 'var(--dashboard-text)' }}>
-              Yüklenen Dosyalar
-              <span className="ml-1.5 text-xs font-normal" style={{ color: 'var(--dashboard-muted)' }}>({gorunenDosyalar.length})</span>
-            </h3>
+          {!selectedLocationType && (
+            <div style={{ fontSize: 13, color: C.ink3, marginTop: 12, fontWeight: 500 }}>
+              Dosya yüklemek için önce Kategori (Hastane veya Depo) seçin. Dosya adından konum otomatik atanır.
+            </div>
+          )}
+        </Card>
+
+        {/* ─── Yüklenen Dosyalar ─────────────────────────────── */}
+        <Card style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: C.ink1 }}>
+              Yüklenen Dosyalar <span style={{ color: C.ink3, fontWeight: 700 }}>({gorunenDosyalar.length})</span>
+            </h2>
+            {autoScanQueue.length > 0 && (
+              <Pill bg={C.surface2} color={C.ink2} icon={<Loader2 size={12} style={{ animation: 'cySpin 1s linear infinite' }} />}>
+                Kuyrukta {autoScanQueue.length}
+              </Pill>
+            )}
+            <div style={{ flex: 1 }} />
+            <SoftBtn
+              tone={AC.primary}
+              onClick={queueAutoScanForUnscannedMatched}
+              disabled={gorunenDosyalar.length === 0 || autoScanQueue.length > 0}
+              style={{ height: 42, padding: '0 16px', fontSize: 13.5 }}
+            >
+              <Wand2 size={16} /> Tümünü Otomatik Tara
+            </SoftBtn>
           </div>
 
           {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-6 w-6 animate-spin" style={{ color: 'var(--dashboard-muted)' }} />
+            <div style={{ display: 'grid', placeItems: 'center', padding: '48px 0' }}>
+              <Loader2 size={26} style={{ color: C.ink3, animation: 'cySpin 1s linear infinite' }} />
             </div>
           ) : gorunenDosyalar.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-12 px-6">
-              <span className="dashboard-panel-icon flex items-center justify-center w-12 h-12 rounded-full mb-3">
-                <FolderOpen className="w-6 h-6" style={{ color: 'var(--dashboard-muted)', opacity: 0.5 }} />
-              </span>
-              <p className="text-sm font-medium" style={{ color: 'var(--dashboard-muted)' }}>Henüz dosya yüklenmedi</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--dashboard-muted)', opacity: 0.6 }}>PDF veya Excel yükleyerek başlayın</p>
-            </div>
+            <EmptyBlock icon={<FileText size={28} />} text="Henüz dosya yüklenmedi." sub="PDF veya Excel yükleyerek başlayın." />
           ) : (
-            <div className="max-h-[400px] overflow-y-auto">
-              {gorunenDosyalar.map((dosya) => (
-                <div
-                  key={dosya.id}
-                  className="flex items-center justify-between px-6 py-3 transition-colors hover:opacity-80"
-                  style={{ borderBottom: '1px solid var(--dashboard-stroke)' }}
-                >
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="dashboard-panel-icon flex items-center justify-center w-9 h-9 rounded-full shrink-0">
-                      {dosya.fileType === 'pdf' ? (
-                        <FileText className="h-4 w-4 text-red-500" />
-                      ) : (
-                        <FileSpreadsheet className="h-4 w-4 text-green-600" />
-                      )}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {gorunenDosyalar.map((dosya) => {
+                const isScanned = pendingScannedDosyaIds.has(dosya.id);
+                const hasLocation = !!dosya.locationId;
+                const canScan = dosya.fileType === 'pdf' && !!dosya.locationType && hasLocation;
+                const isBeingAutoScanned = autoScanningId === dosya.id;
+                const isQueued = autoScanQueue.includes(dosya.id) && !isBeingAutoScanned;
+                const wasAutoMatched = (dosya as any).autoMatchedLocation === true;
+                const rowLocationOptions = getLocationOptions(dosya.locationType || selectedLocationType);
+                return (
+                  <div
+                    key={dosya.id}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 13, flexWrap: 'wrap',
+                      padding: '13px 14px', borderRadius: C.radius,
+                      background: C.surfaceHi, boxShadow: C.clayFlat,
+                    }}
+                  >
+                    {/* File type icon tile */}
+                    <span style={{
+                      width: 40, height: 40, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center',
+                      background: C.surface2, boxShadow: C.clayInset,
+                      color: dosya.fileType === 'pdf' ? C.danger : C.waterDeep,
+                    }}>
+                      {dosya.fileType === 'pdf' ? <FileText size={18} /> : <FileSpreadsheet size={18} />}
                     </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm truncate" style={{ color: 'var(--dashboard-text)' }}>{dosya.fileName}</p>
-                      <div className="flex items-center gap-3 text-xs mt-0.5" style={{ color: 'var(--dashboard-muted)' }}>
+
+                    {/* Name + meta + badges */}
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{dosya.fileName}</span>
+
+                        {isScanned && (
+                          <Pill bg="rgba(111,181,133,0.14)" color={C.waterDeep} icon={<CheckCircle2 size={12} />}>
+                            {dosya.locationType === 'depot' ? 'Mal kabulde bekliyor' : 'Lab stoğunda bekliyor'}
+                          </Pill>
+                        )}
+                        {!isScanned && dosya.fileType === 'pdf' && !isBeingAutoScanned && !isQueued && (
+                          <Pill bg={C.amberSoft} color="#9A6F1E">Taranmadı</Pill>
+                        )}
+                        {isBeingAutoScanned && (
+                          <Pill bg={C.amberSoft} color="#9A6F1E" icon={<Loader2 size={12} style={{ animation: 'cySpin 1s linear infinite' }} />}>
+                            Vision ile taranıyor
+                          </Pill>
+                        )}
+                        {isQueued && (
+                          <Pill bg={C.surface2} color={C.ink2}>Kuyrukta</Pill>
+                        )}
+                        {hasLocation && wasAutoMatched && (
+                          <>
+                            <Pill bg="rgba(155,134,214,0.16)" color="#7C66C2" icon={<Wand2 size={12} />}>
+                              Otomatik atandı{(dosya as any).autoMatchReason === 'akronim' ? ' · kısaltma' : (dosya as any).autoMatchReason === 'ilk_kelime' ? ' · ilk kelime' : (dosya as any).autoMatchReason === 'kod' ? ' · kod' : ''}
+                            </Pill>
+                            <SoftBtn
+                              tone="#7C66C2"
+                              onClick={() => setChangingLocationFileId(prev => prev === dosya.id ? null : dosya.id)}
+                              style={{ height: 30, padding: '0 11px', fontSize: 12, gap: 5 }}
+                            >
+                              <Pencil size={12} /> Değiştir
+                            </SoftBtn>
+                            {changingLocationFileId === dosya.id && (
+                              <div style={{ width: 220, maxWidth: '100%' }}>
+                                <Dropdown
+                                  value={dosya.locationId || ''}
+                                  onChange={(v) => assignLocationToFile(dosya, v)}
+                                  placeholder="Yeni konum seç..."
+                                  options={rowLocationOptions.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+                                />
+                              </div>
+                            )}
+                          </>
+                        )}
+                        {!hasLocation && (
+                          <Pill bg="rgba(192,121,106,0.14)" color={C.danger} icon={<AlertCircle size={12} />}>Konum bulunamadı</Pill>
+                        )}
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: C.ink3, marginTop: 4, flexWrap: 'wrap' }}>
                         <span>{formatFileSize(dosya.fileSize)}</span>
-                        <span className="hidden sm:inline">{dosya.uploadedByName}</span>
-                        <span className="hidden md:inline">{dosya.locationName || 'Konum belirtilmedi'}</span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {getRemainingDays(dosya.expiresAt)}
+                        <span>{dosya.uploadedByName}</span>
+                        <span>{dosya.locationName || 'Konum belirtilmedi'}</span>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <Clock size={12} /> {getRemainingDays(dosya.expiresAt)}
                         </span>
                       </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-lg"
-                      onClick={() => window.open(dosya.downloadURL, '_blank')}
-                      title="İndir"
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 rounded-lg text-red-500 hover:text-red-700 hover:bg-red-500/10"
-                      onClick={() => handleDelete(dosya)}
-                      disabled={deleting === dosya.id}
-                      title="Sil"
-                    >
-                      {deleting === dosya.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
+                      {!hasLocation && selectedLocationType && (
+                        <div style={{ width: 180, maxWidth: '100%' }}>
+                          <Dropdown
+                            value=""
+                            onChange={(v) => assignLocationToFile(dosya, v)}
+                            placeholder="Konum ata..."
+                            options={konumSecenekleri.map((loc: any) => ({ value: loc.id, label: loc.name || loc.ad }))}
+                          />
+                        </div>
                       )}
-                    </Button>
+                      {dosya.fileType === 'pdf' && (
+                        <SoftBtn
+                          tone={isScanned ? C.ink2 : '#fff'}
+                          onClick={() => setScanningFile(dosya)}
+                          disabled={!canScan || isBeingAutoScanned}
+                          style={isScanned ? { height: 38, padding: '0 14px', fontSize: 13 } : {
+                            height: 38, padding: '0 14px', fontSize: 13,
+                            background: `linear-gradient(180deg, ${AC.accent}, ${AC.primary})`,
+                            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.4), 0 12px 22px -10px ${AC.glow}`,
+                          }}
+                        >
+                          <Scan size={14} /> {isScanned ? 'Yeniden Tara' : 'Tara'}
+                        </SoftBtn>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => window.open(dosya.downloadURL, '_blank')}
+                        title="İndir"
+                        style={{
+                          all: 'unset', cursor: 'pointer', width: 36, height: 36, flexShrink: 0, borderRadius: '50%',
+                          display: 'grid', placeItems: 'center', color: C.ink2, background: C.surface2, boxShadow: C.clayFlat,
+                        }}
+                      >
+                        <Download size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(dosya)}
+                        disabled={deleting === dosya.id}
+                        title="Sil"
+                        style={{
+                          all: 'unset', cursor: deleting === dosya.id ? 'not-allowed' : 'pointer', width: 36, height: 36, flexShrink: 0, borderRadius: '50%',
+                          display: 'grid', placeItems: 'center', color: C.danger, background: C.surface2, boxShadow: C.clayFlat,
+                          opacity: deleting === dosya.id ? 0.6 : 1,
+                        }}
+                      >
+                        {deleting === dosya.id ? <Loader2 size={16} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Trash2 size={16} />}
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
-        </div>
 
-        {/* Footer note */}
-        <div className="px-6 py-3" style={{ borderTop: '1px solid var(--dashboard-stroke)', background: 'var(--dashboard-surface-2)' }}>
-          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+          {/* Footer note */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${C.line}`, fontSize: 13, color: C.ink3 }}>
+            <Info size={15} style={{ flexShrink: 0 }} />
             <span>Yüklenen dosyalar 1 hafta sonra otomatik olarak sistemden ve veritabanından silinir.</span>
           </div>
+        </Card>
+
+        {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
+        <div style={{ marginBottom: 16 }}>
+          <CeomedIrsaliyePanel />
         </div>
       </div>
 
-      {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
-      <div className="mt-6">
-        <CeomedIrsaliyePanel />
-      </div>
-    </div>
+      <IrsaliyeScanModal
+        isOpen={!!scanningFile}
+        file={scanningFile}
+        onClose={() => setScanningFile(null)}
+        productCodes={productCodes}
+      />
+
+      {/* Hidden native input kept for compatibility with existing handlers. */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        style={{ display: 'none' }}
+        accept=".pdf,.xlsx,.xls"
+        multiple
+        onChange={handleFileUpload}
+        disabled={uploading}
+      />
+    </ClayPage>
   );
 }

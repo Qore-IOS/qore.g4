@@ -23,6 +23,7 @@ import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
@@ -319,7 +320,7 @@ const ProductCard: React.FC<{
 export default function UrunKoduPanel() {
   const { toast } = useToast();
   const router = useRouter();
-  const { currentUser } = useAuth();
+  const { currentUser, currentCompanyId, isSuperAdmin } = useAuth();
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
   const [productCodes, setProductCodes] = useState<ProductCode[]>([]);
 
@@ -362,29 +363,29 @@ export default function UrunKoduPanel() {
     setIsLoading(true);
     try {
       const [productsSnap, brandsSnap, labGroupsSnap, testGroupsSnap, deviceGroupsSnap, productGroupsSnap, mainUnitsSnap] = await Promise.all([
-        getDocs(collection(db, 'productCodes')),
-        getDocs(collection(db, 'def_brands')),
-        getDocs(collection(db, 'def_labGroups')),
-        getDocs(collection(db, 'def_testGroups')),
-        getDocs(collection(db, 'def_deviceGroups')),
-        getDocs(collection(db, 'def_productGroups')),
-        getDocs(collection(db, 'def_mainUnits')),
+        getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_brands', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_testGroups', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_deviceGroups', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_productGroups', currentCompanyId, isSuperAdmin),
+        getScopedDocs('def_mainUnits', currentCompanyId, isSuperAdmin),
       ]);
-      setProductCodes(productsSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
+      setProductCodes(productsSnap.map(d => ({ id: d.id, ...d.data() } as ProductCode)));
       setDefinitions({
-        brands: brandsSnap.docs.map(d => d.data().name as string).sort(),
-        labGroups: labGroupsSnap.docs.map(d => d.data().name as string).sort(),
-        testGroups: testGroupsSnap.docs.map(d => d.data().name as string).sort(),
-        deviceGroups: deviceGroupsSnap.docs.map(d => d.data().name as string).sort(),
-        productGroups: productGroupsSnap.docs.map(d => d.data().name as string).sort(),
-        mainUnits: mainUnitsSnap.docs.map(d => d.data().name as string).sort(),
+        brands: brandsSnap.map(d => d.data().name as string).sort(),
+        labGroups: labGroupsSnap.map(d => d.data().name as string).sort(),
+        testGroups: testGroupsSnap.map(d => d.data().name as string).sort(),
+        deviceGroups: deviceGroupsSnap.map(d => d.data().name as string).sort(),
+        productGroups: productGroupsSnap.map(d => d.data().name as string).sort(),
+        mainUnits: mainUnitsSnap.map(d => d.data().name as string).sort(),
       });
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
-  }, [toast]);
+  }, [toast, currentCompanyId, isSuperAdmin]);
 
   useEffect(() => { fetchAllData(); }, [fetchAllData]);
 
@@ -392,10 +393,8 @@ export default function UrunKoduPanel() {
   useEffect(() => {
     const fetchCostCheckpoints = async () => {
       try {
-        const checkpointsSnap = await getDocs(
-          query(collection(db, 'costCheckpoints'), orderBy('year', 'desc'), orderBy('month', 'desc'))
-        );
-        const checkpointsList = checkpointsSnap.docs.map(d => {
+        const checkpointDocs = await getScopedDocs('costCheckpoints', currentCompanyId, isSuperAdmin, orderBy('year', 'desc'), orderBy('month', 'desc'));
+        const checkpointsList = checkpointDocs.map(d => {
           const data = d.data();
           return {
             id: d.id,
@@ -411,7 +410,7 @@ export default function UrunKoduPanel() {
       }
     };
     fetchCostCheckpoints();
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Save cost checkpoint
   const handleSaveCostCheckpoint = async () => {

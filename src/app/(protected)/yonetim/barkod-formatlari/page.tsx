@@ -2,7 +2,9 @@
 'use client';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, writeBatch, deleteField } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { useAuth } from '@/contexts/auth-context';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/barcode';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, PlusCircle, Save, Trash2, Edit3, SlidersHorizontal, Info } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';
+import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
@@ -79,6 +82,7 @@ function cleanExpiry(p?: any) {
 
 export default function BarkodFormatlariPage() {
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [formats, setFormats] = useState<BarcodeFormat[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -86,11 +90,11 @@ export default function BarkodFormatlariPage() {
 
   const fetchFormats = useCallback(async () => {
     setIsLoading(true);
-    const snap = await getDocs(query(collection(db, 'barcodeFormats'), orderBy('name', 'asc')));
-    const rawFormats = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
-    setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat));
+    const docs = await getScopedDocs('barcodeFormats', currentCompanyId, isSuperAdmin);
+    const rawFormats = docs.map(d => ({ id: d.id, ...(d.data() as any) })) as BarcodeFormat[];
+    setFormats(rawFormats.map(f => normalizeFormat(f) as BarcodeFormat).sort((a, b) => (a.name || '').localeCompare(b.name || '', 'tr')));
     setIsLoading(false);
-  }, []);
+  }, [currentCompanyId, isSuperAdmin]);
 
   useEffect(() => { fetchFormats(); }, [fetchFormats]);
 
@@ -158,6 +162,10 @@ export default function BarkodFormatlariPage() {
       payload.expiry = deleteField();
     }
   
+    if (!editing.id) {
+      payload.companyId = currentCompanyId;
+    }
+
     try {
       await setDoc(doc(db, 'barcodeFormats', id), payload, { merge: true });
       toast({ title: 'Kaydedildi', description: 'Barkod formatı güncellendi.' });
@@ -179,14 +187,19 @@ export default function BarkodFormatlariPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <BackButton fallback="/yonetim" />
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-xl font-headline">Barkod Formatları</CardTitle>
-          <Button onClick={openNew} className="gap-2"><PlusCircle className="h-4 w-4" /> Yeni Format</Button>
-        </CardHeader>
-        <CardContent>
+    <YonetimShell>
+      <YonetimHeader
+        title="Barkod Formatları"
+        description="GS1, DataMatrix ve özel barkod format kurallarını yönetin."
+        backHref="/yonetim/tanimlar"
+        rightAction={
+          <Button onClick={openNew} className="gap-2" style={{ background: 'var(--mg-accent)', color: '#0a0a0c', border: 'none', fontWeight: 700 }}>
+            <PlusCircle className="h-4 w-4" />
+            Yeni Format
+          </Button>
+        }
+      />
+      <YonetimCard>
           {isLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /> Yükleniyor...</div>
           ) : (
@@ -220,8 +233,7 @@ export default function BarkodFormatlariPage() {
               </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+      </YonetimCard>
 
       <Dialog open={isModalOpen} onOpenChange={(open) => { if (!open) setEditing(null); setIsModalOpen(open); }}>
         <DialogContent className="max-w-3xl">
@@ -363,6 +375,6 @@ export default function BarkodFormatlariPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </YonetimShell>
   );
 }

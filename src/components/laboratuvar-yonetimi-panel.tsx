@@ -10,6 +10,7 @@ import {
   Table, TableHeader, TableHead, TableBody, TableRow, TableCell
 } from '@/components/ui/table';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { LabSelector } from '@/components/common/LabSelector';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -21,6 +22,7 @@ import { Loader2, Search, ChevronUp, ChevronDown, ListChecks, History, PackageX,
 import { useMinMaxRules, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import LabIrsaliyeOcrModal, { type LabOcrResult } from '@/components/lab/LabIrsaliyeOcrModal';
 import { reconcileIrsaliyeAcceptance } from '@/lib/lojistik/reconcile-irsaliye';
@@ -189,9 +191,9 @@ export default function LaboratuvarYonetimiPanel() {
     async function fetchData() {
       setIsLoading(true);
       const [labsSnap, stokSnap, productsSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true))),
-        getDocs(collection(db, 'productCodes'))
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+        getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin))
       ]);
       setLaboratories(labsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Laboratory)));
       setDepoStok(filterByCompanyScope(
@@ -361,11 +363,13 @@ export default function LaboratuvarYonetimiPanel() {
       const headerKeys = jsonData.length > 0 ? Object.keys(jsonData[0]) : [];
       const colMap = detectExcelColumns(headerKeys);
 
-      // Positional fallback when the file has no recognizable headers.
-      // Order: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      // Use positional fallback only when none of the headers are recognizable.
+      // This prevents a headered LOT column in B from being interpreted as Seri No.
+      // Legacy headerless order remains: A=Stok Kodu, B=Barkod Seri, C=Miat, D=Lot, E=Adet.
+      const hasRecognizedHeaders = Object.keys(colMap).length > 0;
       const positional = headerKeys;
       const positionalRole = (role: ColumnRole, index: number): string | undefined =>
-        colMap[role] ?? positional[index];
+        colMap[role] ?? (hasRecognizedHeaders ? undefined : positional[index]);
 
       const rows: ParsedExcelRow[] = [];
 
@@ -375,7 +379,7 @@ export default function LaboratuvarYonetimiPanel() {
         const seriHeader = positionalRole('seri', 1);
         const miadHeader = positionalRole('miad', 2);
         const lotHeader = positionalRole('lot', 3);
-        const adetHeader = colMap.adet; // No positional default; presence is optional
+        const adetHeader = positionalRole('adet', 4);
         const stokAdiHeader = colMap.stokAdi;
 
         const stokKodu = String((stokKoduHeader && rawRow[stokKoduHeader]) || '').trim();
@@ -590,7 +594,7 @@ export default function LaboratuvarYonetimiPanel() {
       });
 
       // Refresh local stock data
-      const stokSnap = await getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true)));
+      const stokSnap = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)));
       setDepoStok(filterByCompanyScope(
         stokSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
         currentCompanyId,
@@ -629,17 +633,14 @@ export default function LaboratuvarYonetimiPanel() {
         <CardContent className="space-y-4">
           <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-grow">
-              <label className="block text-sm font-medium mb-1">Laboratuvar Seçin</label>
-              <Select value={selectedLabId} onValueChange={setSelectedLabId} disabled={isLoading}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Bir laboratuvar seçin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {laboratories.map(l => (
-                    <SelectItem key={l.id} value={l.id!}>{l.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <LabSelector
+                label="Laboratuvar Seçin"
+                labs={laboratories.map(l => ({ id: l.id!, name: l.name, kod: l.kod }))}
+                value={selectedLabId}
+                onChange={setSelectedLabId}
+                placeholder="Bir laboratuvar seçin"
+                disabled={isLoading}
+              />
             </div>
             {selectedLabId && (
                 <div className="flex items-end gap-2">

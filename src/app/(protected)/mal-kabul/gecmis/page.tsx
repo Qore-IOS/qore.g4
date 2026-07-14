@@ -1,409 +1,217 @@
-/**
- * @fileoverview Mal Kabul Transaction History Page
- * @description Displays historical goods receiving transactions with pagination,
- * filtering, and detailed view capabilities.
- * @module app/(protected)/mal-kabul/gecmis/page
- * @version 2.0.0
- */
-
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-
-// Firebase
-import { db } from '@/lib/firebase';
-import {
-  collection,
-  doc,
-  getDocsFromServer,
-  limit,
-  orderBy,
-  query,
-  onSnapshot,
-  type DocumentData,
-  type QueryDocumentSnapshot,
-} from 'firebase/firestore';
-
-// UI Components
-import {
-  Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter,
-} from '@/components/ui/card';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
-
-// Icons
-import { Loader2, History, ChevronLeft, ChevronRight, FileSpreadsheet } from 'lucide-react';
-
-// Hooks & Utils
+import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/auth-context';
+import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
-import { exportDataToExcel } from '@/lib/utils';
+import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 import BackButton from '@/components/BackButton';
-import { toDateFromAny, formatTimestamp } from '@/lib/time';
-import { useRowFocus } from '@/hooks/useRowFocus';
+import { formatTimestamp } from '@/lib/time';
+import { ChevronLeft, ChevronRight, Eye, History, Loader2, Tag } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
-// Logging
-import { malKabulLogger } from '@/lib/logger';
-
-// =============================================================================
-// TYPE DEFINITIONS
-// =============================================================================
-
-/**
- * Mal Kabul transaction header (from Firestore)
- */
-type MalKabulHeader = {
-  transactionId: string;
-  depotId: string;
-  depotName: string;
-  userId: string;
-  userName: string;
-  timestamp?: Date | { seconds: number; nanoseconds: number } | null;
-  itemCount: number;
-  brands?: string[];
-  mode: 'verified' | 'unverified';
-};
-
-/**
- * Mal Kabul transaction line item
- */
-type MalKabulLine = {
-  stokKodu: string;
-  stokAdi: string;
-  lotNumarasi: string;
-  miad: string;
-  adet: number;
-  serials?: string[];
-};
-
-// =============================================================================
-// CONSTANTS
-// =============================================================================
-
-/** Available page size options */
-const PAGE_SIZE_OPTIONS = [50, 100, 200] as const;
-
-/** Firestore collection name */
 const COLLECTION_NAME = 'malKabulTransactions';
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const;
 
-/** Field to order by */
-const ORDER_FIELD = 'timestamp';
+type MalKabulRow = {
+  id: string;
+  transactionId?: string;
+  depotId?: string;
+  depotName?: string;
+  userId?: string;
+  userName?: string;
+  timestamp?: any;
+  itemCount?: number;
+  brands?: string[];
+};
 
-/** Maximum records to fetch */
-const MAX_RECORDS = 1000;
+function tsMillis(ts: any): number {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  return 0;
+}
 
 export default function MalKabulGecmisPage() {
+  const router = useRouter();
   const { toast } = useToast();
-  const sp = useSearchParams();
-  const openId = sp?.get('open') ?? null;
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
-  const [pageSize, setPageSize] = useState<number>(50);
-  const [isLoading, setIsLoading] = useState(true);
-  const [allRows, setAllRows] = useState<(MalKabulHeader & { id: string })[]>([]);
-  const [currentPage, setCurrentPage] = useState<number>(1);
-  const { focusRef } = useRowFocus('open');
+  const [pageSize, setPageSize] = useState<number>(20);
+  const [page, setPage] = useState<number>(1);
+  const [loading, setLoading] = useState(true);
+  const [allRows, setAllRows] = useState<MalKabulRow[]>([]);
+  const [selectedBrand, setSelectedBrand] = useState<string>('all');
 
-  // line modal
-  const [selectedTx, setSelectedTx] = useState<(MalKabulHeader & { id: string }) | null>(null);
-  const [linesLoading, setLinesLoading] = useState(false);
-  const [lines, setLines] = useState<MalKabulLine[]>([]);
-
-  // Real-time listener for transaction history
+  // Fetch ALL records via getScopedDocs which handles three cases:
+  //   1) companyId == normalized  (current records)
+  //   2) companyId == '__legacy__' (legacy-tagged records)
+  //   3) unscoped + matchesCompanyScope (very old records without companyId field)
+  // Using scopedQuery with a single where() clause silently excludes case 2 & 3,
+  // which is why only the most recent (properly-tagged) records were showing.
   useEffect(() => {
-    setIsLoading(true);
-    malKabulLogger.debug('Initializing transaction history listener');
+    if (!currentCompanyId) return;
+    let cancelled = false;
+    setLoading(true);
 
-    const q = query(
-      collection(db, COLLECTION_NAME),
-      orderBy(ORDER_FIELD, 'desc'),
-      limit(MAX_RECORDS)
-    );
+    getScopedDocs(COLLECTION_NAME, currentCompanyId, isSuperAdmin)
+      .then(docs => {
+        if (cancelled) return;
+        const rows = docs
+          .map(d => ({ id: d.id, ...d.data() } as MalKabulRow))
+          .sort((a, b) => tsMillis(b.timestamp) - tsMillis(a.timestamp));
+        setAllRows(rows);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        toast({ title: 'Hata', description: e?.message || 'Kayıtlar yüklenemedi.', variant: 'destructive' });
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snap: { docs: QueryDocumentSnapshot<DocumentData>[] }) => {
-        const data = snap.docs.map((d: QueryDocumentSnapshot<DocumentData>) => ({
-          id: d.id,
-          ...(d.data() as MalKabulHeader)
-        }));
+    return () => { cancelled = true; };
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
-        // Client-side sort to guarantee order
-        data.sort((a, b) => {
-          const aTime = toDateFromAny(a.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
-          const bTime = toDateFromAny(b.timestamp as Parameters<typeof toDateFromAny>[0])?.getTime() ?? 0;
-          return bTime - aTime;
-        });
+  // Reset to page 1 when filter or page size changes
+  useEffect(() => { setPage(1); }, [selectedBrand, pageSize]);
 
-        setAllRows(data);
-        setIsLoading(false);
-        malKabulLogger.info('Transaction history loaded', { count: data.length });
-      },
-      (error: Error) => {
-        malKabulLogger.error('Failed to listen to transaction history', error);
-        toast({
-          title: 'Hata',
-          description: 'Geçmiş verileri dinlenirken bir hata oluştu.',
-          variant: 'destructive'
-        });
-        setIsLoading(false);
-      }
-    );
+  // Brand list derived from fetched data — no separate Firestore round-trip needed
+  const brands = useMemo(() => {
+    const seen = new Set<string>();
+    allRows.forEach(r => (r.brands || []).forEach(b => seen.add(b)));
+    return [...seen].sort((a, b) => a.localeCompare(b, 'tr'));
+  }, [allRows]);
 
-    return () => {
-      malKabulLogger.debug('Cleaning up transaction history listener');
-      unsubscribe();
-    };
-  }, [toast]);
+  const filtered = useMemo(() => {
+    if (!selectedBrand || selectedBrand === 'all') return allRows;
+    return allRows.filter(r => (r.brands || []).includes(selectedBrand));
+  }, [allRows, selectedBrand]);
 
-  /**
-   * Open transaction details modal
-   * @param txId - Transaction ID to open
-   */
-  const openTransaction = useCallback(async (txId: string) => {
-    setLines([]);
-    setLinesLoading(true);
-    malKabulLogger.debug('Opening transaction details', { transactionId: txId });
+  const rows = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, page, pageSize]);
 
-    const txHeader = allRows.find((r) => r.id === txId);
-    if (!txHeader) {
-      malKabulLogger.warn('Transaction not found', { transactionId: txId });
-      toast({ title: 'Bulunamadı', description: 'İşlem mevcut değil veya silinmiş.' });
-      return;
-    }
-    setSelectedTx(txHeader);
-
-    try {
-      const txRef = doc(db, COLLECTION_NAME, txId);
-      const linesSnap = await getDocsFromServer(
-        query(collection(txRef, 'lines'), orderBy('stokKodu'))
-      );
-      const lineData = linesSnap.docs.map((d) => d.data() as MalKabulLine);
-      setLines(lineData);
-      malKabulLogger.info('Transaction details loaded', {
-        transactionId: txId,
-        lineCount: lineData.length
-      });
-    } catch (e) {
-      const error = e instanceof Error ? e : new Error(String(e));
-      malKabulLogger.error('Failed to load transaction details', error, { transactionId: txId });
-      toast({ title: 'Hata', description: error.message || 'Detaylar yüklenemedi', variant: 'destructive' });
-    } finally {
-      setLinesLoading(false);
-    }
-  }, [toast, allRows]);
-  
-  useEffect(() => {
-    if (openId && allRows.length > 0) openTransaction(openId);
-  }, [openId, allRows, openTransaction]);
-
-  const paginatedRows = useMemo(() => {
-    const startIndex = (currentPage - 1) * pageSize;
-    return allRows.slice(startIndex, startIndex + pageSize);
-  }, [allRows, currentPage, pageSize]);
-
-  const totalPages = Math.max(1, Math.ceil(allRows.length / pageSize));
-
-  useEffect(() => {
-    if (currentPage > totalPages && totalPages > 0) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
-  const exportCurrentPage = () => {
-    const rowsForExcel = paginatedRows.map((r: MalKabulHeader & { id: string }) => {
-      return {
-        'İşlem No': r.transactionId || r.id,
-        'Depo': r.depotName,
-        'Kullanıcı': r.userName,
-        'İşlem Zamanı': formatTimestamp(r.timestamp, 'dd.MM.yyyy HH:mm') || '-',
-        'Kalem Sayısı': r.itemCount,
-        'Markalar': (r.brands || []).join(', ')
-      };
-    });
-    exportDataToExcel(rowsForExcel, 'Mal_Kabul_Gecmis', 'Sayfa', toast);
-  };
-
-  const exportDetails = () => {
-    if (!selectedTx || lines.length === 0) {
-      toast({ title: 'Veri Yok', description: 'Dışa aktarılacak detay bulunamadı.' });
-      return;
-    }
-    const summaryData = lines.map((l: MalKabulLine) => ({
-      'Stok Kodu': l.stokKodu,
-      'Stok Adı': l.stokAdi,
-      'Lot': l.lotNumarasi,
-      'Miad': l.miad,
-      'Adet': l.adet,
-    }));
-    const serialsData = lines.flatMap((l: MalKabulLine) =>
-      (l.serials || []).map((s: string) => ({
-        'Stok Kodu': l.stokKodu,
-        'Stok Adı': l.stokAdi,
-        'Lot': l.lotNumarasi,
-        'Seri Numarası': s,
-      }))
-    );
-    exportDataToExcel({
-      'Özet': summaryData,
-      'Seri Numaraları': serialsData
-    }, `MalKabul_${selectedTx.transactionId || selectedTx.id}`, toast);
-  };
-
+  const totalCount = filtered.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const cols = 'minmax(0,2.3fr) 130px minmax(0,1.1fr) 150px 70px minmax(0,1fr) 96px';
 
   return (
-    <div className="p-6">
-      <div className="mx-auto max-w-5xl mb-4">
-        <BackButton fallback="/mal-kabul" />
-      </div>
+    <div className="mk-shell" style={{ padding: '20px 28px 40px' }}>
+      <MkClayStyles />
+      <div style={{ maxWidth: 1680, margin: '0 auto' }}>
+        <div className="mb-4"><BackButton fallback="/mal-kabul" /></div>
 
-      <Card className="mx-auto max-w-5xl">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-2xl flex items-center gap-2">
-                <History className="h-6 w-6" />
-                Mal Kabul İşlem Geçmişi
-              </CardTitle>
-              <CardDescription>
-                Tüm işlemler listelenir. Sayfa başına kayıt sayısını seçebilir ve sayfalar arasında gezinebilirsiniz.
-              </CardDescription>
+        <div style={{ borderRadius: MK_C.radiusLg, background: `linear-gradient(180deg, ${MK_C.surface} 0%, ${MK_C.surface2} 100%)`, boxShadow: MK_C.clay, overflow: 'hidden' }}>
+
+          {/* Header */}
+          <div className="flex flex-wrap items-start gap-4" style={{ padding: '24px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            <span style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', color: MK_C.accent, background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: MK_C.clayFlat }}>
+              <History className="h-5 w-5" />
+            </span>
+            <div className="flex-1" style={{ minWidth: 220 }}>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: '-0.02em', color: MK_C.ink1 }}>Mal Kabul İşlem Geçmişi</h1>
+              <p style={{ margin: '5px 0 0', fontSize: 14, color: MK_C.ink2, fontWeight: 500 }}>Tüm mal kabul işlemleri. Marka ve sayfa boyutuna göre filtreleyin.</p>
+              <div style={{ fontSize: 13, color: MK_C.ink3, fontWeight: 600, marginTop: 8 }}>
+                {loading
+                  ? 'Yükleniyor…'
+                  : `Toplam ${totalCount} işlem · Sayfa ${page} / ${totalPages}`}
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Select value={String(pageSize)} onValueChange={(v: string) => { setPageSize(Number(v)); setCurrentPage(1); }}>
-                <SelectTrigger className="w-32"><SelectValue placeholder="Sayfa boyutu" /></SelectTrigger>
+            <div className="flex flex-wrap items-center gap-3">
+              {brands.length > 0 && (
+                <Select value={selectedBrand} onValueChange={setSelectedBrand}>
+                  <SelectTrigger className="border-0" style={{ width: 180, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}>
+                    <div className="flex items-center gap-2">
+                      <Tag className="h-4 w-4 flex-shrink-0" style={{ color: MK_C.accent }} />
+                      <SelectValue placeholder="Tüm Markalar" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Tüm Markalar</SelectItem>
+                    {brands.map(b => <SelectItem key={b} value={b}>{b}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <Select value={String(pageSize)} onValueChange={v => setPageSize(Number(v))}>
+                <SelectTrigger className="border-0" style={{ width: 140, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}>
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {PAGE_SIZE_OPTIONS.map(s => <SelectItem key={s} value={String(s)}>{s} / sayfa</SelectItem>)}
                 </SelectContent>
               </Select>
-              <Button variant="outline" onClick={exportCurrentPage}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" /> Excel
-              </Button>
             </div>
           </div>
-          <div className="pt-2 text-sm text-muted-foreground">
-            Toplam işlem: {allRows.length} &nbsp;•&nbsp; Sayfa {currentPage} / {totalPages}
+
+          {/* Column headers */}
+          <div className="hidden md:grid" style={{ gridTemplateColumns: cols, gap: 16, padding: '16px 28px', borderBottom: `1px solid ${MK_C.line}` }}>
+            {(['İşlem No', 'Depo', 'Kullanıcı', 'İşlem Zamanı', 'Kalem', 'Markalar', ''] as const).map((h, i) => (
+              <div key={i} style={{ fontSize: 11.5, fontWeight: 700, color: MK_C.ink3, letterSpacing: '0.05em', textTransform: 'uppercase', textAlign: i === 4 ? 'center' : 'left' }}>{h}</div>
+            ))}
           </div>
-        </CardHeader>
 
-        <CardContent className="p-0">
-          <ScrollArea className="h-[60vh] border-t">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>İşlem No</TableHead>
-                  <TableHead>Depo</TableHead>
-                  <TableHead>Kullanıcı</TableHead>
-                  <TableHead>İşlem Zamanı</TableHead>
-                  <TableHead className="text-right">Kalem</TableHead>
-                  <TableHead>Markalar</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8">
-                      <div className="flex flex-col items-center justify-center">
-                        <Loader2 className="h-6 w-6 animate-spin" />
-                        <span className="mt-2 text-sm text-muted-foreground">Yükleniyor...</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ) : paginatedRows.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">Kayıt bulunamadı.</TableCell>
-                  </TableRow>
-                ) : (
-                  paginatedRows.map((r: MalKabulHeader & { id: string }) => (
-                      <TableRow key={r.id} data-row-id={r.id} ref={r.id === openId ? focusRef : null} className="hover:bg-muted/40" >
-                        <TableCell className="font-medium">{r.transactionId || r.id}</TableCell>
-                        <TableCell>{r.depotName || '-'}</TableCell>
-                        <TableCell>{r.userName || '-'}</TableCell>
-                        <TableCell>{formatTimestamp(r.timestamp, 'dd.MM.yyyy HH:mm')}</TableCell>
-                        <TableCell className="text-right">{r.itemCount ?? 0}</TableCell>
-                        <TableCell className="capitalize text-xs text-muted-foreground">{(r.brands || []).join(', ')}</TableCell>
-                        <TableCell className="text-right">
-                          <Button size="sm" onClick={() => openTransaction(r.id)}>Detay</Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                )}
-              </TableBody>
-            </Table>
-          </ScrollArea>
-        </CardContent>
-
-        <CardFooter className="flex items-center justify-between">
-          <Button variant="outline" disabled={currentPage <= 1 || isLoading} onClick={() => setCurrentPage((p: number) => p - 1)}>
-            <ChevronLeft className="h-4 w-4 mr-2" /> Önceki
-          </Button>
-          <span>Sayfa {currentPage} / {totalPages}</span>
-          <Button variant="outline" disabled={currentPage >= totalPages || isLoading} onClick={() => setCurrentPage((p: number) => p + 1)}>
-            Sonraki <ChevronRight className="h-4 w-4 ml-2" />
-          </Button>
-        </CardFooter>
-      </Card>
-
-      <Dialog open={!!selectedTx} onOpenChange={(o: boolean) => !o && setSelectedTx(null)}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
-             <div className="flex justify-between items-start">
-              <div>
-                <DialogTitle>İşlem Detayı</DialogTitle>
-                <DialogDescription>
-                  {selectedTx ? `${selectedTx.depotName ?? '-'} • ${selectedTx.userName ?? '-'} • ${formatTimestamp(selectedTx.timestamp, 'dd.MM.yyyy HH:mm')}` : ''}
-                </DialogDescription>
+          {/* Rows */}
+          <div style={{ padding: '12px 18px', minHeight: '40vh' }}>
+            {loading ? (
+              <div className="flex flex-col items-center justify-center" style={{ padding: '60px 0', color: MK_C.ink2 }}>
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <span className="mt-2 text-sm font-semibold">Tüm geçmiş yükleniyor…</span>
               </div>
-              <Button variant="outline" size="sm" onClick={exportDetails}>
-                  <FileSpreadsheet className="mr-2 h-4 w-4"/> Detaylı Excel
-              </Button>
-            </div>
-          </DialogHeader>
-          <div className="border rounded-lg">
-            <ScrollArea className="max-h-[60vh]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Stok Kodu</TableHead>
-                    <TableHead>Adı</TableHead>
-                    <TableHead>Lot</TableHead>
-                    <TableHead>Miad</TableHead>
-                    <TableHead className="text-right">Adet</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {linesLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center py-8">
-                        <Loader2 className="h-6 w-6 animate-spin inline-block mr-2" />
-                        Detaylar yükleniyor...
-                      </TableCell>
-                    </TableRow>
-                  ) : lines.length === 0 ? (
-                    <TableRow><TableCell colSpan={5} className="text-center py-10">Detay yok.</TableCell></TableRow>
-                  ) : (
-                    lines.map((l: MalKabulLine, idx: number) => (
-                      <TableRow key={idx}>
-                        <TableCell className="font-medium">{l.stokKodu}</TableCell>
-                        <TableCell>{l.stokAdi}</TableCell>
-                        <TableCell>{l.lotNumarasi || '-'}</TableCell>
-                        <TableCell>{l.miad || '-'}</TableCell>
-                        <TableCell className="text-right">{l.adet}</TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </ScrollArea>
+            ) : rows.length === 0 ? (
+              <div style={{ padding: '60px 0', textAlign: 'center', color: MK_C.ink3, fontWeight: 600 }}>Kayıt bulunamadı.</div>
+            ) : (
+              <div className="flex flex-col" style={{ gap: 9 }}>
+                {rows.map((r, idx) => (
+                  <div key={r.id} className="grid items-center"
+                    style={{ gridTemplateColumns: cols, gap: 16, padding: '14px 16px', borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: MK_C.clayFlat, animation: `mkPopIn ${240 + Math.min(idx, 8) * 30}ms ease` }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: MK_C.ink1, fontFamily: 'ui-monospace, monospace', lineHeight: 1.4, wordBreak: 'break-all' }}>{r.transactionId || r.id}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.depotName || '-'}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: MK_C.ink1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.userName || '-'}</div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{formatTimestamp(r.timestamp, 'dd.MM.yyyy HH:mm')}</div>
+                    <div style={{ textAlign: 'center' }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 36, height: 30, padding: '0 10px', borderRadius: MK_C.radiusPill, background: MK_C.surface2, boxShadow: MK_C.clayInset, fontSize: 14, fontWeight: 800, color: MK_C.ink1 }}>{r.itemCount ?? 0}</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(r.brands || []).map((b, i) => (
+                        <span key={`${b}-${i}`} style={{ padding: '4px 10px', borderRadius: MK_C.radiusPill, background: `${MK_C.accent}14`, color: MK_C.accent, fontSize: 12, fontWeight: 700 }}>{b}</span>
+                      ))}
+                    </div>
+                    <button onClick={() => router.push(`/mal-kabul/gecmis/${r.id}`)}
+                      style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7, height: 40, padding: '0 16px', justifySelf: 'end', borderRadius: MK_C.radiusSm, background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clay, color: MK_C.accent, fontSize: 13.5, fontWeight: 700 }}>
+                      <Eye className="h-[15px] w-[15px]" /> Detay
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setSelectedTx(null)}>Kapat</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+
+          {/* Pagination */}
+          {!loading && totalCount > 0 && (
+            <div className="flex items-center" style={{ padding: '16px 28px', borderTop: `1px solid ${MK_C.line}` }}>
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                style={{ all: 'unset', cursor: page <= 1 ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page <= 1 ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page <= 1 ? MK_C.clayInset : MK_C.clay, color: page <= 1 ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page <= 1 ? 0.6 : 1 }}>
+                <ChevronLeft className="h-[15px] w-[15px]" /> Önceki
+              </button>
+              <div className="flex-1" style={{ textAlign: 'center', fontSize: 14, fontWeight: 700, color: MK_C.ink2 }}>
+                Sayfa {page} / {totalPages} &nbsp;·&nbsp; {totalCount} kayıt
+              </div>
+              <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+                style={{ all: 'unset', cursor: page >= totalPages ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 44, padding: '0 18px', borderRadius: MK_C.radiusSm, background: page >= totalPages ? MK_C.surface2 : `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: page >= totalPages ? MK_C.clayInset : MK_C.clay, color: page >= totalPages ? MK_C.ink3 : MK_C.ink1, fontSize: 14, fontWeight: 700, opacity: page >= totalPages ? 0.6 : 1 }}>
+                Sonraki <ChevronRight className="h-[15px] w-[15px]" />
+              </button>
+            </div>
+          )}
+
+        </div>
+      </div>
     </div>
   );
 }

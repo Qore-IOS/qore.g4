@@ -1,5 +1,6 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -8,7 +9,7 @@
 @layer base {
   :root {
     /* --- LIGHT MODE: NEUMORPHIC --- */
-    --background: 0 0% 88%; /* #e0e0e0 */
+    --background: 48 11% 91%; /* #eae9e5 */
     --foreground: 0 0% 20%;
     
     --card: 0 0% 88%;
@@ -39,7 +40,7 @@
     --radius: 1rem;
 
     /* Dock & z-index layout contract */
-    --dock-h: 56px;
+    --dock-h: 76px;
     --dock-gap: 16px;
     --z-content: 1;
     --z-sticky: 100;
@@ -49,9 +50,9 @@
     --z-float: 1200;
 
     /* Dashboard neumorphic tokens (light mode) */
-    --dashboard-bg: #E9E7E3;
-    --dashboard-surface: #F3F2EF;
-    --dashboard-surface-2: #EEECE7;
+    --dashboard-bg: #eae9e5;
+    --dashboard-surface: #eae9e5;
+    --dashboard-surface-2: #eae9e5;
     --dashboard-stroke: rgba(0, 0, 0, .045);
     --dashboard-text: #2B2F33;
     --dashboard-muted: #6C727A;
@@ -62,9 +63,9 @@
     --dashboard-pressed: inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16);
 
     /* Device management module tokens */
-    --device-bg: #ECEDEF;
-    --device-surface: #F3F4F6;
-    --device-surface-2: #E7E9ED;
+    --device-bg: #eae9e5;
+    --device-surface: #eae9e5;
+    --device-surface-2: #eae9e5;
     --device-border: rgba(20, 23, 28, 0.08);
     --device-text: #1F2328;
     --device-muted: #6B7280;
@@ -148,7 +149,7 @@
 }
 
 @layer components {
-    /* ===== Device Management – Unified Light Neumorphic Primitives ===== */
+    /* ===== Device Management â€“ Unified Light Neumorphic Primitives ===== */
 
     /* Shell / page background */
     .cihaz-shell {
@@ -210,8 +211,8 @@
     }
 
     /* ============================================================
-       FLUID EDITORIAL DESIGN SYSTEM — Satın Alma Planning Panel
-       Scope: .fluid-editorial wrapper — overrides dashboard tokens
+       FLUID EDITORIAL DESIGN SYSTEM â€” SatÄ±n Alma Planning Panel
+       Scope: .fluid-editorial wrapper â€” overrides dashboard tokens
        ============================================================ */
 
     .fluid-editorial {
@@ -228,7 +229,7 @@
       --dashboard-bg: #f7faf8;
       --dashboard-focus-glow: rgba(0, 107, 104, 0.25);
       background: #f7faf8;
-      font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+      font-family: 'Urbanist', ui-sans-serif, system-ui, sans-serif;
     }
 
     .fluid-editorial .satin-alma-fluid-shell,
@@ -241,9 +242,9 @@
       min-height: 100dvh;
     }
 
-    /* Panel aktifken tüm görünür alan tek renk — üst / alt / yanlardan farklı
-       sistem UI rengi sızmasın. Body ve main arka planlarını panelin rengine
-       eşitleriz. */
+    /* Panel aktifken tÃ¼m gÃ¶rÃ¼nÃ¼r alan tek renk â€” Ã¼st / alt / yanlardan farklÄ±
+       sistem UI rengi sÄ±zmasÄ±n. Body ve main arka planlarÄ±nÄ± panelin rengine
+       eÅŸitleriz. */
     html:has(.fluid-editorial),
     body:has(.fluid-editorial),
     body:has(.fluid-editorial) main,
@@ -256,7 +257,7 @@
       background: #f7faf8 !important;
     }
 
-    /* İçerik safe zone'u — panel kenarlarında nefes payı */
+    /* Ä°Ã§erik safe zone'u â€” panel kenarlarÄ±nda nefes payÄ± */
     .fluid-editorial .fluid-safe-content {
       padding-left: clamp(1rem, 3vw, 2rem);
       padding-right: clamp(1rem, 3vw, 2rem);
@@ -373,7 +374,7 @@
       transform: scale(0.97);
     }
 
-    /* Fluid date pill — selected */
+    /* Fluid date pill â€” selected */
     .fluid-editorial .fluid-date-selected {
       background: linear-gradient(135deg, #006b68, #5bccca);
       color: #ffffff;
@@ -410,7 +411,7 @@
       pointer-events: none;
     }
 
-    /* E1 – subtle card / list-item (small elevation) */
+    /* E1 â€“ subtle card / list-item (small elevation) */
     .cihaz-card {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -418,7 +419,7 @@
       border-radius: 20px;
     }
 
-    /* E2 – primary card / container (strong elevation) */
+    /* E2 â€“ primary card / container (strong elevation) */
     .cihaz-card-strong {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -426,20 +427,20 @@
       border-radius: 24px;
     }
 
-    /* E0 – pressed / active / inset state */
+    /* E0 â€“ pressed / active / inset state */
     .cihaz-pressed {
       background: var(--dashboard-surface-2);
       box-shadow: var(--dashboard-pressed);
       border-radius: 14px;
     }
 
-    /* Focus ring – accessible keyboard indicator */
+    /* Focus ring â€“ accessible keyboard indicator */
     .cihaz-focus-ring:focus-visible {
       outline: none;
       box-shadow: 0 0 0 3px var(--dashboard-focus-glow);
     }
 
-    /* ===== Action tile – main hub buttons ===== */
+    /* ===== Action tile â€“ main hub buttons ===== */
     .cihaz-action-tile {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -459,7 +460,7 @@
       box-shadow: var(--dashboard-pressed);
     }
 
-    /* ===== Tool list item – secondary actions ===== */
+    /* ===== Tool list item â€“ secondary actions ===== */
     .cihaz-tool-item {
       background: var(--dashboard-surface);
       border: 1px solid var(--dashboard-stroke);
@@ -478,6 +479,161 @@
       transform: translateY(0);
       box-shadow: var(--dashboard-pressed);
     }
+
+
+    /* ============================================================
+       Maliyet Clay Design System — cost dashboard/count/history
+       Scope: .maliyet-clay wrapper. Mirrors the cream claymorphism
+       reference used by dashboard/sipariş/direct-transfer panels.
+       ============================================================ */
+    .maliyet-clay {
+      --dashboard-bg: #EFEAE0;
+      --dashboard-surface: #FCFAF5;
+      --dashboard-surface-2: #F5F1E8;
+      --dashboard-stroke: rgba(90, 72, 40, 0.10);
+      --dashboard-text: #3D382F;
+      --dashboard-muted: #908872;
+      --dashboard-accent: #C98A57;
+      --dashboard-accent-2: #E0B776;
+      --dashboard-accent-glow: rgba(201, 138, 87, 0.24);
+      --dashboard-focus-glow: rgba(201, 138, 87, 0.28);
+      --dashboard-raised:
+        inset 0 1px 1px rgba(255,255,255,0.9),
+        inset 0 -3px 7px rgba(178,160,128,0.14),
+        0 10px 24px -12px rgba(150,128,96,0.34),
+        0 2px 6px -2px rgba(150,128,96,0.16);
+      --dashboard-raised-soft:
+        inset 0 1px 1px rgba(255,255,255,0.85),
+        0 4px 12px -7px rgba(150,128,96,0.28);
+      --dashboard-pressed:
+        inset 0 2px 5px rgba(178,160,128,0.30),
+        inset 0 -1px 0 rgba(255,255,255,0.55);
+      --radius: 24px;
+      min-height: 100dvh;
+      color: var(--dashboard-text);
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background:
+        radial-gradient(120% 80% at 8% -5%, #F6F2EA 0%, transparent 55%),
+        radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+        var(--dashboard-bg) !important;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html:has(.maliyet-clay),
+    body:has(.maliyet-clay),
+    body:has(.maliyet-clay) main,
+    body:has(.maliyet-clay) .page-shell {
+      background: #EFEAE0 !important;
+    }
+
+    .maliyet-clay .cihaz-card,
+    .maliyet-clay .cihaz-card-strong,
+    .maliyet-clay .cihaz-tool-item,
+    .maliyet-clay .cihaz-action-tile {
+      border: 0 !important;
+      background: linear-gradient(180deg, #FCFAF5 0%, #F5F1E8 100%) !important;
+      box-shadow: var(--dashboard-raised) !important;
+      border-radius: 32px !important;
+    }
+
+    .maliyet-clay .cihaz-tool-item,
+    .maliyet-clay .cihaz-card {
+      border-radius: 24px !important;
+    }
+
+    .maliyet-clay .cihaz-action-tile:hover,
+    .maliyet-clay .cihaz-tool-item:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 1px rgba(255,255,255,0.95),
+        inset 0 -3px 7px rgba(178,160,128,0.16),
+        0 16px 28px -14px rgba(150,128,96,0.38) !important;
+    }
+
+    .maliyet-clay .cihaz-pressed {
+      border: 0 !important;
+      background: #F5F1E8 !important;
+      box-shadow: var(--dashboard-pressed) !important;
+      border-radius: 999px !important;
+    }
+
+    .maliyet-clay input,
+    .maliyet-clay select,
+    .maliyet-clay textarea,
+    .maliyet-clay [role="combobox"] {
+      border: 0 !important;
+      background: #F5F1E8 !important;
+      box-shadow: var(--dashboard-pressed) !important;
+      color: var(--dashboard-text) !important;
+      border-radius: 16px !important;
+      font-weight: 600;
+    }
+
+    .maliyet-clay input::placeholder,
+    .maliyet-clay textarea::placeholder {
+      color: #908872 !important;
+      opacity: .85;
+    }
+
+    .maliyet-clay button {
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s cubic-bezier(.22,1,.36,1), opacity .2s ease;
+    }
+
+    .maliyet-clay button:focus-visible {
+      outline: 2px solid var(--dashboard-accent) !important;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 3px var(--dashboard-focus-glow), var(--dashboard-raised-soft) !important;
+    }
+
+    .maliyet-clay .bg-\[var\(--dashboard-accent\)\],
+    .maliyet-clay button.bg-\[var\(--dashboard-accent\)\] {
+      background: linear-gradient(180deg, #E0B776, #C98A57) !important;
+      box-shadow: 0 12px 22px -10px var(--dashboard-accent-glow), inset 0 1px 0 rgba(255,255,255,.35) !important;
+    }
+
+    .maliyet-clay .text-\[var\(--dashboard-accent\)\] {
+      color: #C98A57 !important;
+    }
+
+    .maliyet-clay .border-\[var\(--dashboard-stroke\)\],
+    .maliyet-clay .border-b,
+    .maliyet-clay .border-t,
+    .maliyet-clay .border-r {
+      border-color: rgba(90, 72, 40, 0.10) !important;
+    }
+
+    .maliyet-clay .sticky.top-0,
+    .maliyet-clay .sticky.bottom-0,
+    .maliyet-clay .fixed.bottom-0 {
+      background: rgba(252,250,245,.92) !important;
+      box-shadow: var(--dashboard-raised-soft);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .maliyet-clay aside,
+    .maliyet-clay main > div[class*="border-b"] {
+      background: transparent !important;
+    }
+
+    .maliyet-clay h1,
+    .maliyet-clay h2 {
+      letter-spacing: -0.025em;
+    }
+
+    @media (max-width: 640px) {
+      .maliyet-clay { padding-inline: 0; }
+      .maliyet-clay .max-w-3xl,
+      .maliyet-clay .max-w-4xl,
+      .maliyet-clay .max-w-2xl { padding-inline: 16px; padding-top: 24px; }
+      .maliyet-clay .cihaz-tool-item { border-radius: 22px !important; }
+      .maliyet-clay .cihaz-card,
+      .maliyet-clay .cihaz-card-strong { border-radius: 26px !important; }
+      .maliyet-clay aside.w-\[280px\] { width: min(82vw, 300px) !important; }
+      .maliyet-clay .flex-1.flex.overflow-hidden { overflow: visible; }
+      .maliyet-clay main { min-width: 0; }
+    }
+
 
     /* ===== Section header (label + divider) ===== */
     .cihaz-section-label {
@@ -549,7 +705,7 @@
     }
 
     /* ============================================================
-       LOJISTIK İŞ TERMİNALİ — Sipariş Paneli
+       LOJISTIK Ä°Å TERMÄ°NALÄ° â€” SipariÅŸ Paneli
        Light:  emerald (#10B981) accent, soft white surfaces
        Dark:   magenta (#EC4899) accent + emerald success, deep
                surfaces with glassmorphic glow per design ref.
@@ -589,7 +745,7 @@
       background-image: var(--loj-bg-grad);
       color: var(--loj-text);
       min-height: 100dvh;
-      font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+      font-family: 'Urbanist', ui-sans-serif, system-ui, sans-serif;
       isolation: isolate;
     }
 
@@ -1166,7 +1322,7 @@
     }
 
     /* ============================================================
-       LOJİSTİK TERMİNAL SHELL — sidebar / nav / mobile / confirm fx
+       LOJÄ°STÄ°K TERMÄ°NAL SHELL â€” sidebar / nav / mobile / confirm fx
        ============================================================ */
     :root {
       --lt-sidebar-w: 248px;
@@ -1183,7 +1339,7 @@
       min-height: 100dvh;
       width: 100%;
       color: var(--loj-text, #0F2A24);
-      font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+      font-family: 'Urbanist', ui-sans-serif, system-ui, -apple-system, sans-serif;
       isolation: isolate;
     }
 
@@ -1301,7 +1457,7 @@
     .dark .lt-brand__qore { color: var(--loj-text, #F4ECFA); }
     .lt-brand__logistics {
       margin-left: 2px;
-      font-family: 'Plus Jakarta Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+      font-family: 'Urbanist', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
       font-weight: 500;
       font-style: italic;
       font-size: 22px;
@@ -1752,7 +1908,7 @@
     .dark .lt-bottom-item--danger { color: #F87171; }
 
     /* ============================================================
-       lt-confirm — Apple Face-ID style success animation
+       lt-confirm â€” Apple Face-ID style success animation
        ============================================================ */
     .lt-confirm-overlay {
       position: fixed;
@@ -1874,33 +2030,33 @@
 
         /* 3D Depth: Multiple shadow layers + inner refraction shadows */
         box-shadow:
-          /* Dış derinlik gölgesi */
+          /* DÄ±ÅŸ derinlik gÃ¶lgesi */
           0 16px 56px rgba(15, 30, 60, 0.4),
           0 6px 20px rgba(15, 30, 60, 0.3),
-          /* İç üst ışık - üst kenardan vuran ışık (Y: 1) */
+          /* Ä°Ã§ Ã¼st Ä±ÅŸÄ±k - Ã¼st kenardan vuran Ä±ÅŸÄ±k (Y: 1) */
           inset 0 1px 2px rgba(255, 255, 255, 0.15),
-          /* İç alt ışık refraksiyonu - caustic effect (Y: -1) */
+          /* Ä°Ã§ alt Ä±ÅŸÄ±k refraksiyonu - caustic effect (Y: -1) */
           inset 0 -1px 2px rgba(255, 255, 255, 0.08),
-          /* İç kenar refraksiyon halkası - soldan */
+          /* Ä°Ã§ kenar refraksiyon halkasÄ± - soldan */
           inset 2px 0 3px rgba(255, 255, 255, 0.06),
-          /* İç kenar refraksiyon halkası - sağdan */
+          /* Ä°Ã§ kenar refraksiyon halkasÄ± - saÄŸdan */
           inset -2px 0 3px rgba(255, 255, 255, 0.06);
     }
 
-    /* Light A - Üst kenar rim glow (dış parlama) */
+    /* Light A - Ãœst kenar rim glow (dÄ±ÅŸ parlama) */
     .dark .neu-card::before {
         content: '';
         position: absolute;
         inset: -4px;
         border-radius: 24px;
         background:
-          /* Üst kenar gradient ışık */
+          /* Ãœst kenar gradient Ä±ÅŸÄ±k */
           radial-gradient(
             ellipse 60% 20% at 50% 0%,
             rgba(255, 255, 255, 0.18) 0%,
             transparent 60%
           ),
-          /* Sol üst köşe speküler */
+          /* Sol Ã¼st kÃ¶ÅŸe spekÃ¼ler */
           radial-gradient(
             ellipse 30% 20% at 10% 10%,
             rgba(255, 255, 255, 0.12) 0%,
@@ -1912,32 +2068,32 @@
         z-index: -1;
     }
 
-    /* Light B/C/D - İç hacimsel parlama, speküler ve refraksiyon */
+    /* Light B/C/D - Ä°Ã§ hacimsel parlama, spekÃ¼ler ve refraksiyon */
     .dark .neu-card::after {
         content: '';
         position: absolute;
         inset: 0;
         border-radius: inherit;
         background:
-          /* Light C - Sol üst speküler highlight (metalik parlama) */
+          /* Light C - Sol Ã¼st spekÃ¼ler highlight (metalik parlama) */
           radial-gradient(
             ellipse 40% 30% at 12% 12%,
             rgba(255, 255, 255, 0.12) 0%,
             transparent 50%
           ),
-          /* Light D - Sağ alt speküler */
+          /* Light D - SaÄŸ alt spekÃ¼ler */
           radial-gradient(
             ellipse 35% 25% at 88% 88%,
             rgba(255, 255, 255, 0.06) 0%,
             transparent 50%
           ),
-          /* Light B - Üst hacimsel iç ışık (camın içine yayılan) */
+          /* Light B - Ãœst hacimsel iÃ§ Ä±ÅŸÄ±k (camÄ±n iÃ§ine yayÄ±lan) */
           radial-gradient(
             ellipse 90% 40% at 50% 5%,
             rgba(255, 255, 255, 0.1) 0%,
             transparent 50%
           ),
-          /* Inner edge refraction gradient - üst kenar */
+          /* Inner edge refraction gradient - Ã¼st kenar */
           linear-gradient(
             180deg,
             rgba(255, 255, 255, 0.08) 0%,
@@ -2479,21 +2635,27 @@
     @apply transition-all duration-200 active:scale-95;
   }
 
-  /* Apply strict neumorphism only when NOT in dark mode */
+  /* Faz 6 (mobil modernizasyon): Light-mode butonlar â€” eski neumorphic GRÄ° raised stil
+     yerine DÃœZ/FLAT modern yÃ¼zey (beyaz + ince kenarlÄ±k + hafif gÃ¶lge). 3D neumorphic
+     Ã§ift-gÃ¶lge kaldÄ±rÄ±ldÄ±. TÃ¼m uygulamada tutarlÄ±; dark "liquid glass" korunur. */
   :root:not(.dark) .neu-btn-universal {
-    background-color: #e0e0e0; /* Match body background */
+    background-color: #fbfbfc;
     color: var(--foreground);
-    border: none;
-    border-radius: 12px; /* Consistent radius */
-    box-shadow: 6px 6px 12px #bebebe,
-               -6px -6px 12px #ffffff;
+    border: 1px solid rgba(15, 23, 42, 0.10);
+    border-radius: 10px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   }
 
-  /* Pressed state for Light Mode */
+  :root:not(.dark) .neu-btn-universal:hover {
+    background-color: #ffffff;
+    border-color: rgba(15, 23, 42, 0.16);
+  }
+
+  /* Pressed/active state for Light Mode â€” flat (neumorphic inset deÄŸil) */
   :root:not(.dark) .neu-btn-universal:active,
   :root:not(.dark) .neu-btn-universal[data-state="on"] {
-    box-shadow: inset 4px 4px 8px #bebebe,
-                inset -4px -4px 8px #ffffff;
+    background-color: #f0f0f2;
+    box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.10);
   }
 
   /* Specific Text Colors for Light Mode Variants (since we removed bg color) */
@@ -2509,7 +2671,7 @@
       rgba(255, 255, 255, 0.02) 50%,
       rgba(255, 255, 255, 0.04) 100%
     );
-    /* Kenarlık yok - sadece ışık ve gölge ile tanımlanır */
+    /* KenarlÄ±k yok - sadece Ä±ÅŸÄ±k ve gÃ¶lge ile tanÄ±mlanÄ±r */
     border: none;
     border-radius: 12px;
     backdrop-filter: blur(20px) saturate(180%);
@@ -2517,7 +2679,7 @@
     overflow: visible;
     isolation: isolate;
 
-    /* Sadece dış gölge - kenar çizgisi yok */
+    /* Sadece dÄ±ÅŸ gÃ¶lge - kenar Ã§izgisi yok */
     box-shadow:
       0 8px 32px rgba(20, 40, 80, 0.35),
       0 2px 8px rgba(20, 40, 80, 0.25);
@@ -2525,7 +2687,7 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
-  /* Light A - Çok yumuşak rim glow (kenar çizgisi değil, parlama) */
+  /* Light A - Ã‡ok yumuÅŸak rim glow (kenar Ã§izgisi deÄŸil, parlama) */
   .dark .neu-btn-universal::before {
     content: '';
     position: absolute;
@@ -2801,7 +2963,7 @@
     display: inline-block;
     font-size: 16px;
     font-weight: 500;
-    font-family: "Montserrat", "Manrope", sans-serif;
+    font-family: 'Urbanist', ui-sans-serif, system-ui, sans-serif;
     color: #5550;
     background-image: linear-gradient(#000a, #555);
     -webkit-background-clip: text;
@@ -2944,11 +3106,43 @@
   }
 }
 
-/* Dock item styling - Apple-like colorful 3D icons */
+/* Dock item styling - flat, KPI-card inspired and GPU-friendly. */
+.qdock-flat-shell {
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.dark .qdock-flat-shell,
+.night .qdock-flat-shell {
+  background: rgba(20, 24, 31, 0.92);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    0 1px 3px rgba(0, 0, 0, 0.26);
+}
+
+.qdock-menu-surface {
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.1),
+    0 2px 6px rgba(0, 0, 0, 0.06);
+}
+
+.dark .qdock-menu-surface,
+.night .qdock-menu-surface {
+  background: rgba(20, 24, 31, 0.96);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
 .dock-item-wrapper {
-  @apply w-12 h-12 rounded-xl flex items-center justify-center;
+  @apply w-14 h-14 rounded-2xl flex items-center justify-center;
   position: relative;
-  transition: background 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .dock-item-wrapper:hover {
@@ -2983,31 +3177,190 @@
 
 /* Icon sizing - colorful gradient applied inline via style */
 .dock-item-icon {
-  @apply w-6 h-6;
+  @apply w-8 h-8;
   transition: filter 0.15s ease;
 }
 
-/* Hover glow effect on icon */
-.dock-item-wrapper:hover .dock-item-icon {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.2)) brightness(1.1);
-}
 
 /* Dock tooltip styling - renders via portal above everything */
 .dock-tooltip {
-  @apply rounded-lg px-3 py-1.5 text-xs font-medium;
-  background: rgba(255, 255, 255, 0.92);
-  backdrop-filter: blur(12px) saturate(180%);
-  -webkit-backdrop-filter: blur(12px) saturate(180%);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 1px 3px rgba(0, 0, 0, 0.04);
+  @apply rounded-full px-3 py-1.5 text-xs font-medium;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.72) 0%,
+    rgba(255, 255, 255, 0.5) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.12),
+    0 1px 3px rgba(0, 0, 0, 0.06),
+    inset 0 1px 1px rgba(255, 255, 255, 0.8);
   color: #1a1a1a;
 }
 
 .dark .dock-tooltip {
-  background: rgba(30, 30, 30, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.15);
+  background: linear-gradient(
+    180deg,
+    rgba(50, 50, 60, 0.55) 0%,
+    rgba(25, 25, 32, 0.5) 100%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.4),
+    0 1px 3px rgba(0, 0, 0, 0.2),
+    inset 0 1px 1px rgba(255, 255, 255, 0.18);
   color: #e5e5e5;
+}
+
+/* Dock right-zone: hairline separators + reserved minimized-tab slots.
+   The minimized-tab zone keeps at least two reserved slots and grows as
+   tabs are sent down (the live minimize + genie animation arrive with the
+   tabbed-window system). */
+.qdock-sep {
+  width: 1px;
+  height: 42px;
+  margin: 0 7px;
+  border-radius: 1px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(20, 28, 50, 0.16) 25%,
+    rgba(20, 28, 50, 0.16) 75%,
+    transparent 100%
+  );
+  align-self: center;
+  flex: 0 0 auto;
+}
+.dark .qdock-sep {
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 25%,
+    rgba(255, 255, 255, 0.18) 75%,
+    transparent 100%
+  );
+}
+
+.qdock-minslot {
+  width: 46px;
+  height: 46px;
+  border-radius: 15px;
+  border: 1.5px dashed rgba(20, 28, 50, 0.16);
+  background: rgba(20, 28, 50, 0.03);
+  flex: 0 0 auto;
+}
+.dark .qdock-minslot {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+/* ===== Apple Liquid Glass yüzey katmanları (LiquidGlassSurface) =====
+   --lqg-mx / --lqg-my : imlecin yüzey içindeki normalize konumu (JS yazar)
+   --lqg-ang           : ışık yönü — rim gradyanının açısı (JS yazar)
+   --lqg-r             : köşe yarıçapı */
+/* DİKKAT: Bu ağaçta isolation/mix-blend-mode KULLANMAYIN. Blend'li bir
+   çocuk (+isolate kapsayıcı), kardeş .lqg-refract'ın backdrop-filter'ının
+   sayfa arkasını örneklemesini engelliyor — headless Chromium yeniden
+   üretimiyle kanıtlandı (masaüstü dock'un "düz cam" kalmasının kök nedeni). */
+.lqg-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: var(--lqg-r, 24px);
+}
+.lqg-layer {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+.lqg-refract {
+  overflow: hidden;
+  /* backdrop-filter inline olarak bileşenden gelir (url(#id) + blur + saturate) */
+  transform: translateZ(0);
+}
+/* Cam gövde tonu — ışığı üstten alan çok hafif beyaz hacim.
+   Bilerek zayıf: kırılan arka plan renkleri camın içinden canlı görünmeli. */
+.lqg-tint {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.03) 38%,
+    rgba(255, 255, 255, 0.09) 100%
+  );
+}
+.dark .lqg-tint {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.1) 0%,
+    rgba(12, 12, 18, 0.22) 42%,
+    rgba(255, 255, 255, 0.05) 100%
+  );
+}
+/* İç hacim: üst iç ışık + altta yumuşak geri yansıma */
+.lqg-bevel {
+  box-shadow:
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.7),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.25),
+    inset 0 -8px 18px rgba(255, 255, 255, 0.09),
+    inset 0 10px 20px rgba(255, 255, 255, 0.06);
+}
+.dark .lqg-bevel {
+  box-shadow:
+    inset 0 1px 1px rgba(255, 255, 255, 0.32),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.1),
+    inset 0 -10px 22px rgba(255, 255, 255, 0.05),
+    inset 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+/* İmleci takip eden spekülar parlama + yavaş ortam ışıltısı.
+   mix-blend-mode bilinçli olarak YOK (yukarıdaki nota bakın). */
+.lqg-sheen {
+  background:
+    radial-gradient(
+      130px 56px at calc(var(--lqg-mx, 0.5) * 100%) -28%,
+      rgba(255, 255, 255, 0.55) 0%,
+      rgba(255, 255, 255, 0.14) 45%,
+      transparent 72%
+    ),
+    radial-gradient(
+      90px 44px at calc(var(--lqg-mx, 0.5) * 100% - 60px) 120%,
+      rgba(255, 255, 255, 0.2) 0%,
+      transparent 70%
+    );
+  animation: lqg-ambient 7s ease-in-out infinite;
+}
+.dark .lqg-sheen {
+  opacity: 0.55;
+}
+@keyframes lqg-ambient {
+  0%, 100% { opacity: 0.75; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lqg-sheen { animation: none; }
+}
+/* Işık yönüne göre dönen 1px cam kenarı (maskeli gradyan halka) */
+.lqg-rim {
+  padding: 1px;
+  background: linear-gradient(
+    var(--lqg-ang, 135deg),
+    rgba(255, 255, 255, 0.9) 0%,
+    rgba(255, 255, 255, 0.15) 38%,
+    rgba(255, 255, 255, 0.5) 62%,
+    rgba(255, 255, 255, 0.85) 100%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}
+.dark .lqg-rim {
+  background: linear-gradient(
+    var(--lqg-ang, 135deg),
+    rgba(255, 255, 255, 0.55) 0%,
+    rgba(255, 255, 255, 0.08) 40%,
+    rgba(255, 255, 255, 0.22) 65%,
+    rgba(255, 255, 255, 0.45) 100%
+  );
 }
 
 /* Ensure dialogs with glass-card maintain fixed positioning */
@@ -3041,7 +3394,7 @@
   z-index: 10 !important;
 }
 
-/* ── Device Map Panel (Neumorphic) ── */
+/* â”€â”€ Device Map Panel (Neumorphic) â”€â”€ */
 .device-map-shell {
   max-width: 1200px;
   margin: 0 auto;
@@ -3427,74 +3780,64 @@
   animation: flow 2s ease-in-out infinite;
 }
 
-/* --- FROSTED GLASS CARD: Ürün Kullanım Panel için --- */
+/* --- ÜRÜN KULLANIM PANEL KARTI ---
+   Performans notu: Bu kartlar daha önce backdrop-blur (frosted) ve ardından
+   LiquidGlassSurface (canvas displacement + çoklu backdrop-filter) kullanıyordu.
+   Panelde 5+ kart aynı anda render edildiğinden bu, özellikle eski/zayıf
+   cihazlarda ciddi yavaşlama ve donmaya yol açtı. Bu yüzden GPU dostu, sade
+   bir yarı saydam yüzeye geçildi: backdrop-filter YOK, SVG/canvas YOK.
+   Fotoğraf duvar kâğıdı üstünde temiz "kart" görünümünü korur. */
 .frosted-glass-card {
   position: relative;
   border-radius: 16px;
   overflow: hidden;
-  isolation: isolate;
-}
-
-/* Light mode: Buzlu cam efekti - %20 daha saydam */
-.frosted-glass-card {
-  background: rgba(255, 255, 255, 0.45);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.08),
-    0 2px 8px rgba(0, 0, 0, 0.04),
-    inset 0 1px 1px rgba(255, 255, 255, 0.6);
+    0 8px 24px rgba(0, 0, 0, 0.08),
+    0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-/* Light mode hover */
 .frosted-glass-card:hover {
-  background: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.88);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.1),
-    0 4px 12px rgba(0, 0, 0, 0.06),
-    inset 0 1px 1px rgba(255, 255, 255, 0.7);
+    0 12px 32px rgba(0, 0, 0, 0.1),
+    0 2px 6px rgba(0, 0, 0, 0.06);
 }
 
-/* Dark mode: Karartılmış buzlu cam efekti - %20 daha saydam */
 .dark .frosted-glass-card {
-  background: rgba(0, 0, 0, 0.25);
-  backdrop-filter: blur(20px) saturate(150%) brightness(0.9);
-  -webkit-backdrop-filter: blur(20px) saturate(150%) brightness(0.9);
+  background: rgba(20, 22, 28, 0.82);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.3),
-    0 2px 8px rgba(0, 0, 0, 0.2),
-    inset 0 1px 1px rgba(255, 255, 255, 0.06);
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
-/* Dark mode hover */
 .dark .frosted-glass-card:hover {
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(28, 30, 38, 0.88);
   box-shadow:
-    0 12px 40px rgba(0, 0, 0, 0.4),
-    0 4px 12px rgba(0, 0, 0, 0.3),
-    inset 0 1px 1px rgba(255, 255, 255, 0.1);
+    0 12px 32px rgba(0, 0, 0, 0.45),
+    0 2px 6px rgba(0, 0, 0, 0.3);
 }
 
-/* Frosted glass card içindeki başlıklar için */
+/* Kart içindeki başlıklar */
 .frosted-glass-card .frosted-header {
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+  border-bottom: 1px solid rgba(15, 23, 42, 0.08);
 }
 
 .dark .frosted-glass-card .frosted-header {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-/* Frosted glass kart içeriği */
+/* Kart içeriği */
 .frosted-glass-card .frosted-content {
   padding: 16px;
 }
 
 /* Time-based background panel - now handled via inline styles */
 
-/* Frosted glass button stillerini ayrı tutuyoruz */
+/* Frosted glass button stillerini ayrÄ± tutuyoruz */
 .frosted-glass-btn {
   background: rgba(255, 255, 255, 0.4);
   backdrop-filter: blur(8px);
@@ -3593,11 +3936,11 @@
   }
 }
 
-/* ─────────────────────────────────────────────
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
    Stock warning: blinking red border
    Used on rows in lab stock management panel for items
    that are: expiring soon, at min-stock, or qty=1 (max>2)
-   ───────────────────────────────────────────── */
+   â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 @keyframes stockWarningBlink {
   0%, 100% {
     border-color: rgba(239, 68, 68, 1);
@@ -3640,7 +3983,7 @@
   --qt-surface-strong: rgba(255, 255, 255, 0.9);
   --qt-surface-soft: rgba(255, 255, 255, 0.55);
 
-  /* Brand accent — soft gradient hub palette */
+  /* Brand accent â€” soft gradient hub palette */
   --qt-accent: #7C3AED;       /* violet */
   --qt-accent-2: #06B6D4;     /* cyan */
   --qt-accent-3: #F59E0B;     /* amber for warnings */
@@ -3680,7 +4023,7 @@ html.qt-active { color: var(--qt-text); }
   min-height: 100dvh;
   width: 100%;
   color: var(--qt-text);
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: 'Urbanist', ui-sans-serif, system-ui, -apple-system, sans-serif;
   isolation: isolate;
 }
 
@@ -3716,7 +4059,7 @@ html.qt-active { color: var(--qt-text); }
 }
 .qore-technic-brand__technic {
   margin-left: 2px;
-  font-family: 'Plus Jakarta Sans', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
+  font-family: 'Urbanist', ui-rounded, 'SF Pro Rounded', system-ui, sans-serif;
   font-weight: 500;
   font-style: italic;
   letter-spacing: -0.01em;
@@ -4176,17 +4519,36 @@ html.qt-active { color: var(--qt-text); }
   margin: 0 auto;
 }
 
-/* Mobile bottom nav */
+.qore-technic-main:has(.fault-clay-page),
+.qore-technic-main__inner:has(> .fault-clay-page) {
+  background:
+    radial-gradient(circle at 3% 8%, rgba(255, 79, 160, 0.34), transparent 24%),
+    radial-gradient(circle at 94% 32%, rgba(88, 177, 255, 0.42), transparent 30%),
+    radial-gradient(circle at 50% 93%, rgba(255, 126, 111, 0.24), transparent 34%),
+    linear-gradient(135deg, #f7cdea 0%, #ece6ff 47%, #b8d9ff 100%);
+}
+
+.dark .qore-technic-main:has(.fault-clay-page),
+.dark .qore-technic-main__inner:has(> .fault-clay-page) {
+  background:
+    radial-gradient(circle at 3% 8%, rgba(255, 79, 160, 0.22), transparent 24%),
+    radial-gradient(circle at 94% 32%, rgba(88, 177, 255, 0.24), transparent 30%),
+    radial-gradient(circle at 50% 93%, rgba(129, 84, 255, 0.30), transparent 34%),
+    linear-gradient(135deg, #251b36 0%, #171529 50%, #14243d 100%);
+}
+
+.qore-technic-main__inner:has(> .fault-clay-page) {
+  max-width: none;
+  min-height: 100dvh;
+}
+
+/* Mobile bottom nav — cam yüzey LiquidGlassSurface bileşeninden gelir */
 .qore-technic-bottom-nav {
   position: fixed;
   left: 10px;
   right: 10px;
   bottom: 10px;
   z-index: 40;
-  background: var(--qt-surface);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  border: 1px solid var(--qt-stroke);
   border-radius: 18px;
   box-shadow: var(--qt-elev-md);
   padding: 6px;
@@ -4255,10 +4617,7 @@ html.qt-active { color: var(--qt-text); }
   /* The nav is pinned left/right, so we can position this anywhere inside */
   left: 10px;
   right: 10px;
-  background: rgba(255, 255, 255, 0.70);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
-  border: 1px solid rgba(255, 255, 255, 0.4);
+  /* Cam yüzey LiquidGlassSurface bileşeninden gelir */
   border-radius: 20px;
   box-shadow: 0 -4px 24px 0 rgba(31, 38, 135, 0.08);
   padding: 12px;
@@ -4282,6 +4641,7 @@ html.qt-active { color: var(--qt-text); }
 }
 
 .qt-popover-item {
+  position: relative; /* LiquidGlassSurface katmanlarının üzerinde boyansın */
   display: flex;
   align-items: center;
   gap: 14px;
@@ -4366,6 +4726,11 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: 0 12px 24px -12px rgba(139, 92, 246, 0.55);
 }
 
+.qt-status-btn--stats {
+  background: linear-gradient(135deg, #06B6D4, #2563EB);
+  box-shadow: 0 12px 24px -12px rgba(37, 99, 235, 0.55), 0 4px 10px -4px rgba(6, 182, 212, 0.35);
+}
+
 .qt-status-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.04);
@@ -4401,7 +4766,7 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: 0 2px 6px rgba(239, 68, 68, 0.5);
 }
 
-/* Status row — mobile equal sizing */
+/* Status row â€” mobile equal sizing */
 .qt-status-row {
   display: flex;
   flex-wrap: wrap;
@@ -4900,9 +5265,9 @@ html.qt-active { color: var(--qt-text); }
    Hub content overrides for ALL module pages rendered inside
    QoreTechnicShell (.qt-content). Strips neumorphic backgrounds,
    turns shadcn Cards into transparent glass surfaces, and applies
-   consistent glass styling across every sub-panel (arıza-yönetimi,
+   consistent glass styling across every sub-panel (arÄ±za-yÃ¶netimi,
    teknik-servis, aplikasyon-paneli, lab detail, wizard forms,
-   yedek parça panels, transfer şablonları, etc.)
+   yedek parÃ§a panels, transfer ÅŸablonlarÄ±, etc.)
    NOTE: hub's own `qt-*` components are whitelisted via :not() so
    they keep their dedicated styles.
    ============================================ */
@@ -4973,7 +5338,7 @@ html.qt-active { color: var(--qt-text); }
   background: rgba(17, 24, 39, 0.5) !important;
 }
 
-/* Pressed / inset neumorphic elements → subtle frosted well */
+/* Pressed / inset neumorphic elements â†’ subtle frosted well */
 .qt-content .cihaz-pressed {
   background: rgba(255, 255, 255, 0.3) !important;
   border: 1px solid var(--qt-stroke) !important;
@@ -5053,7 +5418,7 @@ html.qt-active { color: var(--qt-text); }
   border-color: var(--qt-stroke) !important;
 }
 
-/* Tables — frosted look */
+/* Tables â€” frosted look */
 .qt-content thead,
 .qt-content thead tr,
 .qt-content thead th {
@@ -5110,7 +5475,7 @@ html.qt-active { color: var(--qt-text); }
   -webkit-backdrop-filter: blur(10px);
 }
 
-/* BackButton — align to hub theme */
+/* BackButton â€” align to hub theme */
 .qt-content a[href*="cihaz-yonetimi-ana"],
 .qt-content button:has(svg.lucide-arrow-left) {
   color: var(--qt-text-soft) !important;
@@ -5120,7 +5485,7 @@ html.qt-active { color: var(--qt-text); }
   color: var(--qt-accent) !important;
 }
 
-/* shadcn Button inside the hub — neutral ghost look by default.
+/* shadcn Button inside the hub â€” neutral ghost look by default.
    We leave `.qt-*-btn` and destructive variants alone. */
 .qt-content button[data-slot="button"]:not(.qt-icon-btn):not(.qt-ghost-btn):not(.qt-primary-btn):not([data-variant="destructive"]):not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
   background: var(--qt-surface) !important;
@@ -5137,7 +5502,7 @@ html.qt-active { color: var(--qt-text); }
   box-shadow: var(--qt-elev-md);
 }
 
-/* Primary / default shadcn Button variant — promote to gradient */
+/* Primary / default shadcn Button variant â€” promote to gradient */
 .qt-content button[data-variant="default"]:not(.qore-technic-navitem):not(.qore-technic-bottom-item):not(.qore-technic-collapse-btn) {
   background: linear-gradient(135deg, var(--qt-accent), var(--qt-accent-2)) !important;
   color: #fff !important;
@@ -5168,7 +5533,7 @@ html.qt-active { color: var(--qt-text); }
   border-color: rgba(124, 58, 237, 0.22) !important;
 }
 
-/* Dialog / popover (portaled) content — theme in dark/light hub */
+/* Dialog / popover (portaled) content â€” theme in dark/light hub */
 html.qt-active [data-slot="dialog-content"],
 html.qt-active [data-slot="popover-content"],
 html.qt-active [data-slot="alert-dialog-content"] {
@@ -5179,7 +5544,7 @@ html.qt-active [data-slot="alert-dialog-content"] {
   color: var(--qt-text) !important;
 }
 
-/* Wizard form shell / step containers — allow gradient bg through */
+/* Wizard form shell / step containers â€” allow gradient bg through */
 .qt-content .wizard-form-shell,
 .qt-content .wizard-step,
 .qt-content form {
@@ -5194,7 +5559,7 @@ html.qt-active [data-slot="alert-dialog-content"] {
   background: transparent !important;
 }
 
-/* ---- Mobile menu overlay (yedek-parça transfer page) ----
+/* ---- Mobile menu overlay (yedek-parÃ§a transfer page) ----
    The page uses <div class="fixed inset-0 z-50"> with an internal
    <div class="... cihaz-shell ...">. Our transparency rule above
    would let the QOREtechnic bottom nav bleed through that drawer.
@@ -5218,8 +5583,8 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 }
 
 /* Ensure page content doesn't tuck UNDER the sidebar/bottom nav.
-   yedek-parça transfer header uses `flex items-center justify-between`
-   with a back button — add a little inline-start padding on mobile so
+   yedek-parÃ§a transfer header uses `flex items-center justify-between`
+   with a back button â€” add a little inline-start padding on mobile so
    it doesn't collide with the mobile brand/area. */
 @media (max-width: 767px) {
   .qt-content > .qore-technic-main__inner {
@@ -5227,7 +5592,7 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   }
 }
 
-/* ─── Total Verimlilik (Excel-style cells) ───────────────────────── */
+/* â”€â”€â”€ Total Verimlilik (Excel-style cells) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 .tv-cell-input {
   width: 100%;
   height: 100%;
@@ -5264,11 +5629,97 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   z-index: 4;
 }
 
+
+body:has(.fault-clay-page) .page-shell {
+  max-width: none !important;
+  padding-inline: 0 !important;
+  background:
+    radial-gradient(circle at 3% 8%, rgba(255, 79, 160, 0.34), transparent 24%),
+    radial-gradient(circle at 94% 32%, rgba(88, 177, 255, 0.42), transparent 30%),
+    radial-gradient(circle at 50% 93%, rgba(255, 126, 111, 0.24), transparent 34%),
+    linear-gradient(135deg, #f7cdea 0%, #ece6ff 47%, #b8d9ff 100%);
+}
+
+.dark body:has(.fault-clay-page) .page-shell {
+  background:
+    radial-gradient(circle at 3% 8%, rgba(255, 79, 160, 0.22), transparent 24%),
+    radial-gradient(circle at 94% 32%, rgba(88, 177, 255, 0.24), transparent 30%),
+    radial-gradient(circle at 50% 93%, rgba(129, 84, 255, 0.30), transparent 34%),
+    linear-gradient(135deg, #251b36 0%, #171529 50%, #14243d 100%);
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   KREM / CLAY TASARIM — GLOBAL ZEMİN SÖZLEŞMESİ
+   ----------------------------------------------------------------------------
+   Tüm paneller sırayla clay tasarıma geçiyor. Yeni bir panel clay'e geçtiğinde
+   bu dosyayı DÜZENLEMEYE GEREK YOK — panelin kök sarmalayıcısına `clay-shell`
+   sınıfını eklemek (ya da clay-kit'teki <ClayShell> bileşenini kullanmak)
+   yeterli. Aşağıdaki kurallar `.clay-shell` üzerinden çalışır.
+
+   `.mk-shell / .dt-shell / .sp-shell` halihazırda yayında olan paneller için
+   geriye dönük uyumluluk amacıyla listede tutuluyor; bu paneller yeniden
+   yazıldıkça tek başına `clay-shell` sözleşmesine geçecek.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Kök clay sarmalayıcısı — krem zemin + içerik katmanı (z-index: 1). */
+.clay-shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  color: #3D382F;
+  background:
+    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
+    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
+    #EFEAE0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Viewport'u baştan başa saran sabit krem backdrop — gri tema zeminini örter.
+   <ClayShell> bunu otomatik render eder. */
+.clay-shell-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
+    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
+    #EFEAE0;
+}
+
+/* page-shell'in yan boşluğunu (md:px-3) ve genişlik sınırını kaldırarak panel
+   ile arka plan arasında köşeli bir ara katman kalmasını engelliyoruz.
+   (Tailwind utility'lerini geçmek için !important.) */
+body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
+  max-width: none !important;
+  padding-inline: 0 !important;
+}
+
+/* Gövde/main/page-shell krem zemini. qore-standard-shell-bg /
+   qore-global-window-chrome gri (#eeece9) kuralları @layer components içinde
+   !important ile tanımlı; katmanlı !important katmansızı geçtiği için bu
+   override da aynı katmanda ve daha yüksek özgüllükle yazılmalı. */
+@layer components {
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-standard-shell-bg:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell,
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
+  html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
+    background: #EFEAE0 !important;
+  }
+}
+
 /* Fault detail claymorphic redesign */
 .fault-clay-page {
   min-height: 100dvh;
   padding: 22px clamp(14px, 4vw, 38px) 52px;
   color: #171331;
+  overflow-x: clip;
   background:
     radial-gradient(circle at 3% 8%, rgba(255, 79, 160, 0.34), transparent 24%),
     radial-gradient(circle at 94% 32%, rgba(88, 177, 255, 0.42), transparent 30%),
@@ -5338,6 +5789,35 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   color: #fff;
 }
 
+/* Faz 6: ArÄ±za-id eylem butonu (AI 'Yenile' vb.) â€” gri outline/neumorphic yerine
+   clay-cam pill (sayfanÄ±n beyaz-cam + mor/pembe accent estetiÄŸiyle uyumlu). */
+.fault-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.58);
+  background: rgba(255, 255, 255, 0.56);
+  color: #7c3aed;
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(57, 46, 92, 0.14), inset 0 1px 0 rgba(255,255,255,0.78);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  transition: background .15s ease;
+}
+.fault-pill-btn:hover:not(:disabled) { background: rgba(255,255,255,0.78); }
+.fault-pill-btn:disabled { opacity: .6; cursor: not-allowed; }
+.dark .fault-pill-btn {
+  background: rgba(255,255,255,0.10);
+  border-color: rgba(255,255,255,0.14);
+  color: #c4b5fd;
+}
+
 .fault-hero-card,
 .fault-clay-section {
   border-radius: 42px !important;
@@ -5358,6 +5838,10 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 .fault-hero-card {
   overflow: hidden;
   margin-bottom: 20px;
+}
+
+.fault-hero-copy {
+  min-width: 0;
 }
 
 .fault-hero-content {
@@ -5387,6 +5871,7 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 .fault-status-chip,
 .fault-id-chip {
   min-height: 42px;
+  max-width: 100%;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -5396,6 +5881,7 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   background: rgba(255,255,255,0.34);
   color: #211b42;
   font-weight: 900;
+  overflow-wrap: anywhere;
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.58);
 }
 
@@ -5428,11 +5914,13 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 
 .fault-title {
   margin: 0 !important;
+  max-width: 100%;
   font-size: clamp(35px, 6vw, 42px) !important;
   line-height: 1 !important;
   font-weight: 950 !important;
   letter-spacing: -0.07em !important;
   color: #f24aa6 !important;
+  overflow-wrap: anywhere;
 }
 
 .fault-title span {
@@ -5444,9 +5932,11 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 
 .fault-subtitle {
   margin-top: 8px !important;
+  max-width: 100%;
   font-size: 18px !important;
   color: #625d88 !important;
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .dark .fault-subtitle { color: rgba(238,232,255,0.68) !important; }
@@ -5591,6 +6081,8 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 }
 
 .fault-clay-section {
+  max-width: 100%;
+  overflow: hidden;
   padding: clamp(24px, 4vw, 30px) !important;
 }
 
@@ -5638,12 +6130,17 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 .fault-clay-section .text-muted-foreground,
 .fault-clay-section p {
   color: #625d88;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .dark .fault-clay-section .text-muted-foreground,
 .dark .fault-clay-section p { color: rgba(238,232,255,0.68); }
 
 .fault-action-card {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   border-radius: 24px;
   padding: 22px;
   border: 1px solid rgba(255,255,255,0.52);
@@ -5725,11 +6222,11 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 .fault-history-note .fault-history-icon { background: linear-gradient(145deg, #bba6ff, #5b39c9); }
 
 .fault-history-copy { min-width: 0; }
-.fault-history-copy strong { display: block; color: #171331; line-height: 1.1; }
+.fault-history-copy strong { display: block; color: #171331; line-height: 1.1; overflow-wrap: anywhere; }
 .dark .fault-history-copy strong { color: #fbf8ff; }
 .fault-history-copy span { display: block; color: #625d88; overflow-wrap: anywhere; }
 .dark .fault-history-copy span { color: rgba(238,232,255,0.68); }
-.fault-history-time { color: #8d85aa; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: nowrap; }
+.fault-history-time { color: #8d85aa; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; min-width: max-content; max-width: 100%; text-align: right; white-space: nowrap; }
 .fault-history-edit { width: 30px !important; height: 30px !important; }
 
 .fault-clay-page .dialog-content,
@@ -5738,6 +6235,10 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
 }
 
 @media (max-width: 767px) {
+  .qore-technic-main:has(.fault-clay-page) {
+    padding: 0 0 calc(var(--qt-bottom-h) + 16px);
+  }
+
   .fault-clay-page {
     padding: 12px 10px 32px;
   }
@@ -5794,12 +6295,32 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   }
 
   .fault-history-item {
+    position: relative;
     grid-template-columns: auto minmax(0, 1fr);
+    padding: 72px 18px 18px 24px;
   }
 
-  .fault-history-time,
-  .fault-history-edit {
+  .fault-history-icon {
+    position: absolute;
+    top: 18px;
+    right: 18px;
+  }
+
+  .fault-history-copy {
     grid-column: 2;
+  }
+
+  .fault-history-time {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .fault-history-edit {
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
   }
 }
 
@@ -5892,3 +6413,359 @@ html.qt-active body[data-scroll-locked] .qore-technic-bottom-nav {
   .fault-action-option strong { font-size: 17px; }
   .fault-action-option small { font-size: 13px; }
 }
+
+/* â”€â”€â”€ Minimalist horizontal table slider â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+.table-hscroll-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  margin: 0;
+}
+.table-hscroll-slider::-webkit-slider-runnable-track {
+  height: 2px;
+  background: rgba(161, 161, 170, 0.25);
+  border-radius: 2px;
+}
+.table-hscroll-slider::-moz-range-track {
+  height: 2px;
+  background: rgba(161, 161, 170, 0.25);
+  border-radius: 2px;
+  border: none;
+}
+.table-hscroll-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(113, 113, 122, 0.85);
+  border: none;
+  margin-top: -4px;
+  transition: background-color 120ms, transform 120ms;
+}
+.table-hscroll-slider::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: rgba(113, 113, 122, 0.85);
+  border: none;
+  transition: background-color 120ms, transform 120ms;
+}
+.table-hscroll-slider:hover::-webkit-slider-thumb {
+  background: rgba(82, 82, 91, 1);
+  transform: scale(1.15);
+}
+.table-hscroll-slider:hover::-moz-range-thumb {
+  background: rgba(82, 82, 91, 1);
+  transform: scale(1.15);
+}
+.dark .table-hscroll-slider::-webkit-slider-runnable-track,
+.dark .table-hscroll-slider::-moz-range-track {
+  background: rgba(82, 82, 91, 0.35);
+}
+.dark .table-hscroll-slider::-webkit-slider-thumb,
+.dark .table-hscroll-slider::-moz-range-thumb {
+  background: rgba(161, 161, 170, 0.85);
+}
+.dark .table-hscroll-slider:hover::-webkit-slider-thumb,
+.dark .table-hscroll-slider:hover::-moz-range-thumb {
+  background: rgba(212, 212, 216, 1);
+}
+
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+/* Maliyet GÃ¶zlem Merkezi â€” variables + animations                            */
+/* â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.mg-root {
+  --mg-bg: #000000;
+  --mg-bg-2: #050505;
+  --mg-surface: rgba(255,255,255,0.025);
+  --mg-surface-2: rgba(255,255,255,0.045);
+  --mg-surface-3: rgba(255,255,255,0.08);
+  --mg-border: rgba(255,255,255,0.06);
+  --mg-border-strong: rgba(255,255,255,0.12);
+  --mg-text: #ffffff;
+  --mg-text-2: #d4d4d8;
+  --mg-muted: #71717a;
+  --mg-accent: #fb923c;
+  --mg-accent-2: #f97316;
+  --mg-accent-soft: rgba(251,146,60,0.15);
+  --mg-success: #42e46d;
+  --mg-success-soft: rgba(66,228,109,0.15);
+  --mg-danger: #fc7272;
+  --mg-danger-soft: rgba(252,114,114,0.15);
+  --mg-info: #6ea8ff;
+  --mg-purple: #a78bfa;
+  --mg-chip-bg: rgba(255,255,255,0.04);
+  --mg-header-bg: rgba(0,0,0,0.7);
+  font-feature-settings: "cv11", "ss01";
+}
+
+html:not(.dark) .mg-root {
+  --mg-bg: #f5f4f0;
+  --mg-bg-2: #ffffff;
+  --mg-surface: rgba(255,255,255,0.85);
+  --mg-surface-2: rgba(255,255,255,1);
+  --mg-surface-3: rgba(0,0,0,0.04);
+  --mg-border: rgba(0,0,0,0.08);
+  --mg-border-strong: rgba(0,0,0,0.15);
+  --mg-text: #0c0a09;
+  --mg-text-2: #44403c;
+  --mg-muted: #8b8580;
+  --mg-accent: #ea580c;
+  --mg-accent-2: #c2410c;
+  --mg-accent-soft: rgba(234,88,12,0.12);
+  --mg-success: #16a34a;
+  --mg-success-soft: rgba(22,163,74,0.12);
+  --mg-danger: #dc2626;
+  --mg-danger-soft: rgba(220,38,38,0.12);
+  --mg-info: #2563eb;
+  --mg-purple: #7c3aed;
+  --mg-chip-bg: rgba(0,0,0,0.04);
+  --mg-header-bg: rgba(245,244,240,0.8);
+}
+
+@keyframes mg-drawLine {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes mg-fadeInDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes mg-liquidIn {
+  0%   { opacity: 0; transform: scale(1.3) rotate(-2deg); filter: blur(8px); }
+  60%  { opacity: 1; transform: scale(1.05) rotate(0deg);  filter: blur(2px); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg);     filter: blur(0); }
+}
+@keyframes mg-liquidRipple {
+  0%   { opacity: 0;   transform: scale(0.4); }
+  40%  { opacity: 0.9; transform: scale(1.1); }
+  100% { opacity: 0;   transform: scale(1.6); }
+}
+@keyframes mg-liquidTextIn {
+  0%   { opacity: 0; transform: translateY(8px); filter: blur(4px); }
+  100% { opacity: 1; transform: translateY(0);   filter: blur(0); }
+}
+@keyframes mg-progressFill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+@keyframes mg-pulseDot {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251,146,60,0.5); }
+  50%      { box-shadow: 0 0 0 6px rgba(251,146,60,0); }
+}
+
+/* Edge-to-edge sayfalar için body bg — Maliyet Gözlem & Dashboard v2 */
+body.mg-edge-body {
+  background: #f5f4f0 !important;
+}
+html.dark body.mg-edge-body {
+  background: #000000 !important;
+}
+
+@layer components {
+  /* Global desktop window chrome reserves the top-left title rail for the
+     traffic lights, one shared circular back action, and the route title. */
+  body.qore-global-window-chrome .page-shell {
+    padding-top: max(3.5rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome .qore-local-back-button {
+    display: none !important;
+  }
+}
+
+@layer components {
+  /* The first local h1 is the global title source. Keep it readable by assistive
+     tech, but remove its panel-specific visual/icon row from the desktop shell. */
+  body.qore-global-window-chrome [data-qore-global-title-source="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+}
+
+@layer components {
+  html:not(.dark) body.qore-standard-shell-bg,
+  html:not(.dark) body.qore-global-window-chrome {
+    --background: 48 11% 91%;
+    --dashboard-bg: #eeece9;
+    --device-bg: #eeece9;
+    --mg-bg: #eeece9;
+    background: #eae9e5 !important;
+  }
+
+  html:not(.dark) body.qore-standard-shell-bg main,
+  html:not(.dark) body.qore-standard-shell-bg [data-qore-window-content="true"],
+  html:not(.dark) body.qore-standard-shell-bg .page-shell,
+  html:not(.dark) body.qore-standard-shell-bg .cihaz-shell,
+  html:not(.dark) body.qore-standard-shell-bg .mg-root,
+  html:not(.dark) body.qore-standard-shell-bg .satin-alma-fluid-shell,
+  html:not(.dark) body.qore-global-window-chrome main,
+  html:not(.dark) body.qore-global-window-chrome [data-qore-window-content="true"],
+  html:not(.dark) body.qore-global-window-chrome .page-shell,
+  html:not(.dark) body.qore-global-window-chrome .cihaz-shell,
+  html:not(.dark) body.qore-global-window-chrome .mg-root,
+  html:not(.dark) body.qore-global-window-chrome .satin-alma-fluid-shell {
+    background: #eeece9 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-global-title-block="true"],
+  body.qore-global-window-chrome [data-qore-global-title-decorator="true"] {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  body.qore-global-window-chrome [data-qore-window-content="true"] button[aria-label="Geri"] {
+    display: none !important;
+  }
+}
+
+@layer components {
+  html:not(.dark) body.qore-global-window-chrome .qore-window-title {
+    color: #0f172a !important;
+    filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.45));
+  }
+}
+
+@layer components {
+  body.qore-global-window-chrome {
+    --qore-chrome-space: max(2.1rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome.qore-window-chrome-expanded {
+    --qore-chrome-space: max(3.5rem, env(safe-area-inset-top));
+  }
+
+  body.qore-global-window-chrome .page-shell {
+    padding-top: var(--qore-chrome-space);
+    transition: padding-top 520ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: padding-top;
+  }
+
+  .qore-window-chrome {
+    transform-origin: top left;
+    transform: scale(0.6);
+    opacity: 0.48;
+    filter: saturate(0.92) brightness(0.96);
+    transition:
+      transform 520ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      filter 420ms cubic-bezier(0.22, 1, 0.36, 1);
+    will-change: transform, opacity, filter;
+  }
+
+  .qore-window-chrome:hover,
+  .qore-window-chrome:focus-within {
+    transform: scale(1);
+    opacity: 1;
+    filter: saturate(1) brightness(1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    body.qore-global-window-chrome .page-shell,
+    .qore-window-chrome {
+      transition: none;
+    }
+  }
+}
+
+@layer base {
+  /* Cari Odeme Light Theme */
+  .cari-shell {
+    --background: 144 30% 97%; /* Very light greenish-white #f0f8f4 */
+    --foreground: 0 0% 10%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 0 0% 15%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 0 0% 15%;
+    
+    --primary: 147 76% 36%; /* Emerald / #16a34a */
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 147 20% 90%;
+    --secondary-foreground: 147 80% 20%;
+    
+    --muted: 144 20% 90%;
+    --muted-foreground: 144 10% 40%;
+    
+    --accent: 147 30% 90%;
+    --accent-foreground: 147 80% 20%;
+    
+    --border: 144 15% 85%;
+    --input: 144 15% 85%;
+    --ring: 147 76% 36%;
+  }
+}
+
+/* ── Ambient LED Strip Glow ───────────────────────────────────────────────── */
+/*
+ * An inset-0 absolute element (same footprint as the card, border-radius
+ * matched) sits behind the card in DOM. Its box-shadow leaks OUTSIDE the
+ * card boundary; the card's opaque background hides the element itself.
+ * Result: soft directional light on the surface around the card edge —
+ * like a hidden LED strip tucked behind it. Opacity animation = compositor.
+ */
+
+/* bottom-right corner: light on right edge + bottom edge */
+.led-shadow-amber-br {
+  box-shadow:
+    18px  0    36px -6px rgba(251, 191, 36, 0.55),
+    0     18px 36px -6px rgba(251, 191, 36, 0.55);
+}
+.led-shadow-green-br {
+  box-shadow:
+    18px  0    32px -6px rgba(34, 197, 94, 0.50),
+    0     18px 32px -6px rgba(34, 197, 94, 0.50);
+}
+
+/* top-right corner: light on right edge + top edge */
+.led-shadow-amber-tr {
+  box-shadow:
+    18px  0    36px -6px rgba(251, 191, 36, 0.55),
+    0    -18px 36px -6px rgba(251, 191, 36, 0.55);
+}
+.led-shadow-green-tr {
+  box-shadow:
+    18px  0    32px -6px rgba(34, 197, 94, 0.50),
+    0    -18px 32px -6px rgba(34, 197, 94, 0.50);
+}
+
+@keyframes led-breathe {
+  0%, 100% { opacity: 0.22; }
+  50%       { opacity: 0.80; }
+}
+@keyframes led-fade-out {
+  from { opacity: 0.55; }
+  to   { opacity: 0;    }
+}
+@keyframes led-appear {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.led-anim-breathe { animation: led-breathe 3.6s ease-in-out infinite; }
+.led-anim-out     { animation: led-fade-out 0.7s ease-out forwards; }
+/* opacity:0 initial + delay lets amber fade before green appears */
+.led-anim-in      { opacity: 0; animation: led-appear 0.9s ease-out 0.35s forwards; }
+
