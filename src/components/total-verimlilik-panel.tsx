@@ -1778,12 +1778,14 @@ export default function TotalVerimlilikPanel({
         }
       }
 
-      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç
+      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç (bunlar transfers'tan doldurulur)
       const depotsSnap = await getDocs(collection(db, 'depots'));
       const excludedLabIds = new Set<string>();
+      const malKabulDepotIds: string[] = [];
       depotsSnap.forEach((d) => {
         const dep = d.data() as any;
         if (dep.sevkiyatMalKabulden) {
+          malKabulDepotIds.push(d.id);
           (dep.linkedLaboratoryIds || []).forEach((id: string) => excludedLabIds.add(id));
         }
       });
@@ -1798,36 +1800,37 @@ export default function TotalVerimlilikPanel({
         }
       }
 
-      // ─── Mal kabulden alınacak lablar için mal kabul geçmişini tara ───
-      // malKabulTransactions: depotId == labId, timestamp ay aralığında; adetler 'lines' alt koleksiyonunda.
+      // ─── Mal kabulden alınacak lablar için depo→lab sevkiyatını (transfers) tara ───
+      // transfers: sourceDepotId == depotId, mode == 'lab', timestamp ay aralığında.
+      // Her transfer'in 'items' alt koleksiyonundaki her doküman = 1 kutu. targetHospitalId = hedef lab.
       const malKabulPerLab: Record<string, Record<string, number>> = {};
       const monthStart = Timestamp.fromDate(new Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0));
       const monthEndExclusive = Timestamp.fromDate(new Date(selectedYear, selectedMonth + 1, 1, 0, 0, 0, 0));
-      const malKabulLabIds = Array.from(excludedLabIds);
-      await Promise.all(malKabulLabIds.map(async (labId) => {
+      await Promise.all(malKabulDepotIds.map(async (depotId) => {
         try {
           const txSnap = await getDocs(query(
-            collection(db, 'malKabulTransactions'),
-            where('depotId', '==', labId),
+            collection(db, 'transfers'),
+            where('sourceDepotId', '==', depotId),
+            where('mode', '==', 'lab'),
             where('timestamp', '>=', monthStart),
             where('timestamp', '<', monthEndExclusive),
           ));
-          const acc: Record<string, number> = {};
           await Promise.all(txSnap.docs.map(async (txDoc) => {
-            const linesSnap = await getDocs(collection(db, 'malKabulTransactions', txDoc.id, 'lines'));
-            linesSnap.forEach((ln) => {
-              const d = ln.data() as any;
-              const stok = String(d.stokKodu || '').trim();
+            const labId = (txDoc.data() as any).targetHospitalId;
+            if (!labId) return;
+            const itemsSnap = await getDocs(collection(db, 'transfers', txDoc.id, 'items'));
+            itemsSnap.forEach((it) => {
+              const stok = String((it.data() as any).stokKodu || '').trim();
               if (!stok) return;
-              acc[stok] = (acc[stok] || 0) + (Number(d.adet) || 0);
+              if (!malKabulPerLab[labId]) malKabulPerLab[labId] = {};
+              malKabulPerLab[labId][stok] = (malKabulPerLab[labId][stok] || 0) + 1; // her item = 1 kutu
             });
           }));
-          if (Object.keys(acc).length > 0) malKabulPerLab[labId] = acc;
         } catch (e) {
-          console.error('mal kabul sorgu hatası', labId, e);
+          console.error('transfers (mal kabul) sorgu hatası', depotId, e);
         }
       }));
-      const malKabulCoveredLabIds = new Set(malKabulLabIds);
+      const malKabulCoveredLabIds = new Set(Array.from(excludedLabIds));
 
       // İstek dokümanı yaz
       const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), {
