@@ -113,6 +113,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
+    pathname?.startsWith("/maliyet-sayim") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
     pathname?.startsWith("/satin-alma") ||
     pathname?.startsWith("/cari-odeme") ||
