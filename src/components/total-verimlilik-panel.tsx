@@ -1778,15 +1778,19 @@ export default function TotalVerimlilikPanel({
         }
       }
 
-      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç (bunlar transfers'tan doldurulur)
+      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç (bunlar deponun mal kabulünden doldurulur)
       const depotsSnap = await getDocs(collection(db, 'depots'));
       const excludedLabIds = new Set<string>();
       const malKabulDepotIds: string[] = [];
+      const labToDepot = new Map<string, string>(); // labId -> mal kabul deposu id
       depotsSnap.forEach((d) => {
         const dep = d.data() as any;
         if (dep.sevkiyatMalKabulden) {
           malKabulDepotIds.push(d.id);
-          (dep.linkedLaboratoryIds || []).forEach((id: string) => excludedLabIds.add(id));
+          (dep.linkedLaboratoryIds || []).forEach((id: string) => {
+            excludedLabIds.add(id);
+            labToDepot.set(id, d.id);
+          });
         }
       });
 
@@ -1800,34 +1804,33 @@ export default function TotalVerimlilikPanel({
         }
       }
 
-      // ─── Mal kabulden alınacak lablar için depo→lab sevkiyatını (transfers) tara ───
-      // transfers: sourceDepotId == depotId, mode == 'lab', timestamp ay aralığında.
-      // Her transfer'in 'items' alt koleksiyonundaki her doküman = 1 kutu. targetHospitalId = hedef lab.
-      const malKabulPerLab: Record<string, Record<string, number>> = {};
+      // ─── Mal kabulden alınacak depolar için mal kabul (giriş) kayıtlarını tara ───
+      // malKabulTransactions: depotId == depo, timestamp ay aralığında; adetler 'lines' alt koleksiyonunda (adet alanı).
+      // Depo bazında stokKodu toplamı hesaplanır; deponun ortak havuzundaki lablar aynı toplamı alır.
+      const malKabulDepotTotals: Record<string, Record<string, number>> = {}; // depotId -> stok -> toplam adet
       const monthStart = Timestamp.fromDate(new Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0));
       const monthEndExclusive = Timestamp.fromDate(new Date(selectedYear, selectedMonth + 1, 1, 0, 0, 0, 0));
       await Promise.all(malKabulDepotIds.map(async (depotId) => {
         try {
           const txSnap = await getDocs(query(
-            collection(db, 'transfers'),
-            where('sourceDepotId', '==', depotId),
-            where('mode', '==', 'lab'),
+            collection(db, 'malKabulTransactions'),
+            where('depotId', '==', depotId),
             where('timestamp', '>=', monthStart),
             where('timestamp', '<', monthEndExclusive),
           ));
+          const acc: Record<string, number> = {};
           await Promise.all(txSnap.docs.map(async (txDoc) => {
-            const labId = (txDoc.data() as any).targetHospitalId;
-            if (!labId) return;
-            const itemsSnap = await getDocs(collection(db, 'transfers', txDoc.id, 'items'));
-            itemsSnap.forEach((it) => {
-              const stok = String((it.data() as any).stokKodu || '').trim();
+            const linesSnap = await getDocs(collection(db, 'malKabulTransactions', txDoc.id, 'lines'));
+            linesSnap.forEach((ln) => {
+              const d = ln.data() as any;
+              const stok = String(d.stokKodu || '').trim();
               if (!stok) return;
-              if (!malKabulPerLab[labId]) malKabulPerLab[labId] = {};
-              malKabulPerLab[labId][stok] = (malKabulPerLab[labId][stok] || 0) + 1; // her item = 1 kutu
+              acc[stok] = (acc[stok] || 0) + (Number(d.adet) || 0);
             });
           }));
+          malKabulDepotTotals[depotId] = acc;
         } catch (e) {
-          console.error('transfers (mal kabul) sorgu hatası', depotId, e);
+          console.error('mal kabul (malKabulTransactions) sorgu hatası', depotId, e);
         }
       }));
       const malKabulCoveredLabIds = new Set(Array.from(excludedLabIds));
@@ -1885,8 +1888,9 @@ export default function TotalVerimlilikPanel({
             setRows((prevRows) => {
               const updated = prevRows.map((row) => {
                 if (malKabulCoveredLabIds.has(row.labId)) {
-                  // Mal kabulden alınan lab: mal kabul geçmişinden yaz
-                  const val = malKabulPerLab[row.labId]?.[row.stokKodu] || 0;
+                  // Mal kabulden alınan lab: bağlı olduğu deponun mal kabul toplamından yaz
+                  const depotId = labToDepot.get(row.labId);
+                  const val = depotId ? (malKabulDepotTotals[depotId]?.[row.stokKodu] || 0) : 0;
                   return { ...row, ayBasiSevkiyatKutu: val };
                 }
                 if (coveredLabIds.has(row.labId)) {
@@ -1900,10 +1904,10 @@ export default function TotalVerimlilikPanel({
             });
 
             const ceomedBox = Object.values(perLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
-            const malKabulBox = Object.values(malKabulPerLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            const malKabulBox = Object.values(malKabulDepotTotals).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
             toast({
               title: 'Ay başı sevkiyat dolduruldu',
-              description: `Ceomed: ${res.irsaliyeCount} irsaliye → ${Object.keys(perLab).length} lab / ${ceomedBox} kutu. Mal kabul: ${Object.keys(malKabulPerLab).length} lab / ${malKabulBox} kutu.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
+              description: `Ceomed: ${res.irsaliyeCount} irsaliye → ${Object.keys(perLab).length} lab / ${ceomedBox} kutu. Mal kabul: ${malKabulDepotIds.length} depo / ${malKabulBox} kutu.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
               duration: 9000,
             });
             resolve();
