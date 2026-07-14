@@ -1766,12 +1766,16 @@ export default function TotalVerimlilikPanel({
           .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
           .replace(/[^a-z0-9]/g, '');
 
-      // Kurum haritaları
-      const hospitalByCari = new Map<string, any>();
+      // Kurum haritaları — aynı cariye birden fazla hastane atanabilir (ana + ek hizmetler)
+      const hospitalsByCari = new Map<string, any[]>();
       const hospitalById = new Map<string, any>();
       for (const h of hospitals as any[]) {
         hospitalById.set(h.id, h);
-        if (h.ceomedCariKodu) hospitalByCari.set(String(h.ceomedCariKodu).trim().toUpperCase(), h);
+        if (h.ceomedCariKodu) {
+          const c = String(h.ceomedCariKodu).trim().toUpperCase();
+          const arr = hospitalsByCari.get(c);
+          if (arr) arr.push(h); else hospitalsByCari.set(c, [h]);
+        }
       }
 
       // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç
@@ -1819,13 +1823,23 @@ export default function TotalVerimlilikPanel({
             const perLab: Record<string, Record<string, number>> = {};
             let unmatched = 0;
             for (const r of rowsData) {
-              const main = hospitalByCari.get(String(r.cariKodu || '').trim().toUpperCase());
-              if (!main) { unmatched += r.adet; continue; }
-              // Ek hizmet adres yönlendirmesi
-              let target = main;
-              const ekIds = (main.ekHizmetLabIds || []) as string[];
-              if (ekIds.length > 0 && r.sevkAdresi) {
-                const candidates = [main, ...ekIds.map((id) => hospitalById.get(id)).filter(Boolean)];
+              const cari = String(r.cariKodu || '').trim().toUpperCase();
+              const withCode = hospitalsByCari.get(cari) || [];
+              if (withCode.length === 0) { unmatched += r.adet; continue; }
+              // Aday havuz: cariyi paylaşan hastaneler + ek hizmet çocukları
+              const candMap = new Map<string, any>();
+              for (const h of withCode) {
+                candMap.set(h.id, h);
+                for (const ekId of (h.ekHizmetLabIds || [])) {
+                  const ek = hospitalById.get(ekId);
+                  if (ek) candMap.set(ek.id, ek);
+                }
+              }
+              const candidates = Array.from(candMap.values());
+              const mainH = withCode.find((h: any) => (h.ekHizmetLabIds || []).length > 0) || withCode[0];
+              // Adres yönlendirmesi
+              let target = mainH;
+              if (r.sevkAdresi) {
                 const m = candidates.filter((c) => c?.sevkAdresi && normAddr(c.sevkAdresi) === normAddr(r.sevkAdresi));
                 if (m.length >= 1) target = m[0];
               }
