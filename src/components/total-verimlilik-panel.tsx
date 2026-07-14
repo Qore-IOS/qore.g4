@@ -1798,6 +1798,37 @@ export default function TotalVerimlilikPanel({
         }
       }
 
+      // ─── Mal kabulden alınacak lablar için mal kabul geçmişini tara ───
+      // malKabulTransactions: depotId == labId, timestamp ay aralığında; adetler 'lines' alt koleksiyonunda.
+      const malKabulPerLab: Record<string, Record<string, number>> = {};
+      const monthStart = Timestamp.fromDate(new Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0));
+      const monthEndExclusive = Timestamp.fromDate(new Date(selectedYear, selectedMonth + 1, 1, 0, 0, 0, 0));
+      const malKabulLabIds = Array.from(excludedLabIds);
+      await Promise.all(malKabulLabIds.map(async (labId) => {
+        try {
+          const txSnap = await getDocs(query(
+            collection(db, 'malKabulTransactions'),
+            where('depotId', '==', labId),
+            where('timestamp', '>=', monthStart),
+            where('timestamp', '<', monthEndExclusive),
+          ));
+          const acc: Record<string, number> = {};
+          await Promise.all(txSnap.docs.map(async (txDoc) => {
+            const linesSnap = await getDocs(collection(db, 'malKabulTransactions', txDoc.id, 'lines'));
+            linesSnap.forEach((ln) => {
+              const d = ln.data() as any;
+              const stok = String(d.stokKodu || '').trim();
+              if (!stok) return;
+              acc[stok] = (acc[stok] || 0) + (Number(d.adet) || 0);
+            });
+          }));
+          if (Object.keys(acc).length > 0) malKabulPerLab[labId] = acc;
+        } catch (e) {
+          console.error('mal kabul sorgu hatası', labId, e);
+        }
+      }));
+      const malKabulCoveredLabIds = new Set(malKabulLabIds);
+
       // İstek dokümanı yaz
       const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), {
         year: selectedYear,
@@ -1850,18 +1881,27 @@ export default function TotalVerimlilikPanel({
 
             setRows((prevRows) => {
               const updated = prevRows.map((row) => {
-                if (!coveredLabIds.has(row.labId)) return row; // kapsam dışı / hariç lab: dokunma
-                const val = perLab[row.labId]?.[row.stokKodu] || 0;
-                return { ...row, ayBasiSevkiyatKutu: val };
+                if (malKabulCoveredLabIds.has(row.labId)) {
+                  // Mal kabulden alınan lab: mal kabul geçmişinden yaz
+                  const val = malKabulPerLab[row.labId]?.[row.stokKodu] || 0;
+                  return { ...row, ayBasiSevkiyatKutu: val };
+                }
+                if (coveredLabIds.has(row.labId)) {
+                  // Ceomed'den alınan lab
+                  const val = perLab[row.labId]?.[row.stokKodu] || 0;
+                  return { ...row, ayBasiSevkiyatKutu: val };
+                }
+                return row; // kapsam dışı: dokunma
               });
               return recomputeAllRows(updated, interLabTransfers);
             });
 
-            const totalBox = Object.values(perLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            const ceomedBox = Object.values(perLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            const malKabulBox = Object.values(malKabulPerLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
             toast({
               title: 'Ay başı sevkiyat dolduruldu',
-              description: `${res.irsaliyeCount} irsaliye tarandı, ${Object.keys(perLab).length} laboratuvara toplam ${totalBox} kutu yazıldı.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
-              duration: 8000,
+              description: `Ceomed: ${res.irsaliyeCount} irsaliye → ${Object.keys(perLab).length} lab / ${ceomedBox} kutu. Mal kabul: ${Object.keys(malKabulPerLab).length} lab / ${malKabulBox} kutu.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
+              duration: 9000,
             });
             resolve();
           } else if (res.status === 'error') {
