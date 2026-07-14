@@ -54,3 +54,5 @@ qore-studio-work
 # Environment files
 .env.local
 .env*.local
+
+scripts/ceomed-sync/sevkiyat-watcher.log

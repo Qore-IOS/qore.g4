@@ -76,7 +76,7 @@ import {
 } from '@/components/ui/tooltip';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -507,6 +507,7 @@ export default function TotalVerimlilikPanel({
   const [selectedDepotForSevkiyat, setSelectedDepotForSevkiyat] = useState<string>('');
   const [selectedLabsForSevkiyat, setSelectedLabsForSevkiyat] = useState<Set<string>>(new Set());
   const [isFetchingSevkiyat, setIsFetchingSevkiyat] = useState(false);
+  const [isFetchingCeomed, setIsFetchingCeomed] = useState(false);
 
   // Kurumlar Arası Sevk Modal State'leri (Sütun 12)
   const [showKurumlarArasiModal, setShowKurumlarArasiModal] = useState(false);
@@ -1437,6 +1438,117 @@ export default function TotalVerimlilikPanel({
       setSelectedDepotForSevkiyat('');
     }
   }, [selectedDepotForSevkiyat, selectedLabsForSevkiyat, selectedYear, selectedMonth, depots, hospitals, toast, recomputeAllRows, interLabTransfers]);
+
+  // ─── Ceomed'den Ay Başı Sevkiyat çekme (on-demand worker) ───
+  const handleFetchCeomedAyBasiSevkiyat = useCallback(async () => {
+    setIsFetchingCeomed(true);
+    let unsub: (() => void) | null = null;
+    try {
+      // Adres normalizasyonu (ek hizmet yönlendirmesi için)
+      const normAddr = (s?: string): string =>
+        (s || '')
+          .toLocaleLowerCase('tr-TR')
+          .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g')
+          .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+          .replace(/[^a-z0-9]/g, '');
+
+      // Kurum haritaları
+      const hospitalByCari = new Map<string, any>();
+      const hospitalById = new Map<string, any>();
+      for (const h of hospitals as any[]) {
+        hospitalById.set(h.id, h);
+        if (h.ceomedCariKodu) hospitalByCari.set(String(h.ceomedCariKodu).trim().toUpperCase(), h);
+      }
+
+      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç
+      const depotsSnap = await getDocs(collection(db, 'depots'));
+      const excludedLabIds = new Set<string>();
+      depotsSnap.forEach((d) => {
+        const dep = d.data() as any;
+        if (dep.sevkiyatMalKabulden) {
+          (dep.linkedLaboratoryIds || []).forEach((id: string) => excludedLabIds.add(id));
+        }
+      });
+
+      // Ceomed sorgusuyla kapsanan lablar (ceomedCariKodu olan ana + ek hizmetleri), hariçler çıkarılmış
+      const coveredLabIds = new Set<string>();
+      for (const h of hospitals as any[]) {
+        if (!h.ceomedCariKodu) continue;
+        if (!excludedLabIds.has(h.id)) coveredLabIds.add(h.id);
+        for (const ekId of (h.ekHizmetLabIds || [])) {
+          if (!excludedLabIds.has(ekId)) coveredLabIds.add(ekId);
+        }
+      }
+
+      // İstek dokümanı yaz
+      const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), {
+        year: selectedYear,
+        month: selectedMonth + 1, // JS 0-11 → 1-12
+        status: 'pending',
+        requestedAt: serverTimestamp(),
+        requestedByUid: currentUser?.uid || '',
+      });
+
+      toast({ title: 'Sorgu gönderildi', description: 'Ceomed irsaliyeleri sorgulanıyor, bu birkaç dakika sürebilir…' });
+
+      // Sonucu bekle (worker yazınca)
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => { reject(new Error('Zaman aşımı — worker çalışmıyor olabilir.')); }, 10 * 60 * 1000);
+        unsub = onSnapshot(doc(db, 'ceomedSevkiyatResults', reqRef.id), (snap) => {
+          if (!snap.exists()) return;
+          const res = snap.data() as any;
+          if (res.status === 'done') {
+            clearTimeout(timeout);
+            const rowsData = (res.rows || []) as Array<{ cariKodu: string; sevkAdresi: string; stokKodu: string; adet: number }>;
+
+            // labId -> stokKodu -> toplam adet
+            const perLab: Record<string, Record<string, number>> = {};
+            let unmatched = 0;
+            for (const r of rowsData) {
+              const main = hospitalByCari.get(String(r.cariKodu || '').trim().toUpperCase());
+              if (!main) { unmatched += r.adet; continue; }
+              // Ek hizmet adres yönlendirmesi
+              let target = main;
+              const ekIds = (main.ekHizmetLabIds || []) as string[];
+              if (ekIds.length > 0 && r.sevkAdresi) {
+                const candidates = [main, ...ekIds.map((id) => hospitalById.get(id)).filter(Boolean)];
+                const m = candidates.filter((c) => c?.sevkAdresi && normAddr(c.sevkAdresi) === normAddr(r.sevkAdresi));
+                if (m.length >= 1) target = m[0];
+              }
+              if (excludedLabIds.has(target.id)) continue; // mal kabulden alınacak
+              if (!perLab[target.id]) perLab[target.id] = {};
+              perLab[target.id][r.stokKodu] = (perLab[target.id][r.stokKodu] || 0) + r.adet;
+            }
+
+            setRows((prevRows) => {
+              const updated = prevRows.map((row) => {
+                if (!coveredLabIds.has(row.labId)) return row; // kapsam dışı / hariç lab: dokunma
+                const val = perLab[row.labId]?.[row.stokKodu] || 0;
+                return { ...row, ayBasiSevkiyatKutu: val };
+              });
+              return recomputeAllRows(updated, interLabTransfers);
+            });
+
+            const totalBox = Object.values(perLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            toast({
+              title: 'Ay başı sevkiyat dolduruldu',
+              description: `${res.irsaliyeCount} irsaliye tarandı, ${Object.keys(perLab).length} laboratuvara toplam ${totalBox} kutu yazıldı.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
+              duration: 8000,
+            });
+            resolve();
+          } else if (res.status === 'error') {
+            clearTimeout(timeout);
+            reject(new Error(res.error || 'Worker hatası'));
+          }
+        }, (err) => { clearTimeout(timeout); reject(err); });
+      });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e.message || 'Ceomed sevkiyatı çekilemedi.', variant: 'destructive' });
+    } finally {
+      if (unsub) unsub();
+      setIsFetchingCeomed(false);
+    }
+  }, [hospitals, selectedYear, selectedMonth, currentUser, toast, recomputeAllRows, interLabTransfers]);
 
   // Listedeki laboratuvarlar (verimlilik havuzundaki)
   const poolLabIds = useMemo(() => {
@@ -3277,6 +3389,14 @@ export default function TotalVerimlilikPanel({
               </button>
               <button onClick={() => { setShowSevkiyatBilgisiModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
                 <Download className="h-3 w-3" />Sevkiyat Bilgisi Çek
+              </button>
+              <button
+                onClick={() => { handleFetchCeomedAyBasiSevkiyat(); setOpenDrop(null); }}
+                disabled={isFetchingCeomed}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded disabled:opacity-50"
+              >
+                {isFetchingCeomed ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                Ceomed'den Ay Başı Sevkiyat Getir
               </button>
               <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
               <button onClick={() => { setShowExcelImportModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">

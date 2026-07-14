@@ -85,6 +85,26 @@ Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn.
 - Başlat: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync`
 - Tetikleyici: Günlük 06:30, tekrar yok
 
+## Adım 4c — Total Verimlilik sevkiyat watcher (long-running)
+
+`watchSevkiyatRequests.js`, Total Verimlilik panelindeki "Ceomed'den Ay Başı Sevkiyat Getir"
+butonunun yazdığı `ceomedSevkiyatRequests` isteklerini **anlık** dinler; seçilen ayın
+"KURUMA SEVK EDILDI" irsaliyelerini sorgular, kurum + sevk adresi + stok bazında toplam adetleri
+hesaplayıp `ceomedSevkiyatResults/{id}` dokümanına yazar. Panel sonucu okuyup 9. sütunu doldurur.
+
+Bu **sürekli açık kalmalı**. Başlat:
+```powershell
+.\run-sevkiyat-watcher.bat
+```
+Bu bat kapanırsa kendini yeniden başlatır. Kalıcı olması için Task Scheduler'a ekle:
+- Tetikleyici: "Oturum açıldığında" (başlangıçta otomatik başlasın)
+- Program: `...\run-sevkiyat-watcher.bat`, Başlat: `...\scripts\ceomed-sync`
+
+### Firestore kuralları
+`ceomedSevkiyatRequests` (panel yazar/okur) ve `ceomedSevkiyatResults` (worker yazar, panel okur)
+koleksiyonları için: varsayılan `match /{document=**} { allow read, write: if request.auth != null; }`
+kuralı zaten bunları kapsar. Ekstra kural gerekmez.
+
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
 `run-sync.bat` hazır — `.env` dosyasını yükler, dünden bugüne tarih aralığıyla 3 durumu da çeker, `sync.log`'a yazar.

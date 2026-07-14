@@ -110,6 +110,7 @@ export default function DepoYonetimPanel() {
         linkedDeviceLabPoolIds: currentDepot.isPoolWarehouse ? (currentDepot.linkedDeviceLabPoolIds || []).filter(Boolean) : [],
         ceomedEnabled: currentDepot.ceomedEnabled || false,
         ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
+        sevkiyatMalKabulden: currentDepot.sevkiyatMalKabulden || false,
       };
 
       if (currentDepot.id) {
@@ -294,6 +295,20 @@ export default function DepoYonetimPanel() {
                   />
                 </div>
               )}
+
+              {/* Total Verimlilik sevkiyat kaynağı */}
+              <div className="flex items-start justify-between gap-3 p-3 border rounded-md">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium">Sevkiyatı Mal Kabulden Al</label>
+                  <p className="text-xs text-muted-foreground">
+                    Total Verimlilik'te bu depoya bağlı laboratuvarların ay başı sevkiyatı mal kabul/transfer geçmişinden alınır. Kapalıysa Ceomed irsaliyelerinden çekilir.
+                  </p>
+                </div>
+                <Switch
+                  checked={currentDepot.sevkiyatMalKabulden || false}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, sevkiyatMalKabulden: checked })}
+                />
+              </div>
 
               {/* Cihaz Laboratuvar Grubu seçimi - Sadece havuz depo seçiliyken */}
               {currentDepot.isPoolWarehouse && (
