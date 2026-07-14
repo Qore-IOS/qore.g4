@@ -35,6 +35,8 @@ const triggerHaptic = (pattern: number | number[] = 10) => {
   }
 };
 
+const dockTouchClass = "mobile-dock-touch";
+
 // Long press duration in milliseconds
 const LONG_PRESS_DURATION = 500;
 
@@ -70,6 +72,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
     // Reset state
     isLongPress.current = false;
     hasHandledTouch.current = false;
+    triggerHaptic();
 
     // Store touch start position
     const touch = e.touches[0];
@@ -94,7 +97,6 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
     }
 
     // Short tap - open menu
-    triggerHaptic();
     setIsOpen(true);
   }, [clearLongPressTimer]);
 
@@ -178,19 +180,20 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             <LiquidGlassSurface radius={28} strength={34} dispersion={0.42} blur={2.5} bezel={18} zoom={0.22} fallbackBlur={22} shine={false} />
 
             {/* Profile Button */}
-            <div className="relative">
+            <div className="relative" onPointerDown={() => triggerHaptic()}>
               <MobileProfileButton isDark={isDark} />
             </div>
 
             {/* Search Button */}
             <motion.button
               whileTap={{ scale: 0.9 }}
+              onPointerDown={() => triggerHaptic()}
               onClick={() => {
-                triggerHaptic();
                 router.push('/arama');
               }}
               aria-label="Arama panelini aç"
               className={cn(
+                dockTouchClass,
                 "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                 isDark
                   ? "text-white hover:bg-white/10"
@@ -213,6 +216,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
               onMouseLeave={handleMouseLeave}
               aria-label="Mobil menüyü aç"
               className={cn(
+                dockTouchClass,
                 "relative flex items-center justify-center w-11 h-11 rounded-full transition-all duration-200 select-none touch-none",
                 isDark
                   ? "text-white bg-white/10 hover:bg-white/15"
@@ -226,12 +230,13 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             {/* Calendar Button */}
             <motion.button
               whileTap={{ scale: 0.9 }}
+              onPointerDown={() => triggerHaptic()}
               onClick={() => {
-                triggerHaptic();
                 setCalendarOpen(true);
               }}
               aria-label="Takvimi aç"
               className={cn(
+                dockTouchClass,
                 "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                 isDark
                   ? "text-white hover:bg-white/10"
@@ -242,10 +247,11 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
             </motion.button>
 
             {/* Notification Button */}
-            <div className="relative flex items-center">
+            <div className="relative flex items-center" onPointerDown={() => triggerHaptic()}>
               {notificationItem ? (
                 <NotificationsBell
                   triggerClassName={cn(
+                    dockTouchClass,
                     "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                     isDark
                       ? "text-white hover:bg-white/10"
@@ -259,6 +265,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
               ) : (
                 <button
                   className={cn(
+                    dockTouchClass,
                     "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                     isDark
                       ? "text-white hover:bg-white/10"
