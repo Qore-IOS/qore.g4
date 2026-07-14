@@ -296,7 +296,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} />}
+        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} placement="mobile-center" />}
       </AnimatePresence>
     </>
   );

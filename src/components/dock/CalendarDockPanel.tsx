@@ -48,7 +48,13 @@ const sameDay = (a: Date, b: Date) =>
  * işaretler ve bugünün görevlerini listeler. Sadece açıkken mount edildiği
  * için sorgu yalnızca panel açıldığında çalışır (react-query ile cache'li).
  */
-export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
+export function CalendarDockPanel({
+  onClose,
+  placement = 'dock-right',
+}: {
+  onClose: () => void;
+  placement?: 'dock-right' | 'mobile-center';
+}) {
   const { currentUser, currentUserProfile } = useAuth();
   const uid = currentUserProfile?.uid || currentUser?.uid || '';
   const { data: allTasks = [], isLoading } = usePurchasingTasks();
@@ -134,7 +140,10 @@ export function CalendarDockPanel({ onClose }: { onClose: () => void }) {
         aria-label="Takvim"
         onClick={(e) => e.stopPropagation()}
         className={cn(
-          'fixed left-1/2 w-[calc(100vw-32px)] max-w-[360px] -translate-x-1/2 rounded-[22px] p-4 flex flex-col gap-3 sm:left-auto sm:right-4 sm:w-[360px] sm:translate-x-0',
+          'fixed w-[calc(100vw-32px)] max-w-[360px] rounded-[22px] p-4 flex flex-col gap-3',
+          placement === 'mobile-center'
+            ? 'left-1/2 -translate-x-1/2'
+            : 'left-1/2 -translate-x-1/2 sm:left-auto sm:right-4 sm:w-[360px] sm:translate-x-0',
           'bg-white/40 dark:bg-zinc-900/35',
         )}
         style={{
