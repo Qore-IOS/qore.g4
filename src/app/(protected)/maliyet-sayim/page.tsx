@@ -1,7 +1,7 @@
 
 'use client';
 import React, { Suspense } from 'react';
-import MaliyetSayimPanel from '@/components/maliyet-sayim-panel';
+import MaliyetPanel from '@/components/maliyet/MaliyetPanel';
 import { useProductCodes, useHospitals, useDepots } from '@/hooks/useFirebaseQueries';
 import { Loader2 } from 'lucide-react';
 
@@ -21,7 +21,7 @@ function MaliyetSayimContent() {
   }
 
   return (
-    <MaliyetSayimPanel
+    <MaliyetPanel
       hospitals={hospitalsQuery.data ?? []}
       depots={depotsQuery.data ?? []}
       productCodes={productsQuery.data ?? []}
