@@ -4,16 +4,15 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Bell, Calendar } from "lucide-react";
+import { X, Bell, Calendar, Menu, Search } from "lucide-react";
 import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
 import { MobileProfileButton } from "@/components/ui/MobileProfileButton";
 import { ThemeToggleDock } from "@/components/ui/theme-toggle-dock";
 import NotificationsBell from "@/components/notifications/NotificationsBell";
 import { useAI } from "@/contexts/ai-context";
-import type { DockItemData, NotificationItem } from "@/hooks/use-dock";
-import Image from "next/image";
-import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
+import type { DockItemData } from "@/hooks/use-dock";
+import { useIconMappings } from "@/hooks/useIconMappings";
 import { CalendarDockPanel } from "./dock/CalendarDockPanel";
 import { LiquidGlassSurface } from "@/components/ui/liquid-glass";
 
@@ -36,6 +35,8 @@ const triggerHaptic = (pattern: number | number[] = 10) => {
   }
 };
 
+const dockTouchClass = "mobile-dock-touch";
+
 // Long press duration in milliseconds
 const LONG_PRESS_DURATION = 500;
 
@@ -48,9 +49,9 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const { openAI } = useAI();
+  const router = useRouter();
   const iconData = useIconMappings();
   const mobileIcons = iconData?.mappings?.mobile || {};
-
   // Long press handling
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
   const isLongPress = useRef(false);
@@ -71,6 +72,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
     // Reset state
     isLongPress.current = false;
     hasHandledTouch.current = false;
+    triggerHaptic();
 
     // Store touch start position
     const touch = e.touches[0];
@@ -95,7 +97,6 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
     }
 
     // Short tap - open menu
-    triggerHaptic();
     setIsOpen(true);
   }, [clearLongPressTimer]);
 
@@ -178,42 +179,79 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
           >
             <LiquidGlassSurface radius={28} strength={34} dispersion={0.42} blur={2.5} bezel={18} zoom={0.22} fallbackBlur={22} shine={false} />
 
-            {/* Left - Profile Button */}
-            <div className="relative">
+            {/* Profile Button */}
+            <div className="relative" onPointerDown={() => triggerHaptic()}>
               <MobileProfileButton isDark={isDark} />
             </div>
 
-            {/* Center - Logo Button (Floating Above) */}
-            {/* Tap: Open menu | Long press: Open AI */}
-            <div className="absolute left-1/2 -translate-x-1/2 -top-[2.375rem]">
-              <motion.button
-                whileTap={{ scale: 0.9 }}
-                onTouchStart={handleTouchStart}
-                onTouchEnd={handleTouchEnd}
-                onTouchMove={handleTouchMove}
-                onTouchCancel={handleTouchCancel}
-                onMouseDown={handleMouseDown}
-                onMouseUp={handleMouseUp}
-                onMouseLeave={handleMouseLeave}
-                className="w-20 h-20 flex items-center justify-center transition-all duration-300 select-none touch-none"
-                style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
-              >
-                <Image
-                  src={isDark ? "/newlogoblk.png" : "/newlogowh.png"}
-                  alt="Qore - Basılı tut: AI"
-                  width={80}
-                  height={80}
-                  className="w-20 h-20 object-contain pointer-events-none select-none"
-                  draggable={false}
-                />
-              </motion.button>
-            </div>
+            {/* Search Button */}
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onPointerDown={() => triggerHaptic()}
+              onClick={() => {
+                router.push('/arama');
+              }}
+              aria-label="Arama panelini aç"
+              className={cn(
+                dockTouchClass,
+                "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
+                isDark
+                  ? "text-white hover:bg-white/10"
+                  : "text-[#333] hover:bg-black/5"
+              )}
+            >
+              <Search className="w-5 h-5" />
+            </motion.button>
 
-            {/* Right - Notification Button */}
-            <div className="relative flex items-center">
+            {/* Center - Menu Button */}
+            {/* Tap: Open menu | Long press: Open AI */}
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onTouchStart={handleTouchStart}
+              onTouchEnd={handleTouchEnd}
+              onTouchMove={handleTouchMove}
+              onTouchCancel={handleTouchCancel}
+              onMouseDown={handleMouseDown}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseLeave}
+              aria-label="Mobil menüyü aç"
+              className={cn(
+                dockTouchClass,
+                "relative flex items-center justify-center w-11 h-11 rounded-full transition-all duration-200 select-none touch-none",
+                isDark
+                  ? "text-white bg-white/10 hover:bg-white/15"
+                  : "text-[#333] bg-white/35 hover:bg-black/5 shadow-[inset_0_1px_1px_rgba(255,255,255,0.75)]"
+              )}
+              style={{ WebkitTouchCallout: 'none', WebkitUserSelect: 'none' }}
+            >
+              <Menu className="w-5 h-5 pointer-events-none" />
+            </motion.button>
+
+            {/* Calendar Button */}
+            <motion.button
+              whileTap={{ scale: 0.9 }}
+              onPointerDown={() => triggerHaptic()}
+              onClick={() => {
+                setCalendarOpen(true);
+              }}
+              aria-label="Takvimi aç"
+              className={cn(
+                dockTouchClass,
+                "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
+                isDark
+                  ? "text-white hover:bg-white/10"
+                  : "text-[#333] hover:bg-black/5"
+              )}
+            >
+              <Calendar className="w-5 h-5" />
+            </motion.button>
+
+            {/* Notification Button */}
+            <div className="relative flex items-center" onPointerDown={() => triggerHaptic()}>
               {notificationItem ? (
                 <NotificationsBell
                   triggerClassName={cn(
+                    dockTouchClass,
                     "relative flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                     isDark
                       ? "text-white hover:bg-white/10"
@@ -227,6 +265,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
               ) : (
                 <button
                   className={cn(
+                    dockTouchClass,
                     "flex items-center justify-center w-10 h-10 rounded-full transition-all duration-200",
                     isDark
                       ? "text-white hover:bg-white/10"
@@ -257,7 +296,7 @@ export default function MobileDock({ items }: { items: DockItemData[] }) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} />}
+        {calendarOpen && <CalendarDockPanel onClose={() => setCalendarOpen(false)} placement="mobile-center" />}
       </AnimatePresence>
     </>
   );
@@ -274,11 +313,8 @@ interface FullScreenMenuProps {
 
 function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenMenuProps) {
   const router = useRouter();
-  const iconData = useIconMappings();
-  const mobileIcons = iconData?.mappings?.mobile || {};
 
   const handleItemClick = (item: DockItemData) => {
-    triggerHaptic();
     onClose();
     if (item.href) {
       router.push(item.href);
@@ -338,12 +374,9 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
               },
             },
           }}
-          className={cn(
-            "space-y-0 divide-y",
-            isDark ? "divide-white/10" : "divide-black/10"
-          )}
+          className="space-y-2"
         >
-          {items.map((item, index) => (
+          {items.map((item) => (
             <motion.li
               key={item.key}
               variants={{
@@ -353,31 +386,16 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
               transition={{ type: "spring", stiffness: 300, damping: 25 }}
             >
               <button
+                onPointerDown={() => triggerHaptic()}
                 onClick={() => handleItemClick(item)}
                 className={cn(
-                  "w-full text-left px-1 py-4 transition-all duration-200 flex items-center gap-4",
+                  "w-full text-left px-2 py-5 transition-all duration-200 rounded-2xl flex items-center",
                   isDark
-                    ? "text-white hover:bg-white/5"
-                    : "text-[#333] hover:bg-black/5"
+                    ? "text-white hover:bg-white/5 active:bg-white/10"
+                    : "text-[#333] hover:bg-black/5 active:bg-black/5"
                 )}
               >
-                {mobileIcons[item.key] ? (
-                  <Image
-                    src={getIconSrc(mobileIcons[item.key])}
-                    alt={item.label}
-                    width={50}
-                    height={50}
-                    className="w-[50px] h-[50px] shrink-0 object-contain"
-                  />
-                ) : item.icon ? (
-                  <item.icon
-                    className={cn(
-                      "w-[50px] h-[50px] shrink-0",
-                      isDark ? "text-amber-400" : "text-amber-600"
-                    )}
-                  />
-                ) : null}
-                <span className="text-lg font-medium">{item.label}</span>
+                <span className="text-2xl font-semibold tracking-[-0.02em]">{item.label}</span>
               </button>
             </motion.li>
           ))}
@@ -391,34 +409,16 @@ function FullScreenMenu({ items, onClose, isDark, onCalendarClick }: FullScreenM
             transition={{ type: "spring", stiffness: 300, damping: 25 }}
           >
             <button
-              onClick={() => {
-                triggerHaptic();
-                onCalendarClick();
-              }}
+              onPointerDown={() => triggerHaptic()}
+              onClick={onCalendarClick}
               className={cn(
-                "w-full text-left px-1 py-4 transition-all duration-200 flex items-center gap-4",
+                "w-full text-left px-2 py-5 transition-all duration-200 rounded-2xl flex items-center",
                 isDark
-                  ? "text-white hover:bg-white/5"
-                  : "text-[#333] hover:bg-black/5"
+                  ? "text-white hover:bg-white/5 active:bg-white/10"
+                  : "text-[#333] hover:bg-black/5 active:bg-black/5"
               )}
             >
-              {mobileIcons['calendar'] ? (
-                <Image
-                  src={getIconSrc(mobileIcons['calendar'])}
-                  alt="Takvim"
-                  width={50}
-                  height={50}
-                  className="w-[50px] h-[50px] shrink-0 object-contain"
-                />
-              ) : (
-                <Calendar
-                  className={cn(
-                    "w-[50px] h-[50px] shrink-0",
-                    isDark ? "text-amber-400" : "text-amber-600"
-                  )}
-                />
-              )}
-              <span className="text-lg font-medium">Takvim</span>
+              <span className="text-2xl font-semibold tracking-[-0.02em]">Takvim</span>
             </button>
           </motion.li>
         </motion.ul>
