@@ -44,6 +44,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   const [railOpen, setRailOpen] = React.useState(false);
   const [scannerActive, setScannerActive] = React.useState(false);
   const [voiceActive, setVoiceActive] = React.useState(false);
+  const [focusTarget, setFocusTarget] = React.useState<{ stokKodu: string; field: 'box' | 'test' } | null>(null);
   const [saving, setSaving] = React.useState(false);
   const recognitionRef = React.useRef<any>(null);
   const activeBrandRef = React.useRef<string | null>(null);
@@ -90,7 +91,12 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   }, [brands, rules, productCodes]);
 
   const entryFor = (p: ProductCode): ProductCountEntry => countData[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
-  const isCounted = (p: ProductCode) => { const e = countData[p.stokKodu]; if (!e) return false; return e.counted || (parseInt(e.stokAdedi, 10) || 0) > 0 || (parseInt(e.cihazUstuAdedi, 10) || 0) > 0; };
+  const hasValue = (value?: string | number | null) => String(value ?? '').trim() !== '';
+  const isCounted = (p: ProductCode) => {
+    const e = countData[p.stokKodu];
+    if (!e) return false;
+    return e.counted || (hasValue(e.stokAdedi) && hasValue(e.cihazUstuAdedi));
+  };
 
   const brandStats = (b: string) => {
     const list = productsByBrand[b] || [];
@@ -134,17 +140,28 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   const completeProduct = (p: ProductCode) => {
     setCountData(prev => {
       const base = prev[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
-      const next = { ...base, counted: true, stokAdedi: base.stokAdedi === '' ? '0' : base.stokAdedi };
+      const next = { ...base, counted: true, stokAdedi: base.stokAdedi === '' ? '0' : base.stokAdedi, cihazUstuAdedi: base.cihazUstuAdedi === '' ? '0' : base.cihazUstuAdedi };
       syncRemote(p.stokKodu, 'counted', true, next);
       return { ...prev, [p.stokKodu]: next };
     });
     fire({ tone: 'ok', title: 'Satır tamamlandı' });
   };
+
+  const autoCompleteProduct = (p: ProductCode, cihazValue: string, nextProduct?: ProductCode) => {
+    setCountData(prev => {
+      const base = prev[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
+      if (!hasValue(base.stokAdedi) || !hasValue(cihazValue)) return prev;
+      const next = { ...base, cihazUstuAdedi: cihazValue.replace(/[^0-9]/g, ''), counted: true };
+      syncRemote(p.stokKodu, 'counted', true, next);
+      return { ...prev, [p.stokKodu]: next };
+    });
+    if (nextProduct) setFocusTarget({ stokKodu: nextProduct.stokKodu, field: 'box' });
+  };
   const completeBrand = () => {
     if (!brand) return;
     setCountData(prev => {
       const next = { ...prev };
-      brandList.forEach(p => { const base = next[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || ''); const upd = { ...base, counted: true, stokAdedi: base.stokAdedi === '' ? '0' : base.stokAdedi }; next[p.stokKodu] = upd; syncRemote(p.stokKodu, 'counted', true, upd); });
+      brandList.forEach(p => { const base = next[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || ''); const upd = { ...base, counted: true, stokAdedi: base.stokAdedi === '' ? '0' : base.stokAdedi, cihazUstuAdedi: base.cihazUstuAdedi === '' ? '0' : base.cihazUstuAdedi }; next[p.stokKodu] = upd; syncRemote(p.stokKodu, 'counted', true, upd); });
       return next;
     });
     fire({ tone: 'ok', title: `${brand} tamamlandı`, sub: `${brandList.length} ürün sayıldı` });
@@ -243,6 +260,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
 
   let shown = brandList.filter(p => (p.stokAdi || '').toLowerCase().includes(q.toLowerCase()) || p.stokKodu.toLowerCase().includes(q.toLowerCase()));
   if (onlyEmpty) shown = shown.filter(p => !isCounted(p));
+  shown = [...shown].sort((a, b) => Number(isCounted(a)) - Number(isCounted(b)));
 
   if (loadingRules) {
     return <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}><span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.4em', color: 'var(--ink-3)', textTransform: 'uppercase', animation: 'mlLivePulse 1.6s ease-in-out infinite' }}>Yükleniyor</span></div>;
@@ -335,10 +353,17 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {shown.map((p, i) => (
-              <ProductRow key={p.stokKodu} p={p} i={i} ac={ac} mobile={mobile} entry={entryFor(p)} counted={isCounted(p)}
-                onBox={(v) => setField(p, 'stokAdedi', v)} onTest={(v) => setField(p, 'cihazUstuAdedi', v)} onComplete={() => completeProduct(p)} />
-            ))}
+            {shown.map((p, i) => {
+              const nextProduct = shown.find(candidate => candidate.stokKodu !== p.stokKodu && !isCounted(candidate));
+              return (
+                <ProductRow key={p.stokKodu} p={p} i={i} ac={ac} mobile={mobile} entry={entryFor(p)} counted={isCounted(p)}
+                  focusField={focusTarget?.stokKodu === p.stokKodu ? focusTarget.field : null}
+                  onBox={(v: string) => setField(p, 'stokAdedi', v)}
+                  onTest={(v: string) => setField(p, 'cihazUstuAdedi', v)}
+                  onComplete={() => completeProduct(p)}
+                  onAutoComplete={(cihazValue: string) => autoCompleteProduct(p, cihazValue, nextProduct)} />
+              );
+            })}
             {shown.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontWeight: 600, borderRadius: 'var(--radius)', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)' }}>{onlyEmpty ? 'Bu markada sayılmayan ürün kalmadı 🎉' : 'Ürün bulunamadı'}</div>}
           </div>
         </div>
@@ -430,8 +455,32 @@ const BrandRail = ({ brands, active, setActive, ac, brandStats, bare }: any) => 
   );
 };
 
-const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplete }: any) => {
-  const [focB, setFocB] = React.useState(false);
+const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplete, focusField, onAutoComplete }: any) => {
+  const [focusedField, setFocusedField] = React.useState<'box' | 'test' | null>(null);
+  const boxRef = React.useRef<HTMLInputElement | null>(null);
+  const testRef = React.useRef<HTMLInputElement | null>(null);
+  const boxAdvanceTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowCompleteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    if (focusField === 'box') {
+      boxRef.current?.focus();
+      boxRef.current?.select();
+    } else if (focusField === 'test') {
+      testRef.current?.focus();
+      testRef.current?.select();
+    }
+  }, [focusField]);
+
+  React.useEffect(() => () => {
+    if (boxAdvanceTimer.current) clearTimeout(boxAdvanceTimer.current);
+    if (rowCompleteTimer.current) clearTimeout(rowCompleteTimer.current);
+  }, []);
+
+  const focusBoxShadow = (field: 'box' | 'test') => focusedField === field
+    ? `var(--clay-inset), 0 0 0 2px ${ac.primary}, 0 0 0 8px rgba(111,181,133,0.16), 0 0 30px rgba(111,181,133,0.42)`
+    : 'var(--clay-inset)';
+
   const ambalaj = p.ambalajDegeri || 1;
   const boxN = parseInt(entry.stokAdedi || '0', 10) || 0;
   const total = productTotalTests(p, entry);
@@ -454,14 +503,14 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr 1fr' : '1fr 1fr 1.3fr', gap: 10, alignItems: 'stretch' }}>
-          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focB ? `inset 0 0 0 2px ${ac.primary}` : 'var(--clay-inset)', transition: 'box-shadow 200ms' }}>
+          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focusBoxShadow('box'), transition: 'box-shadow 220ms var(--ease-fluid)', animation: focusedField === 'box' ? 'mlLivePulse 1.35s ease-in-out infinite' : undefined }}>
             <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Kutu Adedi</label>
-            <input value={entry.stokAdedi} onChange={(e) => onBox(e.target.value)} onFocus={() => setFocB(true)} onBlur={() => setFocB(false)} inputMode="numeric" placeholder="0"
+            <input ref={boxRef} value={entry.stokAdedi} onChange={(e) => { const v = e.target.value; onBox(v); if (boxAdvanceTimer.current) clearTimeout(boxAdvanceTimer.current); if (String(v).trim() !== '') boxAdvanceTimer.current = setTimeout(() => { testRef.current?.focus(); testRef.current?.select(); }, 300); }} onFocus={() => setFocusedField('box')} onBlur={() => setFocusedField(cur => cur === 'box' ? null : cur)} inputMode="numeric" placeholder="0"
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-1)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
-          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: 'var(--clay-inset)' }}>
+          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focusBoxShadow('test'), transition: 'box-shadow 220ms var(--ease-fluid)', animation: focusedField === 'test' ? 'mlLivePulse 1.35s ease-in-out infinite' : undefined }}>
             <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Açık / Ek Test</label>
-            <input value={entry.cihazUstuAdedi} onChange={(e) => onTest(e.target.value)} inputMode="numeric" placeholder="0"
+            <input ref={testRef} value={entry.cihazUstuAdedi} onChange={(e) => { const v = e.target.value; onTest(v); if (rowCompleteTimer.current) clearTimeout(rowCompleteTimer.current); if (String(entry.stokAdedi ?? '').trim() !== '' && String(v).trim() !== '') rowCompleteTimer.current = setTimeout(() => onAutoComplete?.(v), 300); }} onFocus={() => setFocusedField('test')} onBlur={() => setFocusedField(cur => cur === 'test' ? null : cur)} inputMode="numeric" placeholder="0"
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-2)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
           <div style={{ gridColumn: mobile ? '1 / -1' : 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 18px', borderRadius: 'var(--radius)', background: counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)', boxShadow: counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)', transition: 'all 300ms var(--ease-fluid)' }}>
