@@ -5,7 +5,27 @@ import { nanoid } from 'nanoid';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
-import type { DepoStokItem, ProductCode, Hospital, LabPool } from '@/lib/types';
+import type { DepoStokItem, ProductCode, Hospital, LabPool, Depot, DeviceLabPool } from '@/lib/types';
+
+/* labs actually linked to the depot in depot management (linkedLaboratoryIds +
+   deviceLabPools members for pool warehouses), EXCLUDING perifer labs. This is
+   the only set of labs the depot count should categorize by — no hospital-wide
+   or perifer labs leak in. */
+export function resolveDepotLabs(depot: Depot | undefined, deviceLabPools: DeviceLabPool[], hospitals: Hospital[]): Hospital[] {
+  if (!depot) return [];
+  const ids = new Set<string>();
+  (depot.linkedLaboratoryIds || []).forEach(id => id && ids.add(id));
+  if (depot.isPoolWarehouse) {
+    (depot.linkedDeviceLabPoolIds || []).forEach(pid => {
+      const pool = deviceLabPools.find(p => p.id === pid);
+      (pool?.memberIds || []).forEach(id => id && ids.add(id));
+    });
+  }
+  const byId = new Map(hospitals.map(h => [h.id, h]));
+  return Array.from(ids)
+    .map(id => byId.get(id))
+    .filter((h): h is Hospital => !!h && !h.perifer);
+}
 
 /* one row per product (stokKodu) within the selected depot */
 export interface ProductGroup {
@@ -80,19 +100,21 @@ export function buildLabGroups(
     docsByStok.set(d.stokKodu, arr);
   });
 
+  const isSynthetic = (s: string) => /^(FAZLA|SAYIM)-/i.test(s);
   const labMap = new Map<string, LabGroup>();
   docsByStok.forEach((docs, stokKodu) => {
-    const p = productsByCode.get(stokKodu);
+    const p = productsByCode.get(stokKodu); // may be undefined if the catalog hasn't loaded — depoStok carries enough
     const { labId, labName } = resolveLab(stokKodu, stokToHospitals, hospitalsById, labPools);
-    const serials = Array.from(new Set(docs.map(d => (d.seriNumarasi || '').trim()).filter(Boolean)));
-    const serial = !!p && resolveDefaultTrackingMode(p as any) === 'serial';
+    // real serials only (exclude synthetic FAZLA-/SAYIM- placeholders)
+    const serials = Array.from(new Set(docs.map(d => (d.seriNumarasi || '').trim()).filter(s => s && !isSynthetic(s))));
+    const serial = (!!p && resolveDefaultTrackingMode(p as any) === 'serial') || serials.length > 0;
     const group: ProductGroup = {
       stokKodu,
       stokAdi: p?.stokAdi || docs[0]?.stokAdi || stokKodu,
       labId, labName,
       urunGrubu: p?.urunGrubu || docs[0]?.urunGrubu,
-      ambalajDegeri: p?.ambalajDegeri,
-      serial: serial || (serials.length > 0 && !!p && (p as any).trackingMode === 'serial'),
+      ambalajDegeri: p?.ambalajDegeri ?? docs[0]?.ambalajDegeri,
+      serial,
       docs, serials, currentQty: docs.length,
     };
     const lg = labMap.get(labId) || { labId, labName, products: [] };

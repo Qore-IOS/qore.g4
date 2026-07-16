@@ -5,12 +5,12 @@ import { getDocs, where } from 'firebase/firestore';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useProductCodes, useHospitals, useLabPools, useAllMinMaxRules } from '@/hooks/useFirebaseQueries';
-import type { DepoStokItem } from '@/lib/types';
+import { useDepots, useProductCodes, useHospitals, useLabPools, useDeviceLabPools, useAllMinMaxRules } from '@/hooks/useFirebaseQueries';
+import type { DepoStokItem, Depot } from '@/lib/types';
 import {
   AC, MlStyles, MlToast, MlPageHead, MLIco, useContainerMode, type Mode,
 } from '@/components/maliyet/ml-primitives';
-import { buildStokToHospitals, buildLabGroups } from './depo-logic';
+import { buildStokToHospitals, buildLabGroups, resolveDepotLabs } from './depo-logic';
 import DepoCount from './DepoCount';
 
 const nameOf = (x: any) => x?.name || x?.ad || '—';
@@ -24,15 +24,14 @@ export default function DepoSayimPanel() {
   const productsQ = useProductCodes();
   const hospitalsQ = useHospitals();
   const labPoolsQ = useLabPools();
-  const hospitals = hospitalsQ.data ?? [];
-  const hospitalIds = React.useMemo(() => hospitals.map((h: any) => h.id), [hospitals]);
-  const rulesQ = useAllMinMaxRules(hospitalIds);
-
-  const depots = depotsQ.data ?? [];
+  const deviceLabPoolsQ = useDeviceLabPools();
+  const depots = (depotsQ.data ?? []) as Depot[];
   const productCodes = productsQ.data ?? [];
+  const hospitals = hospitalsQ.data ?? [];
   const labPools = labPoolsQ.data ?? [];
+  const deviceLabPools = deviceLabPoolsQ.data ?? [];
 
-  const [selectedDepot, setSelectedDepot] = React.useState<{ id: string; name: string } | null>(null);
+  const [selectedDepot, setSelectedDepot] = React.useState<Depot | null>(null);
   const [depotStock, setDepotStock] = React.useState<DepoStokItem[]>([]);
   const [loadingStock, setLoadingStock] = React.useState(false);
   const [q, setQ] = React.useState('');
@@ -40,7 +39,12 @@ export default function DepoSayimPanel() {
   const toastRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const fire = (t: any) => { if (toastRef.current) clearTimeout(toastRef.current); setToast({ ...t, id: Date.now() }); toastRef.current = setTimeout(() => setToast(null), 2400); };
 
-  /* load ONLY the selected depot's stock (nothing downloaded before a depot is chosen) */
+  /* the depot's linked labs (perifer excluded) — the only labs to categorize by */
+  const linkedLabs = React.useMemo(() => resolveDepotLabs(selectedDepot || undefined, deviceLabPools as any, hospitals as any), [selectedDepot, deviceLabPools, hospitals]);
+  const linkedLabIds = React.useMemo(() => linkedLabs.map((h: any) => h.id), [linkedLabs]);
+  const rulesQ = useAllMinMaxRules(linkedLabIds);
+
+  /* load ONLY the selected depot's stock (nothing before a depot is chosen) */
   React.useEffect(() => {
     if (!selectedDepot) { setDepotStock([]); return; }
     let alive = true;
@@ -61,44 +65,49 @@ export default function DepoSayimPanel() {
     return buildLabGroups(depotStock, productCodes, stokToHospitals, hospitals, labPools);
   }, [selectedDepot, depotStock, productCodes, rulesQ.data, hospitals, labPools]);
 
-  const catalogLoading = depotsQ.isLoading || productsQ.isLoading || hospitalsQ.isLoading;
+  // productCodes (slow server action) is only needed for barcode resolution, not for
+  // grouping/display — depoStok carries stokAdi/urunGrubu/ambalaj + real serials.
+  const countReady = !loadingStock && !rulesQ.isLoading && !hospitalsQ.isLoading;
 
   const shownDepots = (depots as any[]).filter((d) => nameOf(d).toLowerCase().includes(q.toLowerCase()));
   const pad = mode === 'mobile' ? '16px 14px 40px' : '24px 30px 48px';
+  const loaderBox = (label: string) => (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
+      <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.4em', color: 'var(--ink-3)', textTransform: 'uppercase', animation: 'mlLivePulse 1.6s ease-in-out infinite' }}>{label}</span>
+    </div>
+  );
 
   return (
     <div ref={rootRef} className="ml-root" style={{ minHeight: '100vh', width: '100%' }}>
       <MlStyles />
       {selectedDepot ? (
-        loadingStock || rulesQ.isLoading ? (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
-            <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.4em', color: 'var(--ink-3)', textTransform: 'uppercase', animation: 'mlLivePulse 1.6s ease-in-out infinite' }}>Depo Stoğu Yükleniyor</span>
-          </div>
+        !countReady ? (
+          loaderBox('Depo Stoğu Yükleniyor')
         ) : labGroups.length === 0 ? (
           <div style={{ padding: pad }}>
-            <MlPageHead ico="building" title={selectedDepot.name} sub="Depo sayımı" ac={AC} mode={mode} onBack={() => setSelectedDepot(null)} mobile={mode === 'mobile'} />
+            <MlPageHead ico="building" title={nameOf(selectedDepot)} sub="Depo sayımı" ac={AC} onBack={() => setSelectedDepot(null)} mobile={mode === 'mobile'} />
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, padding: '50px 30px', textAlign: 'center' }}>
               <span style={{ width: 70, height: 70, borderRadius: '28%', display: 'grid', placeItems: 'center', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)', color: 'var(--ink-3)' }}><MLIco.box s={32} /></span>
               <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--ink-1)' }}>Bu depoda sayılacak stok yok</div>
-              <div style={{ fontSize: 13.5, color: 'var(--ink-2)', fontWeight: 500 }}>Depoda kayıtlı (sevk edilmemiş) ürün bulunamadı.</div>
+              <div style={{ fontSize: 13.5, color: 'var(--ink-2)', fontWeight: 500 }}>Depoya bağlı laboratuvarlarda kayıtlı (sevk edilmemiş) ürün bulunamadı.</div>
             </div>
           </div>
         ) : (
-          <DepoCount ac={AC} mode={mode} depot={selectedDepot} groups={labGroups} productCodes={productCodes} onBack={() => setSelectedDepot(null)} fire={fire} />
+          <DepoCount ac={AC} mode={mode} depot={{ id: selectedDepot.id, name: nameOf(selectedDepot) }} groups={labGroups} productCodes={productCodes} onBack={() => setSelectedDepot(null)} fire={fire} />
         )
       ) : (
         <div style={{ padding: pad, maxWidth: 900, margin: '0 auto' }}>
-          <MlPageHead ico="building" title="Depo Sayım" sub="Sayım yapılacak depoyu seçin" ac={AC} mode={mode} mobile={mode === 'mobile'} />
+          <MlPageHead ico="building" title="Depo Sayım" sub="Sayım yapılacak depoyu seçin" ac={AC} mobile={mode === 'mobile'} />
           <div style={{ position: 'relative', marginBottom: 14 }}>
             <span style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)', display: 'inline-flex' }}><MLIco.search s={18} /></span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Depo ara…" style={{ width: '100%', boxSizing: 'border-box', height: 52, padding: '0 16px 0 46px', borderRadius: 'var(--radius-pill)', border: 'none', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)', color: 'var(--ink-1)', fontSize: 15, fontWeight: 500, fontFamily: 'inherit', outline: 'none' }} />
           </div>
-          {catalogLoading ? (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontWeight: 700, letterSpacing: '0.3em', textTransform: 'uppercase', fontSize: 12 }}>Yükleniyor</div>
+          {depotsQ.isLoading ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontWeight: 700, letterSpacing: '0.3em', textTransform: 'uppercase', fontSize: 12 }}>Depolar Yükleniyor</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {shownDepots.map((d, i) => (
-                <button key={d.id} onClick={() => setSelectedDepot({ id: d.id, name: nameOf(d) })}
+                <button key={d.id} onClick={() => setSelectedDepot(d)}
                   style={{ all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'flex', alignItems: 'center', gap: 14, padding: '15px 18px', borderRadius: 'var(--radius)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', animation: `mlPopIn ${180 + Math.min(i, 12) * 40}ms var(--ease-fluid)`, transition: 'transform 160ms var(--ease-fluid)' }}
                   onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.99)')} onPointerUp={(e) => (e.currentTarget.style.transform = '')} onPointerLeave={(e) => (e.currentTarget.style.transform = '')}>
                   <span style={{ width: 40, height: 40, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center', color: AC.primary, background: `${AC.primary}16` }}><MLIco.building s={20} /></span>
