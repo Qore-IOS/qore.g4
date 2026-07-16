@@ -317,10 +317,10 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
         </div>
         {mobile && (
           <div style={{ display: 'flex', gap: 8, marginTop: 10, overflowX: 'auto', paddingBottom: 2 }}>
-            <ToolChip ico="barcode" label={scannerActive ? 'Aktif' : 'Barkod'} live={scannerActive} onClick={() => setScannerActive(v => !v)} />
-            <ToolChip ico="mic" label={voiceActive ? 'Aktif' : 'Sesli'} live={voiceActive} tone="red" onClick={toggleVoice} />
-            <ToolChip ico="download" label="Şablon" onClick={() => fire({ title: 'Şablon indiriliyor' })} />
-            <ToolChip ico="excel" label="Excel" onClick={() => fire({ title: 'Excel içe aktar' })} />
+            <ToolChip ico="barcode" label={scannerActive ? 'Aktif' : 'Barkod'} live={scannerActive} compact onClick={() => setScannerActive(v => !v)} />
+            <ToolChip ico="mic" label={voiceActive ? 'Aktif' : 'Sesli'} live={voiceActive} tone="red" compact onClick={toggleVoice} />
+            <ToolChip ico="download" label="Şablon" compact onClick={() => fire({ title: 'Şablon indiriliyor' })} />
+            <ToolChip ico="excel" label="Excel" compact onClick={() => fire({ title: 'Excel içe aktar' })} />
           </div>
         )}
       </div>
@@ -414,13 +414,13 @@ function emptyEntry(stokKodu: string, stokAdi: string, marka: string): ProductCo
   return { stokKodu, stokAdi, marka, stokAdedi: '', cihazUstuAdedi: '', counted: false };
 }
 
-const ToolChip = ({ ico, label, onClick, live, tone }: any) => {
+const ToolChip = ({ ico, label, onClick, live, tone, compact }: any) => {
   const I = MLIco[ico];
   const c = tone === 'red' ? 'var(--danger)' : 'var(--water-deep)';
   const bg = tone === 'red' ? 'rgba(192,121,106,0.16)' : 'rgba(111,181,133,0.16)';
   return (
-    <button onClick={onClick} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 7, height: 38, padding: '0 13px', borderRadius: 'var(--radius-pill)', background: live ? bg : 'var(--surface-2)', boxShadow: live ? 'none' : 'var(--clay-inset)', color: live ? c : 'var(--ink-2)', fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>
-      {live && <span style={{ width: 7, height: 7, borderRadius: '50%', background: tone === 'red' ? 'var(--danger)' : 'var(--water-solid)', animation: 'mlLivePulse 1.8s ease-in-out infinite' }} />}<I s={15} /> {label}
+    <button onClick={onClick} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: compact ? 5 : 7, height: compact ? 36 : 38, minWidth: compact ? 78 : undefined, flex: '0 0 auto', padding: compact ? '0 10px' : '0 13px', borderRadius: 'var(--radius-pill)', background: live ? bg : 'var(--surface-2)', boxShadow: live ? 'none' : 'var(--clay-inset)', color: live ? c : 'var(--ink-2)', fontSize: compact ? 12 : 12.5, fontWeight: 700, whiteSpace: 'nowrap', lineHeight: 1, overflow: 'hidden' }}>
+      {live && <span style={{ width: 7, height: 7, borderRadius: '50%', background: tone === 'red' ? 'var(--danger)' : 'var(--water-solid)', animation: 'mlLivePulse 1.8s ease-in-out infinite', flexShrink: 0 }} />}<I s={compact ? 14 : 15} /> <span style={{ whiteSpace: 'nowrap', wordBreak: 'keep-all', overflowWrap: 'normal', lineHeight: 1, flexShrink: 0 }}>{label}</span>
     </button>
   );
 };
@@ -508,7 +508,7 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
               <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: `${ac.primary}14`, color: ac.primary, fontSize: 11, fontWeight: 800 }}><MLIco.box s={12} /> Kutu ×{ambalaj}</span>
             </div>
           </div>
-          <button onClick={onComplete} aria-label="Satırı tamamla" style={{ all: 'unset', cursor: 'pointer', width: 40, height: 40, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', color: counted ? '#fff' : 'var(--ink-3)', background: counted ? 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--water-solid))' : 'var(--surface-2)', boxShadow: counted ? '0 6px 13px -4px rgba(111,181,133,0.6)' : 'var(--clay-inset)', border: counted ? 'none' : '2px solid var(--ink-3)', boxSizing: 'border-box', transition: 'all 240ms var(--ease-fluid)' }}><MLIco.check s={19} /></button>
+          <button onClick={() => { if (mobile && String(entry.stokAdedi ?? '').trim() !== '' && String(entry.cihazUstuAdedi ?? '').trim() !== '') onAutoComplete?.(entry.cihazUstuAdedi); else onComplete(); }} aria-label="Satırı tamamla" style={{ all: 'unset', cursor: 'pointer', width: 40, height: 40, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', color: counted ? '#fff' : 'var(--ink-3)', background: counted ? 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--water-solid))' : 'var(--surface-2)', boxShadow: counted ? '0 6px 13px -4px rgba(111,181,133,0.6)' : 'var(--clay-inset)', border: counted ? 'none' : '2px solid var(--ink-3)', boxSizing: 'border-box', transition: 'all 240ms var(--ease-fluid)' }}><MLIco.check s={19} /></button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr 1fr' : '1fr 1fr 1.3fr', gap: 10, alignItems: 'stretch' }}>
