@@ -292,9 +292,9 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
       <div style={{ position: 'sticky', top: 0, zIndex: 30, background: 'linear-gradient(180deg, var(--bg-0) 78%, transparent)', padding: mobile ? '12px 14px 10px' : '16px 24px 12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 14, padding: mobile ? '10px 12px' : '14px 20px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)' }}>
           <MlIconBtn onClick={onBack} ac={ac} size={mobile ? 38 : 44} ariaLabel="Geri"><MLIco.back s={18} /></MlIconBtn>
-          <span style={{ width: mobile ? 38 : 44, height: mobile ? 38 : 44, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${ac.accent}, ${ac.primary})`, boxShadow: `0 8px 16px -7px ${ac.glow}` }}>{kind === 'depot' ? <MLIco.building s={mobile ? 20 : 22} /> : <MLIco.flask s={mobile ? 20 : 22} />}</span>
+          <span style={{ width: mobile ? 0 : 44, height: mobile ? 0 : 44, flexShrink: 0, borderRadius: 12, display: mobile ? 'none' : 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${ac.accent}, ${ac.primary})`, boxShadow: `0 8px 16px -7px ${ac.glow}` }}>{kind === 'depot' ? <MLIco.building s={mobile ? 20 : 22} /> : <MLIco.flask s={mobile ? 20 : 22} />}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: mobile ? 14.5 : 18, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--ink-1)', overflow: 'hidden', textOverflow: mobile ? 'clip' : 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap', display: mobile ? '-webkit-box' : undefined, WebkitLineClamp: mobile ? 2 : undefined, WebkitBoxOrient: mobile ? 'vertical' : undefined, lineHeight: 1.12 }}>{loc.name}</div>
+            <div style={{ fontSize: mobile ? 15.5 : 18, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--ink-1)', overflow: 'hidden', textOverflow: mobile ? 'clip' : 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap', display: mobile ? '-webkit-box' : undefined, WebkitLineClamp: mobile ? 2 : undefined, WebkitBoxOrient: mobile ? 'vertical' : undefined, lineHeight: 1.12 }}>{loc.name}</div>
             <div style={{ fontSize: mobile ? 11 : 12, fontWeight: 600, color: 'var(--ink-3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{brandsDone}/{brands.length} marka · {countedN}/{totalN} ürün</div>
           </div>
           {!mobile && (
@@ -381,20 +381,29 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
       </div>
 
       {/* bottom save bar — flush at the bottom, matching the demo */}
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, padding: mobile ? '10px 14px calc(10px + env(safe-area-inset-bottom))' : '12px 24px 16px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
-        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, padding: mobile ? '8px 10px' : '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 20, flex: 1, minWidth: 0, overflow: 'hidden' }}>
-            <BigStat label={mobile ? 'Toplam' : 'Toplam Test'} value={grandTests} compact={mobile} />
-            {!mobile && <div style={{ width: 1, height: 40, background: 'var(--line)', flexShrink: 0 }} />}
-            <div style={{ flexShrink: 1, minWidth: 0, display: mobile ? 'none' : 'block' }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Toplam Maliyet</div>
-              <div style={{ fontSize: mobile ? 22 : 26, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{grandCostStr}</div>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, padding: mobile ? '8px 14px calc(8px + env(safe-area-inset-bottom))' : '12px 24px 16px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: mobile ? 'column' : 'row', alignItems: mobile ? 'stretch' : 'center', gap: mobile ? 6 : 12, padding: mobile ? '8px 10px 10px' : '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
+          {mobile ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 14, minWidth: 0 }}>
+              <MiniStat label="Toplam Test" value={grandTests.toLocaleString('tr-TR')} />
+              <MiniStat label="Toplam Maliyet" value={grandCostStr} accent />
             </div>
-            {!mobile && <div style={{ width: 1, height: 40, background: 'var(--line)', flexShrink: 0 }} />}
-            {!mobile && <BigStat label="Sayılan" value={countedN} suffix={`/${totalN}`} />}
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 20, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+              <BigStat label="Toplam Test" value={grandTests} />
+              <div style={{ width: 1, height: 40, background: 'var(--line)', flexShrink: 0 }} />
+              <div style={{ flexShrink: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Toplam Maliyet</div>
+                <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{grandCostStr}</div>
+              </div>
+              <div style={{ width: 1, height: 40, background: 'var(--line)', flexShrink: 0 }} />
+              <BigStat label="Sayılan" value={countedN} suffix={`/${totalN}`} />
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: mobile ? 10 : 12, justifyContent: mobile ? 'center' : 'flex-end' }}>
+            {mobile && <MlBtn ico="check" variant="green" ac={ac} onClick={completeBrand} size="sm" style={{ flexShrink: 0 }}>Marka</MlBtn>}
+            <MlBtn ico="check" variant="primary" ac={ac} onClick={save} size={mobile ? 'sm' : 'lg'} style={{ flexShrink: 0 }}>Kaydet</MlBtn>
           </div>
-          {mobile && <MlBtn ico="check" variant="green" ac={ac} onClick={completeBrand} size="sm" style={{ flexShrink: 0 }}>Marka</MlBtn>}
-          <MlBtn ico="check" variant="primary" ac={ac} onClick={save} size="lg" style={{ flexShrink: 0 }}>Kaydet</MlBtn>
         </div>
       </div>
 
@@ -432,6 +441,13 @@ const BigStat = ({ label, value, suffix, compact }: any) => (
       <MlNum value={value} size={compact ? 20 : 24} />
       {suffix && <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-3)' }}>{suffix}</span>}
     </div>
+  </div>
+);
+
+const MiniStat = ({ label, value, accent }: any) => (
+  <div style={{ minWidth: 0, textAlign: 'center' }}>
+    <div style={{ fontSize: 8.5, fontWeight: 800, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', lineHeight: 1 }}>{label}</div>
+    <div style={{ marginTop: 2, maxWidth: 118, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 14, fontWeight: 800, color: accent ? 'var(--accent)' : 'var(--ink-1)', letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }}>{value}</div>
   </div>
 );
 
@@ -491,7 +507,6 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
     : 'var(--clay-inset)';
 
   const ambalaj = p.ambalajDegeri || 1;
-  const boxN = parseInt(entry.stokAdedi || '0', 10) || 0;
   const total = productTotalTests(p, entry);
   const { amount, currency } = calcProductCost(p, entry);
   const grup = urunGrubuLabel(p.urunGrubu);
@@ -527,7 +542,6 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
               <div style={{ fontSize: 10.5, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.85)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Toplam Test</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
                 <MlNum value={total} size={mobile ? 25 : 34} color={counted ? '#fff' : 'var(--ink-1)'} />
-                {boxN > 0 && <span style={{ fontSize: mobile ? 10.5 : 12, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.8)' : 'var(--ink-3)', lineHeight: 1.15, overflowWrap: 'anywhere' }}>{boxN}×{ambalaj}{entry.cihazUstuAdedi ? `+${entry.cihazUstuAdedi}` : ''}</span>}
               </div>
             </div>
             <div style={{ textAlign: 'right', minWidth: mobile ? 104 : undefined }}>
