@@ -45,6 +45,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   const [scannerActive, setScannerActive] = React.useState(false);
   const [voiceActive, setVoiceActive] = React.useState(false);
   const [focusTarget, setFocusTarget] = React.useState<{ stokKodu: string; field: 'box' | 'test' } | null>(null);
+  const [completingRows, setCompletingRows] = React.useState<Set<string>>(() => new Set());
   const [saving, setSaving] = React.useState(false);
   const recognitionRef = React.useRef<any>(null);
   const activeBrandRef = React.useRef<string | null>(null);
@@ -95,7 +96,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   const isCounted = (p: ProductCode) => {
     const e = countData[p.stokKodu];
     if (!e) return false;
-    return e.counted || (hasValue(e.stokAdedi) && hasValue(e.cihazUstuAdedi));
+    return !!e.counted;
   };
 
   const brandStats = (b: string) => {
@@ -148,14 +149,23 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   };
 
   const autoCompleteProduct = (p: ProductCode, cihazValue: string, nextProduct?: ProductCode) => {
-    setCountData(prev => {
-      const base = prev[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
-      if (!hasValue(base.stokAdedi) || !hasValue(cihazValue)) return prev;
-      const next = { ...base, cihazUstuAdedi: cihazValue.replace(/[^0-9]/g, ''), counted: true };
-      syncRemote(p.stokKodu, 'counted', true, next);
-      return { ...prev, [p.stokKodu]: next };
-    });
-    if (nextProduct) setFocusTarget({ stokKodu: nextProduct.stokKodu, field: 'box' });
+    const cleanCihazValue = cihazValue.replace(/[^0-9]/g, '');
+    const currentEntry = countData[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
+    if (!hasValue(currentEntry.stokAdedi) || !hasValue(cleanCihazValue) || currentEntry.counted) return;
+
+    setCompletingRows(prev => new Set(prev).add(p.stokKodu));
+
+    window.setTimeout(() => {
+      setCountData(prev => {
+        const base = prev[p.stokKodu] || emptyEntry(p.stokKodu, p.stokAdi, p.marka || '');
+        if (!hasValue(base.stokAdedi) || !hasValue(cleanCihazValue) || base.counted) return prev;
+        const next = { ...base, cihazUstuAdedi: cleanCihazValue, counted: true };
+        syncRemote(p.stokKodu, 'counted', true, next);
+        return { ...prev, [p.stokKodu]: next };
+      });
+      setCompletingRows(prev => { const next = new Set(prev); next.delete(p.stokKodu); return next; });
+      if (nextProduct) setFocusTarget({ stokKodu: nextProduct.stokKodu, field: 'box' });
+    }, 280);
   };
   const completeBrand = () => {
     if (!brand) return;
@@ -358,6 +368,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
               return (
                 <ProductRow key={p.stokKodu} p={p} i={i} ac={ac} mobile={mobile} entry={entryFor(p)} counted={isCounted(p)}
                   focusField={focusTarget?.stokKodu === p.stokKodu ? focusTarget.field : null}
+                  completing={completingRows.has(p.stokKodu)}
                   onBox={(v: string) => setField(p, 'stokAdedi', v)}
                   onTest={(v: string) => setField(p, 'cihazUstuAdedi', v)}
                   onComplete={() => completeProduct(p)}
@@ -455,26 +466,24 @@ const BrandRail = ({ brands, active, setActive, ac, brandStats, bare }: any) => 
   );
 };
 
-const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplete, focusField, onAutoComplete }: any) => {
+const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplete, focusField, completing, onAutoComplete }: any) => {
   const [focusedField, setFocusedField] = React.useState<'box' | 'test' | null>(null);
   const boxRef = React.useRef<HTMLInputElement | null>(null);
   const testRef = React.useRef<HTMLInputElement | null>(null);
   const boxAdvanceTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const rowCompleteTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   React.useEffect(() => {
     if (focusField === 'box') {
-      boxRef.current?.focus();
+      boxRef.current?.focus({ preventScroll: true });
       boxRef.current?.select();
     } else if (focusField === 'test') {
-      testRef.current?.focus();
+      testRef.current?.focus({ preventScroll: true });
       testRef.current?.select();
     }
   }, [focusField]);
 
   React.useEffect(() => () => {
     if (boxAdvanceTimer.current) clearTimeout(boxAdvanceTimer.current);
-    if (rowCompleteTimer.current) clearTimeout(rowCompleteTimer.current);
   }, []);
 
   const focusBoxShadow = (field: 'box' | 'test') => focusedField === field
@@ -488,7 +497,7 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
   const grup = urunGrubuLabel(p.urunGrubu);
 
   return (
-    <div style={{ position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', background: counted ? 'linear-gradient(180deg, rgba(111,181,133,0.08), rgba(111,181,133,0.03))' : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: counted ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)', transition: 'box-shadow 300ms var(--ease-fluid), background 300ms', animation: `mlPopIn ${200 + Math.min(i, 10) * 45}ms var(--ease-fluid)` }}>
+    <div style={{ position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', transform: completing ? 'translateX(115%) scale(0.98)' : 'translateX(0) scale(1)', opacity: completing ? 0 : 1, background: completing ? 'linear-gradient(180deg, rgba(111,181,133,0.18), rgba(111,181,133,0.08))' : counted ? 'linear-gradient(180deg, rgba(111,181,133,0.08), rgba(111,181,133,0.03))' : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: counted ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)', transition: 'transform 280ms var(--ease-fluid), opacity 220ms ease, box-shadow 300ms var(--ease-fluid), background 300ms', willChange: completing ? 'transform, opacity' : undefined, animation: `mlPopIn ${200 + Math.min(i, 10) * 45}ms var(--ease-fluid)` }}>
       <div style={{ padding: mobile ? 15 : 18 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -505,12 +514,12 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
         <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr 1fr' : '1fr 1fr 1.3fr', gap: 10, alignItems: 'stretch' }}>
           <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focusBoxShadow('box'), transition: 'box-shadow 220ms var(--ease-fluid)', animation: focusedField === 'box' ? 'mlLivePulse 1.35s ease-in-out infinite' : undefined }}>
             <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Kutu Adedi</label>
-            <input ref={boxRef} value={entry.stokAdedi} onChange={(e) => { const v = e.target.value; onBox(v); if (boxAdvanceTimer.current) clearTimeout(boxAdvanceTimer.current); if (String(v).trim() !== '') boxAdvanceTimer.current = setTimeout(() => { testRef.current?.focus(); testRef.current?.select(); }, 300); }} onFocus={() => setFocusedField('box')} onBlur={() => setFocusedField(cur => cur === 'box' ? null : cur)} inputMode="numeric" placeholder="0"
+            <input ref={boxRef} value={entry.stokAdedi} onChange={(e) => { const v = e.target.value; onBox(v); if (boxAdvanceTimer.current) clearTimeout(boxAdvanceTimer.current); if (String(v).trim() !== '') boxAdvanceTimer.current = setTimeout(() => { testRef.current?.focus({ preventScroll: true }); testRef.current?.select(); }, 300); }} onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); testRef.current?.focus({ preventScroll: true }); testRef.current?.select(); }} onFocus={() => setFocusedField('box')} onBlur={() => setFocusedField(cur => cur === 'box' ? null : cur)} inputMode="numeric" placeholder="0"
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-1)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
           <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focusBoxShadow('test'), transition: 'box-shadow 220ms var(--ease-fluid)', animation: focusedField === 'test' ? 'mlLivePulse 1.35s ease-in-out infinite' : undefined }}>
             <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Açık / Ek Test</label>
-            <input ref={testRef} value={entry.cihazUstuAdedi} onChange={(e) => { const v = e.target.value; onTest(v); if (rowCompleteTimer.current) clearTimeout(rowCompleteTimer.current); if (String(entry.stokAdedi ?? '').trim() !== '' && String(v).trim() !== '') rowCompleteTimer.current = setTimeout(() => onAutoComplete?.(v), 300); }} onFocus={() => setFocusedField('test')} onBlur={() => setFocusedField(cur => cur === 'test' ? null : cur)} inputMode="numeric" placeholder="0"
+            <input ref={testRef} value={entry.cihazUstuAdedi} onChange={(e) => onTest(e.target.value)} onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); if (String(entry.stokAdedi ?? '').trim() !== '' && String(entry.cihazUstuAdedi ?? '').trim() !== '') onAutoComplete?.(entry.cihazUstuAdedi); }} onFocus={() => setFocusedField('test')} onBlur={() => setFocusedField(cur => cur === 'test' ? null : cur)} inputMode="numeric" placeholder="0"
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-2)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
           <div style={{ gridColumn: mobile ? '1 / -1' : 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 18px', borderRadius: 'var(--radius)', background: counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)', boxShadow: counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)', transition: 'all 300ms var(--ease-fluid)' }}>

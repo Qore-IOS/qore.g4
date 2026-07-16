@@ -341,14 +341,13 @@ function ProductCountCard({
   const stokInputRef = useRef<HTMLInputElement | null>(null);
   const cihazInputRef = useRef<HTMLInputElement | null>(null);
   const stokAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const cihazCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (focusTarget === 'stok') {
-      stokInputRef.current?.focus();
+      stokInputRef.current?.focus({ preventScroll: true });
       stokInputRef.current?.select();
     } else if (focusTarget === 'cihaz') {
-      cihazInputRef.current?.focus();
+      cihazInputRef.current?.focus({ preventScroll: true });
       cihazInputRef.current?.select();
     }
   }, [focusTarget]);
@@ -356,7 +355,6 @@ function ProductCountCard({
   useEffect(() => {
     return () => {
       if (stokAdvanceTimerRef.current) clearTimeout(stokAdvanceTimerRef.current);
-      if (cihazCompleteTimerRef.current) clearTimeout(cihazCompleteTimerRef.current);
     };
   }, []);
 
@@ -506,7 +504,7 @@ function ProductCountCard({
                   if (stokAdvanceTimerRef.current) clearTimeout(stokAdvanceTimerRef.current);
                   if (nextValue.trim() !== '') {
                     stokAdvanceTimerRef.current = setTimeout(() => {
-                      cihazInputRef.current?.focus();
+                      cihazInputRef.current?.focus({ preventScroll: true });
                       cihazInputRef.current?.select();
                     }, 450);
                   }
@@ -528,14 +526,13 @@ function ProductCountCard({
                 value={entry.cihazUstuAdedi}
                 onFocus={() => setFocusedField('cihaz')}
                 onBlur={() => setFocusedField(current => current === 'cihaz' ? null : current)}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  onCihazChange(nextValue);
-                  if (cihazCompleteTimerRef.current) clearTimeout(cihazCompleteTimerRef.current);
-                  if (entry.stokAdedi.trim() !== '' && nextValue.trim() !== '') {
-                    cihazCompleteTimerRef.current = setTimeout(() => {
-                      onAutoCompleteRow?.(nextValue);
-                    }, 450);
+                onChange={(e) => onCihazChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (entry.stokAdedi.trim() !== '' && entry.cihazUstuAdedi.trim() !== '') {
+                    onAutoCompleteRow?.(entry.cihazUstuAdedi);
                   }
                 }}
                 className="h-9 text-sm"
