@@ -318,6 +318,8 @@ function ProductCountCard({
   activeUsers,
   currentStock,
   onApplyStock,
+  focusTarget,
+  onAutoCompleteRow,
 }: {
   product: ProductCode;
   entry: ProductCountEntry;
@@ -331,8 +333,37 @@ function ProductCountCard({
   activeUsers?: { name: string; color: string }[];
   currentStock?: number;
   onApplyStock?: () => void;
+  focusTarget?: 'stok' | 'cihaz';
+  onAutoCompleteRow?: (cihazValue: string) => void;
 }) {
   const [accordionOpen, setAccordionOpen] = useState(false);
+  const [focusedField, setFocusedField] = useState<'stok' | 'cihaz' | null>(null);
+  const stokInputRef = useRef<HTMLInputElement | null>(null);
+  const cihazInputRef = useRef<HTMLInputElement | null>(null);
+  const stokAdvanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cihazCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (focusTarget === 'stok') {
+      stokInputRef.current?.focus();
+      stokInputRef.current?.select();
+    } else if (focusTarget === 'cihaz') {
+      cihazInputRef.current?.focus();
+      cihazInputRef.current?.select();
+    }
+  }, [focusTarget]);
+
+  useEffect(() => {
+    return () => {
+      if (stokAdvanceTimerRef.current) clearTimeout(stokAdvanceTimerRef.current);
+      if (cihazCompleteTimerRef.current) clearTimeout(cihazCompleteTimerRef.current);
+    };
+  }, []);
+
+  const inputFocusClass = (field: 'stok' | 'cihaz') => cn(
+    'relative rounded-xl transition-all duration-300',
+    focusedField === field && 'ring-2 ring-emerald-400/70 ring-offset-2 ring-offset-[var(--dashboard-bg)] shadow-[0_0_0_6px_rgba(52,211,153,0.14),0_0_26px_rgba(52,211,153,0.38)] animate-pulse'
+  );
 
   const ambalajDegeri = product.ambalajDegeri || 1;
   const anaBirim = product.anaBirim || 'Adet';
@@ -460,27 +491,56 @@ function ProductCountCard({
                 </div>
               )}
             </div>
-            <Input
-              type="number"
-              min="0"
-              placeholder=""
-              value={entry.stokAdedi}
-              onChange={(e) => onStokChange(e.target.value)}
-              className="h-9 text-sm"
-            />
+            <div className={inputFocusClass('stok')}>
+              <Input
+                ref={stokInputRef}
+                type="number"
+                min="0"
+                placeholder=""
+                value={entry.stokAdedi}
+                onFocus={() => setFocusedField('stok')}
+                onBlur={() => setFocusedField(current => current === 'stok' ? null : current)}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  onStokChange(nextValue);
+                  if (stokAdvanceTimerRef.current) clearTimeout(stokAdvanceTimerRef.current);
+                  if (nextValue.trim() !== '') {
+                    stokAdvanceTimerRef.current = setTimeout(() => {
+                      cihazInputRef.current?.focus();
+                      cihazInputRef.current?.select();
+                    }, 450);
+                  }
+                }}
+                className="h-9 text-sm"
+              />
+            </div>
           </div>
           <div className="flex-1">
             <label className="text-[11px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">
               Cihaz Üstü Test
             </label>
-            <Input
-              type="number"
-              min="0"
-              placeholder=""
-              value={entry.cihazUstuAdedi}
-              onChange={(e) => onCihazChange(e.target.value)}
-              className="h-9 text-sm"
-            />
+            <div className={inputFocusClass('cihaz')}>
+              <Input
+                ref={cihazInputRef}
+                type="number"
+                min="0"
+                placeholder=""
+                value={entry.cihazUstuAdedi}
+                onFocus={() => setFocusedField('cihaz')}
+                onBlur={() => setFocusedField(current => current === 'cihaz' ? null : current)}
+                onChange={(e) => {
+                  const nextValue = e.target.value;
+                  onCihazChange(nextValue);
+                  if (cihazCompleteTimerRef.current) clearTimeout(cihazCompleteTimerRef.current);
+                  if (entry.stokAdedi.trim() !== '' && nextValue.trim() !== '') {
+                    cihazCompleteTimerRef.current = setTimeout(() => {
+                      onAutoCompleteRow?.(nextValue);
+                    }, 450);
+                  }
+                }}
+                className="h-9 text-sm"
+              />
+            </div>
           </div>
         </div>
 
@@ -640,6 +700,7 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
   const [countData, setCountData] = useState<Record<string, ProductCountEntry>>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [showOnlyUncounted, setShowOnlyUncounted] = useState(false);
+  const [autoFocusTarget, setAutoFocusTarget] = useState<{ stokKodu: string; field: 'stok' | 'cihaz' } | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
   // Barcode scanner
@@ -1030,6 +1091,23 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
       return updated;
     });
   }, [syncToSession]);
+
+  const handleAutoCompleteRow = useCallback((stokKodu: string, cihazValue: string) => {
+    const nextProduct = filteredProducts.find(p => p.stokKodu !== stokKodu && !countData[p.stokKodu]?.counted);
+
+    setCountData(prev => {
+      const entry = prev[stokKodu];
+      if (!entry || entry.counted || entry.stokAdedi.trim() === '' || cihazValue.trim() === '') return prev;
+
+      const updatedEntry = { ...entry, cihazUstuAdedi: cihazValue, counted: true };
+      syncToSession(stokKodu, 'counted', true, updatedEntry);
+      return { ...prev, [stokKodu]: updatedEntry };
+    });
+
+    if (nextProduct) {
+      setAutoFocusTarget({ stokKodu: nextProduct.stokKodu, field: 'stok' });
+    }
+  }, [countData, filteredProducts, syncToSession]);
 
   const handleAddExpiryWarning = useCallback((stokKodu: string, miad: string) => {
     setCountData(prev => {
@@ -2579,6 +2657,8 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
                         }
                         currentStock={locationStock[product.stokKodu]}
                         onApplyStock={() => handleStokChange(product.stokKodu, String(locationStock[product.stokKodu] ?? 0))}
+                        focusTarget={autoFocusTarget?.stokKodu === product.stokKodu ? autoFocusTarget.field : undefined}
+                        onAutoCompleteRow={(cihazValue) => handleAutoCompleteRow(product.stokKodu, cihazValue)}
                       />
                     ))
                   ) : (
