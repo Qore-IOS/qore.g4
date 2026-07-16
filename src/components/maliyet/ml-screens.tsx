@@ -67,7 +67,7 @@ const EmptyBox = ({ ico, text }: any) => {
 };
 
 /* ───────────────── Maliyet Sayım (chooser + invites) ───────────────── */
-export const MlSayim = ({ ac = AC, mode, go, onStartCount, onJoin, fire, hospitals, depots }: any) => {
+export const MlSayim = ({ ac = AC, mode, go, onExit, onStartCount, onJoin, fire, hospitals, depots }: any) => {
   const mobile = mode === 'mobile';
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth() as any;
   const [tab, setTab] = React.useState<'new' | 'invites'>('new');
@@ -102,7 +102,7 @@ export const MlSayim = ({ ac = AC, mode, go, onStartCount, onJoin, fire, hospita
 
   return (
     <div style={{ maxWidth: 1040, margin: '0 auto' }}>
-      <MlPageHead ico="clipboardCheck" title="Maliyet Sayım" sub="Yeni sayım başlatın veya davetleri görüntüleyin" ac={ac} onBack={() => (chooser ? setChooser(null) : go('home'))} mobile={mobile} />
+      <MlPageHead ico="clipboardCheck" title="Maliyet Sayım" sub="Yeni sayım başlatın veya davetleri görüntüleyin" ac={ac} onBack={() => (chooser ? setChooser(null) : onExit())} mobile={mobile} />
 
       {!chooser && (
         <>
@@ -178,7 +178,7 @@ export const MlSayim = ({ ac = AC, mode, go, onStartCount, onJoin, fire, hospita
 /* ───────────────── Sayım Geçmişi (reads maliyetSayimSessions) ───────────────── */
 interface HistRow { id: string; kind: 'lab' | 'depot'; loc: string; date: string; user: string; count: number; brands: string[]; }
 
-export const MlGecmis = ({ ac = AC, mode, go, fire }: any) => {
+export const MlGecmis = ({ ac = AC, mode, onBack, onOpen, fire }: any) => {
   const mobile = mode === 'mobile';
   const { currentCompanyId, isSuperAdmin } = useAuth() as any;
   const [rows, setRows] = React.useState<HistRow[]>([]);
@@ -218,7 +218,7 @@ export const MlGecmis = ({ ac = AC, mode, go, fire }: any) => {
 
   return (
     <div style={{ maxWidth: 1120, margin: '0 auto' }}>
-      <MlPageHead ico="history" title="Sayım Geçmişi" sub={`${rows.length} sayım oturumu`} ac={ac} onBack={() => go('home')} mobile={mobile} />
+      <MlPageHead ico="history" title="Sayım Geçmişi" sub={`${rows.length} sayım oturumu`} ac={ac} onBack={onBack} mobile={mobile} />
 
       <div style={{ position: 'relative', marginBottom: 14 }}>
         <span style={{ position: 'absolute', left: 18, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)', display: 'inline-flex' }}><MLIco.search s={18} /></span>
@@ -243,7 +243,7 @@ export const MlGecmis = ({ ac = AC, mode, go, fire }: any) => {
           {shown.map((h, i) => (
             <MlCard key={h.id} pad={mobile ? 16 : 18} style={{ animation: `mlPopIn ${220 + Math.min(i, 12) * 45}ms var(--ease-fluid)` }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div onClick={() => onOpen?.(h.id)} style={{ flex: 1, minWidth: 0, cursor: onOpen ? 'pointer' : 'default' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
                     <MlPill tone={h.kind === 'depot' ? 'accent' : 'blue'}>{h.kind === 'depot' ? <><MLIco.building s={12} /> DEPO</> : <><MLIco.flask s={12} /> LAB</>}</MlPill>
                     <span style={{ fontSize: mobile ? 15 : 16.5, fontWeight: 800, color: 'var(--ink-1)', letterSpacing: '-0.01em' }}>{h.loc}</span>
@@ -280,7 +280,7 @@ export const MlToplu = ({ ac = AC, mode, go, onStartCount, fire, hospitals }: an
   const allSel = sel.size === labs.length && labs.length > 0;
 
   return (
-    <div style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 180 }}>
+    <div style={{ maxWidth: 900, margin: '0 auto', paddingBottom: 120 }}>
       <MlPageHead ico="layers" title="Toplu Sayım Gir" sub="Toplu sayım girilecek laboratuvarları seçin" ac={ac} onBack={() => go('sayim')} mobile={mobile} />
       <div style={{ position: 'relative', marginBottom: 12 }}>
         <span style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)', display: 'inline-flex' }}><MLIco.search s={18} /></span>
@@ -303,7 +303,7 @@ export const MlToplu = ({ ac = AC, mode, go, onStartCount, fire, hospitals }: an
         })}
         {shown.length === 0 && <EmptyBox ico="flask" text="Laboratuvar bulunamadı" />}
       </div>
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: mobile ? 'calc(env(safe-area-inset-bottom) + 84px)' : 'calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + 6px)', zIndex: 40, padding: mobile ? '10px 14px' : '12px 24px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, padding: mobile ? '10px 14px calc(10px + env(safe-area-inset-bottom))' : '12px 24px 16px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, padding: '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
           <span style={{ flex: 1, fontSize: 14, fontWeight: 700, color: 'var(--ink-2)' }}>{sel.size} laboratuvar seçildi</span>
           <MlBtn ico="download" ac={ac} onClick={() => fire({ title: 'Excel şablonu indiriliyor' })}>Şablon</MlBtn>

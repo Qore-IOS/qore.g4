@@ -4,7 +4,7 @@ import React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Hospital, Depot, ProductCode } from '@/lib/types';
 import { AC, MlStyles, MlToast, useContainerMode, type Mode } from './ml-primitives';
-import { MlHome, MlSayim, MlGecmis, MlToplu } from './ml-screens';
+import { MlSayim, MlToplu } from './ml-screens';
 import MlCount from './MlCount';
 import type { LocationType } from './ml-logic';
 import type { MaliyetSayimOturum } from '@/lib/maliyet-session';
@@ -19,7 +19,7 @@ export default function MaliyetPanel({ hospitals, depots, productCodes }: Props)
   const rootRef = React.useRef<HTMLDivElement>(null);
   const mode: Mode = useContainerMode(rootRef);
 
-  const [route, setRoute] = React.useState<'home' | 'sayim' | 'gecmis' | 'toplu'>('home');
+  const [route, setRoute] = React.useState<'sayim' | 'toplu'>('sayim');
   const [count, setCount] = React.useState<{ loc: { id: string; name: string }; kind: LocationType; session?: MaliyetSayimOturum | null } | null>(null);
   const [toast, setToast] = React.useState<any>(null);
   const toastRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -55,11 +55,9 @@ export default function MaliyetPanel({ hospitals, depots, productCodes }: Props)
       ) : (
         <div style={{ padding: pad }}>
           <div key={route} style={{ animation: 'mlFadeIn 300ms var(--ease-fluid)' }}>
-            {route === 'home' && <MlHome ac={AC} mode={mode} go={go} goGozlem={() => router.push('/maliyet-gozlem')} />}
-            {route === 'sayim' && <MlSayim ac={AC} mode={mode} go={go} hospitals={hospitals} depots={depots} fire={fire}
+            {route === 'sayim' && <MlSayim ac={AC} mode={mode} go={go} onExit={() => router.push('/cost-dashboard')} hospitals={hospitals} depots={depots} fire={fire}
               onStartCount={(loc: any, kind: LocationType) => startCount(loc, kind)}
               onJoin={(s: MaliyetSayimOturum) => startCount({ id: s.locationId, name: s.locationName }, s.locationType, s)} />}
-            {route === 'gecmis' && <MlGecmis ac={AC} mode={mode} go={go} fire={fire} />}
             {route === 'toplu' && <MlToplu ac={AC} mode={mode} go={go} hospitals={hospitals} fire={fire}
               onStartCount={(loc: any, kind: LocationType) => startCount(loc, kind)} />}
           </div>

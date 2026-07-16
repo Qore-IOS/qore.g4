@@ -298,7 +298,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
       </div>
 
       {/* body */}
-      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: mobile ? '1fr' : (tablet ? '210px 1fr' : '250px 1fr'), gap: mobile ? 0 : 16, padding: mobile ? '0 14px 190px' : '4px 24px 180px' }}>
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: mobile ? '1fr' : (tablet ? '210px 1fr' : '250px 1fr'), gap: mobile ? 0 : 16, padding: mobile ? '0 14px 130px' : '4px 24px 120px' }}>
         {!mobile && <BrandRail brands={brands} active={activeBrand} setActive={setActiveBrand} ac={ac} brandStats={brandStats} />}
 
         <div style={{ minWidth: 0 }}>
@@ -344,8 +344,8 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
         </div>
       </div>
 
-      {/* bottom save bar — lifted above qore's floating dock */}
-      <div style={{ position: 'fixed', left: 0, right: 0, bottom: mobile ? 'calc(env(safe-area-inset-bottom) + 84px)' : 'calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + 6px)', zIndex: 40, padding: mobile ? '10px 14px' : '12px 24px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
+      {/* bottom save bar — flush at the bottom, matching the demo */}
+      <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, padding: mobile ? '10px 14px calc(10px + env(safe-area-inset-bottom))' : '12px 24px 16px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
         <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, padding: mobile ? '10px 12px' : '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 12 : 20, flex: 1, minWidth: 0, overflowX: 'auto' }}>
             <BigStat label="Toplam Test" value={grandTests} />
@@ -433,7 +433,6 @@ const BrandRail = ({ brands, active, setActive, ac, brandStats, bare }: any) => 
 const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplete }: any) => {
   const [focB, setFocB] = React.useState(false);
   const ambalaj = p.ambalajDegeri || 1;
-  const anaBirim = p.anaBirim || 'Adet';
   const boxN = parseInt(entry.stokAdedi || '0', 10) || 0;
   const total = productTotalTests(p, entry);
   const { amount, currency } = calcProductCost(p, entry);
@@ -448,7 +447,7 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--ink-3)', fontFamily: 'ui-monospace, monospace' }}>{p.stokKodu}</span>
               {grup && <span style={{ padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)', fontSize: 11, fontWeight: 700, color: 'var(--ink-2)' }}>{grup}</span>}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: `${ac.primary}14`, color: ac.primary, fontSize: 11, fontWeight: 800 }}><MLIco.box s={12} /> {anaBirim} ×{ambalaj}</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: `${ac.primary}14`, color: ac.primary, fontSize: 11, fontWeight: 800 }}><MLIco.box s={12} /> Kutu ×{ambalaj}</span>
             </div>
           </div>
           <button onClick={onComplete} aria-label="Satırı tamamla" style={{ all: 'unset', cursor: 'pointer', width: 40, height: 40, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center', color: counted ? '#fff' : 'var(--ink-3)', background: counted ? 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--water-solid))' : 'var(--surface-2)', boxShadow: counted ? '0 6px 13px -4px rgba(111,181,133,0.6)' : 'var(--clay-inset)', border: counted ? 'none' : '2px solid var(--ink-3)', boxSizing: 'border-box', transition: 'all 240ms var(--ease-fluid)' }}><MLIco.check s={19} /></button>
