@@ -443,6 +443,57 @@
       ]
     },
     {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "depotId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
+        { "fieldPath": "sevkTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
+        { "fieldPath": "sevkTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "depoStok",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
+        { "fieldPath": "eklenmeTarihi", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "tuketimKayitlari",
       "queryScope": "COLLECTION",
       "fields": [
@@ -1187,6 +1238,22 @@
         { "fieldPath": "hedefKurumId", "order": "ASCENDING" },
         { "fieldPath": "isShipped", "order": "ASCENDING" },
         { "fieldPath": "stokKodu", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "productCodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "stokAdi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hospitals",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "companyId", "order": "ASCENDING" },
+        { "fieldPath": "name", "order": "ASCENDING" }
       ]
     }
   ],

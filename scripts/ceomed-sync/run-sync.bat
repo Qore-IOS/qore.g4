@@ -1,6 +1,7 @@
 @echo off
 REM Ceomed -> Firestore sync (Windows Task Scheduler tarafindan calistirilir)
-REM Bugun ve bir onceki gunu kapsayan tarih araligiyla calisir.
+REM Tarih araligi node tarafinda otomatik hesaplanir: son basarili sync'ten bugune.
+REM Boylece makine gunlerce kapali kalsa bile aradaki irsaliyeler atlanmaz.
 
 setlocal
 
@@ -56,14 +57,11 @@ if not defined CEOMED_COMPANY_ID (
   exit /b 1
 )
 
-REM Tarih araligi: bu haftanin pazartesi - pazar (Turkiye lokal saatine gore)
-for /f %%i in ('powershell -NoProfile -Command "$d=Get-Date; $d.AddDays(-((([int]$d.DayOfWeek + 6) %% 7))).ToString('dd.MM.yyyy')"') do set BAS=%%i
-for /f %%i in ('powershell -NoProfile -Command "$d=Get-Date; $d.AddDays(6 - ((([int]$d.DayOfWeek + 6) %% 7))).ToString('dd.MM.yyyy')"') do set BIT=%%i
+echo [%date% %time%] Sync basliyor (tarih araligi otomatik) >> sync.log
 
-echo [%date% %time%] Sync basliyor: %BAS% - %BIT% >> sync.log
-
+REM Tarih verilmez -> syncToFirestore.js son basarili sync'ten bugune otomatik aralik kurar.
 REM 3 durumu da cek (filtre yok = ALLOWED_STATUSES hepsi)
-node syncToFirestore.js %BAS% %BIT% >> sync.log 2>&1
+node syncToFirestore.js >> sync.log 2>&1
 set SYNC_EXIT=%ERRORLEVEL%
 
 if not "%SYNC_EXIT%"=="0" (

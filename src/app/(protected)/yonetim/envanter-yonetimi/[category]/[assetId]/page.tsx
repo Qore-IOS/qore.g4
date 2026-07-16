@@ -28,6 +28,7 @@ interface Asset {
   marka: string;
   model: string;
   konum: string;
+  bolum?: string;
   teslimEdilenPersonel: string;
   aciklama: string;
   alimFiyatiTl?: number;
@@ -82,8 +83,8 @@ interface AssetHistoryEntry {
   id: string;
   timestamp: any;
   changedBy: string;
-  previousState: { konum: string; teslimEdilenPersonel: string };
-  newState: { konum: string; teslimEdilenPersonel: string };
+  previousState: { konum: string; bolum?: string; teslimEdilenPersonel: string };
+  newState: { konum: string; bolum?: string; teslimEdilenPersonel: string };
 }
 
 interface CustodyEntry {
@@ -120,6 +121,7 @@ export default function AssetDetailPage() {
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState('');
   const [locations, setLocations] = useState<Location[]>([]);
   const [newLocation, setNewLocation] = useState('');
+  const [newBolum, setNewBolum] = useState('');
   const [newPersonel, setNewPersonel] = useState('');
   const [history, setHistory] = useState<AssetHistoryEntry[]>([]);
   const [custodyHistory, setCustodyHistory] = useState<CustodyEntry[]>([]);
@@ -157,6 +159,7 @@ export default function AssetDetailPage() {
           }
           setAsset(data);
           setNewLocation(data.konum);
+          setNewBolum(data.bolum || '');
           setNewPersonel(data.teslimEdilenPersonel);
           setAssignmentPerson(data.zimmetliKisi || data.teslimEdilenPersonel || '');
           setAssignmentSignature(data.dijitalImza || '');
@@ -207,7 +210,7 @@ export default function AssetDetailPage() {
 
   const handleSaveChanges = async () => {
     if (!asset) return;
-    if (newLocation === asset.konum && newPersonel === asset.teslimEdilenPersonel) {
+    if (newLocation === asset.konum && newBolum === (asset.bolum || '') && newPersonel === asset.teslimEdilenPersonel) {
       toast({ title: 'Değişiklik Yok' }); return;
     }
     setIsSaving(true);
@@ -215,12 +218,12 @@ export default function AssetDetailPage() {
       const entry = {
         timestamp: serverTimestamp(),
         changedBy: currentUserProfile?.name || 'Bilinmeyen',
-        previousState: { konum: asset.konum, teslimEdilenPersonel: asset.teslimEdilenPersonel },
-        newState: { konum: newLocation, teslimEdilenPersonel: newPersonel },
+        previousState: { konum: asset.konum, bolum: asset.bolum || '', teslimEdilenPersonel: asset.teslimEdilenPersonel },
+        newState: { konum: newLocation, bolum: newBolum.trim(), teslimEdilenPersonel: newPersonel },
       };
       await addDoc(collection(db, 'assets', asset.id, 'assetHistory'), withCompanyScope(entry, currentUserProfile?.companyId));
-      await updateDoc(doc(db, 'assets', asset.id), { konum: newLocation, teslimEdilenPersonel: newPersonel });
-      setAsset(prev => prev ? { ...prev, konum: newLocation, teslimEdilenPersonel: newPersonel } : prev);
+      await updateDoc(doc(db, 'assets', asset.id), { konum: newLocation, bolum: newBolum.trim(), teslimEdilenPersonel: newPersonel });
+      setAsset(prev => prev ? { ...prev, konum: newLocation, bolum: newBolum.trim(), teslimEdilenPersonel: newPersonel } : prev);
       setHistory(prev => [{ ...entry, id: generateId(), timestamp: new Date() }, ...prev]);
       toast({ title: 'Kaydedildi' });
     } catch {
@@ -370,6 +373,7 @@ export default function AssetDetailPage() {
             <InfoRow label="Marka / Model" value={`${asset.marka || '-'} / ${asset.model || '-'}`} />
             <InfoRow label="Kategori" value={asset.category} />
             <InfoRow label="Konum" value={asset.konum || '-'} />
+            <InfoRow label="Bölüm" value={asset.bolum || '-'} />
             <InfoRow label="Personel" value={asset.teslimEdilenPersonel || '-'} />
             <InfoRow label="Aktif Zimmet" value={asset.zimmetliKisi || '-'} />
             <InfoRow label="Mülkiyet Tipi" value={getOwnershipLabel(asset)} />
@@ -430,6 +434,10 @@ export default function AssetDetailPage() {
               <div>
                 <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Sorumlu Personel</label>
                 <input className={inputClass} placeholder="Ad Soyad" value={newPersonel} onChange={e => setNewPersonel(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-[var(--dashboard-muted)] uppercase tracking-wider mb-1 block">Bölüm</label>
+                <input className={inputClass} placeholder="Örn. Biyokimya, Hematoloji, Acil" value={newBolum} onChange={e => setNewBolum(e.target.value)} />
               </div>
               <button onClick={handleSaveChanges} disabled={isSaving} className="h-9 px-4 rounded-xl text-xs font-semibold bg-[var(--dashboard-accent)] text-white shadow-md hover:opacity-90 transition-all flex items-center gap-1.5 disabled:opacity-50">
                 {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
@@ -558,7 +566,7 @@ export default function AssetDetailPage() {
                           {h.timestamp?.toDate ? format(h.timestamp.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
                         </p>
                         <p className="text-[11px] text-[var(--dashboard-muted)] mt-0.5">
-                          {h.previousState?.konum || '-'} → {h.newState?.konum || '-'} · {h.previousState?.teslimEdilenPersonel || '-'} → {h.newState?.teslimEdilenPersonel || '-'}
+                          {h.previousState?.konum || '-'} → {h.newState?.konum || '-'} · Bölüm: {h.previousState?.bolum || '-'} → {h.newState?.bolum || '-'} · {h.previousState?.teslimEdilenPersonel || '-'} → {h.newState?.teslimEdilenPersonel || '-'}
                         </p>
                       </div>
                     ))}

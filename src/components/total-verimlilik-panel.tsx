@@ -80,7 +80,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, getDoc, Timestamp, where, collectionGroup } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
@@ -323,6 +323,52 @@ interface SnapshotMetrics {
   hakEdisToplam: number;
 }
 
+
+/**
+ * Verimlilik havuzundaki laboratuvar yapısını çözer: ortak stok havuzunda ana
+ * lab tarafından temsil edilen üyeler skip edilir; ana lab satırı, üye lablerin
+ * verilerinin toplanacağı eşleme (labIdToMinMaxLabIds) ile döner.
+ */
+function computePoolLabStructure(
+  selectedPool: EfficiencyPool,
+  labPools: LabPool[],
+  hospitals: Hospital[],
+) {
+  const labsToSkip = new Set<string>();
+  for (const labId of selectedPool.memberIds) {
+    const sharedPool = labPools.find(p => p.memberIds.includes(labId));
+    if (sharedPool && sharedPool.mainLabId) {
+      if (selectedPool.memberIds.includes(sharedPool.mainLabId)) {
+        if (labId !== sharedPool.mainLabId) {
+          labsToSkip.add(labId);
+        }
+      }
+    }
+  }
+
+  const labIdsToProcess = new Set<string>();
+  const labIdToDisplayName = new Map<string, { name: string; kod: string }>();
+  const labIdToMinMaxLabIds = new Map<string, string[]>();
+
+  for (const labId of selectedPool.memberIds) {
+    if (labsToSkip.has(labId)) continue;
+    const lab = hospitals.find(h => h.id === labId);
+    if (!lab) continue;
+
+    const sharedPool = labPools.find(p => p.mainLabId === labId);
+    if (sharedPool) {
+      labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
+      labIdToMinMaxLabIds.set(labId, sharedPool.memberIds);
+      sharedPool.memberIds.forEach(memberId => labIdsToProcess.add(memberId));
+    } else {
+      labIdsToProcess.add(labId);
+      labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
+      labIdToMinMaxLabIds.set(labId, [labId]);
+    }
+  }
+
+  return { labsToSkip, labIdsToProcess, labIdToDisplayName, labIdToMinMaxLabIds };
+}
 
 const CURRENT_YEAR = new Date().getFullYear();
 const YEARS = Array.from({ length: 5 }, (_, i) => CURRENT_YEAR - i);
@@ -725,6 +771,10 @@ export default function TotalVerimlilikPanel({
   const [selectedDepotForSevkiyat, setSelectedDepotForSevkiyat] = useState<string>('');
   const [selectedLabsForSevkiyat, setSelectedLabsForSevkiyat] = useState<Set<string>>(new Set());
   const [isFetchingSevkiyat, setIsFetchingSevkiyat] = useState(false);
+  const [isFetchingCeomed, setIsFetchingCeomed] = useState(false);
+
+  // Ay Başı Sevkiyatları Getir (Sütun 9) - Veri menüsünden tetiklenir
+  const [isFetchingAyBasiSevk, setIsFetchingAyBasiSevk] = useState(false);
 
   // Kurumlar Arası Sevk Modal State'leri (Sütun 12)
   const [showKurumlarArasiModal, setShowKurumlarArasiModal] = useState(false);
@@ -1059,51 +1109,10 @@ export default function TotalVerimlilikPanel({
           return;
         }
 
-        // Önce skip edilecek laboratuvarları belirle
-        // Eğer bir laboratuvar bir ortak stok havuzuna dahilse ve o havuzun ana laboratuvarı
-        // verimlilik havuzunda ise, bu laboratuvar skip edilmeli (ana lab zaten temsil ediyor)
-        const labsToSkip = new Set<string>();
-
-        for (const labId of selectedPool.memberIds) {
-          // Bu laboratuvar herhangi bir ortak stok havuzuna dahil mi?
-          const sharedPool = labPools.find(p => p.memberIds.includes(labId));
-
-          if (sharedPool && sharedPool.mainLabId) {
-            // Bu ortak stok havuzunun ana laboratuvarı verimlilik havuzunda mı?
-            if (selectedPool.memberIds.includes(sharedPool.mainLabId)) {
-              // Eğer bu laboratuvar ana lab değilse, skip et
-              if (labId !== sharedPool.mainLabId) {
-                labsToSkip.add(labId);
-              }
-            }
-          }
-        }
-
-        // Havuzdaki laboratuvarların ID'lerini al (skip edilenler hariç)
-        const labIdsToProcess = new Set<string>();
-        const labIdToDisplayName = new Map<string, { name: string; kod: string }>();
-        const labIdToMinMaxLabIds = new Map<string, string[]>();
-
-        for (const labId of selectedPool.memberIds) {
-          // Skip listesindeki laboratuvarları atla - bunlar zaten ana lab tarafından temsil ediliyor
-          if (labsToSkip.has(labId)) continue;
-
-          const lab = hospitals.find(h => h.id === labId);
-          if (!lab) continue;
-
-          // Bu laboratuvar bir ortak havuzun ana laboratuvarı mı?
-          const sharedPool = labPools.find(p => p.mainLabId === labId);
-          if (sharedPool) {
-            // Ana laboratuvar olarak görüntüle ama tüm havuz üyelerinin min-max'ını al
-            labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
-            labIdToMinMaxLabIds.set(labId, sharedPool.memberIds);
-            sharedPool.memberIds.forEach(memberId => labIdsToProcess.add(memberId));
-          } else {
-            labIdsToProcess.add(labId);
-            labIdToDisplayName.set(labId, { name: lab.name, kod: lab.kod || '' });
-            labIdToMinMaxLabIds.set(labId, [labId]);
-          }
-        }
+        // Havuz lab yapısı: skip edilen lablar, işlenecek lablar ve ortak stok
+        // havuzu eşlemesi ("Ay Başı Sevkiyatları Getir" ile paylaşılan mantık)
+        const { labsToSkip, labIdsToProcess, labIdToDisplayName, labIdToMinMaxLabIds } =
+          computePoolLabStructure(selectedPool, labPools, hospitals);
 
         // Min-max kurallarını PARALEL çek (önceden lab başına ardışık getDocs →
         // N round-trip; havuz açılışındaki asıl gecikme buydu).
@@ -1743,6 +1752,178 @@ export default function TotalVerimlilikPanel({
       setSelectedDepotForSevkiyat('');
     }
   }, [selectedDepotForSevkiyat, selectedLabsForSevkiyat, selectedYear, selectedMonth, depots, hospitals, toast, recomputeAllRows, interLabTransfers]);
+
+  // ─── Ceomed'den Ay Başı Sevkiyat çekme (on-demand worker) ───
+  const handleFetchCeomedAyBasiSevkiyat = useCallback(async () => {
+    setIsFetchingCeomed(true);
+    let unsub: (() => void) | null = null;
+    try {
+      // Adres normalizasyonu (ek hizmet yönlendirmesi için)
+      const normAddr = (s?: string): string =>
+        (s || '')
+          .toLocaleLowerCase('tr-TR')
+          .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g')
+          .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+          .replace(/[^a-z0-9]/g, '');
+
+      // Kurum haritaları — aynı cariye birden fazla hastane atanabilir (ana + ek hizmetler)
+      const hospitalsByCari = new Map<string, any[]>();
+      const hospitalById = new Map<string, any>();
+      for (const h of hospitals as any[]) {
+        hospitalById.set(h.id, h);
+        if (h.ceomedCariKodu) {
+          const c = String(h.ceomedCariKodu).trim().toUpperCase();
+          const arr = hospitalsByCari.get(c);
+          if (arr) arr.push(h); else hospitalsByCari.set(c, [h]);
+        }
+      }
+
+      // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç (bunlar deponun mal kabulünden doldurulur)
+      const depotsSnap = await getDocs(collection(db, 'depots'));
+      const excludedLabIds = new Set<string>();
+      const malKabulDepotIds: string[] = [];
+      const labToDepot = new Map<string, string>(); // labId -> mal kabul deposu id
+      depotsSnap.forEach((d) => {
+        const dep = d.data() as any;
+        if (dep.sevkiyatMalKabulden) {
+          malKabulDepotIds.push(d.id);
+          (dep.linkedLaboratoryIds || []).forEach((id: string) => {
+            excludedLabIds.add(id);
+            labToDepot.set(id, d.id);
+          });
+        }
+      });
+
+      // Ceomed sorgusuyla kapsanan lablar (ceomedCariKodu olan ana + ek hizmetleri), hariçler çıkarılmış
+      const coveredLabIds = new Set<string>();
+      for (const h of hospitals as any[]) {
+        if (!h.ceomedCariKodu) continue;
+        if (!excludedLabIds.has(h.id)) coveredLabIds.add(h.id);
+        for (const ekId of (h.ekHizmetLabIds || [])) {
+          if (!excludedLabIds.has(ekId)) coveredLabIds.add(ekId);
+        }
+      }
+
+      // ─── Mal kabulden alınacak depolar için mal kabul (giriş) kayıtlarını tara ───
+      // malKabulTransactions: depotId == depo, timestamp ay aralığında; adetler 'lines' alt koleksiyonunda (adet alanı).
+      // Depo bazında stokKodu toplamı hesaplanır; deponun ortak havuzundaki lablar aynı toplamı alır.
+      const malKabulDepotTotals: Record<string, Record<string, number>> = {}; // depotId -> stok -> toplam adet
+      const monthStart = Timestamp.fromDate(new Date(selectedYear, selectedMonth, 1, 0, 0, 0, 0));
+      const monthEndExclusive = Timestamp.fromDate(new Date(selectedYear, selectedMonth + 1, 1, 0, 0, 0, 0));
+      await Promise.all(malKabulDepotIds.map(async (depotId) => {
+        try {
+          const txSnap = await getDocs(query(
+            collection(db, 'malKabulTransactions'),
+            where('depotId', '==', depotId),
+            where('timestamp', '>=', monthStart),
+            where('timestamp', '<', monthEndExclusive),
+          ));
+          const acc: Record<string, number> = {};
+          await Promise.all(txSnap.docs.map(async (txDoc) => {
+            const linesSnap = await getDocs(collection(db, 'malKabulTransactions', txDoc.id, 'lines'));
+            linesSnap.forEach((ln) => {
+              const d = ln.data() as any;
+              const stok = String(d.stokKodu || '').trim();
+              if (!stok) return;
+              acc[stok] = (acc[stok] || 0) + (Number(d.adet) || 0);
+            });
+          }));
+          malKabulDepotTotals[depotId] = acc;
+        } catch (e) {
+          console.error('mal kabul (malKabulTransactions) sorgu hatası', depotId, e);
+        }
+      }));
+      const malKabulCoveredLabIds = new Set(Array.from(excludedLabIds));
+
+      // İstek dokümanı yaz
+      const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), {
+        year: selectedYear,
+        month: selectedMonth + 1, // JS 0-11 → 1-12
+        status: 'pending',
+        requestedAt: serverTimestamp(),
+        requestedByUid: currentUser?.uid || '',
+      });
+
+      toast({ title: 'Sorgu gönderildi', description: 'Ceomed irsaliyeleri sorgulanıyor, bu birkaç dakika sürebilir…' });
+
+      // Sonucu bekle (worker yazınca)
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => { reject(new Error('Zaman aşımı — worker çalışmıyor olabilir.')); }, 10 * 60 * 1000);
+        unsub = onSnapshot(doc(db, 'ceomedSevkiyatResults', reqRef.id), (snap) => {
+          if (!snap.exists()) return;
+          const res = snap.data() as any;
+          if (res.status === 'done') {
+            clearTimeout(timeout);
+            const rowsData = (res.rows || []) as Array<{ cariKodu: string; sevkAdresi: string; stokKodu: string; adet: number }>;
+
+            // labId -> stokKodu -> toplam adet
+            const perLab: Record<string, Record<string, number>> = {};
+            let unmatched = 0;
+            for (const r of rowsData) {
+              const cari = String(r.cariKodu || '').trim().toUpperCase();
+              const withCode = hospitalsByCari.get(cari) || [];
+              if (withCode.length === 0) { unmatched += r.adet; continue; }
+              // Aday havuz: cariyi paylaşan hastaneler + ek hizmet çocukları
+              const candMap = new Map<string, any>();
+              for (const h of withCode) {
+                candMap.set(h.id, h);
+                for (const ekId of (h.ekHizmetLabIds || [])) {
+                  const ek = hospitalById.get(ekId);
+                  if (ek) candMap.set(ek.id, ek);
+                }
+              }
+              const candidates = Array.from(candMap.values());
+              const mainH = withCode.find((h: any) => (h.ekHizmetLabIds || []).length > 0) || withCode[0];
+              // Adres yönlendirmesi
+              let target = mainH;
+              if (r.sevkAdresi) {
+                const m = candidates.filter((c) => c?.sevkAdresi && normAddr(c.sevkAdresi) === normAddr(r.sevkAdresi));
+                if (m.length >= 1) target = m[0];
+              }
+              if (excludedLabIds.has(target.id)) continue; // mal kabulden alınacak
+              if (!perLab[target.id]) perLab[target.id] = {};
+              perLab[target.id][r.stokKodu] = (perLab[target.id][r.stokKodu] || 0) + r.adet;
+            }
+
+            setRows((prevRows) => {
+              const updated = prevRows.map((row) => {
+                if (malKabulCoveredLabIds.has(row.labId)) {
+                  // Mal kabulden alınan lab: bağlı olduğu deponun mal kabul toplamından yaz
+                  const depotId = labToDepot.get(row.labId);
+                  const val = depotId ? (malKabulDepotTotals[depotId]?.[row.stokKodu] || 0) : 0;
+                  return { ...row, ayBasiSevkiyatKutu: val };
+                }
+                if (coveredLabIds.has(row.labId)) {
+                  // Ceomed'den alınan lab
+                  const val = perLab[row.labId]?.[row.stokKodu] || 0;
+                  return { ...row, ayBasiSevkiyatKutu: val };
+                }
+                return row; // kapsam dışı: dokunma
+              });
+              return recomputeAllRows(updated, interLabTransfers);
+            });
+
+            const ceomedBox = Object.values(perLab).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            const malKabulBox = Object.values(malKabulDepotTotals).reduce((s, m) => s + Object.values(m).reduce((a, b) => a + b, 0), 0);
+            toast({
+              title: 'Ay başı sevkiyat dolduruldu',
+              description: `Ceomed: ${res.irsaliyeCount} irsaliye → ${Object.keys(perLab).length} lab / ${ceomedBox} kutu. Mal kabul: ${malKabulDepotIds.length} depo / ${malKabulBox} kutu.` + (unmatched ? ` ${unmatched} kutu eşleşmeyen cari nedeniyle atlandı.` : ''),
+              duration: 9000,
+            });
+            resolve();
+          } else if (res.status === 'error') {
+            clearTimeout(timeout);
+            reject(new Error(res.error || 'Worker hatası'));
+          }
+        }, (err) => { clearTimeout(timeout); reject(err); });
+      });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e.message || 'Ceomed sevkiyatı çekilemedi.', variant: 'destructive' });
+    } finally {
+      if (unsub) unsub();
+      setIsFetchingCeomed(false);
+    }
+  }, [hospitals, selectedYear, selectedMonth, currentUser, toast, recomputeAllRows, interLabTransfers]);
 
   // Listedeki laboratuvarlar (verimlilik havuzundaki)
   const poolLabIds = useMemo(() => {
@@ -3488,6 +3669,8 @@ export default function TotalVerimlilikPanel({
         return `((AyBaşıSevk ${f(row.ayBasiSevkiyatKutu)} + Göztepe ${f(row.goztepeSevkiyat)} + K.Arası ${f(row.kurumlarArasiSevk)} + Loj ${f(row.lojistikAraTransfer)}) × Ambalaj ${f(row.ambalajDegeri)}) + TotalAyBaşı ${f(row.totalAyBasiStok)} = ${f(row.sevkiyatlarSonrasiTotalTest)}`;
       case 'donemSonuToplamTest':
         return `(D.SonuStok ${f(row.donemSonuStokKutu)} × Ambalaj ${f(row.ambalajDegeri)}) + D.SonuCihaz ${f(row.donemSonuCihazUstuTest)} = ${f(row.donemSonuToplamTest)}`;
+      case 'ayBasiSevkiyatKutu':
+        return `Veri → "Ay Başı Sevkiyatları Getir" ile dönem içi sevk/mal kabul kayıtlarından doldurulur: ${row.labName} — ${f(row.ayBasiSevkiyatKutu)} kutu (lot farkı gözetilmez; elle düzenlenebilir)`;
       case 'arizaliKitTest':
         return `Cihazdan çıkan kit (dönem içi) test toplamı = ${f(row.arizaliKitTest)}`;
       case 'beklenenTestSayisi':
@@ -3795,6 +3978,14 @@ export default function TotalVerimlilikPanel({
               </button>
               <button onClick={() => { setShowSevkiyatBilgisiModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">
                 <Download className="h-3 w-3" />Sevkiyat Bilgisi Çek
+              </button>
+              <button
+                onClick={() => { handleFetchCeomedAyBasiSevkiyat(); setOpenDrop(null); }}
+                disabled={isFetchingCeomed}
+                className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded disabled:opacity-50"
+              >
+                {isFetchingCeomed ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                Ceomed'den Ay Başı Sevkiyat Getir
               </button>
               <div className="h-px bg-zinc-200 dark:bg-zinc-700 my-1" />
               <button onClick={() => { setShowExcelImportModal(true); setOpenDrop(null); }} className="w-full flex items-center gap-2 px-2.5 py-1.5 text-[11.5px] hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded">

@@ -64,9 +64,21 @@ alabilirsin (her tenant kendi sync kurulumunu çalıştırır).
 
 Çalıştır (3 durumun hepsini çekip Firestore `pendingCeomedIrsaliye` koleksiyonuna yazar):
 ```bash
+# Tarih verilmezse aralık otomatik: son başarılı sync'ten bugüne (önerilen)
+node syncToFirestore.js
+# Elle tarih aralığı:
 node syncToFirestore.js 05.05.2026 06.05.2026
 # Sadece tek durum:
 node syncToFirestore.js 05.05.2026 06.05.2026 --status="KURUMA SEVK EDILDI"
+```
+
+Otomatik mod son başarılı çalışma zamanını `scripts/ceomed-sync/.sync-state.json`
+dosyasında tutar (gitignore'da). Makine günlerce kapalı kalsa bile bir sonraki
+çalışmada aralık o güne kadar geriye uzar; aradaki irsaliyeler kaybolmaz.
+İsteğe bağlı env ayarları:
+```env
+CEOMED_SYNC_MIN_LOOKBACK_DAYS=7    # her çalışmada en az bu kadar gün geriye bak
+CEOMED_SYNC_MAX_LOOKBACK_DAYS=90   # uzun kesintide en fazla bu kadar gün geriye bak
 ```
 
 Yazılan doküman şeması:
@@ -112,9 +124,29 @@ Task Scheduler'a günde 1 kez çalışacak şekilde ayrı bir görev ekle (örn.
 - Başlat: `C:\Users\btuba\Desktop\qore.g4\scripts\ceomed-sync`
 - Tetikleyici: Günlük 06:30, tekrar yok
 
+## Adım 4c — Total Verimlilik sevkiyat watcher (long-running)
+
+`watchSevkiyatRequests.js`, Total Verimlilik panelindeki "Ceomed'den Ay Başı Sevkiyat Getir"
+butonunun yazdığı `ceomedSevkiyatRequests` isteklerini **anlık** dinler; seçilen ayın
+"KURUMA SEVK EDILDI" irsaliyelerini sorgular, kurum + sevk adresi + stok bazında toplam adetleri
+hesaplayıp `ceomedSevkiyatResults/{id}` dokümanına yazar. Panel sonucu okuyup 9. sütunu doldurur.
+
+Bu **sürekli açık kalmalı**. Başlat:
+```powershell
+.\run-sevkiyat-watcher.bat
+```
+Bu bat kapanırsa kendini yeniden başlatır. Kalıcı olması için Task Scheduler'a ekle:
+- Tetikleyici: "Oturum açıldığında" (başlangıçta otomatik başlasın)
+- Program: `...\run-sevkiyat-watcher.bat`, Başlat: `...\scripts\ceomed-sync`
+
+### Firestore kuralları
+`ceomedSevkiyatRequests` (panel yazar/okur) ve `ceomedSevkiyatResults` (worker yazar, panel okur)
+koleksiyonları için: varsayılan `match /{document=**} { allow read, write: if request.auth != null; }`
+kuralı zaten bunları kapsar. Ekstra kural gerekmez.
+
 ## Adım 5 — Windows Task Scheduler ile Otomasyon
 
-`run-sync.bat` hazır — varsa önce `set-env.bat`, sonra `.env` dosyasını yükler; `.env` değerleri `set-env.bat` değerlerini ezer. İçinde bulunduğumuz haftanın tarih aralığıyla izinli durumları çeker ve `sync.log`'a yazar. Batch dosyası eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
+`run-sync.bat` hazır — varsa önce `set-env.bat`, sonra `.env` dosyasını yükler; `.env` değerleri `set-env.bat` değerlerini ezer. Tarih aralığını Node tarafı otomatik hesaplar: son başarılı sync'ten bugüne (eski "içinde bulunulan hafta" penceresi kaldırıldı — o pencere, makine hafta sonu/tatilde kapalı kaldığında önceki haftanın irsaliyelerini kalıcı olarak atlıyordu). Batch dosyası eksik zorunlu ayar veya Node hatasında non-zero exit code döndürür; böylece Task Scheduler gerçek hatayı “başarılı” gibi göstermez.
 
 ### Önce `.env` oluştur
 `scripts/ceomed-sync/.env` dosyası (gitignore'da) düz `KEY=VALUE` satırları içermeli:

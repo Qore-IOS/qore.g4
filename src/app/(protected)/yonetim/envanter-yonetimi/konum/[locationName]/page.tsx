@@ -27,6 +27,7 @@ interface Asset {
   marka: string;
   model: string;
   konum: string;
+  bolum?: string;
   teslimEdilenPersonel: string;
   aciklama: string;
   seriNumarasi?: string;
@@ -131,6 +132,7 @@ export default function AssetLocationPage() {
         Durum: 'iyi',
         Marka: '',
         Model: '',
+        'Bölüm': '',
         'Teslim Edilen Personel': '',
         'Alım Fiyatı (TL)': '',
         'Satın Alma Tarihi': '',
@@ -178,6 +180,7 @@ export default function AssetLocationPage() {
       Durum: asset.durum || '',
       Marka: asset.marka || '',
       Model: asset.model || '',
+      'Bölüm': asset.bolum || '',
       'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
       'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
       'Zimmetli Kişi': asset.zimmetliKisi || '',
@@ -215,6 +218,7 @@ export default function AssetLocationPage() {
           marka: String(row['Marka'] || row['marka'] || '').trim(),
           model: String(row['Model'] || row['model'] || '').trim(),
           konum: locationName,
+          bolum: String(row['Bölüm'] || row['Bolum'] || row['bölüm'] || row['bolum'] || '').trim(),
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
           alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['alimfiyatitl'] || 0) || 0,
           satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
@@ -343,6 +347,7 @@ export default function AssetLocationPage() {
                     <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Seri No</th>
                     <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Durum</th>
                     <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Marka / Model</th>
+                    <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Bölüm</th>
                     <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Personel</th>
                     <th className="text-left py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">Fiyat</th>
                     <th className="text-right py-2 px-3 text-[11px] font-semibold uppercase tracking-wider text-[var(--dashboard-muted)]">İşlem</th>
@@ -351,7 +356,7 @@ export default function AssetLocationPage() {
                 <tbody>
                   {filteredAssets.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="text-center py-12 text-[var(--dashboard-muted)]">Bu konum için kayıtlı ürün yok veya filtre ile eşleşmiyor.</td>
+                      <td colSpan={10} className="text-center py-12 text-[var(--dashboard-muted)]">Bu konum için kayıtlı ürün yok veya filtre ile eşleşmiyor.</td>
                     </tr>
                   ) : (
                     filteredAssets.map(asset => {
@@ -379,6 +384,7 @@ export default function AssetLocationPage() {
                           <td className="py-2 px-3 font-mono text-xs text-[var(--dashboard-text)]">{asset.seriNumarasi || '-'}</td>
                           <td className="py-2 px-3 capitalize text-[var(--dashboard-text)]">{asset.durum || '-'}</td>
                           <td className="py-2 px-3 text-[var(--dashboard-text)]">{[asset.marka, asset.model].filter(Boolean).join(' / ') || '-'}</td>
+                          <td className="py-2 px-3 text-[var(--dashboard-text)]">{asset.bolum || '-'}</td>
                           <td className="py-2 px-3 text-[var(--dashboard-text)]">{asset.teslimEdilenPersonel || '-'}</td>
                           <td className="py-2 px-3 text-[var(--dashboard-text)]">{typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl.toLocaleString('tr-TR') : '-'}</td>
                           <td className="py-2 px-3 text-right">

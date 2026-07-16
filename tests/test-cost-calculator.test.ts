@@ -205,6 +205,22 @@ test('deviceMonthlyCostTL: satin_alma amortismanlı aylık karşılık', () => {
   assert.equal(deviceMonthlyCostTL(dev, rates), 10000);
 });
 
+test('depoStokCounts: sunucu özeti ham satırlarla birebir aynı sonucu verir', () => {
+  // Her lab için 5 kutu A ürünü → count=5 özet satırları
+  const counts: Any[] = labs.map((lab) => ({ hedefKurumId: lab.id, stokKodu: 'A', count: 5 }));
+  const rCounts = calculateTestCost({ ...baseInputs, depoStok: undefined, depoStokCounts: counts });
+  const rRows = calculateTestCost(baseInputs);
+
+  assert.equal(rCounts.totalTestUnits, rRows.totalTestUnits);
+  assert.equal(rCounts.stockCostTL, rRows.stockCostTL);
+  assert.equal(rCounts.inventoryCostTL, rRows.inventoryCostTL);
+  assert.equal(rCounts.deviceCostMonthlyTL, rRows.deviceCostMonthlyTL);
+  assert.equal(rCounts.personnelCostMonthlyTL, rRows.personnelCostMonthlyTL);
+  assert.equal(rCounts.testTotalCostTL, rRows.testTotalCostTL);
+  assert.equal(rCounts.costPerTestTL, rRows.costPerTestTL);
+  assert.equal(rCounts.perLab.length, rRows.perLab.length);
+});
+
 test('Kullanıcı senaryosu: X testi maliyet kırılımı', () => {
   const r = calculateTestCost(baseInputs);
 

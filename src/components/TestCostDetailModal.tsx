@@ -30,6 +30,7 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';
 
 interface Props {
   open: boolean;
@@ -64,7 +65,7 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
       setLoading(true);
       setError(null);
       try {
-        const [productsSnap, labsSnap, devicesSnap, assignedSnap, assetsSnap, personnelSnap, stokSnap, rates] =
+        const [productsSnap, labsSnap, devicesSnap, assignedSnap, assetsSnap, personnelSnap, stokCounts, rates] =
           await Promise.all([
             getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin, orderBy('stokAdi', 'asc'))),
             getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin, orderBy('name', 'asc'))),
@@ -72,8 +73,14 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
             getDocs(scopedQuery('hospitalDeviceAssignments', currentCompanyId, isSuperAdmin)),
             getDocs(scopedQuery('assets', currentCompanyId, isSuperAdmin)),
             getDocs(scopedQuery('personnel', currentCompanyId, isSuperAdmin)),
-            // Sadece sevk edilmiş stok (lab'lardaki); server-side filter.
-            getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true))),
+            // Sevk edilmiş stok sunucuda özetlenir; API erişilemezse
+            // eski belge-belge Firestore yoluna düşülür.
+            fetchDepoStokCounts(currentCompanyId, isSuperAdmin).catch(async () => {
+              const snap = await getDocs(
+                scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('isShipped', '==', true)),
+              );
+              return aggregateDepoStokRows(snap.docs.map((d) => d.data() as DepoStokItem));
+            }),
             getExchangeRates().catch(() => ({ EUR: 1, USD: 1.08, TRY: 38.5 })),
           ]);
 
@@ -97,8 +104,6 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
           currentCompanyId,
           isSuperAdmin,
         );
-        const depoStok = depoStokSnapFilter(stokSnap.docs.map((d) => ({ id: d.id, ...d.data() } as DepoStokItem)));
-
         const productMap = new Map<string, ProductCode>();
         products.forEach((p) => productMap.set(p.stokKodu, p));
         const deviceDefs = new Map<string, Device>();
@@ -113,7 +118,7 @@ export default function TestCostDetailModal({ open, onOpenChange, testDef, allTe
           deviceDefs,
           assets,
           personnel,
-          depoStok,
+          depoStokCounts: stokCounts,
           rates: rates as Record<Currency, number>,
         };
 
@@ -467,11 +472,3 @@ function KpiBox({
   );
 }
 
-/**
- * Filtre: gerçek stok hesabında sadece labda olan (isShipped=true) stoğu kullanırız;
- * tüm satırları motora geçirip motor içinde filtrelemek de mümkün, burada erken filtre
- * uygulayarak bellek tasarrufu yapıyoruz.
- */
-function depoStokSnapFilter(items: DepoStokItem[]): DepoStokItem[] {
-  return items.filter((i) => i.isShipped === true);
-}

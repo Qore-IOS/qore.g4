@@ -61,6 +61,8 @@ interface AssetCategory {
 interface Location {
   id: string;
   name: string;
+  type: 'lab' | 'depo';
+  code?: string;
 }
 
 export default function EnvanterYonetimiPage() {
@@ -106,13 +108,13 @@ export default function EnvanterYonetimiPage() {
       ).length);
 
       const hospitalLocations = filterByCompanyScope(
-        hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string, companyId: (doc.data() as any).companyId })),
+        hospitalsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Hospital).name as string, kod: (doc.data() as Hospital).kod, companyId: (doc.data() as any).companyId })),
         currentCompanyId, isSuperAdmin
-      ).map(({ id, name }) => ({ id, name }));
+      ).map(({ id, name, kod }) => ({ id, name, type: 'lab' as const, code: kod || '' }));
       const depotLocations = filterByCompanyScope(
         depotsSnap.docs.map(doc => ({ id: doc.id, name: (doc.data() as Depot).name as string, companyId: (doc.data() as any).companyId })),
         currentCompanyId, isSuperAdmin
-      ).map(({ id, name }) => ({ id, name }));
+      ).map(({ id, name }) => ({ id, name, type: 'depo' as const }));
       setLocations([...hospitalLocations, ...depotLocations].sort((a, b) => a.name.localeCompare(b.name)));
     } catch (e) {
       toast({ title: 'Hata', description: 'Veriler yüklenemedi.', variant: 'destructive' });
@@ -161,7 +163,7 @@ export default function EnvanterYonetimiPage() {
     const data: Record<string, unknown> = { name: categoryName };
     try {
       if (editingCategory.id) {
-        await setDoc(doc(db, 'assetCategories', editingCategory.id), data, { merge: true });
+        await setDoc(doc(db, 'assetCategories', editingCategory.id), withCompanyScope(data, currentCompanyId), { merge: true });
       } else {
         const iconRes = await fetch('/api/envanter/category-icon', {
           method: 'POST',
@@ -172,7 +174,7 @@ export default function EnvanterYonetimiPage() {
           const iconData = await iconRes.json();
           data.iconSvg = iconData.iconSvg;
         }
-        await addDoc(collection(db, 'assetCategories'), data);
+        await addDoc(collection(db, 'assetCategories'), withCompanyScope(data, currentCompanyId));
       }
       toast({ title: 'Basarili', description: 'Kategori kaydedildi.' });
       setIsModalOpen(false);
@@ -206,7 +208,9 @@ export default function EnvanterYonetimiPage() {
         Durum: 'iyi',
         Marka: '',
         Model: '',
+        'Lab Kodu': '',
         Konum: '',
+        'Bölüm': '',
         'Teslim Edilen Personel': '',
         'Alım Fiyatı (TL)': '',
         'Satın Alma Tarihi': '',
@@ -233,15 +237,18 @@ export default function EnvanterYonetimiPage() {
     XLSX.utils.book_append_sheet(workbook, templateSheet, 'Envanter Şablonu');
 
     const categoryNames = categories.map(c => c.name);
-    const locationNames = locations.map(l => l.name);
+    const labReferences = locations.filter(l => l.type === 'lab');
+    const depotReferences = locations.filter(l => l.type === 'depo');
     const durumOptions = ['iyi', 'orta', 'kötü', 'çok kötü'];
     const amortismanOptions = ['dogrusal', 'azalan_bakiye'];
     const refData: any[] = [];
-    const maxLen = Math.max(categoryNames.length, locationNames.length, durumOptions.length, amortismanOptions.length);
+    const maxLen = Math.max(categoryNames.length, labReferences.length, depotReferences.length, durumOptions.length, amortismanOptions.length);
     for (let i = 0; i < maxLen; i++) {
       refData.push({
         'Kategoriler': categoryNames[i] || '',
-        'Konumlar': locationNames[i] || '',
+        'Lab Kodu': labReferences[i]?.code || '',
+        'Laboratuvar Adı': labReferences[i]?.name || '',
+        'Depo Konumları': depotReferences[i]?.name || '',
         'Durum Seçenekleri': durumOptions[i] || '',
         'Amortisman Yöntemleri': amortismanOptions[i] || '',
       });
@@ -256,7 +263,7 @@ export default function EnvanterYonetimiPage() {
   const handleDownloadCurrentInventory = () => {
     const mappedAssetKeys = new Set([
       'category', 'demirbasNo', 'urunAdi', 'seriNumarasi', 'durum', 'marka', 'model', 'konum',
-      'teslimEdilenPersonel', 'alimFiyatiTl', 'satinAlmaTarihi', 'garantiBitisTarihi',
+      'bolum', 'teslimEdilenPersonel', 'alimFiyatiTl', 'satinAlmaTarihi', 'garantiBitisTarihi',
       'planliKullanimOmruYil', 'amortismanYontemi', 'amortismanBaslangicTarihi', 'hurdaTarihi',
       'imhaTarihi', 'satisTarihi', 'sonBakimTarihi', 'sonrakiBakimTarihi', 'sonKalibrasyonTarihi',
       'sonrakiKalibrasyonTarihi', 'bakimMaliyetiTl', 'zimmetliKisi', 'checkOutTarihi', 'checkInTarihi',
@@ -272,7 +279,9 @@ export default function EnvanterYonetimiPage() {
         Durum: asset.durum || '',
         Marka: asset.marka || '',
         Model: asset.model || '',
+        'Lab Kodu': locations.find(l => l.type === 'lab' && l.name === asset.konum)?.code || '',
         Konum: asset.konum || '',
+        'Bölüm': asset.bolum || '',
         'Teslim Edilen Personel': asset.teslimEdilenPersonel || '',
         'Alım Fiyatı (TL)': typeof asset.alimFiyatiTl === 'number' ? asset.alimFiyatiTl : '',
         'Satın Alma Tarihi': asset.satinAlmaTarihi || '',
@@ -314,8 +323,21 @@ export default function EnvanterYonetimiPage() {
     try {
       const data = await readExcelDataSmart(file, 'product', toast);
       if (!data || data.length === 0) {
-        toast({ title: 'Bos Dosya', description: 'Excel dosyasinda veri bulunamadi.', variant: 'default' });
-        setLoading(false);
+        if (assets.length === 0) {
+          toast({ title: 'Bos Envanter', description: 'Excel dosyasinda veri yok ve silinecek envanter kaydi bulunmuyor.', variant: 'default' });
+          return;
+        }
+
+        for (let i = 0; i < assets.length; i += 450) {
+          const deleteBatch = writeBatch(db);
+          assets.slice(i, i + 450).forEach((asset) => {
+            deleteBatch.delete(doc(db, 'assets', asset.id));
+          });
+          await deleteBatch.commit();
+        }
+
+        toast({ title: 'Envanter Temizlendi', description: `Excel dosyasi bos oldugu icin ${assets.length} envanter kaydi silindi.` });
+        fetchData();
         return;
       }
 
@@ -326,6 +348,13 @@ export default function EnvanterYonetimiPage() {
         const demirbasNo = String(row['Demirbaş No'] || row['demirbasno'] || '').trim();
         if (!demirbasNo) continue;
 
+        const labCode = String(row['Lab Kodu'] || row['LabKodu'] || row['labKodu'] || row['labkodu'] || '').trim();
+        const matchedLab = labCode
+          ? locations.find(l => l.type === 'lab' && l.code?.toLocaleLowerCase('tr-TR') === labCode.toLocaleLowerCase('tr-TR'))
+          : undefined;
+        const rawKonum = String(row['Konum'] || row['konum'] || '').trim();
+        const resolvedKonum = matchedLab?.name || rawKonum;
+
         const assetData: Partial<Asset> = {
           category: String(row['Kategori'] || row['kategori'] || '').trim(),
           demirbasNo,
@@ -334,7 +363,8 @@ export default function EnvanterYonetimiPage() {
           durum: String(row['Durum'] || row['durum'] || 'iyi').trim() as any,
           marka: String(row['Marka'] || row['marka'] || '').trim(),
           model: String(row['Model'] || row['model'] || '').trim(),
-          konum: String(row['Konum'] || row['konum'] || '').trim(),
+          konum: resolvedKonum,
+          bolum: String(row['Bölüm'] || row['Bolum'] || row['bölüm'] || row['bolum'] || '').trim(),
           teslimEdilenPersonel: String(row['Teslim Edilen Personel'] || row['teslimedilenpersonel'] || '').trim(),
           alimFiyatiTl: Number(row['Alım Fiyatı (TL)'] || row['Alim Fiyati (TL)'] || row['alimfiyatitl'] || row['alim_fiyati_tl'] || 0) || 0,
           satinAlmaTarihi: String(row['Satın Alma Tarihi'] || row['Satin Alma Tarihi'] || row['satinalmatarihi'] || '').trim(),
@@ -356,7 +386,7 @@ export default function EnvanterYonetimiPage() {
           dijitalImza: String(row['Dijital İmza'] || row['Dijital Imza'] || row['dijitalimza'] || '').trim(),
           zimmetFisNo: String(row['Zimmet Fiş No'] || row['Zimmet Fis No'] || row['zimmetfisno'] || '').trim(),
           aciklama: String(row['Açıklama'] || row['aciklama'] || '').trim(),
-          manuelKonum: locations.some(l => l.name === String(row['Konum'] || '').trim()) ? undefined : String(row['Konum'] || '').trim(),
+          manuelKonum: locations.some(l => l.name === resolvedKonum) ? undefined : resolvedKonum,
         };
 
         const existingAsset = assets.find(a => a.demirbasNo === demirbasNo);

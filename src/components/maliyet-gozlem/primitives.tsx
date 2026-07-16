@@ -102,6 +102,8 @@ interface MiniStatProps {
   unit?: string;
   isCount?: boolean;
   decimals?: number;
+  /** Verilirse kart tıklanabilir olur — hesabın alt kırılımını açmak için. */
+  onClick?: () => void;
 }
 
 export function MiniStat({
@@ -114,6 +116,7 @@ export function MiniStat({
   unit = '₺',
   isCount = false,
   decimals = 0,
+  onClick,
 }: MiniStatProps) {
   const [hovered, setHovered] = useState(false);
   const isMobile = useIsMobile();
@@ -122,6 +125,7 @@ export function MiniStat({
     <div
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={onClick}
       style={{
         flex: 1,
         minWidth: 0,
@@ -136,7 +140,7 @@ export function MiniStat({
         boxShadow: hovered
           ? `0 16px 48px rgba(0,0,0,0.4), 0 0 0 1px ${color}33, inset 0 1px 0 rgba(255,255,255,0.06)`
           : '0 1px 0 rgba(255,255,255,0.04) inset',
-        cursor: 'default',
+        cursor: onClick ? 'pointer' : 'default',
       }}
     >
       <div
@@ -425,7 +429,7 @@ export function ActivityCard({
             justifyContent: 'center',
             transition: 'all 0.2s',
           }}
-          onClick={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onClick?.(); }}
         >
           <svg width={isMobile ? 10 : 12} height={isMobile ? 10 : 12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M7 17 17 7M7 7h10v10" />
@@ -1283,6 +1287,125 @@ export function InsightsCard({ insights, autoMs = 60000, assistantContext }: Ins
           showTrigger={false}
         />
       )}
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// KpiBreakdownModal — KPI kartına tıklanınca hesabın alt kırılımını gösterir
+// ────────────────────────────────────────────────────────────────────────────
+
+export interface KpiBreakdownRow {
+  label: string;
+  value?: string;
+  sub?: string;
+  onClick?: () => void;
+}
+
+export function KpiBreakdownModal({
+  title,
+  subtitle,
+  rows = [],
+  content,
+  width = 560,
+  onClose,
+}: {
+  title: string;
+  subtitle?: string;
+  rows?: KpiBreakdownRow[];
+  /** Satır listesinin altında gösterilecek zengin içerik (ekstre, dağıtım tablosu vb.) */
+  content?: React.ReactNode;
+  /** Modal genişliği (px) — geniş tablolar için artırılabilir */
+  width?: number;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 1000,
+        background: 'rgba(0,0,0,0.45)',
+        backdropFilter: 'blur(4px)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: 'var(--mg-surface)',
+          border: '1px solid var(--mg-border)',
+          borderRadius: 18,
+          width: `min(${width}px, 100%)`,
+          maxHeight: '80vh',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxShadow: '0 24px 80px rgba(0,0,0,0.5)',
+        }}
+      >
+        <div style={{ padding: '18px 20px 12px', borderBottom: '1px solid var(--mg-border)', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--mg-text)' }}>{title}</div>
+            {subtitle && <div style={{ fontSize: 12, color: 'var(--mg-muted)', marginTop: 2 }}>{subtitle}</div>}
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Kapat"
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: '50%',
+              border: '1px solid var(--mg-border)',
+              background: 'var(--mg-surface-2)',
+              color: 'var(--mg-text-2)',
+              cursor: 'pointer',
+              fontSize: 14,
+              lineHeight: 1,
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ overflowY: 'auto', padding: '8px 20px 16px' }}>
+          {rows.length === 0 && !content ? (
+            <div style={{ padding: 24, textAlign: 'center', fontSize: 13, color: 'var(--mg-muted)' }}>Kırılım verisi yok.</div>
+          ) : (
+            rows.map((r, i) => (
+              <div
+                key={`${r.label}-${i}`}
+                role={r.onClick ? 'button' : undefined}
+                tabIndex={r.onClick ? 0 : undefined}
+                onClick={r.onClick}
+                onKeyDown={(e) => { if (r.onClick && (e.key === 'Enter' || e.key === ' ')) r.onClick(); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  padding: '10px 0',
+                  borderBottom: i < rows.length - 1 ? '1px solid var(--mg-border)' : 'none',
+                  cursor: r.onClick ? 'pointer' : 'default',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--mg-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.label}</div>
+                  {r.sub && <div style={{ fontSize: 11, color: 'var(--mg-muted)', marginTop: 1 }}>{r.sub}</div>}
+                </div>
+                {r.value != null && (
+                  <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--mg-accent)', whiteSpace: 'nowrap' }}>{r.value}</div>
+                )}
+              </div>
+            ))
+          )}
+          {content}
+        </div>
+      </div>
     </div>
   );
 }

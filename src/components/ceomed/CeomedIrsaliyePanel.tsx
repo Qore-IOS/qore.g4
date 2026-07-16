@@ -63,12 +63,23 @@ interface PendingIrsaliye {
   tarih: string; // dd-MM-yyyy
   cariKodu: string;
   cariUnvan: string;
+  sevkAdresi?: string;
   durumAciklama: string;
   itemCount: number;
   items: CeomedItem[];
   status: 'pending' | 'approved' | 'rejected';
   syncedAt?: Timestamp;
   approvedAt?: Timestamp;
+}
+
+// Sevk adresini normalize et: küçük harf, Türkçe karakterler sadeleşir, noktalama/boşluk temizlenir.
+function normalizeAddress(s?: string): string {
+  if (!s) return '';
+  return s
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]/g, ''); // sadece harf+rakam kalsın
 }
 
 const STATUS_OPTIONS = [
@@ -132,16 +143,6 @@ export default function CeomedIrsaliyePanel() {
     return () => unsub();
   }, [currentCompanyId, isSuperAdmin]);
 
-  // Hospital lookup by ceomedCariKodu
-  const hospitalByCari = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
-    for (const h of hospitals) {
-      const c = (h as any).ceomedCariKodu;
-      if (c) map.set(String(c).trim().toUpperCase(), { id: h.id, name: h.name });
-    }
-    return map;
-  }, [hospitals]);
-
   // Depot lookup by ceomedCariKodu
   const depotByCari = useMemo(() => {
     const map = new Map<string, { id: string; name: string }>();
@@ -160,6 +161,77 @@ export default function CeomedIrsaliyePanel() {
     }
     return map;
   }, [productCodes]);
+
+  const hospitalById = useMemo(() => {
+    const map = new Map<string, any>();
+    for (const h of hospitals) map.set(h.id, h);
+    return map;
+  }, [hospitals]);
+
+  // Aynı cari koduna birden fazla hastane atanabilir (ana + ek hizmetler aynı cariyi paylaşır).
+  const hospitalsByCari = useMemo(() => {
+    const map = new Map<string, any[]>();
+    for (const h of hospitals as any[]) {
+      const c = h.ceomedCariKodu ? String(h.ceomedCariKodu).trim().toUpperCase() : '';
+      if (!c) continue;
+      const arr = map.get(c);
+      if (arr) arr.push(h); else map.set(c, [h]);
+    }
+    return map;
+  }, [hospitals]);
+
+  /**
+   * Bir irsaliye için hedef laboratuvarı çözer.
+   * - Aynı cariyi paylaşan tüm hastaneler + onların ek hizmetleri aday havuzunu oluşturur.
+   * - İrsaliyenin sevkAdresi bu havuzdaki bir hastanenin sevkAdresi ile birebir eşleşirse hedef odur.
+   * - Eşleşme yoksa varsayılan: ek hizmeti olan ana hastane (yoksa cariyi paylaşan ilk hastane).
+   */
+  const resolveTarget = useMemo(() => {
+    return (irs: PendingIrsaliye) => {
+      const cari = (irs.cariKodu || '').trim().toUpperCase();
+      const withCode = hospitalsByCari.get(cari) || [];
+      if (withCode.length === 0) {
+        return { mainId: null, mainName: null, routedId: null, routedName: null, matchedByAddress: false, ambiguous: false };
+      }
+      // Aday havuz: cariyi paylaşan hastaneler + ek hizmet çocukları (dedup)
+      const candMap = new Map<string, any>();
+      for (const h of withCode) {
+        candMap.set(h.id, h);
+        for (const ekId of (h.ekHizmetLabIds || [])) {
+          const ek = hospitalById.get(ekId);
+          if (ek) candMap.set(ek.id, ek);
+        }
+      }
+      const candidates = Array.from(candMap.values());
+      // Varsayılan ana: ek hizmeti olan hastane (yoksa ilk)
+      const mainHospital = withCode.find((h) => (h.ekHizmetLabIds || []).length > 0) || withCode[0];
+
+      const irsAddr = normalizeAddress(irs.sevkAdresi);
+      let routed: any = null;
+      let ambiguous = false;
+      if (irsAddr) {
+        const matches = candidates.filter((c) => c?.sevkAdresi && normalizeAddress(c.sevkAdresi) === irsAddr);
+        if (matches.length === 1) routed = matches[0];
+        else if (matches.length > 1) { routed = matches[0]; ambiguous = true; }
+      }
+      const target = routed || mainHospital;
+      return {
+        mainId: mainHospital.id,
+        mainName: mainHospital.name,
+        routedId: target.id,
+        routedName: target.name,
+        matchedByAddress: !!routed && routed.id !== mainHospital.id,
+        ambiguous,
+      };
+    };
+  }, [hospitalsByCari, hospitalById]);
+
+  // Detay açılınca sevk adresine göre hedefi otomatik seç
+  useEffect(() => {
+    if (!selected) { setTargetHospitalId(''); return; }
+    const t = resolveTarget(selected);
+    setTargetHospitalId(t.routedId || '');
+  }, [selected, resolveTarget]);
 
   const filtered = useMemo(() => {
     return list.filter((i) => {
@@ -224,10 +296,12 @@ export default function CeomedIrsaliyePanel() {
 
   const handleApprove = async (irs: PendingIrsaliye) => {
     const cari = (irs.cariKodu || '').trim().toUpperCase();
-    const mainHospitalMatch = hospitalByCari.get(cari);
+    // Hastane hedefi: adres-farkındalı, çoklu-cari çözümü
+    const resolved = resolveTarget(irs);
+    // Depo hedefi: ceomedCariKodu eşleşen depo
     const mainDepotMatch = depotByCari.get(cari);
 
-    if (!mainHospitalMatch && !mainDepotMatch) {
+    if (!resolved.mainId && !mainDepotMatch) {
       toast({
         title: 'Eşleşme yok',
         description: `${irs.cariKodu} kodlu cariye karşılık gelen laboratuvar/depo bulunamadı. Yönetim → Laboratuvarlar veya Yönetim → Depolar'dan Ceomed Cari Kodu alanını doldurun.`,
@@ -236,8 +310,9 @@ export default function CeomedIrsaliyePanel() {
       return;
     }
 
-    const targetHospital = mainHospitalMatch
-      ? hospitals.find((h) => h.id === (targetHospitalId || mainHospitalMatch.id))
+    const mainMatch = resolved.mainId ? { id: resolved.mainId, name: resolved.mainName as string } : null;
+    const targetHospital = resolved.mainId
+      ? hospitals.find((h) => h.id === (targetHospitalId || resolved.routedId || resolved.mainId))
       : null;
     const targetDepot = mainDepotMatch
       ? depots.find((d) => d.id === (targetDepotId || mainDepotMatch.id))
@@ -289,6 +364,9 @@ export default function CeomedIrsaliyePanel() {
                 irsaliyeNumarasi: irs.irsaliyeNo,
                 eklenmeTarihi: Timestamp.now(),
                 isShipped: !useDepot,
+                // Kuruma direkt aktarımda onay anı = sevk anı; Total Verimlilik
+                // "Ay Başı Sevk (Kutu)" otomatik doldurma bu tarihe göre sayar.
+                sevkTarihi: useDepot ? null : Timestamp.now(),
                 hedefKurumId: useDepot ? '' : targetHospital!.id,
                 hedefKurum: useDepot ? '' : targetHospital!.name,
                 createdByName: currentUserProfile?.name || currentUser?.email || 'Ceomed Sync',
@@ -346,10 +424,11 @@ export default function CeomedIrsaliyePanel() {
         hospitalName: useDepot ? null : targetHospital!.name,
         depotId: useDepot ? targetDepot!.id : null,
         depotName: useDepot ? targetDepot!.name : null,
-        mainHospitalId: mainHospitalMatch?.id || null,
-        mainHospitalName: mainHospitalMatch?.name || null,
+        mainHospitalId: mainMatch?.id || null,
+        mainHospitalName: mainMatch?.name || null,
         mainDepotId: mainDepotMatch?.id || null,
         mainDepotName: mainDepotMatch?.name || null,
+        routedTo: (!useDepot && mainMatch && targetHospital && targetHospital.id !== mainMatch.id) ? targetHospital.id : null,
       });
 
       toast({
@@ -495,9 +574,9 @@ export default function CeomedIrsaliyePanel() {
         ) : (
           <div className="space-y-2">
             {filtered.map((i) => {
-              const cari = (i.cariKodu || '').trim().toUpperCase();
-              const hospitalMatch = hospitalByCari.get(cari);
-              const depotMatch = depotByCari.get(cari);
+              const matchT = resolveTarget(i);
+              const match = matchT.mainId ? { id: matchT.mainId, name: matchT.mainName as string } : null;
+              const depotMatch = depotByCari.get((i.cariKodu || '').trim().toUpperCase());
               const statusBadge =
                 i.status === 'approved'
                   ? { text: 'Onaylandı', cls: 'bg-emerald-100 text-emerald-700' }
@@ -533,12 +612,20 @@ export default function CeomedIrsaliyePanel() {
                         <span className="truncate">{i.cariUnvan}</span>
                       </div>
                       <div className="mt-1">
-                        {(hospitalMatch || depotMatch) ? (
+                        {match ? (() => {
+                          const t = resolveTarget(i);
+                          return t.matchedByAddress ? (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
+                              <CheckCircle className="h-3 w-3" /> Yönlendirildi: {t.routedName} <span className="text-[var(--dashboard-muted)]">(adres eşleşti)</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
+                              <CheckCircle className="h-3 w-3" /> Eşleşti: {match.name}
+                            </span>
+                          );
+                        })() : depotMatch ? (
                           <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">
-                            <CheckCircle className="h-3 w-3" /> Eşleşti:
-                            {hospitalMatch ? ` Lab: ${hospitalMatch.name}` : ''}
-                            {hospitalMatch && depotMatch ? ' • ' : ''}
-                            {depotMatch ? ` Depo: ${depotMatch.name}` : ''}
+                            <CheckCircle className="h-3 w-3" /> Eşleşti (depo): {depotMatch.name}
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 text-[11px] text-amber-600">
@@ -580,20 +667,41 @@ export default function CeomedIrsaliyePanel() {
             </DialogTitle>
           </DialogHeader>
           {selected && (() => {
-            const mainMatch = hospitalByCari.get((selected.cariKodu || '').trim().toUpperCase());
-            const mainHospital = mainMatch ? hospitals.find((h) => h.id === mainMatch.id) : null;
-            const ekHizmetIds = (mainHospital?.ekHizmetLabIds || []) as string[];
-            const ekHizmetLabs = ekHizmetIds
-              .map((id) => hospitals.find((h) => h.id === id))
-              .filter(Boolean) as { id: string; name: string }[];
+            const cari = (selected.cariKodu || '').trim().toUpperCase();
+            const withCode = (hospitalsByCari.get(cari) || []) as any[];
+            const mainHospital = withCode.find((h) => (h.ekHizmetLabIds || []).length > 0) || withCode[0] || null;
+            // Aday havuz: cariyi paylaşan tüm hastaneler + ek hizmet çocukları (ana hariç, dropdown için)
+            const candMap = new Map<string, any>();
+            for (const h of withCode) {
+              for (const ekId of (h.ekHizmetLabIds || [])) {
+                const ek = hospitalById.get(ekId);
+                if (ek) candMap.set(ek.id, ek);
+              }
+              // Cariyi paylaşan diğer hastaneler de seçilebilir olsun
+              if (mainHospital && h.id !== mainHospital.id) candMap.set(h.id, h);
+            }
+            const ekHizmetLabs = Array.from(candMap.values()) as { id: string; name: string }[];
             const showRouting = selected.status === 'pending' && mainHospital && ekHizmetLabs.length > 0;
             return (
               <>
-                {showRouting && (
+                {showRouting && (() => {
+                  const t = resolveTarget(selected);
+                  return (
                   <div className="rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-3 mb-2">
                     <label className="text-xs text-[var(--dashboard-muted)] mb-1 block">
                       Hedef Laboratuvar (yönlendirme)
                     </label>
+                    {selected.sevkAdresi && (
+                      <p className="text-[11px] text-[var(--dashboard-muted)] mb-1">
+                        İrsaliye sevk adresi: <span className="font-medium">{selected.sevkAdresi}</span>
+                      </p>
+                    )}
+                    {t.matchedByAddress && (
+                      <p className="text-[11px] text-emerald-600 mb-1 flex items-center gap-1">
+                        <CheckCircle className="h-3 w-3" /> Sevk adresi eşleşti — otomatik "{t.routedName}" seçildi.
+                        {t.ambiguous && ' (Birden fazla eşleşme, ilki seçildi — kontrol edin.)'}
+                      </p>
+                    )}
                     <Select
                       value={targetHospitalId || mainHospital!.id}
                       onValueChange={(v) => setTargetHospitalId(v)}
@@ -613,7 +721,8 @@ export default function CeomedIrsaliyePanel() {
                       </SelectContent>
                     </Select>
                   </div>
-                )}
+                  );
+                })()}
                 <div className="flex-1 overflow-y-auto space-y-2 pr-2">
               {(selected.items || []).map((item, idx) => {
                 const product = productByStokKodu.get(String(item.STOK_KODU).trim());

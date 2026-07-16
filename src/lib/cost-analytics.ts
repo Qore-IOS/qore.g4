@@ -9,6 +9,12 @@ export interface SayimSessionItem {
   marka: string;
   stokAdedi: number;
   cihazUstuAdedi: number;
+  /** Cost snapshot captured when the count was saved. */
+  cost?: number;
+  /** Currency snapshot captured when the count was saved. */
+  currency?: Currency;
+  /** Package-size snapshot captured when the count was saved. */
+  ambalajDegeri?: number;
 }
 
 export interface SayimSession {
@@ -17,8 +23,20 @@ export interface SayimSession {
   locationId: string;
   locationName: string;
   createdAt: any;
+  /** Optional accounting period for back-dated bulk count sessions, formatted as YYYY-MM. */
+  period?: string;
+  /** Optional zero-based month saved by the bulk count flow. */
+  month?: number;
+  /** Optional year saved by the bulk count flow. */
+  year?: number;
   items: SayimSessionItem[];
+  /** Soft-deleted sessions act as a reset marker for the same period + location. */
+  isDeleted?: boolean;
+  deletedAt?: any;
+  deletedByUid?: string;
+  deletedByName?: string;
 }
+
 
 export interface BrandCostData {
   name: string;
@@ -66,12 +84,41 @@ export interface TurnoverMetrics {
   dio: number;
 }
 
-export function getSessionDate(session: SayimSession): Date | null {
-  if (!session.createdAt) return null;
-  if (session.createdAt.toDate) return session.createdAt.toDate();
-  if (session.createdAt.seconds) return new Date(session.createdAt.seconds * 1000);
-  const d = new Date(session.createdAt);
+function toDateValue(value: any): Date | null {
+  if (!value) return null;
+  if (value.toDate) return value.toDate();
+  if (value.seconds) return new Date(value.seconds * 1000);
+  const d = new Date(value);
   return isValid(d) ? d : null;
+}
+
+function getCreatedAtDate(session: SayimSession): Date | null {
+  return toDateValue(session.createdAt);
+}
+
+function getSessionPeriodDate(session: SayimSession): Date | null {
+  const periodMatch = typeof session.period === 'string' ? session.period.match(/^(\d{4})-(\d{2})$/) : null;
+  if (periodMatch) {
+    const year = Number(periodMatch[1]);
+    const monthIndex = Number(periodMatch[2]) - 1;
+    const d = new Date(year, monthIndex, 1);
+    return isValid(d) ? d : null;
+  }
+
+  if (typeof session.year === 'number' && typeof session.month === 'number') {
+    const d = new Date(session.year, session.month, 1);
+    return isValid(d) ? d : null;
+  }
+
+  return null;
+}
+
+/**
+ * Date used by cost-observation analytics. Back-dated bulk counts are grouped
+ * by their selected accounting period; legacy sessions fall back to createdAt.
+ */
+export function getSessionDate(session: SayimSession): Date | null {
+  return getSessionPeriodDate(session) || getCreatedAtDate(session);
 }
 
 export function getProductCostInCurrency(
@@ -80,15 +127,19 @@ export function getProductCostInCurrency(
   cihazUstu: number,
   productMap: Map<string, ProductCode>,
   rates: Record<Currency, number>,
-  targetCurrency: Currency
+  targetCurrency: Currency,
+  snapshot?: Pick<SayimSessionItem, 'cost' | 'currency' | 'ambalajDegeri'>
 ): number {
   const product = productMap.get(stokKodu);
-  if (!product?.cost || !product?.ambalajDegeri) return 0;
+  const productCost = Number(product?.cost ?? snapshot?.cost ?? 0);
+  const rawPackageSize = Number(product?.ambalajDegeri ?? snapshot?.ambalajDegeri ?? 0);
+  const packageSize = rawPackageSize > 0 ? rawPackageSize : 1;
+  if (!productCost) return 0;
 
-  const totalTest = (quantity * product.ambalajDegeri) + cihazUstu;
-  const costPerTest = product.cost / product.ambalajDegeri;
+  const totalTest = (quantity * packageSize) + cihazUstu;
+  const costPerTest = productCost / packageSize;
   const totalCostNative = costPerTest * totalTest;
-  const productCurrency = (product.currency || 'TRY') as Currency;
+  const productCurrency = (product?.currency || snapshot?.currency || 'TRY') as Currency;
 
   let costEUR = totalCostNative;
   if (productCurrency === 'USD') costEUR = totalCostNative / (rates.USD || 1);
@@ -97,14 +148,76 @@ export function getProductCostInCurrency(
   return costEUR * (rates[targetCurrency] || 1);
 }
 
+function compareSessionsByAnalyticsDateDesc(a: SayimSession, b: SayimSession): number {
+  const ad = getSessionDate(a)?.getTime() ?? 0;
+  const bd = getSessionDate(b)?.getTime() ?? 0;
+  if (bd !== ad) return bd - ad;
+  const ac = (toDateValue(a.deletedAt) || getCreatedAtDate(a))?.getTime() ?? 0;
+  const bc = (toDateValue(b.deletedAt) || getCreatedAtDate(b))?.getTime() ?? 0;
+  return bc - ac;
+}
+
+function sortSessionsByAnalyticsDateDesc(sessions: SayimSession[]): SayimSession[] {
+  return [...sessions].sort(compareSessionsByAnalyticsDateDesc);
+}
+
+function mergeSessionItem(target: SayimSessionItem, source: SayimSessionItem): SayimSessionItem {
+  return {
+    ...target,
+    stokAdedi: (Number(target.stokAdedi) || 0) + (Number(source.stokAdedi) || 0),
+    cihazUstuAdedi: (Number(target.cihazUstuAdedi) || 0) + (Number(source.cihazUstuAdedi) || 0),
+  };
+}
+
+function mergeSessionsByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
+  const consolidatedByLocation = new Map<string, SayimSession>();
+  const resetKeys = new Set<string>();
+
+  sortSessionsByAnalyticsDateDesc(sessions).forEach((session) => {
+    const key = `${session.locationType}-${session.locationId}`;
+    if (resetKeys.has(key)) return;
+    if (session.isDeleted) {
+      resetKeys.add(key);
+      return;
+    }
+
+    const current = consolidatedByLocation.get(key);
+    if (!current) {
+      consolidatedByLocation.set(key, {
+        ...session,
+        items: session.items.map((item) => ({ ...item })),
+      });
+      return;
+    }
+
+    const itemsByStockCode = new Map<string, SayimSessionItem>(
+      current.items.map((item) => [item.stokKodu, { ...item }]),
+    );
+
+    session.items.forEach((item) => {
+      const existing = itemsByStockCode.get(item.stokKodu);
+      itemsByStockCode.set(item.stokKodu, existing ? mergeSessionItem(existing, item) : { ...item });
+    });
+
+    consolidatedByLocation.set(key, {
+      ...current,
+      id: `${current.id}+${session.id}`,
+      items: Array.from(itemsByStockCode.values()),
+    });
+  });
+
+  return consolidatedByLocation;
+}
+
 export function getSessionsInRange(
   sessions: SayimSession[],
   range: TimeRange,
   customStart?: Date,
   customEnd?: Date
 ): SayimSession[] {
-  if (range === 'all') return sessions;
-  if (range === 'latest') return sessions.length > 0 ? [sessions[0]] : [];
+  const sortedSessions = sortSessionsByAnalyticsDateDesc(sessions);
+  if (range === 'all') return sortedSessions;
+  if (range === 'latest') return sortedSessions.length > 0 ? [sortedSessions[0]] : [];
 
   const now = new Date();
   let start: Date;
@@ -123,18 +236,121 @@ export function getSessionsInRange(
     start = subMonths(now, 12);
   }
 
-  return sessions.filter((s) => {
+  return sortedSessions.filter((s) => {
     const d = getSessionDate(s);
     return d && d >= start && d <= end;
   });
 }
 
-export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
-  const latestByLocation = new Map<string, SayimSession>();
-  sessions.forEach((session) => {
-    const key = `${session.locationType}-${session.locationId}`;
-    if (!latestByLocation.has(key)) latestByLocation.set(key, session);
+/** Dönem anahtarı (YYYY-MM) — sayımın analitik tarihinden türetilir. */
+function periodKeyOf(session: SayimSession): string {
+  const d = getSessionDate(session);
+  if (!d) return 'na';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/** İki kalem listesini stok koduna göre birleştirir; adetleri TOPLAR. */
+function mergeSessionItems(target: Map<string, SayimSessionItem>, items: SayimSessionItem[] | undefined): void {
+  (items || []).forEach((it) => {
+    if (!it || !it.stokKodu) return;
+    const existing = target.get(it.stokKodu);
+    if (existing) {
+      existing.stokAdedi = (Number(existing.stokAdedi) || 0) + (Number(it.stokAdedi) || 0);
+      existing.cihazUstuAdedi = (Number(existing.cihazUstuAdedi) || 0) + (Number(it.cihazUstuAdedi) || 0);
+      if (!existing.stokAdi && it.stokAdi) existing.stokAdi = it.stokAdi;
+      if (!existing.marka && it.marka) existing.marka = it.marka;
+      if (existing.cost == null && it.cost != null) existing.cost = it.cost;
+      if (existing.currency == null && it.currency != null) existing.currency = it.currency;
+      if (existing.ambalajDegeri == null && it.ambalajDegeri != null) existing.ambalajDegeri = it.ambalajDegeri;
+    } else {
+      target.set(it.stokKodu, {
+        ...it,
+        stokAdedi: Number(it.stokAdedi) || 0,
+        cihazUstuAdedi: Number(it.cihazUstuAdedi) || 0,
+      });
+    }
   });
+}
+
+/**
+ * Bir lokasyonun bir dönemdeki (ay) sayımlarını TOPLAR. Aynı kurum + aynı dönem
+ * için birden fazla sayım girildiyse üzerine yazmaz; aynı stok kodundaki adetleri
+ * toplar, farklı ürünleri ayrı kalem olarak tutar. Silinen (isDeleted) sayım, o
+ * döneme kadar biriken toplamı SIFIRLAR (reset marker); sonraki sayımlar yeniden
+ * birikmeye başlar. Her (lokasyon, dönem) için tek birleşik sayım döndürür.
+ */
+export function consolidateSessionsByLocationPeriod(sessions: SayimSession[]): SayimSession[] {
+  const groups = new Map<string, SayimSession[]>();
+  sessions.forEach((s) => {
+    const key = `${s.locationType}-${s.locationId}-${periodKeyOf(s)}`;
+    const arr = groups.get(key);
+    if (arr) arr.push(s);
+    else groups.set(key, [s]);
+  });
+
+  const result: SayimSession[] = [];
+  groups.forEach((groupSessions, key) => {
+    // Kronolojik (eskiden yeniye) — silme reset'i doğru sırayla uygulansın.
+    const ordered = [...groupSessions].sort((a, b) => {
+      const at = (toDateValue(a.deletedAt) || getCreatedAtDate(a))?.getTime() ?? 0;
+      const bt = (toDateValue(b.deletedAt) || getCreatedAtDate(b))?.getTime() ?? 0;
+      return at - bt;
+    });
+
+    const merged = new Map<string, SayimSessionItem>();
+    let representative: SayimSession | null = null;
+    let latestCreatedAt: any = null;
+    let latestCreatedMs = -Infinity;
+
+    ordered.forEach((s) => {
+      if (s.isDeleted) {
+        merged.clear(); // dönem sıfırlama
+        return;
+      }
+      mergeSessionItems(merged, s.items);
+      representative = s;
+      const ms = getCreatedAtDate(s)?.getTime() ?? 0;
+      if (ms >= latestCreatedMs) {
+        latestCreatedMs = ms;
+        latestCreatedAt = s.createdAt;
+      }
+    });
+
+    if (merged.size === 0 || !representative) return; // boş / tamamen resetlenmiş dönem
+    const rep = representative as SayimSession;
+    result.push({
+      id: key,
+      locationType: rep.locationType,
+      locationId: rep.locationId,
+      locationName: rep.locationName,
+      createdAt: latestCreatedAt ?? rep.createdAt,
+      period: rep.period,
+      month: rep.month,
+      year: rep.year,
+      items: Array.from(merged.values()),
+      isDeleted: false,
+    });
+  });
+
+  return result;
+}
+
+/**
+ * Her lokasyon için EN GÜNCEL DÖNEMİN birleşik (toplanmış) sayımını döndürür.
+ * Aynı dönemdeki birden çok sayım `consolidateSessionsByLocationPeriod` ile
+ * toplanır; ardından lokasyon başına en güncel dönem seçilir. Tek bir döneme
+ * filtrelenmiş girdi verilirse (dönem seçili gözlem) sonuç o dönemin toplamıdır.
+ */
+export function getLatestByLocation(sessions: SayimSession[]): Map<string, SayimSession> {
+  const consolidated = consolidateSessionsByLocationPeriod(sessions);
+  const latestByLocation = new Map<string, SayimSession>();
+
+  sortSessionsByAnalyticsDateDesc(consolidated).forEach((session) => {
+    const key = `${session.locationType}-${session.locationId}`;
+    if (latestByLocation.has(key)) return;
+    latestByLocation.set(key, session);
+  });
+
   return latestByLocation;
 }
 
@@ -144,7 +360,8 @@ export function getSessionCost(
   rates: Record<Currency, number>,
   currency: Currency
 ): number {
-  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency), 0);
+  if (session.isDeleted) return 0;
+  return session.items.reduce((sum, item) => sum + getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item), 0);
 }
 
 export function getConsolidatedCostForWindow(
@@ -231,7 +448,7 @@ export function getBrandCostBreakdown(
     session.items.forEach((item) => {
       const name = item.marka || 'Diğer';
       const row = map.get(name) || { value: 0, products: new Set<string>() };
-      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      row.value += getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       row.products.add(item.stokKodu);
       map.set(name, row);
     });
@@ -255,7 +472,7 @@ export function getLocationCostBreakdown(
     const brandMap = new Map<string, number>();
     let total = 0;
     session.items.forEach((item) => {
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       total += cost;
       brandMap.set(item.marka || 'Diğer', (brandMap.get(item.marka || 'Diğer') || 0) + cost);
     });
@@ -290,7 +507,7 @@ export function getProductGroupBreakdown(
     session.items.forEach((item) => {
       const group = (productMap.get(item.stokKodu)?.urunGrubu || 'diger') as ProductGroupCostData['group'];
       const normalizedGroup = ['kit', 'sarf', 'yedek_parca'].includes(group) ? group : 'diger';
-      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency);
+      const cost = getProductCostInCurrency(item.stokKodu, item.stokAdedi, item.cihazUstuAdedi, productMap, rates, currency, item);
       totals.set(normalizedGroup, (totals.get(normalizedGroup) || 0) + cost);
     });
   });
@@ -334,8 +551,9 @@ export function getMonthlyTrend(
     .filter((x): x is { session: SayimSession; d: Date } => !!x.d);
 
   if (!dated.length) return [];
-  const minDate = dated[dated.length - 1].d;
-  const maxDate = dated[0].d;
+  dated.sort((a, b) => a.d.getTime() - b.d.getTime());
+  const minDate = dated[0].d;
+  const maxDate = dated[dated.length - 1].d;
   const start = startOfMonth(minDate);
   const end = endOfMonth(maxDate);
 

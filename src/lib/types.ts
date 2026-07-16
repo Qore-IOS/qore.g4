@@ -78,10 +78,7 @@ export interface Hospital {
   ceomedCariKodu?: string; // Ceomed ERP'deki cari kodu (örn. M51001) - irsaliye eşlemesi için
   mahalKodu?: string; // Hastane Sarf kategorisindeki lablar için mahal kodu (örn. 152.06.A.001) — QR teslimat doğrulamasında kullanılır
   ekHizmetLabIds?: string[]; // Bu ana laboratuvara bağlı ek hizmet laboratuvarlarının id'leri
-  /** Acil statüsü — true ise 7/24 (Pazartesi-Pazar 00:00-24:00) çalışır kabul edilir, calismaSaatleri yok sayılır. */
-  acilStatusu?: boolean;
-  /** Lab çalışma saatleri — kapasite ve atıl maliyet hesabında kullanılır. */
-  calismaSaatleri?: LabCalismaSaatleri;
+  sevkAdresi?: string; // Ceomed irsaliyesindeki sevk adresi ile eşleştirme için (ek hizmet yönlendirmesi)
   [k: string]: any;
 }
 
@@ -147,8 +144,7 @@ export interface Depot {
   // Ceomed entegrasyonu
   ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
-  ceomedCariKodu?: string; // Ceomed cari kodu (örn. M51001) — Ceomed irsaliye eşleştirmesi için
-  orderLimitEnabled?: boolean; // Manuel depo talebinde max stok üstü siparişi engeller
+  sevkiyatMalKabulden?: boolean; // true ise total verimlilik ay başı sevkiyat bu depoya bağlı lablar için mal kabul/transfer geçmişinden alınır (Ceomed sorgusundan hariç)
   [k: string]: any;
 }
 
@@ -164,6 +160,8 @@ export interface MinMaxRule {
   tuketimSuresiBirimi?: 'gun' | 'saat';
   /** Hastane Sarf labları için: transfer ekranında otomatik gelen transfer adedi */
   otomatikTransferAdedi?: number;
+  counterEnabled?: boolean;
+  counterPlusEnabled?: boolean;
 }
 
 /* ——— Sarf Dağıtım (Hastane Sarf) transfer akışı ——— */
@@ -1120,6 +1118,7 @@ export interface Asset {
   seriNumarasi?: string;
   durum?: 'iyi' | 'orta' | 'kötü' | 'çok kötü';
   konum: string;
+  bolum?: string;
   manuelKonum?: string;
   alimFiyatiTl?: number;
   satinAlmaTarihi?: string;
@@ -1183,6 +1182,24 @@ export interface TestDefinitionGlobal {
   createdByName?: string;
   updatedAt?: TimestampLike;
   companyId?: string;
+}
+
+/**
+ * Basitleştirilmiş personel gider modeli: tek bir kişi başı aylık gider (TL)
+ * ve lab başına personel sayısı. Ortak stok havuzlarında sayı yalnızca ana
+ * laba girilir; toplam gider havuz üyesi lablara test hacmine göre dağıtılır.
+ * Şirket başına tek doküman (personnelCostConfig koleksiyonu).
+ */
+export interface PersonnelCostConfig {
+  id?: string;
+  /** Personel başına aylık gider (TL) */
+  costPerPersonTL: number;
+  /** labId → personel sayısı (havuzlu lablarda yalnızca ana laba girilir) */
+  labCounts: Record<string, number>;
+  companyId?: string;
+  updatedAt?: TimestampLike;
+  updatedByUid?: string;
+  updatedByName?: string;
 }
 
 /**

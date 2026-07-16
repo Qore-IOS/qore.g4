@@ -103,7 +103,7 @@ export const PlCheck = ({ done, onClick, color, size = 26 }: { done: boolean; on
     onClick={(e) => { e.stopPropagation(); onClick(); }}
     aria-label={done ? 'Tamamlandı olarak işaretle' : 'Tamamla'}
     style={{
-      all: 'unset', cursor: 'pointer', width: size, height: size, minWidth: size, borderRadius: '50%', flexShrink: 0,
+      all: 'unset', cursor: 'pointer', width: size, height: size, minWidth: size, minHeight: size, aspectRatio: '1 / 1', borderRadius: '50%', flexShrink: 0,
       display: 'grid', placeItems: 'center', boxSizing: 'border-box',
       background: done ? (color || 'var(--water-solid)') : 'var(--surface-hi)',
       border: done ? 'none' : `2px solid ${color ? color + '88' : 'var(--ink-3)'}`,
@@ -153,7 +153,7 @@ export const PlIconBtn = ({ onClick, hot, ac, size = 46, children, ariaLabel }: 
   <button
     onClick={onClick} aria-label={ariaLabel}
     style={{
-      all: 'unset', cursor: 'pointer', width: size, height: size, borderRadius: 'var(--radius-sm)', display: 'grid', placeItems: 'center', flexShrink: 0, boxSizing: 'border-box',
+      all: 'unset', cursor: 'pointer', width: size, height: size, minWidth: size, minHeight: size, aspectRatio: '1 / 1', borderRadius: hot ? '50%' : 'var(--radius-sm)', display: 'grid', placeItems: 'center', flexShrink: 0, boxSizing: 'border-box',
       color: hot ? '#fff' : 'var(--ink-2)',
       background: hot ? `linear-gradient(180deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-hi)',
       boxShadow: hot ? `0 12px 22px -10px ${ac.glow}, inset 0 1px 0 rgba(255,255,255,0.35)` : 'var(--clay)',
@@ -248,12 +248,15 @@ body.mg-edge-body:has(.pl-root) { background: #EFEAE0 !important; }
 
 @keyframes plPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes plFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes plSlideDay { from { opacity: 0.72; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes plBob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 @keyframes plToastIn { from { opacity: 0; transform: translate(-50%, -14px) scale(0.96); } to { opacity: 1; transform: translate(-50%, 0) scale(1); } }
 @keyframes plGrowW { from { width: 0; } }
 @keyframes plGrowH { from { height: 0; } }
 @keyframes plModalPop { from { opacity: 0; transform: translateY(16px) scale(0.97); } to { opacity: 1; transform: none; } }
 @keyframes plSheetUp { from { opacity: 0; transform: translateY(100%); } to { opacity: 1; transform: none; } }
+@keyframes plSpin { to { transform: rotate(360deg); } }
+.pl-root .pl-spin, .pl-spin { animation: plSpin 0.8s linear infinite; }
 @media (prefers-reduced-motion: reduce) { .pl-root *, .pl-root *::before, .pl-root *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 `;
 

@@ -480,6 +480,161 @@
       box-shadow: var(--dashboard-pressed);
     }
 
+
+    /* ============================================================
+       Maliyet Clay Design System — cost dashboard/count/history
+       Scope: .maliyet-clay wrapper. Mirrors the cream claymorphism
+       reference used by dashboard/sipariş/direct-transfer panels.
+       ============================================================ */
+    .maliyet-clay {
+      --dashboard-bg: #EFEAE0;
+      --dashboard-surface: #FCFAF5;
+      --dashboard-surface-2: #F5F1E8;
+      --dashboard-stroke: rgba(90, 72, 40, 0.10);
+      --dashboard-text: #3D382F;
+      --dashboard-muted: #908872;
+      --dashboard-accent: #C98A57;
+      --dashboard-accent-2: #E0B776;
+      --dashboard-accent-glow: rgba(201, 138, 87, 0.24);
+      --dashboard-focus-glow: rgba(201, 138, 87, 0.28);
+      --dashboard-raised:
+        inset 0 1px 1px rgba(255,255,255,0.9),
+        inset 0 -3px 7px rgba(178,160,128,0.14),
+        0 10px 24px -12px rgba(150,128,96,0.34),
+        0 2px 6px -2px rgba(150,128,96,0.16);
+      --dashboard-raised-soft:
+        inset 0 1px 1px rgba(255,255,255,0.85),
+        0 4px 12px -7px rgba(150,128,96,0.28);
+      --dashboard-pressed:
+        inset 0 2px 5px rgba(178,160,128,0.30),
+        inset 0 -1px 0 rgba(255,255,255,0.55);
+      --radius: 24px;
+      min-height: 100dvh;
+      color: var(--dashboard-text);
+      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background:
+        radial-gradient(120% 80% at 8% -5%, #F6F2EA 0%, transparent 55%),
+        radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+        var(--dashboard-bg) !important;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    html:has(.maliyet-clay),
+    body:has(.maliyet-clay),
+    body:has(.maliyet-clay) main,
+    body:has(.maliyet-clay) .page-shell {
+      background: #EFEAE0 !important;
+    }
+
+    .maliyet-clay .cihaz-card,
+    .maliyet-clay .cihaz-card-strong,
+    .maliyet-clay .cihaz-tool-item,
+    .maliyet-clay .cihaz-action-tile {
+      border: 0 !important;
+      background: linear-gradient(180deg, #FCFAF5 0%, #F5F1E8 100%) !important;
+      box-shadow: var(--dashboard-raised) !important;
+      border-radius: 32px !important;
+    }
+
+    .maliyet-clay .cihaz-tool-item,
+    .maliyet-clay .cihaz-card {
+      border-radius: 24px !important;
+    }
+
+    .maliyet-clay .cihaz-action-tile:hover,
+    .maliyet-clay .cihaz-tool-item:hover {
+      transform: translateY(-1px);
+      box-shadow:
+        inset 0 1px 1px rgba(255,255,255,0.95),
+        inset 0 -3px 7px rgba(178,160,128,0.16),
+        0 16px 28px -14px rgba(150,128,96,0.38) !important;
+    }
+
+    .maliyet-clay .cihaz-pressed {
+      border: 0 !important;
+      background: #F5F1E8 !important;
+      box-shadow: var(--dashboard-pressed) !important;
+      border-radius: 999px !important;
+    }
+
+    .maliyet-clay input,
+    .maliyet-clay select,
+    .maliyet-clay textarea,
+    .maliyet-clay [role="combobox"] {
+      border: 0 !important;
+      background: #F5F1E8 !important;
+      box-shadow: var(--dashboard-pressed) !important;
+      color: var(--dashboard-text) !important;
+      border-radius: 16px !important;
+      font-weight: 600;
+    }
+
+    .maliyet-clay input::placeholder,
+    .maliyet-clay textarea::placeholder {
+      color: #908872 !important;
+      opacity: .85;
+    }
+
+    .maliyet-clay button {
+      transition: transform .2s cubic-bezier(.22,1,.36,1), box-shadow .2s cubic-bezier(.22,1,.36,1), opacity .2s ease;
+    }
+
+    .maliyet-clay button:focus-visible {
+      outline: 2px solid var(--dashboard-accent) !important;
+      outline-offset: 2px;
+      box-shadow: 0 0 0 3px var(--dashboard-focus-glow), var(--dashboard-raised-soft) !important;
+    }
+
+    .maliyet-clay .bg-\[var\(--dashboard-accent\)\],
+    .maliyet-clay button.bg-\[var\(--dashboard-accent\)\] {
+      background: linear-gradient(180deg, #E0B776, #C98A57) !important;
+      box-shadow: 0 12px 22px -10px var(--dashboard-accent-glow), inset 0 1px 0 rgba(255,255,255,.35) !important;
+    }
+
+    .maliyet-clay .text-\[var\(--dashboard-accent\)\] {
+      color: #C98A57 !important;
+    }
+
+    .maliyet-clay .border-\[var\(--dashboard-stroke\)\],
+    .maliyet-clay .border-b,
+    .maliyet-clay .border-t,
+    .maliyet-clay .border-r {
+      border-color: rgba(90, 72, 40, 0.10) !important;
+    }
+
+    .maliyet-clay .sticky.top-0,
+    .maliyet-clay .sticky.bottom-0,
+    .maliyet-clay .fixed.bottom-0 {
+      background: rgba(252,250,245,.92) !important;
+      box-shadow: var(--dashboard-raised-soft);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+    }
+
+    .maliyet-clay aside,
+    .maliyet-clay main > div[class*="border-b"] {
+      background: transparent !important;
+    }
+
+    .maliyet-clay h1,
+    .maliyet-clay h2 {
+      letter-spacing: -0.025em;
+    }
+
+    @media (max-width: 640px) {
+      .maliyet-clay { padding-inline: 0; }
+      .maliyet-clay .max-w-3xl,
+      .maliyet-clay .max-w-4xl,
+      .maliyet-clay .max-w-2xl { padding-inline: 16px; padding-top: 24px; }
+      .maliyet-clay .cihaz-tool-item { border-radius: 22px !important; }
+      .maliyet-clay .cihaz-card,
+      .maliyet-clay .cihaz-card-strong { border-radius: 26px !important; }
+      .maliyet-clay aside.w-\[280px\] { width: min(82vw, 300px) !important; }
+      .maliyet-clay .flex-1.flex.overflow-hidden { overflow: visible; }
+      .maliyet-clay main { min-width: 0; }
+    }
+
+
     /* ===== Section header (label + divider) ===== */
     .cihaz-section-label {
       font-size: 12px;
@@ -6614,3 +6769,50 @@ html.dark body.mg-edge-body {
 /* opacity:0 initial + delay lets amber fade before green appears */
 .led-anim-in      { opacity: 0; animation: led-appear 0.9s ease-out 0.35s forwards; }
 
+/* Mobile dock: tiny liquid-glass touch ripple for tap acknowledgement. */
+.mobile-dock-touch {
+  isolation: isolate;
+  overflow: hidden;
+  transform: translateZ(0);
+}
+
+.mobile-dock-touch::before {
+  content: "";
+  position: absolute;
+  inset: 50%;
+  z-index: -1;
+  width: 140%;
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  pointer-events: none;
+  background:
+    radial-gradient(circle, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.34) 28%, transparent 62%),
+    radial-gradient(circle, rgba(244, 150, 74, 0.24) 0%, rgba(255, 255, 255, 0.08) 42%, transparent 70%);
+  filter: blur(0.5px);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.18);
+}
+
+.mobile-dock-touch:active::before {
+  animation: mobile-dock-liquid-ripple 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.mobile-dock-touch:active {
+  box-shadow:
+    inset 0 0 18px rgba(255, 255, 255, 0.26),
+    0 0 18px rgba(255, 255, 255, 0.18);
+}
+
+@keyframes mobile-dock-liquid-ripple {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.18);
+  }
+  38% {
+    opacity: 0.72;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
