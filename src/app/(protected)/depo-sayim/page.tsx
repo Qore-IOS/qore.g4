@@ -120,8 +120,13 @@ export default function DepoSayimPage() {
     }
     setCountLoading(true);
     try {
+      const selectedDepotName = depots.find(depot => depot.id === selectedDepotId)?.name || '';
       const stockSnap = await getDocs(query(collection(db, 'depoStok'), where('depotId', '==', selectedDepotId)));
-      const stockItems = filterByCompanyScope(stockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin).filter(item => !item.isShipped);
+      const stockItems = filterByCompanyScope(stockSnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)), currentCompanyId, isSuperAdmin)
+        .filter(item => !item.isShipped)
+        .filter(item => item.depotId === selectedDepotId)
+        .filter(item => !item.depotName || !selectedDepotName || item.depotName === selectedDepotName);
+
 
       const firstLabByProduct = new Map<string, LabGroup>();
       labGroups.forEach(group => group.productCodes.forEach(code => {
@@ -163,7 +168,7 @@ export default function DepoSayimPage() {
     } finally {
       setCountLoading(false);
     }
-  }, [currentCompanyId, isSuperAdmin, labGroups, productsByCode, selectedDepotId, toast]);
+  }, [currentCompanyId, depots, isSuperAdmin, labGroups, productsByCode, selectedDepotId, toast]);
 
   const visibleLabGroups = useMemo(() => labGroups.filter(group => Array.from(group.productCodes).some(code => entries[code])), [entries, labGroups]);
 
