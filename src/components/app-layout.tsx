@@ -111,6 +111,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
+  const isMaliyetSayimRoute = pathname?.startsWith("/maliyet-sayim");
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/maliyet-sayim") ||
@@ -368,7 +369,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {!isTeknisyen && <MobileDock items={dockItems} />}
+        {!isTeknisyen && !isMaliyetSayimRoute && <MobileDock items={dockItems} />}
 
 
         <TaskPlannerPanel
