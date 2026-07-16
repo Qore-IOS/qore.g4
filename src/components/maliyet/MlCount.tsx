@@ -290,12 +290,12 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
       {/* top bar */}
       <div style={{ position: 'sticky', top: 0, zIndex: 30, background: 'linear-gradient(180deg, var(--bg-0) 78%, transparent)', padding: mobile ? '12px 14px 10px' : '16px 24px 12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 10 : 14, padding: mobile ? '12px 14px' : '14px 20px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)' }}>
-          <MlIconBtn onClick={onBack} ac={ac} size={mobile ? 40 : 44} ariaLabel="Geri"><MLIco.back s={18} /></MlIconBtn>
-          <span style={{ width: mobile ? 40 : 44, height: mobile ? 40 : 44, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${ac.accent}, ${ac.primary})`, boxShadow: `0 8px 16px -7px ${ac.glow}` }}>{kind === 'depot' ? <MLIco.building s={mobile ? 20 : 22} /> : <MLIco.flask s={mobile ? 20 : 22} />}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 14, padding: mobile ? '10px 12px' : '14px 20px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)' }}>
+          <MlIconBtn onClick={onBack} ac={ac} size={mobile ? 38 : 44} ariaLabel="Geri"><MLIco.back s={18} /></MlIconBtn>
+          <span style={{ width: mobile ? 38 : 44, height: mobile ? 38 : 44, flexShrink: 0, borderRadius: 12, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${ac.accent}, ${ac.primary})`, boxShadow: `0 8px 16px -7px ${ac.glow}` }}>{kind === 'depot' ? <MLIco.building s={mobile ? 20 : 22} /> : <MLIco.flask s={mobile ? 20 : 22} />}</span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: mobile ? 15 : 18, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--ink-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{loc.name}</div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-3)', marginTop: 1 }}>{brandsDone}/{brands.length} marka · {countedN}/{totalN} ürün</div>
+            <div style={{ fontSize: mobile ? 14.5 : 18, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--ink-1)', overflow: 'hidden', textOverflow: mobile ? 'clip' : 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap', display: mobile ? '-webkit-box' : undefined, WebkitLineClamp: mobile ? 2 : undefined, WebkitBoxOrient: mobile ? 'vertical' : undefined, lineHeight: 1.12 }}>{loc.name}</div>
+            <div style={{ fontSize: mobile ? 11 : 12, fontWeight: 600, color: 'var(--ink-3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{brandsDone}/{brands.length} marka · {countedN}/{totalN} ürün</div>
           </div>
           {!mobile && (
             <div style={{ display: 'flex', gap: 8 }}>
@@ -312,7 +312,7 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
                 <div style={{ fontSize: 18, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.02em' }}>{grandCostStr}</div>
               </div>
             )}
-            <MlRing pct={globalPct} size={mobile ? 40 : 48} thickness={mobile ? 5 : 6} />
+            <MlRing pct={globalPct} size={mobile ? 36 : 48} thickness={mobile ? 5 : 6} />
           </div>
         </div>
         {mobile && (
@@ -382,11 +382,11 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
 
       {/* bottom save bar — flush at the bottom, matching the demo */}
       <div style={{ position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 40, padding: mobile ? '10px 14px calc(10px + env(safe-area-inset-bottom))' : '12px 24px 16px', background: 'linear-gradient(0deg, var(--bg-0) 72%, transparent)' }}>
-        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12, padding: mobile ? '10px 12px' : '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 12 : 20, flex: 1, minWidth: 0, overflowX: 'auto' }}>
-            <BigStat label="Toplam Test" value={grandTests} />
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: mobile ? 8 : 12, padding: mobile ? '8px 10px' : '12px 18px', borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))', boxShadow: '0 -8px 24px -12px rgba(150,128,96,0.4), var(--clay)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 20, flex: 1, minWidth: 0, overflow: 'hidden' }}>
+            <BigStat label={mobile ? 'Toplam' : 'Toplam Test'} value={grandTests} compact={mobile} />
             {!mobile && <div style={{ width: 1, height: 40, background: 'var(--line)', flexShrink: 0 }} />}
-            <div style={{ flexShrink: 0 }}>
+            <div style={{ flexShrink: 1, minWidth: 0, display: mobile ? 'none' : 'block' }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>Toplam Maliyet</div>
               <div style={{ fontSize: mobile ? 22 : 26, fontWeight: 800, color: 'var(--accent)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{grandCostStr}</div>
             </div>
@@ -425,11 +425,11 @@ const ToolChip = ({ ico, label, onClick, live, tone, compact }: any) => {
   );
 };
 
-const BigStat = ({ label, value, suffix }: any) => (
-  <div style={{ flexShrink: 0 }}>
-    <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</div>
+const BigStat = ({ label, value, suffix, compact }: any) => (
+  <div style={{ flexShrink: 0, minWidth: compact ? 74 : undefined }}>
+    <div style={{ fontSize: compact ? 9.5 : 10.5, fontWeight: 700, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{label}</div>
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 3 }}>
-      <MlNum value={value} size={24} />
+      <MlNum value={value} size={compact ? 20 : 24} />
       {suffix && <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--ink-3)' }}>{suffix}</span>}
     </div>
   </div>
@@ -522,17 +522,17 @@ const ProductRow = ({ p, i, ac, mobile, entry, counted, onBox, onTest, onComplet
             <input ref={testRef} value={entry.cihazUstuAdedi} onChange={(e) => onTest(e.target.value)} onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); if (String(entry.stokAdedi ?? '').trim() !== '' && String(entry.cihazUstuAdedi ?? '').trim() !== '') onAutoComplete?.(entry.cihazUstuAdedi); }} onFocus={() => setFocusedField('test')} onBlur={() => setFocusedField(cur => cur === 'test' ? null : cur)} inputMode="numeric" placeholder="0"
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-2)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
-          <div style={{ gridColumn: mobile ? '1 / -1' : 'auto', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '10px 18px', borderRadius: 'var(--radius)', background: counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)', boxShadow: counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)', transition: 'all 300ms var(--ease-fluid)' }}>
+          <div style={{ gridColumn: mobile ? '1 / -1' : 'auto', display: mobile ? 'grid' : 'flex', gridTemplateColumns: mobile ? 'minmax(0,1fr) auto' : undefined, alignItems: 'center', justifyContent: 'space-between', gap: mobile ? 8 : 12, padding: mobile ? '12px 14px' : '10px 18px', borderRadius: 'var(--radius)', background: counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)', boxShadow: counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)', transition: 'all 300ms var(--ease-fluid)' }}>
             <div>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.85)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Toplam Test</div>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-                <MlNum value={total} size={mobile ? 30 : 34} color={counted ? '#fff' : 'var(--ink-1)'} />
-                {boxN > 0 && <span style={{ fontSize: 12, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.8)' : 'var(--ink-3)' }}>{boxN}×{ambalaj}{entry.cihazUstuAdedi ? `+${entry.cihazUstuAdedi}` : ''}</span>}
+                <MlNum value={total} size={mobile ? 25 : 34} color={counted ? '#fff' : 'var(--ink-1)'} />
+                {boxN > 0 && <span style={{ fontSize: mobile ? 10.5 : 12, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.8)' : 'var(--ink-3)', lineHeight: 1.15, overflowWrap: 'anywhere' }}>{boxN}×{ambalaj}{entry.cihazUstuAdedi ? `+${entry.cihazUstuAdedi}` : ''}</span>}
               </div>
             </div>
-            <div style={{ textAlign: 'right' }}>
+            <div style={{ textAlign: 'right', minWidth: mobile ? 104 : undefined }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: counted ? 'rgba(255,255,255,0.85)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Maliyet</div>
-              <div style={{ fontSize: mobile ? 20 : 23, fontWeight: 800, color: counted ? '#fff' : 'var(--accent)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{money(amount, currency)}</div>
+              <div style={{ fontSize: mobile ? 18 : 23, fontWeight: 800, color: counted ? '#fff' : 'var(--accent)', letterSpacing: '-0.02em', whiteSpace: 'nowrap' }}>{money(amount, currency)}</div>
             </div>
           </div>
         </div>
