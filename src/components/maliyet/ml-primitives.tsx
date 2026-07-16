@@ -177,7 +177,7 @@ export const MlToast = ({ toast, ac = AC }: any) => {
 
 export const MlNum = ({ value, money, size = 30, color, dur = 550 }: any) => {
   const v = useCountUp(value, dur, true);
-  return <span style={{ fontSize: size, fontWeight: 800, color: color || 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>{money ? ML_MONEY(v) : ML_NUM(v)}</span>;
+  return <span style={{ display: 'inline-block', fontSize: size, fontWeight: 800, color: color || 'var(--ink-1)', letterSpacing: '-0.02em', lineHeight: 1, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{money ? ML_MONEY(v) : ML_NUM(v)}</span>;
 };
 
 export const MlBar = ({ pct, tone, height = 8 }: any) => (
