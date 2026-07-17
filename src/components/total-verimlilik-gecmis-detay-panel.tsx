@@ -556,7 +556,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                           <div className="py-1.5 px-2">
                             <span>22. Kutu Kayıp</span>
                             <div className="text-xs font-normal text-muted-foreground">
-                              {column22Mode === 'kumulatif' ? '((14-18)-15)/Amb' : '((14-18)-19)/Amb'}
+                              {column22Mode === 'kumulatif' ? '((14-18)-15)/Amb' : '((14-18)-21)/Amb'}
                             </div>
                           </div>
                         </div>
@@ -663,7 +663,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                               {Math.abs(row.kitVerimlilikFark).toLocaleString('tr-TR')}/{row.kumulatifTotal.toLocaleString('tr-TR')} = %{Math.abs(row.kitVerimlilikYuzde).toFixed(1)}
                             </span>
                             <span className="text-[10px] text-muted-foreground">
-                              K({row.kumulatifTotal.toLocaleString('tr-TR')}) - H({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
+                              Küm({row.kumulatifTotal.toLocaleString('tr-TR')}) - Rutin({row.hakEdis.toLocaleString('tr-TR')}) = {row.kitVerimlilikFark.toLocaleString('tr-TR')}
                             </span>
                           </div>
                         </TableCell>
