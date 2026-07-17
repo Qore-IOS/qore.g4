@@ -2995,7 +2995,10 @@ export default function TotalVerimlilikPanel({
   // Scroll viewport yardımcı fonksiyon
   const getScrollViewport = useCallback(() => {
     const container = scrollContainerRef.current;
-    return container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null;
+    return (
+      (container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
+      (tableParentRef.current?.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null)
+    );
   }, []);
 
   // Yatay slider sync: viewport scroll → slider position (DOM manipulation ile - state kullanmadan)
@@ -3016,8 +3019,8 @@ export default function TotalVerimlilikPanel({
   }, [getScrollViewport, rows.length]);
 
   // Slider değişimi → viewport scroll (DOM manipulation ile)
-  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = Number(e.target.value);
+  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement> | React.FormEvent<HTMLInputElement>) => {
+    const value = Number(e.currentTarget.value);
     const scrollEl = getScrollViewport();
     if (scrollEl) {
       sliderSyncRef.current = true;
@@ -4335,6 +4338,7 @@ export default function TotalVerimlilikPanel({
                 step={0.1}
                 defaultValue={0}
                 onChange={handleSliderChange}
+                onInput={handleSliderChange}
                 aria-label="Tabloyu yatay kaydır"
                 className="table-hscroll-slider"
               />
@@ -4412,14 +4416,13 @@ export default function TotalVerimlilikPanel({
                         <React.Fragment key={group.labId}>
                           {/* Group row */}
                           <tr onClick={() => toggleLabExpand(group.labId)} className="cursor-pointer select-none">
-                            <td colSpan={1 + visibleCols.length} className="sticky top-8 left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 px-2">
-                              <div className="flex items-center gap-2">
+                            <td colSpan={1 + visibleCols.length} className="sticky top-8 left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 p-0">
+                              <div className="sticky left-0 z-30 flex items-center gap-2 h-8 px-2 bg-zinc-900 dark:bg-zinc-800 min-w-max">
                                 <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
                                 <span className="font-semibold text-[11.5px]">{group.labName}</span>
                                 {group.labKod && <span className="text-[9.5px] text-zinc-400 font-mono">({group.labKod})</span>}
                                 <span className="text-[9.5px] text-zinc-400">· {group.rows.length} ürün</span>
-                                <div className="flex-1" />
-                                <span className="text-[9.5px] text-zinc-400">Ort. Verimlilik: <strong className={`font-mono ${avgKitVerim >= 90 ? 'text-emerald-400' : avgKitVerim >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>%{avgKitVerim.toFixed(0)}</strong></span>
+                                <span className="text-[9.5px] text-zinc-400 ml-4">Ort. Verimlilik: <strong className={`font-mono ${avgKitVerim >= 90 ? 'text-emerald-400' : avgKitVerim >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>%{avgKitVerim.toFixed(0)}</strong></span>
                                 <span className="text-[9.5px] text-zinc-400">Rutin: <strong className="font-mono text-white">{fmtN(totalRutin)}</strong></span>
                               </div>
                             </td>
