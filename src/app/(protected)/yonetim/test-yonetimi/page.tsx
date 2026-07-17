@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, Trash2, Loader2, Upload, Download, Search, X, Calculator, RefreshCw, BarChart3 } from 'lucide-react';
+import { Plus, Trash2, Loader2, Upload, Download, Search, X, Calculator, RefreshCw, BarChart3, Pencil } from 'lucide-react';
 import TestCostDetailModal from '@/components/TestCostDetailModal';
 import {
   collection,
@@ -14,6 +14,7 @@ import {
   doc,
   writeBatch,
   serverTimestamp,
+  updateDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
@@ -124,6 +125,9 @@ export default function HakEdisPage() {
 
   // Cost detail modal
   const [costDetailFor, setCostDetailFor] = useState<TestDefinitionGlobal | null>(null);
+  const [editingProductsForId, setEditingProductsForId] = useState<string | null>(null);
+  const [editingLinkedStokKodlari, setEditingLinkedStokKodlari] = useState<string[]>([]);
+  const [isUpdatingProducts, setIsUpdatingProducts] = useState(false);
 
   // Döviz kurları
   const [exchangeRates, setExchangeRates] = useState<{ EUR: number; USD: number; TRY: number } | null>(null);
@@ -201,6 +205,40 @@ export default function HakEdisPage() {
 
   const removeStokKodu = (stokKodu: string) => {
     setNewLinkedStokKodlari((cur) => cur.filter((x) => x !== stokKodu));
+  };
+
+  const startEditingProducts = (definition: TestDefinitionGlobal) => {
+    setEditingProductsForId(definition.id);
+    setEditingLinkedStokKodlari([...(definition.linkedStokKodlari || [])]);
+  };
+
+  const toggleEditingStokKodu = (stokKodu: string) => {
+    setEditingLinkedStokKodlari((cur) => (cur.includes(stokKodu) ? cur.filter((x) => x !== stokKodu) : [...cur, stokKodu]));
+  };
+
+  const removeEditingStokKodu = (stokKodu: string) => {
+    setEditingLinkedStokKodlari((cur) => cur.filter((x) => x !== stokKodu));
+  };
+
+  const handleUpdateLinkedProducts = async (definition: TestDefinitionGlobal) => {
+    setIsUpdatingProducts(true);
+    try {
+      const uniqueLinkedStokKodlari = Array.from(new Set(editingLinkedStokKodlari));
+      await updateDoc(doc(db, COLLECTION, definition.id), {
+        linkedStokKodlari: uniqueLinkedStokKodlari,
+        updatedAt: serverTimestamp(),
+        updatedByUid: currentUserProfile?.uid ?? null,
+        updatedByName: currentUserProfile?.name ?? currentUserProfile?.email ?? null,
+      });
+      toast({ title: 'Başarılı', description: 'Teste bağlı ürünler güncellendi.' });
+      setEditingProductsForId(null);
+      setEditingLinkedStokKodlari([]);
+    } catch (e) {
+      console.error('linked products update error', e);
+      toast({ title: 'Hata', description: 'Teste bağlı ürünler güncellenemedi.', variant: 'destructive' });
+    } finally {
+      setIsUpdatingProducts(false);
+    }
   };
 
   // -------------------------------------------------------------------------
@@ -662,18 +700,98 @@ export default function HakEdisPage() {
                           <TableCell className="font-mono font-medium">{d.sutKodu}</TableCell>
                           <TableCell>{d.sutTestAdi}</TableCell>
                           <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {(d.linkedStokKodlari || []).length === 0 ? (
-                                <span className="text-xs text-muted-foreground">Ürün bağlantısı yok</span>
-                              ) : (d.linkedStokKodlari || []).map((k) => {
-                                const p = productMap.get(k);
-                                return (
-                                  <Badge key={k} variant="outline" className="gap-1">
-                                    <span className="text-xs">{p?.stokAdi || k}</span>
-                                    <span className="font-mono text-[10px] text-muted-foreground">{k}</span>
-                                  </Badge>
-                                );
-                              })}
+                            <div className="flex flex-col gap-2">
+                              <div className="flex flex-wrap gap-1">
+                                {(d.linkedStokKodlari || []).length === 0 ? (
+                                  <span className="text-xs text-muted-foreground">Ürün bağlantısı yok</span>
+                                ) : (d.linkedStokKodlari || []).map((k) => {
+                                  const p = productMap.get(k);
+                                  return (
+                                    <Badge key={k} variant="outline" className="gap-1">
+                                      <span className="text-xs">{p?.stokAdi || k}</span>
+                                      <span className="font-mono text-[10px] text-muted-foreground">{k}</span>
+                                    </Badge>
+                                  );
+                                })}
+                              </div>
+                              <Popover
+                                open={editingProductsForId === d.id}
+                                onOpenChange={(open) => {
+                                  if (open) {
+                                    startEditingProducts(d);
+                                  } else {
+                                    setEditingProductsForId(null);
+                                    setEditingLinkedStokKodlari([]);
+                                  }
+                                }}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button variant="outline" size="sm" className="w-fit gap-2" disabled={loading.products}>
+                                    <Pencil className="h-3.5 w-3.5" /> Ürünleri Düzenle
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-96 p-3" align="start">
+                                  <div className="space-y-3">
+                                    <div>
+                                      <div className="text-sm font-medium">Bağlı ürünleri düzenle</div>
+                                      <div className="text-xs text-muted-foreground">Ürün ekleyebilir veya mevcut ürünleri çıkarabilirsiniz.</div>
+                                    </div>
+                                    {editingLinkedStokKodlari.length > 0 && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {editingLinkedStokKodlari.map((k) => (
+                                          <Badge key={k} variant="secondary" className="gap-1">
+                                            <span className="text-xs">{productMap.get(k)?.stokAdi || k}</span>
+                                            <span className="font-mono text-[10px] text-muted-foreground">{k}</span>
+                                            <button
+                                              type="button"
+                                              onClick={() => removeEditingStokKodu(k)}
+                                              className="hover:text-destructive"
+                                              aria-label={`${k} kaldır`}
+                                            >
+                                              <X className="h-3 w-3" />
+                                            </button>
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <Command>
+                                      <CommandInput placeholder="Ürün adı veya kodu ara..." />
+                                      <CommandList className="max-h-64">
+                                        <CommandEmpty>Ürün bulunamadı.</CommandEmpty>
+                                        <CommandGroup>
+                                          {productCodes.map((p) => {
+                                            const checked = editingLinkedStokKodlari.includes(p.stokKodu);
+                                            return (
+                                              <CommandItem
+                                                key={p.id}
+                                                value={`${p.stokAdi} ${p.stokKodu} ${p.testAdi || ''}`}
+                                                onSelect={() => toggleEditingStokKodu(p.stokKodu)}
+                                              >
+                                                <Check className={cn('mr-2 h-4 w-4', checked ? 'opacity-100' : 'opacity-0')} />
+                                                <div className="flex flex-col">
+                                                  <span>{p.stokAdi}</span>
+                                                  <span className="text-xs text-muted-foreground">
+                                                    {p.stokKodu} {p.testAdi && `• ${p.testAdi}`}
+                                                  </span>
+                                                </div>
+                                              </CommandItem>
+                                            );
+                                          })}
+                                        </CommandGroup>
+                                      </CommandList>
+                                    </Command>
+                                    <div className="flex justify-end gap-2">
+                                      <Button variant="outline" size="sm" onClick={() => setEditingProductsForId(null)} disabled={isUpdatingProducts}>
+                                        Vazgeç
+                                      </Button>
+                                      <Button size="sm" onClick={() => handleUpdateLinkedProducts(d)} disabled={isUpdatingProducts}>
+                                        {isUpdatingProducts && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                                        Kaydet
+                                      </Button>
+                                    </div>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             </div>
                           </TableCell>
                           <TableCell className="text-right font-semibold">

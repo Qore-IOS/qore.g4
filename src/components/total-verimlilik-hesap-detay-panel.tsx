@@ -189,7 +189,7 @@ export default function TotalVerimlilikHesapDetayPanel({ recordId, labId }: Prop
               ) : (
                 <>
                   <div className="text-lg font-bold text-muted-foreground">Dahil değil</div>
-                  <div className="text-xs text-muted-foreground">19. Hak Ediş girilmedi</div>
+                  <div className="text-xs text-muted-foreground">21. Rutin girilmedi</div>
                 </>
               )}
             </div>
@@ -221,7 +221,7 @@ export default function TotalVerimlilikHesapDetayPanel({ recordId, labId }: Prop
                   <TableHead>Test</TableHead>
                   <TableHead className="text-right">14-18</TableHead>
                   <TableHead className="text-right">15. Kümülatif</TableHead>
-                  <TableHead className="text-right">19. Hak Ediş</TableHead>
+                  <TableHead className="text-right">21. Rutin</TableHead>
                   <TableHead className="text-right">Stok Fark</TableHead>
                   <TableHead className="text-right">Stok Skoru</TableHead>
                   <TableHead className="text-right">Kit Fark</TableHead>
