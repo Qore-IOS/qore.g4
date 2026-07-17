@@ -39,6 +39,8 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
   const [scannerActive, setScannerActive] = React.useState(true);
   const [voiceActive, setVoiceActive] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
+  const [completingRows, setCompletingRows] = React.useState<Set<string>>(() => new Set());
+  const [focusTarget, setFocusTarget] = React.useState<string | null>(null);
   const recognitionRef = React.useRef<any>(null);
   const activeLabRef = React.useRef<string | null>(activeLabId);
   React.useEffect(() => { activeLabRef.current = activeLabId; }, [activeLabId]);
@@ -67,6 +69,17 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
       return { ...prev, [code]: { ...base, scannedSerials: next, touched: true } };
     });
   };
+  /* Enter-to-advance: slide the row out (green), then complete it and focus the next row's input */
+  const autoCompleteRow = (p: ProductGroup, next?: ProductGroup) => {
+    const s = states[p.stokKodu];
+    if (String(s?.countedAdet ?? '').trim() === '') return;
+    setCompletingRows(prev => new Set(prev).add(p.stokKodu));
+    window.setTimeout(() => {
+      setStates(prev => { const base = ensure(p.stokKodu, prev); return { ...prev, [p.stokKodu]: { ...base, counted: true, touched: true } }; });
+      setCompletingRows(prev => { const n = new Set(prev); n.delete(p.stokKodu); return n; });
+      if (next) setFocusTarget(next.stokKodu);
+    }, 280);
+  };
   const completeLab = () => {
     const lg = groups.find(g => g.labId === activeLabId);
     if (!lg) return;
@@ -74,8 +87,8 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
       const next = { ...prev };
       lg.products.forEach(p => {
         const base = ensure(p.stokKodu, next);
-        if (p.serial) next[p.stokKodu] = { ...base, scannedSerials: new Set(p.serials), touched: true };
-        else next[p.stokKodu] = { ...base, countedAdet: base.countedAdet === '' ? String(p.currentQty) : base.countedAdet, touched: true };
+        if (p.serial) next[p.stokKodu] = { ...base, scannedSerials: new Set(p.serials), counted: true, touched: true };
+        else next[p.stokKodu] = { ...base, countedAdet: base.countedAdet === '' ? String(p.currentQty) : base.countedAdet, counted: true, touched: true };
       });
       return next;
     });
@@ -119,14 +132,14 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
         const base = ensure(found.stokKodu, prev);
         if (base.scannedSerials.has(serial)) return prev;
         const next = new Set(base.scannedSerials); next.add(serial);
-        return { ...prev, [found.stokKodu]: { ...base, scannedSerials: next, touched: true } };
+        return { ...prev, [found.stokKodu]: { ...base, scannedSerials: next, counted: true, touched: true } };
       });
       playFeedback(); fire({ tone: 'ok', title: `${found.stokAdi}`, sub: `Seri: ${serial}` });
     } else {
       setStates(prev => {
         const base = ensure(found.stokKodu, prev);
         const cur = parseInt(base.countedAdet || '0', 10) || 0;
-        return { ...prev, [found.stokKodu]: { ...base, countedAdet: String(cur + 1), touched: true } };
+        return { ...prev, [found.stokKodu]: { ...base, countedAdet: String(cur + 1), counted: true, touched: true } };
       });
       playFeedback(); fire({ tone: 'ok', title: `${found.stokAdi} +1` });
     }
@@ -147,7 +160,7 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
         commands.forEach(cmd => {
           const g = groupByCode.get(cmd.stokKodu); if (!g) return;
           const base = next[cmd.stokKodu] || emptyCount();
-          if (cmd.stokAdedi != null) next[cmd.stokKodu] = { ...base, countedAdet: String(cmd.stokAdedi), touched: true };
+          if (cmd.stokAdedi != null) next[cmd.stokKodu] = { ...base, countedAdet: String(cmd.stokAdedi), counted: true, touched: true };
         });
         return next;
       });
@@ -192,7 +205,7 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
           const val = r['Sayılan'] ?? r['sayilan'] ?? r['Sayilan'];
           if (!code || val === '' || val == null) return;
           if (!groupByCode.has(code)) return;
-          next[code] = { ...(next[code] || emptyCount()), countedAdet: String(parseInt(val, 10) || 0), touched: true };
+          next[code] = { ...(next[code] || emptyCount()), countedAdet: String(parseInt(val, 10) || 0), counted: true, touched: true };
           n++;
         });
         return next;
@@ -297,12 +310,17 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {shown.map((p, i) => (
-              <ProductRow key={p.stokKodu} p={p} i={i} ac={ac} mobile={mobile} state={states[p.stokKodu]}
-                expanded={expanded.has(p.stokKodu)} onToggleExpand={() => setExpanded(prev => { const n = new Set(prev); n.has(p.stokKodu) ? n.delete(p.stokKodu) : n.add(p.stokKodu); return n; })}
-                onManual={(v) => setManual(p.stokKodu, v)} onToggleSerial={(s) => toggleSerial(p.stokKodu, s)}
-                onComplete={() => setStates(prev => { const base = ensure(p.stokKodu, prev); return { ...prev, [p.stokKodu]: p.serial ? { ...base, scannedSerials: new Set(p.serials), touched: true } : { ...base, countedAdet: base.countedAdet === '' ? String(p.currentQty) : base.countedAdet, touched: true } }; })} />
-            ))}
+            {shown.map((p, i) => {
+              const nextProduct = shown.find(c => c.stokKodu !== p.stokKodu && !isCountedRow(c, states[c.stokKodu]));
+              return (
+                <ProductRow key={p.stokKodu} p={p} i={i} ac={ac} mobile={mobile} state={states[p.stokKodu]}
+                  completing={completingRows.has(p.stokKodu)} focusActive={focusTarget === p.stokKodu}
+                  expanded={expanded.has(p.stokKodu)} onToggleExpand={() => setExpanded(prev => { const n = new Set(prev); n.has(p.stokKodu) ? n.delete(p.stokKodu) : n.add(p.stokKodu); return n; })}
+                  onManual={(v) => setManual(p.stokKodu, v)} onToggleSerial={(s) => toggleSerial(p.stokKodu, s)}
+                  onEnter={() => autoCompleteRow(p, nextProduct)}
+                  onComplete={() => setStates(prev => { const base = ensure(p.stokKodu, prev); return { ...prev, [p.stokKodu]: p.serial ? { ...base, scannedSerials: new Set(p.serials), counted: true, touched: true } : { ...base, countedAdet: base.countedAdet === '' ? String(p.currentQty) : base.countedAdet, counted: true, touched: true } }; })} />
+              );
+            })}
             {shown.length === 0 && <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontWeight: 600, borderRadius: 'var(--radius)', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)' }}>{onlyEmpty ? 'Bu grupta sayılmayan ürün kalmadı 🎉' : 'Ürün bulunamadı'}</div>}
           </div>
         </div>
@@ -387,16 +405,21 @@ const LabRail = ({ groups, active, setActive, ac, labStat, bare }: any) => {
   );
 };
 
-const ProductRow = ({ p, i, ac, mobile, state, expanded, onToggleExpand, onManual, onToggleSerial, onComplete }: any) => {
+const ProductRow = ({ p, i, ac, mobile, state, expanded, onToggleExpand, onManual, onToggleSerial, onComplete, completing, focusActive, onEnter }: any) => {
   const [focB, setFocB] = React.useState(false);
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
   const counted = countedOf(p, state);
   const isC = isCountedRow(p, state);
   const diff = counted - p.currentQty;
   const grup = urunGrubuLabel(p.urunGrubu);
   const scanned: Set<string> = state?.scannedSerials || new Set();
 
+  React.useEffect(() => {
+    if (focusActive) { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); }
+  }, [focusActive]);
+
   return (
-    <div style={{ position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', background: isC ? 'linear-gradient(180deg, rgba(111,181,133,0.08), rgba(111,181,133,0.03))' : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: isC ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)', transition: 'box-shadow 300ms var(--ease-fluid), background 300ms', animation: `mlPopIn ${200 + Math.min(i, 10) * 45}ms var(--ease-fluid)` }}>
+    <div style={{ position: 'relative', borderRadius: 'var(--radius-lg)', overflow: 'hidden', transform: completing ? 'translateX(115%) scale(0.98)' : 'translateX(0) scale(1)', opacity: completing ? 0 : 1, willChange: completing ? 'transform, opacity' : undefined, background: completing ? 'linear-gradient(180deg, rgba(111,181,133,0.18), rgba(111,181,133,0.08))' : isC ? 'linear-gradient(180deg, rgba(111,181,133,0.08), rgba(111,181,133,0.03))' : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: isC ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)', transition: 'transform 280ms var(--ease-fluid), opacity 220ms ease, box-shadow 300ms var(--ease-fluid), background 300ms', animation: `mlPopIn ${200 + Math.min(i, 10) * 45}ms var(--ease-fluid)` }}>
       <div style={{ padding: mobile ? 15 : 18 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -417,9 +440,9 @@ const ProductRow = ({ p, i, ac, mobile, state, expanded, onToggleExpand, onManua
             <div style={{ fontSize: 26, fontWeight: 800, color: 'var(--ink-2)', marginTop: 2, letterSpacing: '-0.01em' }}>{p.currentQty}</div>
           </div>
           {/* sayılan (input) */}
-          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focB ? `inset 0 0 0 2px ${ac.primary}` : 'var(--clay-inset)', transition: 'box-shadow 200ms' }}>
+          <div style={{ padding: '10px 14px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: focB ? `var(--clay-inset), 0 0 0 2px ${ac.primary}, 0 0 0 8px rgba(111,181,133,0.16), 0 0 30px rgba(111,181,133,0.42)` : 'var(--clay-inset)', transition: 'box-shadow 220ms var(--ease-fluid)', animation: focB ? 'mlLivePulse 1.35s ease-in-out infinite' : undefined }}>
             <label style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Sayılan</label>
-            <input value={p.serial && scanned.size > 0 ? String(scanned.size) : (state?.countedAdet ?? '')} onChange={(e) => onManual(e.target.value)} onFocus={() => setFocB(true)} onBlur={() => setFocB(false)} inputMode="numeric" placeholder="0"
+            <input ref={inputRef} value={p.serial && scanned.size > 0 ? String(scanned.size) : (state?.countedAdet ?? '')} onChange={(e) => onManual(e.target.value)} onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); if (String(state?.countedAdet ?? '').trim() !== '') onEnter?.(); }} onFocus={() => setFocB(true)} onBlur={() => setFocB(false)} inputMode="numeric" placeholder="0"
               readOnly={p.serial && scanned.size > 0}
               style={{ width: '100%', boxSizing: 'border-box', border: 'none', background: 'transparent', outline: 'none', fontSize: 26, fontWeight: 800, color: 'var(--ink-1)', fontFamily: 'inherit', marginTop: 2, letterSpacing: '-0.01em' }} />
           </div>
