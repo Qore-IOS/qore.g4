@@ -47,9 +47,10 @@ export interface LabGroup { labId: string; labName: string; products: ProductGro
 export interface CountState {
   countedAdet: string;             // manual number (string to allow empty)
   scannedSerials: Set<string>;     // scanned serial numbers (serial products)
-  touched: boolean;                // user interacted → include in save
+  counted: boolean;                // explicit completion (green + saved) — like maliyet
+  touched: boolean;                // user typed something (value present)
 }
-export const emptyCount = (): CountState => ({ countedAdet: '', scannedSerials: new Set(), touched: false });
+export const emptyCount = (): CountState => ({ countedAdet: '', scannedSerials: new Set(), counted: false, touched: false });
 
 /* invert Record<hospitalId, MinMaxRule[]> → Map<stokKodu, hospitalId[]> */
 export function buildStokToHospitals(allRules: Record<string, { stokKodu: string }[]>): Map<string, string[]> {
@@ -141,7 +142,7 @@ export function countedOf(g: ProductGroup, s?: CountState): number {
 }
 export function isCountedRow(g: ProductGroup, s?: CountState): boolean {
   if (!s) return false;
-  return s.touched || (g.serial && s.scannedSerials.size > 0) || s.countedAdet !== '';
+  return s.counted || (g.serial && s.scannedSerials.size > 0);
 }
 
 export interface SaveSummary { deleted: number; created: number; sessions: number; skippedSerial: number; touched: number; }
