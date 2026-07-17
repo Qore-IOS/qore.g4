@@ -730,16 +730,16 @@ export function calculateStokDogrulukFark(
 }
 
 /**
- * Calculates kit efficiency difference (Column 21)
+ * Calculates kit efficiency difference (Column 24)
  * @param kumulatifTotal - Cumulative total
- * @param hakEdis - Earned amount
+ * @param hakEdis - Routine test count (column 21)
  * @returns Kit efficiency difference
  */
 export function calculateKitVerimlilikFark(
   kumulatifTotal: number,
   hakEdis: number
 ): number {
-  return kumulatifTotal - hakEdis;
+  return kumulatifTotal - hakEdis; // Kümülatif (15) - Rutin (21)
 }
 
 /**
