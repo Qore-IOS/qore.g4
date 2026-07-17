@@ -184,7 +184,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
       'Dönem Sonu Stok (Kutu)': r.donemSonuStokKutu,
       'Dönem Sonu Cihaz Üstü (Test)': r.donemSonuCihazUstuTest,
       'Dönem Sonu Toplam Test': r.donemSonuToplamTest,
-      'Hak Ediş (Test)': r.hakEdis,
+      'Rutin (Test)': r.hakEdis,
       'Stok Doğruluk Fark (Test)': r.stokDogrulukFark,
       'Stok Doğruluk Sapma (%)': Number(r.stokDogrulukYuzde.toFixed(2)),
       'Kit Verimlilik Fark (Test)': r.kitVerimlilikFark,
@@ -514,7 +514,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                         18. Dönem Sonu Toplam Test
                       </TableHead>
                       <TableHead className="min-w-[140px] bg-yellow-50 dark:bg-yellow-950">
-                        19. Hak Ediş (Test)
+                        21. Rutin (Test)
                       </TableHead>
                       <TableHead className="min-w-[200px] bg-red-50 dark:bg-red-950 text-center">
                         <div className="flex flex-col">
@@ -550,7 +550,7 @@ export default function TotalVerimlilikGecmisDetayPanel({ recordId }: Props) {
                                   : 'bg-violet-100 dark:bg-violet-900 text-violet-700 dark:text-violet-300 hover:bg-violet-200 dark:hover:bg-violet-800'
                               }`}
                             >
-                              Hak Edişe Göre
+                              Rutine Göre
                             </button>
                           </div>
                           <div className="py-1.5 px-2">
