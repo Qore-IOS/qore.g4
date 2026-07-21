@@ -15,18 +15,29 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deliverShortcutResult = exports.buildShortcutDeliverySummary = void 0;
+exports.buildShortcutDeliverySummary = buildShortcutDeliverySummary;
+exports.deliverShortcutResult = deliverShortcutResult;
 const admin = __importStar(require("firebase-admin"));
 const functions = __importStar(require("firebase-functions"));
 const firestore_1 = require("firebase-admin/firestore");
@@ -41,24 +52,42 @@ function normalizeChannels(value) {
     const raw = Array.isArray(value) ? value : [];
     const channels = raw
         .map((channel) => String(channel).trim())
+        .map((channel) => channel === 'app' ? 'inApp' : channel)
         .filter((channel) => CHANNELS.has(channel));
     return Array.from(new Set(channels.length ? channels : ['inApp']));
 }
 function stringArray(value) {
     return Array.isArray(value) ? value.map((item) => String(item).trim()).filter(Boolean) : [];
 }
-function recipientList(shortcut) {
+function normalizePhoneForWhatsApp(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits)
+        return null;
+    const withCountryCode = digits.length === 10 ? `90${digits}` : digits.startsWith('0') && digits.length === 11 ? `9${digits}` : digits;
+    return withCountryCode.length >= 11 ? `${withCountryCode}@c.us` : null;
+}
+async function recipientList(shortcut) {
     var _a;
-    return Array.from(new Set([
+    const recipients = [
         ...stringArray(shortcut.recipients),
         ...stringArray((_a = shortcut.params) === null || _a === void 0 ? void 0 : _a.alicilar),
-    ]));
-}
-function emailRecipients(recipients) {
-    return recipients.filter((recipient) => recipient.includes('@'));
+    ];
+    if (shortcut.createdByUid) {
+        const userSnap = await db.collection('users').doc(shortcut.createdByUid).get();
+        const user = userSnap.exists ? userSnap.data() || {} : {};
+        if (typeof user.email === 'string' && user.email.trim())
+            recipients.push(user.email.trim());
+        const whatsappRecipient = normalizePhoneForWhatsApp(user.phoneNumber);
+        if (whatsappRecipient)
+            recipients.push(whatsappRecipient);
+    }
+    return Array.from(new Set(recipients));
 }
 function whatsappRecipients(recipients) {
-    return recipients.filter((recipient) => recipient.endsWith('@c.us') || recipient.endsWith('@g.us'));
+    return recipients.filter((recipient) => recipient.endsWith('@c.us'));
+}
+function emailRecipients(recipients) {
+    return recipients.filter((recipient) => recipient.includes('@') && !whatsappRecipients([recipient]).length);
 }
 function textValue(value) {
     if (value === null || value === undefined)
@@ -83,7 +112,6 @@ function buildShortcutDeliverySummary(result, shortcut) {
         parts.push(`Aksiyon: ${shortcut.actionKey}.`);
     return parts.join('\n');
 }
-exports.buildShortcutDeliverySummary = buildShortcutDeliverySummary;
 function buildPdf(result, summary, runId) {
     const doc = new jspdf_1.jsPDF({ unit: 'pt', format: 'a4' });
     doc.setFontSize(16);
@@ -206,7 +234,7 @@ async function sendInApp(shortcut, runId, summary, result) {
         type: 'custom',
         title: 'Shortcut raporu hazır',
         message: summary,
-        href: result.deepLink || `/shortcut-runs/${runId}`,
+        href: `/raporlama/olusturulan-raporlar?runId=${runId}`,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
         targets,
         actor: { uid: shortcut.createdByUid || 'system', name: shortcut.createdByName || 'QORE System' },
@@ -243,10 +271,8 @@ async function sendWhatsapp(recipients, summary, attachments) {
         return { channel: 'whatsapp', status: 'skipped', message: 'WhatsApp yapılandırması eksik.' };
     }
     const to = whatsappRecipients(recipients);
-    if (!to.length && waConfig.group_id)
-        to.push(waConfig.group_id);
     if (!to.length)
-        return { channel: 'whatsapp', status: 'skipped', message: 'WhatsApp alıcısı bulunamadı.' };
+        return { channel: 'whatsapp', status: 'skipped', message: 'Raporu oluşturan kullanıcı için WhatsApp telefon alıcısı bulunamadı.' };
     const pdf = attachments.find((attachment) => attachment.contentType === 'application/pdf');
     const results = [];
     for (const recipient of to) {
@@ -265,7 +291,7 @@ async function sendWhatsapp(recipients, summary, attachments) {
 }
 async function deliverShortcutResult(args) {
     const channels = normalizeChannels(args.shortcut.deliveryChannels);
-    const recipients = recipientList(args.shortcut);
+    const recipients = await recipientList(args.shortcut);
     const summary = buildShortcutDeliverySummary(args.result, args.shortcut);
     await logDelivery(args.runRef, { channel: 'inApp', status: 'sent', message: 'Kısa özet üretildi.', meta: { summary } });
     const attachments = await ensureGeneratedAttachments({
@@ -300,5 +326,4 @@ async function deliverShortcutResult(args) {
     }
     return { summary, attachments, attempts };
 }
-exports.deliverShortcutResult = deliverShortcutResult;
 //# sourceMappingURL=delivery.js.map

@@ -16,15 +16,25 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.onShortcutRunRequestCreated = exports.shortcutScheduler = exports.onBankTransactionWritten = exports.backfillCompanyStats = exports.dailyStatsRollover = exports.onFaultWritten = exports.onShipmentWritten = exports.onTuketimWritten = exports.onDepoStokWritten = exports.onUserClaimSync = exports.onDepoStokAccepted = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
+exports.cleanupExpiredIrsaliyeDosyalari = exports.maintenanceUpcomingReminder = exports.faultInterventionReminder = exports.onNotificationCreated = exports.recomputeCostSnapshot = exports.dailyCostSnapshot = exports.onShortcutRunRequestCreated = exports.shortcutScheduler = exports.onBankTransactionWritten = exports.backfillCompanyStats = exports.dailyStatsRollover = exports.onFaultWritten = exports.onShipmentWritten = exports.onTuketimWritten = exports.onDepoStokWritten = exports.onUserClaimSync = exports.onDepoStokAccepted = exports.onPeripheralOrderCreatedSendWhatsApp = exports.onPeripheralOrderCreatedSendMail = exports.onDeviceFaultReportResolved = exports.onAplikasyonFormCreated = exports.onTeknikServisFormCreated = exports.nfcLoginWithSerial = exports.mirrorPresenceToFirestore = exports.createCustomTokenForNfcUser = exports.revokeUserSessions = void 0;
 const admin = __importStar(require("firebase-admin"));
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firebase_functions_1 = require("firebase-functions");
@@ -65,6 +75,9 @@ Object.defineProperty(exports, "onBankTransactionWritten", { enumerable: true, g
 var shortcutScheduler_1 = require("./shortcutScheduler");
 Object.defineProperty(exports, "shortcutScheduler", { enumerable: true, get: function () { return shortcutScheduler_1.shortcutScheduler; } });
 Object.defineProperty(exports, "onShortcutRunRequestCreated", { enumerable: true, get: function () { return shortcutScheduler_1.onShortcutRunRequestCreated; } });
+var costSnapshot_1 = require("./costSnapshot");
+Object.defineProperty(exports, "dailyCostSnapshot", { enumerable: true, get: function () { return costSnapshot_1.dailyCostSnapshot; } });
+Object.defineProperty(exports, "recomputeCostSnapshot", { enumerable: true, get: function () { return costSnapshot_1.recomputeCostSnapshot; } });
 function chunk(arr, size = 500) {
     const out = [];
     for (let i = 0; i < arr.length; i += size)
