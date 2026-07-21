@@ -90,10 +90,6 @@ function emailRecipients(recipients: string[]): string[] {
   return recipients.filter((recipient) => recipient.includes('@') && !whatsappRecipients([recipient]).length);
 }
 
-function emailRecipients(recipients: string[]): string[] {
-  return recipients.filter((recipient) => recipient.includes('@') && !whatsappRecipients([recipient]).length);
-}
-
 function textValue(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (value instanceof Date) return value.toISOString();
