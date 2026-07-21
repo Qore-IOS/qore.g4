@@ -6,7 +6,7 @@ import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search, Loader2, Download, Warehouse, FlaskConical } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search, Loader2, Download, Warehouse, FlaskConical, FileText } from 'lucide-react';
 import {
   HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart, Ring,
   Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar, DeltaBadge,
@@ -298,6 +298,34 @@ export default function DashboardV2({
     const dateTag = costMeta?.forDate || format(new Date(), 'yyyy-MM-dd');
     XLSX.writeFile(wb, `anlik-maliyet-${dateTag}.xlsx`);
   }, [costByDepot, costByLab, costMeta]);
+
+  // Anlık maliyet PDF raporu (10 sayfalık, demodaki şablon) — karttan indirilir
+  const [isReportBusy, setIsReportBusy] = useState(false);
+  const exportCostReportPdf = useCallback(async () => {
+    setIsReportBusy(true);
+    try {
+      const snapshotLike = {
+        schemaVersion: 2, source: (costMeta?.source as any) || 'manual',
+        computedAt: costMeta?.computedAt || new Date().toISOString(),
+        forDate: costMeta?.forDate || format(new Date(), 'yyyy-MM-dd'),
+        rates: { EUR: 1, USD: 1, TRY: 1 }, pools: { EUR: 0, USD: 0, TRY: 0 },
+        riskyTRY: riskyCost || 0, itemCount: 0,
+        totalTRY: totalStockCost || 0,
+        byDepot: costByDepot, byLab: costByLab,
+      } as StockCostSnapshot;
+      const [{ buildCostReportModel }, { generateCostReportPdf }] = await Promise.all([
+        import('@/lib/cost-report'),
+        import('@/lib/cost-report-pdf'),
+      ]);
+      const model = buildCostReportModel(snapshotLike);
+      const doc = await generateCostReportPdf(model);
+      doc.save(`maliyet-raporu-${(costMeta?.forDate || format(new Date(), 'yyyy-MM-dd'))}.pdf`);
+    } catch (e) {
+      console.error('[Dashboard] cost report pdf failed:', e);
+    } finally {
+      setIsReportBusy(false);
+    }
+  }, [costByDepot, costByLab, totalStockCost, riskyCost, costMeta]);
 
   // Snapshot dokümanını dinle; yoksa bir kez istemci fallback ile hesapla.
   const costFallbackTriggered = useRef(false);
@@ -919,9 +947,14 @@ export default function DashboardV2({
                 <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: 'rgba(111,181,133,0.14)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Banknote size={20} /></span>
                 Anlık Maliyet Detayı
               </DialogTitle>
-              <button onClick={exportCostExcel} style={{ all: 'unset', marginLeft: 'auto', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.waterSolid}, ${HOME_C.waterDeep})`, boxShadow: `0 8px 16px -8px rgba(111,181,133,0.7)` }}>
-                <Download size={16} /> Excel
-              </button>
+              <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 10 }}>
+                <button onClick={exportCostReportPdf} disabled={isReportBusy} style={{ all: 'unset', cursor: isReportBusy ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: 'linear-gradient(180deg, #8B7CF0, #6C5CE7)', boxShadow: '0 8px 16px -8px rgba(108,92,231,0.7)', opacity: isReportBusy ? 0.7 : 1 }}>
+                  {isReportBusy ? <Loader2 size={16} style={{ animation: 'mkSpin 0.8s linear infinite' }} /> : <FileText size={16} />} PDF Rapor
+                </button>
+                <button onClick={exportCostExcel} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.waterSolid}, ${HOME_C.waterDeep})`, boxShadow: `0 8px 16px -8px rgba(111,181,133,0.7)` }}>
+                  <Download size={16} /> Excel
+                </button>
+              </div>
             </div>
             <DialogDescription style={{ fontSize: 13.5, color: HOME_C.ink2, fontWeight: 500, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <span>Depo ve laboratuvar bazında kırılım.</span>
