@@ -2992,12 +2992,17 @@ export default function TotalVerimlilikPanel({
     setTestsSentToCenter({});
   }, []);
 
-  // Scroll viewport yardımcı fonksiyon
+  // Scroll viewport yardımcı fonksiyon.
+  // Bu projedeki ScrollArea, Radix değil; kök öğenin kendisi (overflow-auto) kaydırılır.
+  // Radix viewport'u varsa onu, yoksa container'ın kendisini döndür.
   const getScrollViewport = useCallback(() => {
     const container = scrollContainerRef.current;
+    if (!container) return null;
+    // Radix viewport varsa onu, yoksa (bu projedeki custom ScrollArea) container'ın kendisini döndür.
     return (
-      (container?.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
-      (tableParentRef.current?.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null)
+      (container.querySelector('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
+      (tableParentRef.current?.closest('[data-radix-scroll-area-viewport]') as HTMLElement | null) ||
+      container
     );
   }, []);
 
@@ -3394,16 +3399,19 @@ export default function TotalVerimlilikPanel({
   const footerAgg = useMemo(() => {
     const nums = (colId: string) => flatVisibleRows.map(r => Number(resolveFilterValue(r, colId))).filter(v => Number.isFinite(v));
     const sum = (list: number[]) => list.reduce((s, n) => s + n, 0);
-    const avg = (list: number[]) => list.length > 0 ? sum(list) / list.length : 0;
     const hakList = nums('hakEdis');
-    const kitPerfList = flatVisibleRows.map(r => Math.max(0, Math.min(100, 100 - Math.abs(r.kitVerimlilikYuzde))));
     const costList = nums('sarfiyatMaliyeti');
+    // Verimlilik = stok doğruluk kaybı / test hacmi (kümülatif). Per-satır skor + hacim ağırlıklı ortalama.
+    const perfList = flatVisibleRows.map(r => { const vol = Math.max(0, r.kumulatifTotal || 0); return vol > 0 ? Math.max(0, Math.min(100, 100 - (Math.abs(r.stokDogrulukFark) / vol) * 100)) : 100; });
+    const totalFark = sum(flatVisibleRows.map(r => Math.abs(r.stokDogrulukFark)));
+    const totalVol = sum(flatVisibleRows.map(r => Math.max(0, r.kumulatifTotal || 0)));
+    const verimAvg = totalVol > 0 ? Math.max(0, Math.min(100, 100 - (totalFark / totalVol) * 100)) : 100;
     return {
       hakSum: sum(hakList),
-      kitAvg: avg(kitPerfList),
+      kitAvg: verimAvg,
       costSum: sum(costList),
-      minKit: kitPerfList.length ? Math.min(...kitPerfList) : 0,
-      maxKit: kitPerfList.length ? Math.max(...kitPerfList) : 0,
+      minKit: perfList.length ? Math.min(...perfList) : 0,
+      maxKit: perfList.length ? Math.max(...perfList) : 0,
     };
   }, [flatVisibleRows, resolveFilterValue]);
   const pivotData = useMemo(() => {
@@ -4410,20 +4418,30 @@ export default function TotalVerimlilikPanel({
                   <tbody>
                     {groupedRows.map(group => {
                       const isOpen = expandedLabs.has(group.labId);
-                      const avgKitVerim = group.rows.length > 0 ? Math.max(0, Math.min(100, 100 - (group.rows.reduce((s, r) => s + Math.abs(r.kitVerimlilikYuzde), 0) / group.rows.length))) : 0;
+                      // Ort. Verimlilik = stok doğruluk kaybı / test hacmi (kümülatif) → hacim ağırlıklı verimlilik
+                      const grpFark = group.rows.reduce((s, r) => s + Math.abs(r.stokDogrulukFark), 0);
+                      const grpVol = group.rows.reduce((s, r) => s + Math.max(0, r.kumulatifTotal || 0), 0);
+                      const avgVerim = grpVol > 0 ? Math.max(0, Math.min(100, 100 - (grpFark / grpVol) * 100)) : 100;
                       const totalRutin = group.rows.reduce((s, r) => s + r.hakEdis, 0);
                       return (
                         <React.Fragment key={group.labId}>
                           {/* Group row */}
                           <tr onClick={() => toggleLabExpand(group.labId)} className="cursor-pointer select-none">
-                            <td colSpan={1 + visibleCols.length} className="sticky top-8 left-0 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 p-0">
-                              <div className="sticky left-0 z-30 flex items-center gap-2 h-8 px-2 bg-zinc-900 dark:bg-zinc-800 min-w-max">
-                                <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
-                                <span className="font-semibold text-[11.5px]">{group.labName}</span>
-                                {group.labKod && <span className="text-[9.5px] text-zinc-400 font-mono">({group.labKod})</span>}
-                                <span className="text-[9.5px] text-zinc-400">· {group.rows.length} ürün</span>
-                                <span className="text-[9.5px] text-zinc-400 ml-4">Ort. Verimlilik: <strong className={`font-mono ${avgKitVerim >= 90 ? 'text-emerald-400' : avgKitVerim >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>%{avgKitVerim.toFixed(0)}</strong></span>
-                                <span className="text-[9.5px] text-zinc-400">Rutin: <strong className="font-mono text-white">{fmtN(totalRutin)}</strong></span>
+                            <td colSpan={1 + visibleCols.length} className="sticky top-8 z-20 bg-zinc-900 dark:bg-zinc-800 text-white border-b border-zinc-950 h-8 px-2">
+                              <div className="flex items-center gap-2">
+                                {/* lab adı yatay kaydırmada solda sabit kalır */}
+                                <div className="sticky left-2 z-10 flex items-center gap-2 bg-zinc-900 dark:bg-zinc-800 pr-2">
+                                  <ChevronRight className={`h-3 w-3 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                                  <span className="font-semibold text-[11.5px] whitespace-nowrap">{group.labName}</span>
+                                  {group.labKod && <span className="text-[9.5px] text-zinc-400 font-mono">({group.labKod})</span>}
+                                  <span className="text-[9.5px] text-zinc-400 whitespace-nowrap">· {group.rows.length} ürün</span>
+                                </div>
+                                <div className="flex-1" />
+                                {/* verimlilik/rutin rozetleri sağda sabit kalır */}
+                                <div className="sticky right-2 z-10 flex items-center gap-3 bg-zinc-900 dark:bg-zinc-800 pl-2">
+                                  <span className="text-[9.5px] text-zinc-400 whitespace-nowrap">Ort. Verimlilik: <strong className={`font-mono ${avgVerim >= 90 ? 'text-emerald-400' : avgVerim >= 70 ? 'text-amber-400' : 'text-rose-400'}`}>%{avgVerim.toFixed(0)}</strong></span>
+                                  <span className="text-[9.5px] text-zinc-400 whitespace-nowrap">Rutin: <strong className="font-mono text-white">{fmtN(totalRutin)}</strong></span>
+                                </div>
                               </div>
                             </td>
                           </tr>
