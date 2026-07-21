@@ -28,6 +28,7 @@ export {
 } from './companyStatsAggregation';
 export { onBankTransactionWritten } from './cariReconciliation';
 export { shortcutScheduler, onShortcutRunRequestCreated } from './shortcutScheduler';
+export { dailyCostSnapshot, recomputeCostSnapshot } from './costSnapshot';
 
 function chunk<T>(arr: T[], size = 500): T[][] {
   const out: T[][] = [];

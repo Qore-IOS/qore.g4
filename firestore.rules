@@ -93,6 +93,18 @@ service cloud.firestore {
       );
       allow write: if false;
     }
+
+    // costSnapshots — anlık maliyet günlük snapshot doc'u. Doc ID = companyId.
+    // Normalde her sabah 06:00 Cloud Function yazar (admin SDK rules'ı bypass eder),
+    // ancak istemci fallback / "Yeniden hesapla" da aynı şirketin doc'unu yazabilir.
+    match /costSnapshots/{companyId} {
+      allow read: if isSignedIn() && (
+        isSuperAdmin() || companyId == userCompany()
+      );
+      allow write: if isSignedIn() && (
+        isSuperAdmin() || companyId == userCompany()
+      );
+    }
     match /depoStok/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /hospitalDeviceAssignments/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /purchasingTasks/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
