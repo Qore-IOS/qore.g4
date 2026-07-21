@@ -16,13 +16,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.shortcutScheduler = exports.onShortcutRunRequestCreated = void 0;
 const admin = __importStar(require("firebase-admin"));
@@ -32,6 +42,7 @@ const functions = __importStar(require("firebase-functions"));
 const firestore_1 = require("firebase-admin/firestore");
 const handlers_1 = require("./shortcuts/handlers");
 const delivery_1 = require("./shortcuts/delivery");
+const notifications_1 = require("./lib/notifications");
 if (!admin.apps.length)
     admin.initializeApp();
 const db = admin.firestore();
@@ -54,29 +65,57 @@ function normalizeStringArray(value) {
 function snapshotMatchesCurrentUser(snapshot, user) {
     if (!snapshot || Object.keys(snapshot).length === 0)
         return true;
+    // The snapshot is a point-in-time audit record captured when the shortcut was created.
+    // Do not use it as the source of truth for current role/view permissions: profile
+    // enrichment, default views, or legitimate role changes can make this serialized
+    // snapshot differ even when the user still has access. Current access is enforced
+    // below with the live user document (panelKey and scoped lab/depot checks).
+    const snapshotUid = typeof snapshot.uid === 'string' ? snapshot.uid : null;
+    if (snapshotUid && user.uid && snapshotUid !== user.uid)
+        return false;
     const snapshotCompanyId = typeof snapshot.companyId === 'string' ? snapshot.companyId : null;
     if (snapshotCompanyId && user.companyId && snapshotCompanyId !== user.companyId)
         return false;
-    const snapshotRole = typeof snapshot.role === 'string' ? snapshot.role : null;
-    if (snapshotRole && user.role && snapshotRole !== user.role)
-        return false;
-    const snapshotRoles = normalizeStringArray(snapshot.roles);
-    if (snapshotRoles.length) {
-        const currentRoles = new Set([...normalizeStringArray(user.roles), ...(user.role ? [String(user.role)] : [])]);
-        if (!snapshotRoles.every((role) => currentRoles.has(role)))
-            return false;
-    }
-    const snapshotPermissions = normalizeStringArray(snapshot.permissions);
-    if (snapshotPermissions.length) {
-        const currentPermissions = new Set([
-            ...normalizeStringArray(user.permissions),
-            ...normalizeStringArray(user.permissionKeys),
-            ...normalizeStringArray(user.accessibleViews),
-        ]);
-        if (!snapshotPermissions.every((permission) => currentPermissions.has(permission)))
-            return false;
-    }
     return true;
+}
+function valueFromPath(source, path) {
+    return path.split('.').reduce((current, key) => {
+        if (!current || typeof current !== 'object')
+            return undefined;
+        return current[key];
+    }, source);
+}
+function scopeIdsFromShortcut(shortcut, keys) {
+    const values = keys.flatMap((key) => {
+        var _a;
+        const direct = (_a = valueFromPath(shortcut.params, key)) !== null && _a !== void 0 ? _a : valueFromPath(shortcut, key);
+        return Array.isArray(direct) ? direct : [direct];
+    });
+    return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean).filter((value) => value !== 'all')));
+}
+function hasScope(currentAllowed, requested) {
+    if (!requested.length)
+        return true;
+    // Elsewhere in the app an empty assignment list means company-wide access rather
+    // than no access, so preserve that convention for background shortcut runs.
+    if (!currentAllowed.length)
+        return true;
+    const allowed = new Set(currentAllowed);
+    return requested.every((id) => allowed.has(id));
+}
+async function emitPermissionDeniedNotifications(shortcut, runRef, reason) {
+    if (!shortcut.createdByUid)
+        return;
+    await (0, notifications_1.createNotification)({
+        type: 'custom',
+        title: 'Kestirme yetki nedeniyle atlandı',
+        message: `${shortcut.title || shortcut.actionKey || 'Kestirme'} çalıştırılmadı: ${reason}`,
+        href: `/shortcut-runs/${runRef.id}`,
+        actor: { uid: 'system', name: 'QORE System' },
+        targets: [`user:${shortcut.createdByUid}`, 'role:admin'],
+        audience: { userIds: [shortcut.createdByUid], roles: ['admin'] },
+        meta: { shortcutId: shortcut.id || null, runId: runRef.id, reason },
+    });
 }
 async function verifyShortcutPermissions(shortcut) {
     const uid = String(shortcut.createdByUid || '').trim();
@@ -93,6 +132,18 @@ async function verifyShortcutPermissions(shortcut) {
     }
     if (!snapshotMatchesCurrentUser(shortcut.permissionSnapshot, user)) {
         return { ok: false, reason: 'permission snapshot no longer matches current user permissions' };
+    }
+    const accessibleViews = normalizeStringArray(user.accessibleViews);
+    if (shortcut.panelKey && !accessibleViews.includes(String(shortcut.panelKey))) {
+        return { ok: false, reason: 'panelKey is no longer accessible to the shortcut creator' };
+    }
+    const requestedLabIds = scopeIdsFromShortcut(shortcut, ['labId', 'labIds', 'laboratoryId', 'laboratoryIds', 'hospitalId', 'hospitalIds']);
+    const requestedDepotIds = scopeIdsFromShortcut(shortcut, ['depotId', 'depotIds']);
+    if (!hasScope(normalizeStringArray(user.assignedLaboratories), requestedLabIds)) {
+        return { ok: false, reason: 'lab filters are outside the creator current scope' };
+    }
+    if (!hasScope(normalizeStringArray(user.assignedDepots), requestedDepotIds)) {
+        return { ok: false, reason: 'depot filters are outside the creator current scope' };
     }
     return { ok: true };
 }
@@ -176,8 +227,26 @@ async function executeShortcutRun(shortcutRef, runRef, trigger, requestedByUid) 
     try {
         await appendRunLog(runRef, 'info', `Shortcut ${trigger} run started.`);
         const permission = await verifyShortcutPermissions(locked);
-        if (!permission.ok)
-            throw new Error(permission.reason || 'Permission check failed');
+        if (!permission.ok) {
+            const message = permission.reason || 'Permission check failed';
+            const nextRunAt = trigger === 'scheduled' ? computeNextRunAt(locked.schedule, new Date()) : toDate(locked.nextRunAt);
+            await runRef.set({
+                status: 'skipped_permission_denied',
+                completedAt: firestore_1.FieldValue.serverTimestamp(),
+                message,
+            }, { merge: true });
+            await appendRunLog(runRef, 'warn', message, { status: 'skipped_permission_denied' });
+            await emitPermissionDeniedNotifications(locked, runRef, message);
+            await shortcutRef.update({
+                lastRunAt: firestore_1.FieldValue.serverTimestamp(),
+                nextRunAt: nextRunAt ? firestore_1.Timestamp.fromDate(nextRunAt) : null,
+                enabled: trigger === 'scheduled' && !nextRunAt ? false : locked.enabled,
+                processingRunId: firestore_1.FieldValue.delete(),
+                processingStartedAt: firestore_1.FieldValue.delete(),
+                updatedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            return;
+        }
         const handler = resolveHandler(locked);
         if (!handler)
             throw new Error(`No shortcut handler registered for actionKey: ${locked.actionKey || '(empty)'}`);
