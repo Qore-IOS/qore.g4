@@ -22,7 +22,7 @@ const CSS = `
   position: fixed; inset: 0; overflow: hidden;
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: var(--ink-1);
   background: var(--bg-0);
-  display: grid; place-items: center; padding: 20px;
+  display: flex; align-items: center; justify-content: center; padding: 20px;
   -webkit-font-smoothing: antialiased;
 }
 .qlogin *, .qlogin *::before, .qlogin *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -30,36 +30,55 @@ const CSS = `
 .qlogin input::placeholder { color: var(--ink-3); }
 .qlogin input:-webkit-autofill { -webkit-text-fill-color: var(--ink-1); transition: background-color 9999s ease-in-out 0s; }
 .qlogin button:focus-visible, .qlogin input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.qlogin-ribbons { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+.qlogin-card { position: relative; z-index: 1; width: 100%; max-width: 420px; margin: 0 auto; }
 @keyframes qFadeUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
 @keyframes qPopIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
-@keyframes qFloatA { 0%,100% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(14px,10px) rotate(4deg); } }
-@keyframes qFloatB { 0%,100% { transform: translate(0,0) rotate(0deg); } 50% { transform: translate(-12px,-10px) rotate(-4deg); } }
 @keyframes qSpin { to { transform: rotate(360deg); } }
 @keyframes qShake { 10%,90% { transform: translateX(-2px); } 30%,70% { transform: translateX(4px); } 50% { transform: translateX(-5px); } }
 @media (prefers-reduced-motion: reduce) { .qlogin * { animation-duration: 0.01ms !important; } }
 `;
 
-/* warm layered ribbon cluster (top-left / bottom-right decorative graphics) */
+/* concentric warm ribbon curl — nested filled bands (cream → caramel → brown),
+   bright highlight rim on the outer edge, soft drop shadow. Static (no animation). */
+const polar = (cx: number, cy: number, r: number, deg: number): [number, number] => {
+  const a = (deg * Math.PI) / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+};
+const arcPath = (cx: number, cy: number, r: number, a0: number, a1: number): string => {
+  const [x0, y0] = polar(cx, cy, r, a0);
+  const [x1, y1] = polar(cx, cy, r, a1);
+  const large = Math.abs(a1 - a0) > 180 ? 1 : 0;
+  const sweep = a1 > a0 ? 1 : 0;
+  return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${r} ${r} 0 ${large} ${sweep} ${x1.toFixed(2)} ${y1.toFixed(2)}`;
+};
+
+const CX = 148, CY = 148, A0 = 66, A1 = 372; // gap (opening) centered toward bottom-right
+const BANDS = [
+  { r: 118, w: 28, light: '#F5DFB8', dark: '#EBCE97' }, // outer pale gold
+  { r: 90, w: 28, light: '#EBB878', dark: '#DDA05E' }, // golden
+  { r: 62, w: 28, light: '#D2924F', dark: '#B9793F' }, // caramel → brown
+];
+
 const Ribbons = ({ id }: { id: string }) => (
-  <svg viewBox="0 0 320 320" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }}>
+  <svg viewBox="0 0 296 296" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} aria-hidden="true">
     <defs>
-      <linearGradient id={`${id}-g`} x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#EFC98C" />
-        <stop offset="0.5" stopColor="#D69A63" />
-        <stop offset="1" stopColor="#A9704A" />
-      </linearGradient>
-      <linearGradient id={`${id}-h`} x1="0" y1="0" x2="1" y2="1">
-        <stop offset="0" stopColor="#FBEBCF" />
-        <stop offset="1" stopColor="#F2D4A6" />
-      </linearGradient>
+      {BANDS.map((b, i) => (
+        <linearGradient key={i} id={`${id}-b${i}`} x1="0" y1="0" x2="0.35" y2="1">
+          <stop offset="0" stopColor={b.light} />
+          <stop offset="1" stopColor={b.dark} />
+        </linearGradient>
+      ))}
       <filter id={`${id}-s`} x="-40%" y="-40%" width="180%" height="180%">
-        <feDropShadow dx="0" dy="14" stdDeviation="16" floodColor="rgba(150,110,70,0.35)" />
+        <feDropShadow dx="0" dy="12" stdDeviation="13" floodColor="rgba(150,110,70,0.34)" />
       </filter>
     </defs>
     <g filter={`url(#${id}-s)`} fill="none" strokeLinecap="round">
-      <path d="M18,150 C 30,58 130,26 208,66 C 288,108 300,196 250,262" stroke={`url(#${id}-g)`} strokeWidth="52" />
-      <path d="M64,168 C 78,96 150,74 206,104 C 262,134 268,196 236,246" stroke={`url(#${id}-g)`} strokeWidth="34" opacity="0.92" />
-      <path d="M104,178 C 118,124 168,110 208,132" stroke={`url(#${id}-h)`} strokeWidth="15" opacity="0.85" />
+      {/* bright highlight rim hugging the outer edge */}
+      <path d={arcPath(CX, CY, BANDS[0].r + 12, A0, A1)} stroke="#FEF6E4" strokeWidth="7" opacity="0.9" />
+      {BANDS.map((b, i) => (
+        <path key={i} d={arcPath(CX, CY, b.r, A0, A1)} stroke={`url(#${id}-b${i})`} strokeWidth={b.w} />
+      ))}
     </g>
   </svg>
 );
@@ -120,16 +139,18 @@ export default function LoginPage() {
     <div className="qlogin">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
-      {/* decorative ribbons */}
-      <div style={{ position: 'absolute', top: 'clamp(-90px,-8vw,-40px)', left: 'clamp(-90px,-8vw,-40px)', width: 'clamp(220px,32vw,360px)', height: 'clamp(220px,32vw,360px)', pointerEvents: 'none', animation: 'qFloatA 11s ease-in-out infinite' }}>
-        <Ribbons id="tl" />
-      </div>
-      <div style={{ position: 'absolute', bottom: 'clamp(-90px,-8vw,-40px)', right: 'clamp(-90px,-8vw,-40px)', width: 'clamp(220px,32vw,360px)', height: 'clamp(220px,32vw,360px)', pointerEvents: 'none', transform: 'rotate(180deg)', animation: 'qFloatB 13s ease-in-out infinite' }}>
-        <Ribbons id="br" />
+      {/* decorative ribbons — static, in an isolated non-interactive layer */}
+      <div className="qlogin-ribbons">
+        <div style={{ position: 'absolute', top: 'clamp(-72px,-7vw,-34px)', left: 'clamp(-72px,-7vw,-34px)', width: 'clamp(190px,32vw,320px)', height: 'clamp(190px,32vw,320px)' }}>
+          <Ribbons id="tl" />
+        </div>
+        <div style={{ position: 'absolute', bottom: 'clamp(-72px,-7vw,-34px)', right: 'clamp(-72px,-7vw,-34px)', width: 'clamp(190px,32vw,320px)', height: 'clamp(190px,32vw,320px)', transform: 'rotate(180deg)' }}>
+          <Ribbons id="br" />
+        </div>
       </div>
 
       {/* card */}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 420, borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', padding: 'clamp(26px,6vw,40px) clamp(22px,6vw,38px)', animation: `qFadeUp 500ms var(--ease-fluid)${shake ? `, qShake 400ms var(--ease-fluid)` : ''}` }} key={shake}>
+      <div className="qlogin-card" style={{ borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', padding: 'clamp(26px,6vw,40px) clamp(22px,6vw,38px)', animation: `qFadeUp 500ms var(--ease-fluid)${shake ? `, qShake 400ms var(--ease-fluid)` : ''}` }} key={shake}>
         {/* logo */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
           <span style={{ width: 76, height: 76, borderRadius: 22, display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(160deg, var(--accent-2), var(--accent))', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.45), 0 14px 28px -10px var(--accent-glow)' }}>

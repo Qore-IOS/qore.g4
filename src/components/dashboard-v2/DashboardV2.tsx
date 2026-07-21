@@ -6,7 +6,7 @@ import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search } from 'lucide-react';
+import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search, Loader2, Download, Warehouse, FlaskConical } from 'lucide-react';
 import {
   HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart, Ring,
   Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar, DeltaBadge,
@@ -16,7 +16,7 @@ import {
   format, startOfWeek, endOfWeek, eachDayOfInterval,
   subDays, addDays, subWeeks, addWeeks, subMonths, addMonths, subYears, addYears,
   startOfDay, endOfDay, startOfMonth, endOfMonth, startOfYear, endOfYear, eachMonthOfInterval,
-  parse, isValid, differenceInDays
+  parse, isValid, differenceInDays, isSameDay, isSameMonth, isToday
 } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
@@ -31,10 +31,12 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getDocs, Timestamp, limit as fsLimit } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, getDocs, doc, setDoc, Timestamp, limit as fsLimit } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
+import { withCompanyScope } from '@/lib/company-scope';
+import { computeStockCostSnapshot, type StockCostSnapshot, type CostLocationRow } from '@/lib/cost-snapshot';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import {
@@ -69,14 +71,58 @@ function MiniKpi({ s, i }: { s: { value: number; tone: string; bg: string; icon:
   );
 }
 
-function ShortcutTile({ panel, i }: { panel: any; i: number }) {
+// Kompakt, etkileşimli aylık takvim (Bugün kartının sol yarısı).
+function MiniCalendar({ month, selected, taskDays, onSelectDay, onPrevMonth, onNextMonth }: {
+  month: Date; selected: Date; taskDays: Set<string>;
+  onSelectDay: (d: Date) => void; onPrevMonth: () => void; onNextMonth: () => void;
+}) {
+  const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
+  const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
+  const wd = ['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pz'];
+  const btn = (child: React.ReactNode, onClick: () => void) => (
+    <button onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ all: 'unset', cursor: 'pointer', width: 26, height: 26, borderRadius: 9, display: 'grid', placeItems: 'center', color: HOME_C.ink2, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: HOME_C.clayFlat }}>{child}</button>
+  );
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+        {btn(<ChevronLeft size={14} />, onPrevMonth)}
+        <span style={{ fontSize: 12.5, fontWeight: 800, color: HOME_C.ink1, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{format(month, 'LLLL yyyy', { locale: tr })}</span>
+        {btn(<ChevronRight size={14} />, onNextMonth)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
+        {wd.map((d) => <div key={d} style={{ textAlign: 'center', fontSize: 9.5, fontWeight: 700, color: HOME_C.ink3, padding: '2px 0' }}>{d}</div>)}
+        {days.map((day) => {
+          const key = format(day, 'yyyy-MM-dd');
+          const inMonth = isSameMonth(day, month);
+          const sel = isSameDay(day, selected);
+          const today = isToday(day);
+          const has = taskDays.has(key);
+          return (
+            <button key={key} onClick={(e) => { e.stopPropagation(); onSelectDay(day); }}
+              style={{ all: 'unset', cursor: 'pointer', position: 'relative', aspectRatio: '1 / 1', minWidth: 0, borderRadius: 8, display: 'grid', placeItems: 'center', fontSize: 11.5, fontWeight: sel || today ? 800 : 600,
+                color: sel ? '#fff' : inMonth ? HOME_C.ink1 : HOME_C.ink3,
+                background: sel ? `linear-gradient(180deg, ${HOME_C.accent2}, ${HOME_C.accent})` : 'transparent',
+                boxShadow: sel ? `0 5px 11px -5px ${HOME_C.accentGlow}` : today ? `inset 0 0 0 1.5px ${HOME_C.accent}` : 'none',
+                opacity: inMonth ? 1 : 0.55 }}>
+              {format(day, 'd')}
+              {has && <span style={{ position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: sel ? '#fff' : HOME_C.accent }} />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ShortcutTile({ panel, i, dense }: { panel: any; i: number; dense?: boolean }) {
   const [p, setP] = useState(false);
   const Icon = panel.icon;
+  const iconSz = dense ? 40 : 46;
   return (
     <Link href={panel.href} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
-      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '16px 8px', borderRadius: HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 45}ms ${HOME_C.ease}` }}>
-      <span style={{ width: 46, height: 46, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={22} /></span>
-      <span style={{ fontSize: 12.5, fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }}>{panel.label}</span>
+      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', height: '100%', minHeight: dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: dense ? 7 : 10, padding: dense ? '10px 6px' : '16px 8px', borderRadius: HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
+      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={dense ? 20 : 22} /></span>
+      <span style={{ fontSize: 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }}>{panel.label}</span>
     </Link>
   );
 }
@@ -89,34 +135,6 @@ interface DashboardPanelProps {
 }
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
-type CostCurrency = 'EUR' | 'USD' | 'TRY';
-type CurrencyPools = Record<CostCurrency, number>;
-
-type StockProductBreakdown = {
-  stokKodu: string;
-  stokAdi: string;
-  quantity: number;
-  nativeTotals: CurrencyPools;
-  tryTotal: number;
-};
-
-type StockLocationBreakdown = {
-  id: string;
-  name: string;
-  type: 'depo' | 'lab';
-  quantity: number;
-  nativeTotals: CurrencyPools;
-  tryTotal: number;
-  products: StockProductBreakdown[];
-};
-
-type StockBrandBreakdown = {
-  brand: string;
-  quantity: number;
-  nativeTotals: CurrencyPools;
-  tryTotal: number;
-  locations: StockLocationBreakdown[];
-};
 
 function DashboardSkeleton() {
   return (
@@ -134,9 +152,6 @@ function DashboardSkeleton() {
     </div>
   );
 }
-
-const STOCK_COST_SNAPSHOT_KEY = 'dashboard_stock_cost_snapshot_v1';
-const STOCK_COST_SNAPSHOT_TTL = 1000 * 60 * 60 * 24; // 24 saat
 
 export default function DashboardV2({
     hospitals,
@@ -186,292 +201,122 @@ export default function DashboardV2({
 
   const isLoading = faultsLoading || tasksLoading || expiringLoading;
 
-  // Total stock cost + risky cost – client-side calculation
+  // Anlık maliyet — costSnapshots/{companyId} dokümanından okunur (her sabah
+  // 06:00'da Cloud Function günceller). Doküman yoksa ilk açılışta istemci
+  // fallback ile hesaplanır. "Yeniden hesapla" elle yeniden hesaplar.
   const [totalStockCost, setTotalStockCost] = useState<number | null>(null);
   const [riskyCost, setRiskyCost] = useState<number | null>(null);
   const [isStockCostDetailOpen, setIsStockCostDetailOpen] = useState(false);
-  const [stockCostBreakdown, setStockCostBreakdown] = useState<StockBrandBreakdown[]>([]);
+  const [costByDepot, setCostByDepot] = useState<CostLocationRow[]>([]);
+  const [costByLab, setCostByLab] = useState<CostLocationRow[]>([]);
+  const [costMeta, setCostMeta] = useState<{ computedAt: string; forDate: string; source: string } | null>(null);
   const [isRefreshingStockCost, setIsRefreshingStockCost] = useState(false);
 
-  const loadStockCostSnapshot = useCallback(async (forceRefresh = false) => {
-    if (!forceRefresh) {
-      try {
-        const cached = localStorage.getItem(STOCK_COST_SNAPSHOT_KEY);
-        if (cached) {
-          const parsed = JSON.parse(cached) as {
-            timestamp: number;
-            totalStockCost: number;
-            riskyCost: number;
-            stockCostBreakdown: StockBrandBreakdown[];
-          };
-          if (Date.now() - parsed.timestamp < STOCK_COST_SNAPSHOT_TTL) {
-            setTotalStockCost(parsed.totalStockCost);
-            setRiskyCost(parsed.riskyCost);
-            setStockCostBreakdown(parsed.stockCostBreakdown || []);
-            return;
-          }
-        }
-      } catch (error) {
-        console.warn('[Dashboard] stock cost snapshot cache parse error:', error);
-      }
-    }
+  const applySnapshot = useCallback((snap: StockCostSnapshot) => {
+    setTotalStockCost(Number(snap.totalTRY) || 0);
+    setRiskyCost(Number(snap.riskyTRY) || 0);
+    setCostByDepot(Array.isArray(snap.byDepot) ? snap.byDepot : []);
+    setCostByLab(Array.isArray(snap.byLab) ? snap.byLab : []);
+    setCostMeta({ computedAt: snap.computedAt, forDate: snap.forDate, source: snap.source });
+  }, []);
 
+  // Tüm depo + lab stoğunu (isShipped filtresi YOK) çekip anlık maliyeti hesaplar,
+  // costSnapshots/{companyId} dokümanına yazar.
+  const computeAndSaveSnapshot = useCallback(async (source: StockCostSnapshot['source']) => {
+    setIsRefreshingStockCost(true);
     try {
-      setIsRefreshingStockCost(true);
-      try {
-        const exchangeRates = await getExchangeRates();
-        let productDocs: any[] = [];
-        let stockDocs: any[] = [];
-        let depotDocs: any[] = [];
+      const rates = await getExchangeRates();
+      let productDocs: any[] = [], stockDocs: any[] = [], depotDocs: any[] = [];
+      try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+      try { const s = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
+      try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
-        try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+      const depotNames: Record<string, string> = {};
+      depotDocs.forEach((d) => { depotNames[d.id] = String(d.data()?.name || d.id); });
+      const hospitalNames: Record<string, string> = {};
+      hospitals.forEach((h) => { hospitalNames[h.id] = h.name; });
+
+      // Depo bazlı minMaxRules — riskli stok hesabı için
+      const minMaxRules: Record<string, { max: number; maxGun: number }> = {};
+      await Promise.all(depotDocs.map(async (dep) => {
         try {
-          // Dashboard sadece mevcut stoğu (sevk edilmemiş) sayar; isShipped=true
-          // kayıtlar zaman içinde birikir ama özet için gerekmez.
-          const s = await getDocs(scopedQuery(
-            'depoStok',
-            currentCompanyId,
-            isSuperAdmin,
-            where('isShipped', '==', false),
-          ));
-          stockDocs = s.docs;
-        } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-        try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
-
-        const depotNameMap = new Map<string, string>();
-        depotDocs.forEach((d) => {
-          const data = d.data();
-          depotNameMap.set(d.id, String(data?.name || d.id));
-        });
-        const hospitalById = new Map(hospitals.map((h) => [h.id, h.name]));
-
-        // Build cost map: stokKodu -> birim maliyet + para birimi + metadata
-        const costMap = new Map<string, { cost: number; currency: CostCurrency; brand: string; stokAdi: string }>();
-        productDocs.forEach((d) => {
-          const data = d.data();
-          const rawCost = data.cost ?? data.birimFiyat ?? data.unitPrice ?? data.price;
-          const numCost = typeof rawCost === 'number' ? rawCost : parseFloat(rawCost);
-          const currency = (typeof data.currency === 'string' ? data.currency.toUpperCase() : 'TRY') as CostCurrency;
-          const normalizedCurrency: CostCurrency = currency === 'EUR' || currency === 'USD' ? currency : 'TRY';
-          if (numCost && !isNaN(numCost) && data.stokKodu) {
-            costMap.set(data.stokKodu, {
-              cost: numCost,
-              currency: normalizedCurrency,
-              brand: String(data.marka || 'Markasız'),
-              stokAdi: String(data.stokAdi || data.stokKodu),
-            });
-          }
-        });
-
-        const sumPoolsToTry = (pools: Record<CostCurrency, number>): number => {
-          const eurToTry = exchangeRates.TRY;
-          const usdToTry = exchangeRates.TRY / exchangeRates.USD;
-          return pools.TRY + (pools.EUR * eurToTry) + (pools.USD * usdToTry);
-        };
-
-        // Toplam maliyet hesapla
-        const totalPools: Record<CostCurrency, number> = { TRY: 0, USD: 0, EUR: 0 };
-        const breakdownMap = new Map<string, {
-          quantity: number;
-          nativeTotals: CurrencyPools;
-          locations: Map<string, {
-            id: string;
-            name: string;
-            type: 'depo' | 'lab';
-            quantity: number;
-            nativeTotals: CurrencyPools;
-            products: Map<string, StockProductBreakdown>;
-          }>;
-        }>();
-        const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
-        const groupedByDepotAndProduct = new Map<string, number>();
-
-        stockDocs.forEach((d) => {
-          const data = d.data();
-          const productCost = costMap.get(data.stokKodu);
-          const qty = Number(data.quantity ?? 1) || 1;
-          if (productCost) {
-            totalPools[productCost.currency] += (productCost.cost * qty);
-
-            const brandKey = productCost.brand || 'Markasız';
-            let brandEntry = breakdownMap.get(brandKey);
-            if (!brandEntry) {
-              brandEntry = {
-                quantity: 0,
-                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
-                locations: new Map(),
-              };
-              breakdownMap.set(brandKey, brandEntry);
-            }
-            brandEntry.quantity += qty;
-            brandEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
-
-            const isLab = data.isShipped === true;
-            const locationType: 'depo' | 'lab' = isLab ? 'lab' : 'depo';
-            const locationId = isLab
-              ? String(data.hedefKurumId || data.labId || data.hedefKurum || 'bilinmeyen-lab')
-              : String(data.depotId || 'bilinmeyen-depo');
-            const locationName = isLab
-              ? (hospitalById.get(locationId) || String(data.hedefKurum || data.labName || 'Bilinmeyen Lab'))
-              : (depotNameMap.get(locationId) || String(data.depotName || 'Bilinmeyen Depo'));
-            const locationKey = `${locationType}:${locationId}`;
-            let locationEntry = brandEntry.locations.get(locationKey);
-            if (!locationEntry) {
-              locationEntry = {
-                id: locationId,
-                name: locationName,
-                type: locationType,
-                quantity: 0,
-                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
-                products: new Map(),
-              };
-              brandEntry.locations.set(locationKey, locationEntry);
-            }
-            locationEntry.quantity += qty;
-            locationEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
-
-            const productKey = data.stokKodu;
-            let productEntry = locationEntry.products.get(productKey);
-            if (!productEntry) {
-              productEntry = {
-                stokKodu: data.stokKodu,
-                stokAdi: productCost.stokAdi,
-                quantity: 0,
-                nativeTotals: { TRY: 0, USD: 0, EUR: 0 },
-                tryTotal: 0,
-              };
-              locationEntry.products.set(productKey, productEntry);
-            }
-            productEntry.quantity += qty;
-            productEntry.nativeTotals[productCost.currency] += productCost.cost * qty;
-          }
-          // Riskli hesabı için stok bilgisi topla
-          activeStockItems.push({
-            stokKodu: data.stokKodu,
-            lotNumarasi: data.lotNumarasi || '',
-            miad: typeof data.miad === 'string' ? data.miad : '',
-            depotId: data.depotId || '',
-            quantity: qty,
+          const rs = await getDocs(collection(db, 'depots', dep.id, 'minMaxRules'));
+          rs.docs.forEach((r) => {
+            const rule = r.data();
+            if (rule.stokKodu && rule.max && rule.maxGun) minMaxRules[`${dep.id}__${rule.stokKodu}`] = { max: rule.max, maxGun: rule.maxGun };
           });
-          // Depo+stokKodu bazında toplam adet
-          const gKey = `${data.depotId || ''}__${data.stokKodu}`;
-          groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + qty);
-        });
+        } catch { /* rule fetch hatası riskli hesabı atlar */ }
+      }));
 
-        const computedTotalStockCost = sumPoolsToTry(totalPools);
-        setTotalStockCost(computedTotalStockCost);
-        const breakdown: StockBrandBreakdown[] = Array.from(breakdownMap.entries()).map(([brand, brandEntry]) => {
-          const locations: StockLocationBreakdown[] = Array.from(brandEntry.locations.values()).map((loc) => {
-            const products = Array.from(loc.products.values()).map((p) => ({
-              ...p,
-              tryTotal: sumPoolsToTry(p.nativeTotals),
-            })).sort((a, b) => b.tryTotal - a.tryTotal);
-            return {
-              id: loc.id,
-              name: loc.name,
-              type: loc.type,
-              quantity: loc.quantity,
-              nativeTotals: loc.nativeTotals,
-              tryTotal: sumPoolsToTry(loc.nativeTotals),
-              products,
-            };
-          }).sort((a, b) => b.tryTotal - a.tryTotal);
-          return {
-            brand,
-            quantity: brandEntry.quantity,
-            nativeTotals: brandEntry.nativeTotals,
-            tryTotal: sumPoolsToTry(brandEntry.nativeTotals),
-            locations,
-          };
-        }).sort((a, b) => b.tryTotal - a.tryTotal);
-        setStockCostBreakdown(breakdown);
+      const snapshot = computeStockCostSnapshot({
+        products: productDocs.map((d) => d.data()),
+        stocks: stockDocs.map((d) => d.data()),
+        depotNames, hospitalNames, minMaxRules, rates, source, now: new Date(),
+      });
+      applySnapshot(snapshot);
 
-        // Riskli maliyet: tüm depolardan minMaxRules çek
-        const depotIds = depotDocs.map((d) => d.id);
-        const allMinMaxRules = new Map<string, { max: number; maxGun: number }>();
-
-        const rulePromises = depotIds.map(async (depotId) => {
-          const rulesSnap = await getDocs(collection(db, 'depots', depotId, 'minMaxRules'));
-          rulesSnap.docs.forEach((d) => {
-            const rule = d.data();
-            if (rule.stokKodu && rule.max && rule.maxGun) {
-              // Depo bazlı key — aynı ürün farklı depolarda farklı rule'a sahip olabilir
-              allMinMaxRules.set(`${depotId}__${rule.stokKodu}`, { max: rule.max, maxGun: rule.maxGun });
-            }
-          });
-        });
-        await Promise.all(rulePromises);
-
-        // Stokları grupla: depotId + stokKodu + lotNumarasi + miad
-        const lotGroups = new Map<string, { stokKodu: string; depotId: string; lotNumarasi: string; miad: string; quantity: number }>();
-        activeStockItems.forEach((item) => {
-          const key = `${item.depotId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
-          const existing = lotGroups.get(key);
-          if (existing) {
-            existing.quantity += item.quantity;
-          } else {
-            lotGroups.set(key, { ...item, quantity: item.quantity });
-          }
-        });
-
-        // Her lot grubu için riskli kutu hesabı
-        const riskyPools: Record<CostCurrency, number> = { TRY: 0, USD: 0, EUR: 0 };
-        lotGroups.forEach((group) => {
-          const ruleKey = `${group.depotId}__${group.stokKodu}`;
-          const rule = allMinMaxRules.get(ruleKey);
-          if (!rule) return;
-
-          // Miad info
-          if (!group.miad) return;
-          const miadDate = parse(group.miad, 'dd.MM.yyyy', new Date());
-          if (!isValid(miadDate)) return;
-          const miadDays = differenceInDays(miadDate, new Date());
-          if (miadDays <= 0 || miadDays === Infinity) return;
-
-          // Coverage info
-          const periodDays = Math.floor(rule.maxGun);
-          if (periodDays <= 0) return;
-          const dailyNeed = rule.max / periodDays;
-          if (dailyNeed <= 0) return;
-          // Depo+stokKodu bazında toplam stok (lot-agnostic coverage)
-          const totalStockForProduct = groupedByDepotAndProduct.get(ruleKey) || group.quantity;
-          const coverageDays = Math.floor(totalStockForProduct / dailyNeed);
-
-          if (coverageDays <= miadDays) return; // Riskli değil
-
-          const riskyDays = coverageDays - miadDays;
-          const riskyBoxes = Math.min(Math.max(0, Math.ceil(riskyDays * dailyNeed)), group.quantity);
-          const productCost = costMap.get(group.stokKodu);
-          if (!productCost) return;
-          riskyPools[productCost.currency] += riskyBoxes * productCost.cost;
-        });
-
-        const computedRiskyCost = sumPoolsToTry(riskyPools);
-        setRiskyCost(computedRiskyCost);
-
+      if (currentCompanyId) {
         try {
-          localStorage.setItem(STOCK_COST_SNAPSHOT_KEY, JSON.stringify({
-            timestamp: Date.now(),
-            totalStockCost: computedTotalStockCost,
-            riskyCost: computedRiskyCost,
-            stockCostBreakdown: breakdown,
-          }));
-        } catch (error) {
-          console.warn('[Dashboard] stock cost snapshot cache save error:', error);
-        }
-      } catch (err) {
-        console.error('[Dashboard] getTotalStockCost error:', err);
-        setTotalStockCost(0);
-        setRiskyCost(0);
+          await setDoc(doc(db, 'costSnapshots', currentCompanyId), withCompanyScope({ ...snapshot, updatedAt: Timestamp.now() }, currentCompanyId));
+        } catch (e) { console.warn('[Dashboard] costSnapshot save failed:', e); }
       }
+    } catch (err) {
+      console.error('[Dashboard] computeAndSaveSnapshot error:', err);
+      setTotalStockCost((prev) => (prev === null ? 0 : prev));
+      setRiskyCost((prev) => (prev === null ? 0 : prev));
     } finally {
       setIsRefreshingStockCost(false);
     }
-  }, [hospitals]);
+  }, [currentCompanyId, isSuperAdmin, hospitals, applySnapshot]);
 
+  // Kırılım tablosunu (Depo + Lab → Ürün) Excel'e aktar
+  const exportCostExcel = useCallback(async () => {
+    const XLSX = await import('xlsx');
+    const rows: Record<string, any>[] = [];
+    const push = (loc: CostLocationRow) => {
+      loc.products.forEach((p) => {
+        rows.push({
+          Boyut: loc.type === 'depo' ? 'Depo' : 'Laboratuvar',
+          Konum: loc.name,
+          'Stok Kodu': p.stokKodu,
+          'Ürün': p.stokAdi,
+          Marka: p.brand,
+          'Ürün Grubu': p.urunGrubu || '',
+          Adet: p.quantity,
+          EUR: Number(p.nativeTotals.EUR.toFixed(2)),
+          USD: Number(p.nativeTotals.USD.toFixed(2)),
+          TRY: Number(p.nativeTotals.TRY.toFixed(2)),
+          'Toplam (TRY)': Number(p.tryTotal.toFixed(2)),
+        });
+      });
+    };
+    costByDepot.forEach(push);
+    costByLab.forEach(push);
+    const ws = XLSX.utils.json_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Anlık Maliyet');
+    const dateTag = costMeta?.forDate || format(new Date(), 'yyyy-MM-dd');
+    XLSX.writeFile(wb, `anlik-maliyet-${dateTag}.xlsx`);
+  }, [costByDepot, costByLab, costMeta]);
+
+  // Snapshot dokümanını dinle; yoksa bir kez istemci fallback ile hesapla.
+  const costFallbackTriggered = useRef(false);
   useEffect(() => {
-    loadStockCostSnapshot(false);
-  }, [loadStockCostSnapshot]);
+    if (!currentCompanyId) return;
+    const ref = doc(db, 'costSnapshots', currentCompanyId);
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        applySnapshot(snap.data() as StockCostSnapshot);
+      } else if (!costFallbackTriggered.current) {
+        costFallbackTriggered.current = true;
+        computeAndSaveSnapshot('client-fallback');
+      }
+    }, (err) => {
+      console.warn('[Dashboard] costSnapshot listen failed:', err);
+      if (!costFallbackTriggered.current) { costFallbackTriggered.current = true; computeAndSaveSnapshot('client-fallback'); }
+    });
+    return () => unsub();
+  }, [currentCompanyId, applySnapshot, computeAndSaveSnapshot]);
 
   // Yesterday's consumption cost – fetch by date range, then join client-side
   const [yesterdayConsumptionCost, setYesterdayConsumptionCost] = useState(0);
@@ -609,6 +454,27 @@ export default function DashboardV2({
       })
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }, [purchasingTasks, currentUserProfile?.uid]);
+
+  // Bugün kartı — etkileşimli takvim + seçili günün görevleri
+  const [selectedDay, setSelectedDay] = useState<Date>(new Date());
+  const [calMonth, setCalMonth] = useState<Date>(startOfMonth(new Date()));
+  const tasksByDayKey = useMemo(() => {
+    const m = new Map<string, any[]>();
+    if (!currentUserProfile?.uid) return m;
+    purchasingTasks.forEach((task) => {
+      const mine = task.createdByUid === currentUserProfile.uid
+        || task.assignedPersonnel?.some((p: any) => p.uid === currentUserProfile.uid)
+        || task.accompanyingPersonnel?.some((p: any) => p.uid === currentUserProfile.uid);
+      if (!mine || !task.date) return;
+      const arr = m.get(task.date) || [];
+      arr.push(task); m.set(task.date, arr);
+    });
+    m.forEach((arr) => arr.sort((a, b) => a.startTime.localeCompare(b.startTime)));
+    return m;
+  }, [purchasingTasks, currentUserProfile?.uid]);
+  const taskDaySet = useMemo(() => new Set(tasksByDayKey.keys()), [tasksByDayKey]);
+  const selectedDayKey = format(selectedDay, 'yyyy-MM-dd');
+  const selectedDayTasks = tasksByDayKey.get(selectedDayKey) || [];
 
   useEffect(() => {
     const el = calendarScrollRef.current;
@@ -862,9 +728,10 @@ export default function DashboardV2({
   ];
 
   // Bugün — yapılan / toplam görev
-  const totalToday = todayTasks.length;
-  const doneToday = todayTasks.filter((t: any) => t.completed).length;
+  const totalToday = selectedDayTasks.length;
+  const doneToday = selectedDayTasks.filter((t: any) => t.completed).length;
   const todayPct = totalToday ? Math.round((doneToday / totalToday) * 100) : 0;
+  const selectedIsToday = isToday(selectedDay);
 
   // Miad göstergesi (gauge — adet kapaklı oran)
   const miadCount = typeof expiringProductsCount === 'number' ? expiringProductsCount : 0;
@@ -881,77 +748,80 @@ export default function DashboardV2({
 
   return (
     <>
-      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '18px 26px 28px' : '20px 22px 30px' }}>
-        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap }}>
+      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '14px 24px 18px' : '18px 22px 26px' }}>
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap, height: wide ? 'calc(100dvh - 32px)' : 'auto', overflow: wide ? 'hidden' : 'visible' }}>
 
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
-            <div style={{ width: isMobile ? 44 : 50, height: isMobile ? 44 : 50, borderRadius: 16, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 17 : 20, fontWeight: 800 }}>{initials}</div>
+          <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
+            <div style={{ width: isMobile ? 42 : 46, height: isMobile ? 42 : 46, borderRadius: 15, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 16 : 19, fontWeight: 800 }}>{initials}</div>
             <div style={{ minWidth: 0 }}>
-              <h1 style={{ margin: 0, fontSize: isMobile ? 21 : 26, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1 }}>{userName}</h1>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: HOME_C.ink2 }}>Hoş geldin · genel bakış</div>
+              <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 23, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1 }}>{userName}</h1>
+              <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2 }}>Hoş geldin · genel bakış</div>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
-              {!isMobile && <span style={{ fontSize: 14, fontWeight: 700, color: HOME_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span>}
+              {!isMobile && <span style={{ fontSize: 13.5, fontWeight: 700, color: HOME_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span>}
               <ClayIconBtn round><Bell size={18} /></ClayIconBtn>
             </div>
           </div>
 
-          {/* KPI row */}
-          <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : tablet ? '1fr 1fr' : 'minmax(0,1.1fr) minmax(0,1fr) minmax(0,1fr)', gap, alignItems: 'stretch', animation: `mkRise 560ms ${HOME_C.ease} 60ms both` }}>
+          {/* KPI row — üç kart eşit boyda, kompakt */}
+          <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : tablet ? '1fr 1fr' : '1fr 1fr 1fr', gap, alignItems: 'stretch', animation: `mkRise 560ms ${HOME_C.ease} 60ms both` }}>
             {/* Cihaz Atama Durumu */}
             <div style={{ gridColumn: tablet ? '1 / -1' : 'auto' }}>
-              <ClayCard>
-                <CardHead ico={<ActivitySquare size={19} />} title="Cihaz Atama Durumu" tone="accent" right={<Pill>{faultTotal} toplam</Pill>} />
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 16 }}>
+              <ClayCard pad={16} style={{ height: '100%' }}>
+                <CardHead ico={<ActivitySquare size={18} />} title="Cihaz Atama Durumu" tone="accent" right={<Pill>{faultTotal} toplam</Pill>} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 12 }}>
                   {faultStats.map((s, i) => <MiniKpi key={s.key} s={s} i={i} />)}
                 </div>
               </ClayCard>
             </div>
 
             {/* Miad ≤ 45 Gün */}
-            <Link href="/stok-yonetimi" style={{ textDecoration: 'none', display: 'block' }}>
-              <ClayCard hover>
-                <CardHead ico={<AlertTriangle size={19} />} title="Miad ≤ 45 Gün" tone="amber" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex' }}><ArrowUpRight size={16} /></span>} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 14 }}>
-                  <Ring pct={miadPct} size={86} stroke={10} color={HOME_C.amber} delay={200}>
+            <Link href="/stok-yonetimi" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
+              <ClayCard hover pad={16} style={{ height: '100%' }}>
+                <CardHead ico={<AlertTriangle size={18} />} title="Miad ≤ 45 Gün" tone="amber" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex' }}><ArrowUpRight size={16} /></span>} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
+                  <Ring pct={miadPct} size={72} stroke={9} color={HOME_C.amber} delay={200}>
                     <div style={{ textAlign: 'center' }}>
-                      <CountText value={miadCount} style={{ fontSize: 26, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', display: 'block' }} />
-                      <div style={{ fontSize: 11, fontWeight: 600, color: HOME_C.ink3 }}>ürün</div>
+                      <CountText value={miadCount} style={{ fontSize: 22, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', display: 'block' }} />
+                      <div style={{ fontSize: 10, fontWeight: 600, color: HOME_C.ink3 }}>ürün</div>
                     </div>
                   </Ring>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13.5, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.45 }}>Tüm depolarda miadı yaklaşan ürünler</div>
-                    <div style={{ marginTop: 12 }}><Tag tone={HOME_C.amber} bg={HOME_C.amberSoft}>≤ 45 gün penceresi</Tag></div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.4 }}>Tüm depolarda miadı yaklaşan ürünler</div>
+                    <div style={{ marginTop: 10 }}><Tag tone={HOME_C.amber} bg={HOME_C.amberSoft}>≤ 45 gün penceresi</Tag></div>
                   </div>
                 </div>
               </ClayCard>
             </Link>
 
             {/* Anlık Maliyet */}
-            <ClayCard tone="ok" onClick={() => setIsStockCostDetailOpen(true)} hover>
-              <CardHead ico={<Banknote size={19} />} title="Anlık Maliyet" tone="ok" right={<ClayIconBtn spin onClick={() => loadStockCostSnapshot(true)}><RefreshCw size={16} /></ClayIconBtn>} />
-              <div style={{ marginTop: 14 }}>
+            <ClayCard tone="ok" onClick={() => setIsStockCostDetailOpen(true)} hover pad={16} style={{ height: '100%' }}>
+              <CardHead ico={<Banknote size={18} />} title="Anlık Maliyet" tone="ok" right={<ClayIconBtn onClick={() => computeAndSaveSnapshot('manual')}>{isRefreshingStockCost ? <Loader2 size={16} style={{ animation: 'mkSpin 0.8s linear infinite' }} /> : <RefreshCw size={16} />}</ClayIconBtn>} />
+              <div style={{ marginTop: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                   {totalStockCost === null
-                    ? <span style={{ fontSize: 34, fontWeight: 800, color: HOME_C.ink3 }}>…</span>
-                    : <CountText value={totalStockCost} format={fmtTL} style={{ fontSize: isMobile ? 30 : 36, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />}
+                    ? <span style={{ fontSize: 28, fontWeight: 800, color: HOME_C.ink3 }}>…</span>
+                    : <CountText value={totalStockCost} format={fmtTL} style={{ fontSize: isMobile ? 26 : 30, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 11, marginTop: 14, padding: '12px 16px', borderRadius: HOME_C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: 'inset 0 0 0 1px rgba(192,121,106,0.18)' }}>
-                  <span style={{ color: HOME_C.danger, display: 'inline-flex' }}><AlertTriangle size={18} /></span>
-                  <span style={{ fontSize: 13.5, fontWeight: 800, color: HOME_C.danger, letterSpacing: '0.02em' }}>RİSKLİ STOK</span>
-                  <span style={{ marginLeft: 'auto', fontSize: 17, fontWeight: 800, color: HOME_C.danger, fontVariantNumeric: 'tabular-nums' }}>{riskyCost !== null ? fmtTL(riskyCost) : '…'}</span>
+                <div style={{ fontSize: 11, fontWeight: 600, color: HOME_C.ink3, marginTop: 5 }}>
+                  {costMeta ? `${format(new Date(costMeta.computedAt), 'dd MMM HH:mm', { locale: tr })} · ${costMeta.source === 'scheduled' ? '06:00 otomatik' : costMeta.source === 'manual' ? 'elle hesaplandı' : 'ilk hesap'}` : 'hesaplanıyor…'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9, padding: '9px 13px', borderRadius: HOME_C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: 'inset 0 0 0 1px rgba(192,121,106,0.18)' }}>
+                  <span style={{ color: HOME_C.danger, display: 'inline-flex' }}><AlertTriangle size={16} /></span>
+                  <span style={{ fontSize: 12.5, fontWeight: 800, color: HOME_C.danger, letterSpacing: '0.02em' }}>RİSKLİ STOK</span>
+                  <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 800, color: HOME_C.danger, fontVariantNumeric: 'tabular-nums' }}>{riskyCost !== null ? fmtTL(riskyCost) : '…'}</span>
                 </div>
               </div>
             </ClayCard>
           </div>
 
-          {/* Trend + Today */}
-          <div style={{ display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1.55fr) minmax(0,1fr)' : '1fr', gap, animation: `mkRise 560ms ${HOME_C.ease} 150ms both` }}>
+          {/* Trend + Bugün — kompakt boy */}
+          <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: wide ? 'minmax(0,1.5fr) minmax(0,1fr)' : '1fr', gap, animation: `mkRise 560ms ${HOME_C.ease} 150ms both` }}>
             {/* Tüketim Trendi */}
-            <ClayCard onClick={() => setIsConsumptionModalOpen(true)} hover>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 6, flexWrap: 'wrap' }}>
-                <CardHead ico={<TrendingUp size={19} />} title="Tüketim Trendi" tone="accent" flush />
+            <ClayCard onClick={() => setIsConsumptionModalOpen(true)} hover pad={16}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 4, flexWrap: 'wrap' }}>
+                <CardHead ico={<TrendingUp size={18} />} title="Tüketim Trendi" tone="accent" flush />
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
                   <Segmented value={trendPeriod} onChange={(v) => setTrendPeriod(v)} options={periodSeg.map(p => ({ v: p, l: periodLabel[p] }))} />
                   <ClayIconBtn onClick={() => setIsConsumptionModalOpen(true)}><Maximize2 size={16} /></ClayIconBtn>
@@ -960,10 +830,10 @@ export default function DashboardV2({
               <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-                    <CountText value={trendTotal} style={{ fontSize: isMobile ? 32 : 40, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />
+                    <CountText value={trendTotal} style={{ fontSize: isMobile ? 28 : 34, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums' }} />
                     {trendTotal > 0 && <DeltaBadge value={trendDelta} neutralLabel="sabit" />}
                   </div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: HOME_C.ink2, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                     <span>{trendTitle}</span>
                     {trendPeak > 0 && <span style={{ color: HOME_C.ink3 }}>· zirve {fmtInt(trendPeak)}</span>}
                   </div>
@@ -973,40 +843,53 @@ export default function DashboardV2({
                   <ClayIconBtn round onClick={() => handleTrendNav('next')}><ChevronRight size={16} /></ClayIconBtn>
                 </div>
               </div>
-              <div style={{ marginTop: 8 }}>
-                <ClayLineChart data={trendSpark.length ? trendSpark : [0]} labels={trendLabels.length ? trendLabels : ['']} height={isMobile ? 180 : wide ? 176 : 210} animKey={trendPeriod + trendTitle} yTicks />
+              <div style={{ marginTop: 6 }}>
+                <ClayLineChart data={trendSpark.length ? trendSpark : [0]} labels={trendLabels.length ? trendLabels : ['']} height={isMobile ? 150 : wide ? 132 : 168} animKey={trendPeriod + trendTitle} yTicks />
               </div>
             </ClayCard>
 
-            {/* Bugün */}
-            <ClayCard>
-              <CardHead ico={<CalendarCheck size={19} />} title="Bugün" tone="accent" right={<Pill>{doneToday}/{totalToday} görev</Pill>} />
-              <div style={{ marginTop: 10, marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, color: HOME_C.ink3, marginBottom: 7 }}>
-                  <span>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span><span>%{todayPct}</span>
-                </div>
-                <ClayBar pct={todayPct} />
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: isMobile ? 'none' : wide ? 168 : 220, overflowY: 'auto', paddingRight: 4 }}>
-                {totalToday === 0 ? (
-                  <div style={{ padding: '30px 0', textAlign: 'center', color: HOME_C.ink3, fontSize: 13, fontWeight: 600 }}>Bugün için planlanmış görev yok.</div>
-                ) : todayTasks.map((t: any, i: number) => (
-                  <div key={t.id || i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 13px', borderRadius: HOME_C.radiusSm, background: t.completed ? 'rgba(111,181,133,0.09)' : HOME_C.surfaceHi, boxShadow: t.completed ? 'none' : HOME_C.clayFlat, animation: `mkPopIn ${300 + Math.min(i, 8) * 80}ms ${HOME_C.ease}` }}>
-                    <span style={{ width: 26, height: 26, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', background: t.completed ? HOME_C.waterSolid : HOME_C.surface2, boxShadow: t.completed ? '0 4px 9px -3px rgba(111,181,133,0.6)' : HOME_C.clayInset, color: t.completed ? '#fff' : HOME_C.ink3 }}>{t.completed ? <Check size={14} /> : <span style={{ width: 7, height: 7, borderRadius: '50%', background: HOME_C.accent }} />}</span>
-                    <span style={{ fontSize: 12.5, fontWeight: 700, color: HOME_C.ink3, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>{t.startTime}</span>
-                    <span style={{ flex: 1, fontSize: 14, fontWeight: 600, color: t.completed ? HOME_C.ink3 : HOME_C.ink1, textDecoration: t.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+            {/* Bugün — sol yarı etkileşimli takvim, sağ yarı seçili günün görevleri */}
+            <ClayCard pad={16}>
+              <CardHead ico={<CalendarCheck size={18} />} title="Bugün" tone="accent" right={<Pill>{doneToday}/{totalToday} görev</Pill>} />
+              <div style={{ marginTop: 12, display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'minmax(186px, 216px) 1fr', gap: 16, alignItems: 'stretch' }}>
+                {/* takvim */}
+                <MiniCalendar
+                  month={calMonth}
+                  selected={selectedDay}
+                  taskDays={taskDaySet}
+                  onSelectDay={(d) => { setSelectedDay(d); if (!isSameMonth(d, calMonth)) setCalMonth(startOfMonth(d)); }}
+                  onPrevMonth={() => setCalMonth((m) => subMonths(m, 1))}
+                  onNextMonth={() => setCalMonth((m) => addMonths(m, 1))}
+                />
+                {/* seçili günün görevleri */}
+                <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, fontSize: 12, fontWeight: 700, color: HOME_C.ink2, marginBottom: 6 }}>
+                    <span style={{ textTransform: 'capitalize' }}>{format(selectedDay, 'd MMMM EEEE', { locale: tr })}{selectedIsToday ? ' · bugün' : ''}</span>
+                    <span style={{ color: HOME_C.ink3 }}>%{todayPct}</span>
                   </div>
-                ))}
+                  <ClayBar pct={todayPct} />
+                  <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 7, maxHeight: isMobile ? 220 : 150, overflowY: 'auto', paddingRight: 4 }}>
+                    {totalToday === 0 ? (
+                      <div style={{ padding: '22px 0', textAlign: 'center', color: HOME_C.ink3, fontSize: 12.5, fontWeight: 600 }}>{selectedIsToday ? 'Bugün için planlanmış görev yok.' : 'Bu gün için planlanmış görev yok.'}</div>
+                    ) : selectedDayTasks.map((t: any, i: number) => (
+                      <div key={t.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: HOME_C.radiusSm, background: t.completed ? 'rgba(111,181,133,0.09)' : HOME_C.surfaceHi, boxShadow: t.completed ? 'none' : HOME_C.clayFlat, animation: `mkPopIn ${240 + Math.min(i, 8) * 70}ms ${HOME_C.ease}` }}>
+                        <span style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', background: t.completed ? HOME_C.waterSolid : HOME_C.surface2, boxShadow: t.completed ? '0 4px 9px -3px rgba(111,181,133,0.6)' : HOME_C.clayInset, color: t.completed ? '#fff' : HOME_C.ink3 }}>{t.completed ? <Check size={12} /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: HOME_C.accent }} />}</span>
+                        <span style={{ fontSize: 11.5, fontWeight: 700, color: HOME_C.ink3, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>{t.startTime}</span>
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: t.completed ? HOME_C.ink3 : HOME_C.ink1, textDecoration: t.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </ClayCard>
           </div>
 
-          {/* Sık Kullanılanlar — kahve kart / krem butonlar */}
-          <div style={{ animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
-          <ClayCard tone="brown" pad={isMobile ? 14 : 18}>
-            <CardHead ico={<Search size={19} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : 7}, 1fr)`, gap: isMobile ? 10 : 12, marginTop: 16 }}>
-              {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} />)}
+          {/* Sık Kullanılanlar — kalan alanı doldurur, tüm butonlar kaydırmasız sığar */}
+          <div style={{ flex: wide ? '1 1 auto' : '0 0 auto', minHeight: 0, display: 'flex', animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
+          <ClayCard tone="brown" pad={isMobile ? 14 : 16} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            <CardHead ico={<Search size={18} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : 8}, 1fr)`, gridAutoRows: wide ? '1fr' : 'auto', gap: isMobile ? 10 : 11, marginTop: 12 }}>
+              {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} dense={wide} />)}
             </div>
           </ClayCard>
           </div>
@@ -1031,65 +914,70 @@ export default function DashboardV2({
       <Dialog open={isStockCostDetailOpen} onOpenChange={setIsStockCostDetailOpen}>
         <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto border-0 p-0" style={{ background: `linear-gradient(180deg, ${HOME_C.surface} 0%, ${HOME_C.surface2} 100%)`, boxShadow: HOME_C.clay, borderRadius: HOME_C.radiusLg }}>
           <DialogHeader style={{ padding: '22px 26px 16px', borderBottom: `1px solid ${HOME_C.line}` }}>
-            <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 20, fontWeight: 800, color: HOME_C.ink1, letterSpacing: '-0.02em' }}>
-              <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: 'rgba(111,181,133,0.14)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Banknote size={20} /></span>
-              Anlık Maliyet Detayı
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: 13.5, color: HOME_C.ink2, fontWeight: 500, marginTop: 4 }}>
-              Kırılım sırası: Marka → Kurum (Depo/Lab) → Ürün.
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+              <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 20, fontWeight: 800, color: HOME_C.ink1, letterSpacing: '-0.02em' }}>
+                <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: 'rgba(111,181,133,0.14)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Banknote size={20} /></span>
+                Anlık Maliyet Detayı
+              </DialogTitle>
+              <button onClick={exportCostExcel} style={{ all: 'unset', marginLeft: 'auto', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.waterSolid}, ${HOME_C.waterDeep})`, boxShadow: `0 8px 16px -8px rgba(111,181,133,0.7)` }}>
+                <Download size={16} /> Excel
+              </button>
+            </div>
+            <DialogDescription style={{ fontSize: 13.5, color: HOME_C.ink2, fontWeight: 500, marginTop: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span>Depo ve laboratuvar bazında kırılım.</span>
+              <span style={{ fontWeight: 800, color: HOME_C.ink1 }}>Toplam: {totalStockCost !== null ? fmtTL(totalStockCost) : '…'}</span>
+              {costMeta && <span style={{ color: HOME_C.ink3 }}>· {format(new Date(costMeta.computedAt), 'dd MMM yyyy HH:mm', { locale: tr })}</span>}
             </DialogDescription>
           </DialogHeader>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 26px 26px' }}>
-            {stockCostBreakdown.length === 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18, padding: '16px 26px 26px' }}>
+            {(costByDepot.length === 0 && costByLab.length === 0) ? (
               <p style={{ fontSize: 14, color: HOME_C.ink3, fontWeight: 600, textAlign: 'center', padding: '40px 0' }}>Detay verisi bulunamadı.</p>
-            ) : stockCostBreakdown.map((brand) => (
-              <details key={brand.brand} style={{ borderRadius: HOME_C.radius, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, padding: 14 }} open>
-                <summary style={{ cursor: 'pointer', listStyle: 'none', fontWeight: 800, fontSize: 14.5, color: HOME_C.ink1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <span>{brand.brand}</span>
-                  <span style={{ color: HOME_C.waterDeep, fontVariantNumeric: 'tabular-nums' }}>
-                    {fmtTL(brand.tryTotal)}
-                  </span>
-                </summary>
-                <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {brand.locations.map((location) => (
-                    <details key={`${location.type}-${location.id}`} style={{ borderRadius: HOME_C.radiusSm, background: HOME_C.surface2, boxShadow: HOME_C.clayInset, padding: 12 }}>
-                      <summary style={{ cursor: 'pointer', listStyle: 'none', fontSize: 13.5, fontWeight: 700, color: HOME_C.ink1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                          <Tag tone={location.type === 'depo' ? HOME_C.accent : HOME_C.skyDeep} bg={location.type === 'depo' ? `${HOME_C.accent}16` : 'rgba(124,168,222,0.16)'}>{location.type === 'depo' ? 'Depo' : 'Lab'}</Tag>
-                          {location.name}
-                        </span>
-                        <span style={{ fontWeight: 700, color: HOME_C.ink2, fontVariantNumeric: 'tabular-nums' }}>
-                          {fmtTL(location.tryTotal)}
-                        </span>
-                      </summary>
-                      <div style={{ marginTop: 10, overflowX: 'auto' }}>
-                        <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ textAlign: 'left', color: HOME_C.ink3, borderBottom: `1px solid ${HOME_C.line}` }}>
-                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Stok Kodu</th>
-                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Ürün</th>
-                              <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Adet</th>
-                              <th style={{ padding: '6px 0 6px 8px', fontWeight: 700, textAlign: 'right' }}>Toplam (TRY)</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {location.products.map((product) => (
-                              <tr key={product.stokKodu} style={{ borderBottom: `1px solid ${HOME_C.line}` }}>
-                                <td style={{ padding: '7px 8px 7px 0', fontFamily: 'ui-monospace, monospace', color: HOME_C.ink2 }}>{product.stokKodu}</td>
-                                <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink1, fontWeight: 600 }}>{product.stokAdi}</td>
-                                <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink2 }}>{product.quantity}</td>
-                                <td style={{ padding: '7px 0 7px 8px', textAlign: 'right', fontWeight: 700, color: HOME_C.ink1, fontVariantNumeric: 'tabular-nums' }}>
-                                  {fmtTL(product.tryTotal)}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </details>
-                  ))}
+            ) : ([
+              { key: 'depo', title: 'Depolar', icon: <Warehouse size={17} />, rows: costByDepot, tone: HOME_C.accent, bg: `${HOME_C.accent}16` },
+              { key: 'lab', title: 'Laboratuvarlar', icon: <FlaskConical size={17} />, rows: costByLab, tone: HOME_C.skyDeep, bg: 'rgba(124,168,222,0.16)' },
+            ] as const).map((section) => section.rows.length === 0 ? null : (
+              <div key={section.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 15, fontWeight: 800, color: HOME_C.ink1 }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center', color: section.tone, background: section.bg }}>{section.icon}</span>
+                  {section.title}
+                  <span style={{ marginLeft: 'auto', color: HOME_C.waterDeep, fontVariantNumeric: 'tabular-nums' }}>{fmtTL(section.rows.reduce((a, l) => a + l.tryTotal, 0))}</span>
                 </div>
-              </details>
+                {section.rows.map((location) => (
+                  <details key={`${location.type}-${location.id}`} style={{ borderRadius: HOME_C.radius, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, padding: 14 }}>
+                    <summary style={{ cursor: 'pointer', listStyle: 'none', fontSize: 14, fontWeight: 700, color: HOME_C.ink1, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        {location.name}
+                        <span style={{ fontSize: 11.5, fontWeight: 600, color: HOME_C.ink3 }}>· {location.products.length} ürün · {location.quantity} adet</span>
+                      </span>
+                      <span style={{ fontWeight: 800, color: HOME_C.waterDeep, fontVariantNumeric: 'tabular-nums' }}>{fmtTL(location.tryTotal)}</span>
+                    </summary>
+                    <div style={{ marginTop: 10, overflowX: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: 12.5, borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ textAlign: 'left', color: HOME_C.ink3, borderBottom: `1px solid ${HOME_C.line}` }}>
+                            <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Stok Kodu</th>
+                            <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Ürün</th>
+                            <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Marka</th>
+                            <th style={{ padding: '6px 8px 6px 0', fontWeight: 700 }}>Adet</th>
+                            <th style={{ padding: '6px 0 6px 8px', fontWeight: 700, textAlign: 'right' }}>Toplam (TRY)</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {location.products.map((product) => (
+                            <tr key={product.stokKodu} style={{ borderBottom: `1px solid ${HOME_C.line}` }}>
+                              <td style={{ padding: '7px 8px 7px 0', fontFamily: 'ui-monospace, monospace', color: HOME_C.ink2 }}>{product.stokKodu}</td>
+                              <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink1, fontWeight: 600 }}>{product.stokAdi}</td>
+                              <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink2 }}>{product.brand}</td>
+                              <td style={{ padding: '7px 8px 7px 0', color: HOME_C.ink2 }}>{product.quantity}</td>
+                              <td style={{ padding: '7px 0 7px 8px', textAlign: 'right', fontWeight: 700, color: HOME_C.ink1, fontVariantNumeric: 'tabular-nums' }}>{fmtTL(product.tryTotal)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </details>
+                ))}
+              </div>
             ))}
           </div>
         </DialogContent>
