@@ -2116,7 +2116,14 @@ export default function TotalVerimlilikPanel({
     });
 
     const fileName = `Total_Verimlilik_${selectedPool?.name || 'Rapor'}_${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}`;
-    exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
+    // Özelleştirilmiş, biçimlendirilmiş Excel (freeze + renkli sütunlar + kenarlık +
+    // Kalması Gereken Stok sütunu + kırmızı satırlar). Hata olursa düz export'a düş.
+    import('@/lib/totalVerimlilikExcel')
+      .then(({ exportTotalVerimlilikStyledExcel }) => exportTotalVerimlilikStyledExcel(dataToExport, fileName))
+      .catch((err) => {
+        console.error('[TotalVerimlilik] styled excel export failed, falling back:', err);
+        exportDataToExcel(dataToExport, fileName, 'Veriler', toast);
+      });
   }, [rows, selectedPoolId, efficiencyPools, selectedYear, selectedMonth, toast, interLabTransfers, selectedBrand, selectedUrunGrubu, productCodes]);
 
   // Phase 5 - Excel Dosyası Yükle ve Verileri Aktar
