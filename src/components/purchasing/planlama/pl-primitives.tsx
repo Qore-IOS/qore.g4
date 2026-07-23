@@ -26,6 +26,7 @@ export interface Task {
   laboratoryLat?: number;
   laboratoryLng?: number;
   invitations?: TaskInvite[];
+  userId?: string;
   locationVerifiedAt?: any;
   createdAt?: any;
 }

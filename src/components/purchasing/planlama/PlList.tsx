@@ -16,9 +16,10 @@ interface ListProps {
   onToggle: (id: string) => void; onToggleSub: (tid: string, sid: string) => void;
   onAddSub: (tid: string, title: string) => void;
   onEdit: (t: Task) => void; onDelete: (id: string) => void; onAdd: () => void;
+  pendingInviteCount?: number; onPendingInvites?: () => void;
 }
 
-const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, selectedDate, setSelectedDate, onToggle, onToggleSub, onAddSub, onEdit, onDelete, onAdd }) => {
+const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, selectedDate, setSelectedDate, onToggle, onToggleSub, onAddSub, onEdit, onDelete, onAdd, pendingInviteCount = 0, onPendingInvites }) => {
   const mobile = mode === 'mobile';
   const today = selectedDate || plToday();
   const td = plParse(today);
@@ -67,6 +68,7 @@ const PlList: React.FC<ListProps> = ({ ac, mode, tasks, filter, setFilter, selec
           <div style={{ fontFamily: 'var(--serif)', fontWeight: 800, fontSize: mobile ? 76 : 110, lineHeight: 0.92, color: 'var(--ink-1)', letterSpacing: '-0.02em' }}>{td.getDate()}</div>
           <div style={{ fontFamily: 'var(--serif)', fontWeight: 700, fontSize: mobile ? 50 : 72, lineHeight: 0.95, color: 'var(--ink-1)', letterSpacing: '0.01em' }}>{PL_EN_MON[td.getMonth()]}</div>
         </div>
+        <button onClick={onPendingInvites} style={{ all: 'unset', cursor: 'pointer', alignSelf: 'center', padding: mobile ? '9px 10px' : '10px 14px', borderRadius: 'var(--radius-sm)', background: pendingInviteCount ? 'rgba(201,138,87,0.16)' : 'var(--surface-2)', boxShadow: 'var(--clay-inset)', color: 'var(--ink-2)', fontSize: 12, fontWeight: 800, textAlign: 'center', whiteSpace: 'nowrap' }}>Bekleyen<br />davetler{pendingInviteCount ? ` · ${pendingInviteCount}` : ''}</button>
         <div style={{ width: 1, background: 'var(--line)', alignSelf: 'stretch', margin: mobile ? '6px 0' : '10px 0' }} />
         <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: mobile ? 18 : 26, minWidth: mobile ? 96 : 130 }}>
           <div>

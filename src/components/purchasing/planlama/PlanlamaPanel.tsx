@@ -9,7 +9,7 @@ import {
   collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
 } from 'firebase/firestore';
 import {
-  AC, PL_DOW, PL_MON, PL_PRI, PlStyles, PlIconBtn, PlToast, PlCheck, useContainerMode, uid,
+  AC, PL_DOW, PL_MON, PL_PRI, PlStyles, PlIconBtn, PlToast, PlCheck, PlModal, PlModalHead, PlBtn, useContainerMode, uid,
   plToday, plParse, plRelative,
   type Task, type Mode, type SubTask, type TaskInvite,
 } from './pl-primitives';
@@ -65,6 +65,7 @@ const toTask = (id: string, d: any): Task => ({
   laboratoryLat: typeof d.laboratoryLat === 'number' ? d.laboratoryLat : undefined,
   laboratoryLng: typeof d.laboratoryLng === 'number' ? d.laboratoryLng : undefined,
   invitations: Array.isArray(d.invitations) ? d.invitations : [],
+  userId: d.userId || '',
   locationVerifiedAt: d.locationVerifiedAt,
   createdAt: typeof d.createdAt === 'number' ? d.createdAt : (d.createdAt?.toMillis?.() ?? 0),
 });
@@ -92,6 +93,7 @@ export default function PlanlamaPanel() {
   const [toast, setToast] = React.useState<any>(null);
   const [laboratories, setLaboratories] = React.useState<{ id: string; name: string; lat?: number; lng?: number }[]>([]);
   const [personnel, setPersonnel] = React.useState<{ uid: string; name: string; role: string }[]>([]);
+  const [inviteModal, setInviteModal] = React.useState(false);
   const toastRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fire = (t: any) => {
@@ -202,6 +204,18 @@ export default function PlanlamaPanel() {
     catch (e) { console.error(e); }
     syncTask({ ...t, done: !t.done }, 'upsert');
   };
+  const respondToInvite = async (taskId: string, status: 'accepted' | 'declined') => {
+    if (!currentUser) return;
+    const task = tasks.find((item) => item.id === taskId); if (!task) return;
+    const invitations = (task.invitations || []).map((invite) => invite.uid === currentUser.uid ? { ...invite, status, respondedAt: Date.now() } : invite);
+    patchLocal(taskId, (item) => ({ ...item, invitations }));
+    try {
+      await updateDoc(doc(db, COLLECTION, taskId), { invitations, updatedAt: serverTimestamp() });
+      if (status === 'accepted') syncTask({ ...task, invitations }, 'upsert');
+      if (task.userId) await createNotification({ type: 'custom', channel: 'push', title: status === 'accepted' ? 'Görev daveti kabul edildi' : 'Görev daveti iptal edildi', message: `${currentUserProfile?.name || 'Personel'}, “${task.title}” görev davetine ${status === 'accepted' ? 'katılacağını bildirdi' : 'katılamayacağını bildirdi'}.`, href: '/satin-alma/planlama', actor: { uid: currentUser.uid, name: currentUserProfile?.name || 'QORE' }, targets: [`user:${task.userId}`], meta: { taskId, invitationResponse: status } });
+      fire({ tone: 'ok', title: status === 'accepted' ? 'Davet kabul edildi' : 'Davet iptal edildi', sub: task.title });
+    } catch (error) { console.error(error); fire({ title: 'Davet güncellenemedi' }); }
+  };
   const toggleSub = async (tid: string, sid: string) => {
     const t = tasks.find((x) => x.id === tid); if (!t) return;
     const subs = t.subs.map((s) => s.id === sid ? { ...s, done: !s.done } : s);
@@ -274,6 +288,7 @@ export default function PlanlamaPanel() {
   const visible = searchOpen && search.trim()
     ? tasks.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()) || (t.note || '').toLowerCase().includes(search.toLowerCase()))
     : tasks;
+  const pendingInvites = tasks.filter((task) => task.invitations?.some((invite) => invite.uid === currentUser?.uid && invite.status === 'pending'));
 
   const pad = mode === 'mobile' ? '16px 14px 100px' : mode === 'tablet' ? '22px 24px 64px' : '28px clamp(24px, 3vw, 52px) 64px';
 
@@ -300,7 +315,7 @@ export default function PlanlamaPanel() {
           </div>
         ) : (
           <div style={{ animation: 'plFadeIn 300ms var(--ease-fluid)', display: mode === 'wide' ? 'grid' : 'block', gridTemplateColumns: mode === 'wide' ? 'minmax(0, 1.45fr) minmax(360px, 0.55fr)' : undefined, gap: mode === 'wide' ? 28 : undefined, alignItems: 'start' }}>
-            <PlList ac={AC} mode={mode} tasks={visible} filter={filter} setFilter={setFilter} selectedDate={selectedDate} setSelectedDate={setSelectedDate}
+            <PlList ac={AC} mode={mode} tasks={visible} filter={filter} setFilter={setFilter} selectedDate={selectedDate} setSelectedDate={setSelectedDate} pendingInviteCount={pendingInvites.length} onPendingInvites={() => setInviteModal(true)}
               onToggle={toggleTask} onToggleSub={toggleSub} onAddSub={addSub} onEdit={(t) => setTaskModal(t)} onDelete={delTask} onAdd={() => setTaskModal({ presetDate: selectedDate })} />
             {mode === 'wide' && <PlDesktopAside ac={AC} tasks={visible} selectedDate={selectedDate} setSelectedDate={setSelectedDate} onToggle={toggleTask} onAdd={(d) => setTaskModal({ presetDate: d })} />}
           </div>
@@ -310,11 +325,25 @@ export default function PlanlamaPanel() {
 
 
       <PlTaskModal ac={AC} mode={mode} open={!!taskModal} task={taskModal} onClose={() => setTaskModal(null)} onSave={saveTask} onDelete={delTask} laboratories={laboratories} personnel={personnel} />
+      <PlInviteModal ac={AC} open={inviteModal} tasks={pendingInvites} onClose={() => setInviteModal(false)} onRespond={respondToInvite} />
       <PlAnalytics ac={AC} mode={mode} open={analytics} tasks={tasks} onClose={() => setAnalytics(false)} />
       <PlToast toast={toast} ac={AC} />
     </div>
   );
 }
+
+const PlInviteModal = ({ ac, open, tasks, onClose, onRespond }: { ac: any; open: boolean; tasks: Task[]; onClose: () => void; onRespond: (id: string, status: 'accepted' | 'declined') => void }) => (
+  <PlModal open={open} onClose={onClose} width={560}>
+    <PlModalHead ico="calendar" title="Bekleyen davetler" onClose={onClose} ac={ac} />
+    <div style={{ padding: 20, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      {tasks.length ? tasks.map((task) => <div key={task.id} style={{ padding: 15, borderRadius: 'var(--radius)', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)' }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: 'var(--ink-1)' }}>{task.title}</div>
+        <div style={{ marginTop: 4, fontSize: 12.5, fontWeight: 600, color: 'var(--ink-3)' }}>{plRelative(task.date)}{task.time ? ` · ${task.time}` : ''}{task.laboratoryName ? ` · ${task.laboratoryName}` : ''}</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 14 }}><PlBtn variant="primary" ac={ac} onClick={() => onRespond(task.id, 'accepted')} style={{ height: 38, padding: '0 14px' }}>Kabul et</PlBtn><PlBtn variant="ghost" ac={ac} onClick={() => onRespond(task.id, 'declined')} style={{ height: 38, padding: '0 14px' }}>İptal et</PlBtn></div>
+      </div>) : <div style={{ padding: '36px 12px', textAlign: 'center', color: 'var(--ink-3)', fontWeight: 700 }}>Bekleyen davetiniz yok.</div>}
+    </div>
+  </PlModal>
+);
 
 
 const PlDesktopAside = ({ ac, tasks, selectedDate, setSelectedDate, onToggle, onAdd }: any) => {
