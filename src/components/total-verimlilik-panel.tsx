@@ -3216,6 +3216,41 @@ export default function TotalVerimlilikPanel({
     return map;
   }, [visibleCols]);
 
+  // Excel benzeri hücre gezinme: oklar / Enter (aşağı, Shift+Enter yukarı) /
+  // Tab (sağa, Shift+Tab sola) / Home-End (satır başı-sonu). Düzenlenebilir
+  // hücreler (input.tv-cell-input) her satırda aynı sayıda ve DOM sırasıyla
+  // satır-major olduğundan, hedef indeksi sabit sütun sayısı (C) ile bulunur.
+  const handleGridKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    const el = e.target as HTMLElement;
+    if (!(el instanceof HTMLInputElement) || !el.classList.contains('tv-cell-input')) return;
+    const parent = tableParentRef.current;
+    if (!parent) return;
+    const inputs = Array.from(parent.querySelectorAll<HTMLInputElement>('input.tv-cell-input'));
+    const i = inputs.indexOf(el);
+    if (i < 0) return;
+    const tr = el.closest('tr');
+    const C = Math.max(1, tr ? tr.querySelectorAll('input.tv-cell-input').length : 1);
+    const rowStart = i - (i % C);
+    let target = -1;
+    switch (e.key) {
+      case 'Enter':      target = e.shiftKey ? i - C : i + C; break;
+      case 'ArrowDown':  target = i + C; break;
+      case 'ArrowUp':    target = i - C; break;
+      case 'ArrowRight': target = i + 1; break;
+      case 'ArrowLeft':  target = i - 1; break;
+      case 'Tab':        target = e.shiftKey ? i - 1 : i + 1; break;
+      case 'Home':       target = e.ctrlKey ? 0 : rowStart; break;
+      case 'End':        target = e.ctrlKey ? inputs.length - 1 : rowStart + C - 1; break;
+      default: return;
+    }
+    e.preventDefault(); // sayısal input'larda ok tuşlarının değeri değiştirmesini de engeller
+    if (target < 0 || target >= inputs.length) return;
+    const t = inputs[target];
+    t.focus();
+    try { t.select(); } catch { /* number input select may throw */ }
+    t.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, []);
+
   const resolveFilterValue = useCallback((row: TableRow, colId: string): unknown => {
     if (colId.startsWith('fx_')) {
       const fxId = colId.replace('fx_', '');
@@ -4359,7 +4394,7 @@ export default function TotalVerimlilikPanel({
               />
             </div>
             <ScrollArea className="w-full h-[calc(100%-22px)]" ref={scrollContainerRef}>
-              <div ref={tableParentRef} style={{ minWidth: visibleCols.reduce((s, c) => s + c.w, 0) + 36 }}>
+              <div ref={tableParentRef} onKeyDown={handleGridKeyDown} style={{ minWidth: visibleCols.reduce((s, c) => s + c.w, 0) + 36 }}>
                 <table className="border-separate border-spacing-0 w-full">
                   <thead>
                     <tr>
