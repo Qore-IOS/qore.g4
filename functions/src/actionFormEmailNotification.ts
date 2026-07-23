@@ -394,15 +394,18 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
     currentY += 18;
 
     autoTable(doc, {
-      head: [[tr('Parça'), tr('Kod'), tr('Adet'), tr('Birim')]],
+      head: [[tr('Parça'), tr('Kod'), tr('Seri No'), tr('Adet'), tr('Birim')]],
       body: trRows(parts.map((act: any) => {
         let partName = act.stokAdi || act.action;
         if (act.isManualEntry && act.stokKodu && act.stokAdi) {
           partName = `${act.stokKodu} - ${act.stokAdi}`;
         }
+        const serial = (act.serialNumber || '').trim();
+        const displayPartName = serial ? `${partName} (SN: ${serial})` : partName;
         return [
-          partName,
+          displayPartName,
           act.stokKodu || '-',
+          serial || '-',
           String(act.quantity),
           act.anaBirim ? act.anaBirim.toLowerCase() : 'adet',
         ];
