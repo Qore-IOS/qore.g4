@@ -215,6 +215,45 @@ export default function AplikasyonIslemFormuPage() {
   const [baslangicTarihi, setBaslangicTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
   const [bitisTarihi, setBitisTarihi] = useState<string>(format(new Date(), 'yyyy-MM-dd'));
 
+  // Tarih/saat seçiminde henüz gelmemiş (gelecek) bir zaman seçilmesini engelle.
+  // "max" attribute'u ileri günleri, aşağıdaki handler'lar ise ileri saatleri engeller.
+  const todayDateStr = format(new Date(), 'yyyy-MM-dd');
+
+  const isFutureDateTime = (dateStr: string, timeStr: string): boolean => {
+    if (!dateStr) return false;
+    const [y, m, d] = dateStr.split('-').map(Number);
+    if (!y || !m || !d) return false;
+    let hh = 0;
+    let mm = 0;
+    if (timeStr) {
+      const [h, min] = timeStr.split(':').map(Number);
+      hh = Number.isFinite(h) ? h : 0;
+      mm = Number.isFinite(min) ? min : 0;
+    }
+    const selected = new Date(y, m - 1, d, hh, mm, 0, 0);
+    return selected.getTime() > Date.now();
+  };
+
+  const handleDateChange = (field: 'baslangic' | 'bitis', value: string) => {
+    const timeStr = field === 'baslangic' ? baslangicSaati : bitisSaati;
+    if (isFutureDateTime(value, timeStr)) {
+      toast({ title: 'Geçersiz Tarih', description: 'İleri bir tarih seçilemez. Henüz gelmemiş bir tarih seçtiniz.', variant: 'destructive' });
+      return;
+    }
+    if (field === 'baslangic') setBaslangicTarihi(value);
+    else setBitisTarihi(value);
+  };
+
+  const handleTimeChange = (field: 'baslangic' | 'bitis', value: string) => {
+    const dateStr = field === 'baslangic' ? baslangicTarihi : bitisTarihi;
+    if (isFutureDateTime(dateStr, value)) {
+      toast({ title: 'Geçersiz Saat', description: 'İleri bir saat seçilemez. Henüz gelmemiş bir saat seçtiniz.', variant: 'destructive' });
+      return;
+    }
+    if (field === 'baslangic') setBaslangicSaati(value);
+    else setBitisSaati(value);
+  };
+
 
   const [isSignatureModalOpen, setIsSignatureModalOpen] = useState(false);
   const [signatureStep, setSignatureStep] = useState<'pre_questions' | 'personnel' | 'technician'>('pre_questions');
@@ -1518,6 +1557,16 @@ export default function AplikasyonIslemFormuPage() {
       return;
     }
 
+    // Henüz gelmemiş (gelecek) bir tarih/saat seçilemez.
+    if (isFutureDateTime(baslangicTarihi, baslangicSaati)) {
+      toast({ title: 'Geçersiz Tarih', description: 'Başlangıç tarihi/saati ileri bir zaman olamaz.', variant: 'destructive' });
+      return;
+    }
+    if (isFutureDateTime(bitisTarihi, bitisSaati)) {
+      toast({ title: 'Geçersiz Tarih', description: 'Bitiş tarihi/saati ileri bir zaman olamaz.', variant: 'destructive' });
+      return;
+    }
+
     // Validate açıklama (zorunlu)
     if (!aciklama.trim()) {
       toast({ title: 'Eksik Bilgi', description: 'Lütfen açıklama alanını doldurun.', variant: 'destructive' });
@@ -2750,19 +2799,19 @@ export default function AplikasyonIslemFormuPage() {
             <div className="wizard-datetime-grid">
               <div>
                 <label>Başlangıç Tarihi *</label>
-                <input type="date" value={baslangicTarihi} onChange={(e) => setBaslangicTarihi(e.target.value)} />
+                <input type="date" max={todayDateStr} value={baslangicTarihi} onChange={(e) => handleDateChange('baslangic', e.target.value)} />
               </div>
               <div>
                 <label>Başlangıç Saati *</label>
-                <input type="time" value={baslangicSaati} onChange={(e) => setBaslangicSaati(e.target.value)} />
+                <input type="time" value={baslangicSaati} onChange={(e) => handleTimeChange('baslangic', e.target.value)} />
               </div>
               <div>
                 <label>Bitiş Tarihi *</label>
-                <input type="date" value={bitisTarihi} onChange={(e) => setBitisTarihi(e.target.value)} />
+                <input type="date" max={todayDateStr} value={bitisTarihi} onChange={(e) => handleDateChange('bitis', e.target.value)} />
               </div>
               <div>
                 <label>Bitiş Saati *</label>
-                <input type="time" value={bitisSaati} onChange={(e) => setBitisSaati(e.target.value)} />
+                <input type="time" value={bitisSaati} onChange={(e) => handleTimeChange('bitis', e.target.value)} />
               </div>
             </div>
             <p style={{ fontSize: '12px', color: 'rgba(255,255,255,0.4)', marginTop: '12px' }}>
