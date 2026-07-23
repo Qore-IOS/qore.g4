@@ -264,7 +264,7 @@ export default function PlanlamaPanel() {
           <div style={{ animation: 'plFadeIn 300ms var(--ease-fluid)', display: mode === 'wide' ? 'grid' : 'block', gridTemplateColumns: mode === 'wide' ? 'minmax(0, 1.45fr) minmax(360px, 0.55fr)' : undefined, gap: mode === 'wide' ? 28 : undefined, alignItems: 'start' }}>
             <PlList ac={AC} mode={mode} tasks={visible} filter={filter} setFilter={setFilter} selectedDate={selectedDate} setSelectedDate={setSelectedDate}
               onToggle={toggleTask} onToggleSub={toggleSub} onAddSub={addSub} onEdit={(t) => setTaskModal(t)} onDelete={delTask} onAdd={() => setTaskModal({ presetDate: selectedDate })} />
-            {mode === 'wide' && <PlDesktopAside ac={AC} tasks={visible} selectedDate={selectedDate} setSelectedDate={setSelectedDate} onToggle={toggleTask} onEdit={(t) => setTaskModal(t)} onAdd={(d) => setTaskModal({ presetDate: d })} />}
+            {mode === 'wide' && <PlDesktopAside ac={AC} tasks={visible} selectedDate={selectedDate} setSelectedDate={setSelectedDate} onToggle={toggleTask} onAdd={(d) => setTaskModal({ presetDate: d })} />}
           </div>
         )}
       </div>
@@ -279,7 +279,7 @@ export default function PlanlamaPanel() {
 }
 
 
-const PlDesktopAside = ({ ac, tasks, selectedDate, setSelectedDate, onToggle, onEdit, onAdd }: any) => {
+const PlDesktopAside = ({ ac, tasks, selectedDate, setSelectedDate, onToggle, onAdd }: any) => {
   const d0 = plParse(selectedDate || plToday());
   const cursor = { y: d0.getFullYear(), m: d0.getMonth() };
   const pref = `${cursor.y}-${String(cursor.m + 1).padStart(2, '0')}`;
@@ -312,7 +312,7 @@ const PlDesktopAside = ({ ac, tasks, selectedDate, setSelectedDate, onToggle, on
             const isToday = iso === plToday();
             const allDone = items.length > 0 && items.every((t) => t.done);
             return (
-              <button key={iso} onMouseEnter={() => setSelectedDate(iso)} onFocus={() => setSelectedDate(iso)} onClick={() => setSelectedDate(iso)} style={{ all: 'unset', cursor: 'pointer', aspectRatio: '1', minHeight: 45, borderRadius: 'var(--radius-sm)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, background: isSel ? `linear-gradient(180deg, ${ac.accent}, ${ac.primary})` : isToday ? `${ac.primary}14` : (items.length ? 'var(--surface-hi)' : 'transparent'), boxShadow: isSel ? `0 8px 16px -7px ${ac.glow}` : (items.length ? 'var(--clay-flat)' : 'none'), color: isSel ? '#fff' : 'var(--ink-2)', transition: 'all 180ms var(--ease-fluid)' }}>
+              <button key={iso} onClick={() => setSelectedDate(iso)} style={{ all: 'unset', cursor: 'pointer', aspectRatio: '1', minHeight: 45, borderRadius: 'var(--radius-sm)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 3, background: isSel ? `linear-gradient(180deg, ${ac.accent}, ${ac.primary})` : isToday ? `${ac.primary}14` : (items.length ? 'var(--surface-hi)' : 'transparent'), boxShadow: isSel ? `0 8px 16px -7px ${ac.glow}` : (items.length ? 'var(--clay-flat)' : 'none'), color: isSel ? '#fff' : 'var(--ink-2)', transition: 'all 180ms var(--ease-fluid)' }}>
                 <span style={{ fontSize: 14.5, fontWeight: 800 }}>{day}</span>
                 {items.length > 0 && (allDone ? <span style={{ color: isSel ? '#fff' : 'var(--water-deep)', fontSize: 13, fontWeight: 900 }}>✓</span> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: isSel ? '#fff' : ac.primary }} />)}
               </button>
@@ -323,7 +323,7 @@ const PlDesktopAside = ({ ac, tasks, selectedDate, setSelectedDate, onToggle, on
       <section style={{ flex: 1, minHeight: 0, padding: 22, borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', overflow: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}><h3 style={{ margin: 0, fontSize: 20, fontWeight: 800, color: 'var(--ink-1)' }}>Tüm görevler</h3><div style={{ flex: 1 }} /><PlIconBtn onClick={() => onAdd(selectedDate)} hot ac={ac} size={38} ariaLabel="Görev ekle"><Plus size={18} /></PlIconBtn></div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {all.map((t: Task) => { const pri = PL_PRI[t.pri]; return <div key={t.id} onMouseEnter={() => setSelectedDate(t.date)} onClick={() => onEdit(t)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', borderRadius: 'var(--radius)', background: t.date === selectedDate ? `${ac.primary}14` : 'var(--surface-hi)', boxShadow: 'var(--clay-flat)', cursor: 'pointer', opacity: t.done ? 0.65 : 1 }}><PlCheck done={t.done} onClick={() => onToggle(t.id)} color={pri.solid} size={23} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--ink-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: t.done ? 'line-through' : 'none' }}>{t.title}</div><div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', marginTop: 2 }}>{plRelative(t.date)}{t.time ? ` · ${t.time}` : ''}</div></div><span style={{ width: 8, height: 8, borderRadius: '50%', background: pri.solid }} /></div>; })}
+          {all.map((t: Task) => { const pri = PL_PRI[t.pri]; return <div key={t.id} onClick={() => setSelectedDate(t.date)} style={{ display: 'flex', alignItems: 'center', gap: 11, padding: '12px 14px', borderRadius: 'var(--radius)', background: t.date === selectedDate ? `${ac.primary}14` : 'var(--surface-hi)', boxShadow: 'var(--clay-flat)', cursor: 'pointer', opacity: t.done ? 0.65 : 1 }}><PlCheck done={t.done} onClick={() => onToggle(t.id)} color={pri.solid} size={23} /><div style={{ flex: 1, minWidth: 0 }}><div style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--ink-1)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', textDecoration: t.done ? 'line-through' : 'none' }}>{t.title}</div><div style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', marginTop: 2 }}>{plRelative(t.date)}{t.time ? ` · ${t.time}` : ''}</div></div><span style={{ width: 8, height: 8, borderRadius: '50%', background: pri.solid }} /></div>; })}
         </div>
       </section>
     </aside>
