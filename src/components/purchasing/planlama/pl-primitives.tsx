@@ -9,6 +9,7 @@ import {
 /* ─────────────────────────── types ─────────────────────────── */
 export type Priority = 'high' | 'mid' | 'low';
 export interface SubTask { id: string; title: string; done: boolean; }
+export interface TaskInvite { uid: string; name: string; status: 'pending' | 'accepted' | 'declined'; respondedAt?: number; }
 export interface Task {
   id: string;
   title: string;
@@ -19,6 +20,14 @@ export interface Task {
   end?: string;   // HH:MM
   done: boolean;
   subs: SubTask[];
+  labVisit?: boolean;
+  laboratoryId?: string;
+  laboratoryName?: string;
+  laboratoryLat?: number;
+  laboratoryLng?: number;
+  invitations?: TaskInvite[];
+  userId?: string;
+  locationVerifiedAt?: any;
   createdAt?: any;
 }
 export type Mode = 'mobile' | 'tablet' | 'wide';
