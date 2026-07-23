@@ -17,7 +17,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Barcode, Trash2, CheckCircle, Loader2, Search, AlertTriangle, Undo, Info, History } from 'lucide-react';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot, deleteField } from 'firebase/firestore';
+import { touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { LabSelector } from '@/components/common/LabSelector';
@@ -259,15 +260,19 @@ export default function UrunIadePanel() {
         isShipped: false,
         depotId: selectedDepotId,
         depotName: depotName,
-        hedefKurum: null,
-        hedefKurumId: null,
-        sevkTarihi: null,
+        hedefKurum: deleteField(),
+        hedefKurumId: deleteField(),
+        sevkTarihi: deleteField(),
+        transferId: deleteField(),
+        sourceDepotId: deleteField(),
+        sourceDepotName: deleteField(),
         rafAdresi: 'IADE' 
       });
     });
 
     try {
       await batch.commit();
+      await touchStockMetadata();
       toast({ title: 'İade Başarılı', description: `${itemsToProcess.length} ürün depoya geri alındı.` });
       setReturnItems([]);
     } catch (e) {

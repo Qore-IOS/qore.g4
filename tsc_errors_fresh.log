@@ -1,0 +1,31 @@
+﻿node.exe : node:internal/modules/cjs/loader:1210
+At line:1 char:11
++ $output = & node node_modules/typescript/bin/tsc --noEmit 2>&1 | Out- ...
++           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (node:internal/modules/cjs/loader:1210:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  throw err;
+  ^
+
+Error: Cannot find module '../lib/tsc.js'
+Require stack:
+- C:\Users\btuba\Desktop\qore.g4\node_modules\typescript\bin\tsc
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1207:15)
+    at Module._load (node:internal/modules/cjs/loader:1038:27)
+    at Module.require (node:internal/modules/cjs/loader:1289:19)
+    at require (node:internal/modules/helpers:182:18)
+    at Object.<anonymous> (C:\Users\btuba\Desktop\qore.g4\node_modules\typescript\bin\tsc:2:1)
+    at Module._compile (node:internal/modules/cjs/loader:1521:14)
+    at Module._extensions..js (node:internal/modules/cjs/loader:1623:10)
+    at Module.load (node:internal/modules/cjs/loader:1266:32)
+    at Module._load (node:internal/modules/cjs/loader:1091:12)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:164:12) {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: [
+    'C:\\Users\\btuba\\Desktop\\qore.g4\\node_modules\\typescript\\bin\\tsc'
+  ]
+}
+
+Node.js v20.20.2
+

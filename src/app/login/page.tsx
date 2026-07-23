@@ -5,6 +5,12 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, Lock, Eye, EyeOff, Check, ArrowRight, Loader2, Sparkle } from 'lucide-react';
 
+const RIBBON_TURN_DURATION_MS = 480;
+const RIBBON_LAYER_STAGGER_MS = 120;
+const RIBBON_CORNER_STAGGER_MS = 60;
+const RIBBON_SUCCESS_WINDOW_MS =
+  RIBBON_TURN_DURATION_MS + RIBBON_LAYER_STAGGER_MS * 2 + RIBBON_CORNER_STAGGER_MS + 60;
+
 /* clay tokens + keyframes, scoped to the login screen (cream, theme-independent) */
 const CSS = `
 .qlogin {
@@ -36,11 +42,30 @@ const CSS = `
 @keyframes qPopIn { from { opacity: 0; transform: scale(0.9); } to { opacity: 1; transform: none; } }
 @keyframes qSpin { to { transform: rotate(360deg); } }
 @keyframes qShake { 10%,90% { transform: translateX(-2px); } 30%,70% { transform: translateX(4px); } 50% { transform: translateX(-5px); } }
-@media (prefers-reduced-motion: reduce) { .qlogin * { animation-duration: 0.01ms !important; } }
+@keyframes qRibbonHalfTurn { from { transform: rotate(0deg); } to { transform: rotate(180deg); } }
+.qlogin-ribbon-band {
+  transform-box: view-box;
+  transform-origin: 148px 148px;
+}
+.qlogin-ribbon-band--turn {
+  animation: qRibbonHalfTurn ${RIBBON_TURN_DURATION_MS}ms var(--ease-fluid) forwards;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .qlogin * {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  .qlogin-ribbon-band--turn {
+    animation: none !important;
+    transform: rotate(180deg);
+  }
+}
 `;
 
 /* concentric warm ribbon curl — nested filled bands (cream → caramel → brown),
-   bright highlight rim on the outer edge, soft drop shadow. Static (no animation). */
+   bright highlight rim on the outer edge, soft drop shadow. */
 const polar = (cx: number, cy: number, r: number, deg: number): [number, number] => {
   const a = (deg * Math.PI) / 180;
   return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
@@ -55,12 +80,20 @@ const arcPath = (cx: number, cy: number, r: number, a0: number, a1: number): str
 
 const CX = 148, CY = 148, A0 = 66, A1 = 372; // gap (opening) centered toward bottom-right
 const BANDS = [
-  { r: 118, w: 28, light: '#F5DFB8', dark: '#EBCE97' }, // outer pale gold
-  { r: 90, w: 28, light: '#EBB878', dark: '#DDA05E' }, // golden
-  { r: 62, w: 28, light: '#D2924F', dark: '#B9793F' }, // caramel → brown
+  { layer: 'outer', r: 118, w: 28, light: '#F5DFB8', dark: '#EBCE97' }, // outer pale gold
+  { layer: 'middle', r: 90, w: 28, light: '#EBB878', dark: '#DDA05E' }, // golden
+  { layer: 'inner', r: 62, w: 28, light: '#D2924F', dark: '#B9793F' }, // caramel → brown
 ];
 
-const Ribbons = ({ id }: { id: string }) => (
+const Ribbons = ({
+  id,
+  animate,
+  cornerDelayMs,
+}: {
+  id: string;
+  animate: boolean;
+  cornerDelayMs: number;
+}) => (
   <svg viewBox="0 0 296 296" width="100%" height="100%" style={{ display: 'block', overflow: 'visible' }} aria-hidden="true">
     <defs>
       {BANDS.map((b, i) => (
@@ -74,11 +107,25 @@ const Ribbons = ({ id }: { id: string }) => (
       </filter>
     </defs>
     <g filter={`url(#${id}-s)`} fill="none" strokeLinecap="round">
-      {/* bright highlight rim hugging the outer edge */}
-      <path d={arcPath(CX, CY, BANDS[0].r + 12, A0, A1)} stroke="#FEF6E4" strokeWidth="7" opacity="0.9" />
-      {BANDS.map((b, i) => (
-        <path key={i} d={arcPath(CX, CY, b.r, A0, A1)} stroke={`url(#${id}-b${i})`} strokeWidth={b.w} />
-      ))}
+      {BANDS.map((b, i) => {
+        const layerDelayMs = cornerDelayMs + (BANDS.length - 1 - i) * RIBBON_LAYER_STAGGER_MS;
+
+        return (
+          <g
+            key={b.layer}
+            className={`qlogin-ribbon-band${animate ? ' qlogin-ribbon-band--turn' : ''}`}
+            data-ribbon-corner={id}
+            data-ribbon-layer={b.layer}
+            style={{ animationDelay: `${layerDelayMs}ms` }}
+          >
+            {/* The highlight is part of the outer layer, so all visible pieces stay aligned. */}
+            {i === 0 && (
+              <path d={arcPath(CX, CY, b.r + 12, A0, A1)} stroke="#FEF6E4" strokeWidth="7" opacity="0.9" />
+            )}
+            <path d={arcPath(CX, CY, b.r, A0, A1)} stroke={`url(#${id}-b${i})`} strokeWidth={b.w} />
+          </g>
+        );
+      })}
     </g>
   </svg>
 );
@@ -90,6 +137,7 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [successAnimationComplete, setSuccessAnimationComplete] = useState(false);
   const [shake, setShake] = useState(0);
 
   const router = useRouter();
@@ -97,16 +145,40 @@ export default function LoginPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!isLoadingAuth && currentUser) {
-      const target =
-        currentUserProfile?.role === 'lojistik_sorumlusu'
-          ? '/siparisler'
-          : currentUserProfile?.role === 'sarf_dagitim_personeli'
-            ? '/sarf-teslimat'
-            : '/dashboard';
+    if (!success) return;
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const timeoutId = window.setTimeout(
+      () => setSuccessAnimationComplete(true),
+      reducedMotion ? 0 : RIBBON_SUCCESS_WINDOW_MS
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, [success]);
+
+  useEffect(() => {
+    if (isLoadingAuth || isLoading || !currentUser || !currentUserProfile) return;
+
+    const target =
+      currentUserProfile.role === 'lojistik_sorumlusu'
+        ? '/siparisler'
+        : currentUserProfile.role === 'sarf_dagitim_personeli'
+          ? '/sarf-teslimat'
+          : '/dashboard';
+
+    // Existing sessions redirect immediately; fresh logins wait for the six ribbon turns.
+    if (!success || successAnimationComplete) {
       router.replace(target);
     }
-  }, [isLoadingAuth, currentUser, currentUserProfile?.role, router]);
+  }, [
+    isLoadingAuth,
+    isLoading,
+    currentUser,
+    currentUserProfile,
+    success,
+    successAnimationComplete,
+    router,
+  ]);
 
   const handleLogin = async (e: FormEvent) => {
     e.preventDefault();
@@ -128,8 +200,9 @@ export default function LoginPage() {
     }
   };
 
-  // already authenticated (and not mid-success-animation) → redirecting, render nothing
-  if (isLoadingAuth || (currentUser && !success)) return null;
+  // Already authenticated sessions render nothing while redirecting. A fresh login
+  // stays mounted between Firebase auth and setSuccess so the exit animation is visible.
+  if (isLoadingAuth || (currentUser && !success && !isLoading)) return null;
 
   const label: React.CSSProperties = { display: 'block', fontSize: 13, fontWeight: 700, color: 'var(--ink-2)', marginBottom: 8, letterSpacing: '0.01em' };
   const field: React.CSSProperties = { position: 'relative', display: 'flex', alignItems: 'center', height: 56, borderRadius: 'var(--radius-sm)', background: 'var(--surface-hi)', boxShadow: 'var(--clay-inset)' };
@@ -139,13 +212,13 @@ export default function LoginPage() {
     <div className="qlogin">
       <style dangerouslySetInnerHTML={{ __html: CSS }} />
 
-      {/* decorative ribbons — static, in an isolated non-interactive layer */}
+      {/* decorative ribbons — six independently staggered layers on successful login */}
       <div className="qlogin-ribbons">
         <div style={{ position: 'absolute', top: 'clamp(-72px,-7vw,-34px)', left: 'clamp(-72px,-7vw,-34px)', width: 'clamp(190px,32vw,320px)', height: 'clamp(190px,32vw,320px)' }}>
-          <Ribbons id="tl" />
+          <Ribbons id="tl" animate={success} cornerDelayMs={0} />
         </div>
         <div style={{ position: 'absolute', bottom: 'clamp(-72px,-7vw,-34px)', right: 'clamp(-72px,-7vw,-34px)', width: 'clamp(190px,32vw,320px)', height: 'clamp(190px,32vw,320px)', transform: 'rotate(180deg)' }}>
-          <Ribbons id="br" />
+          <Ribbons id="br" animate={success} cornerDelayMs={RIBBON_CORNER_STAGGER_MS} />
         </div>
       </div>
 
@@ -159,7 +232,7 @@ export default function LoginPage() {
         </div>
 
         {success ? (
-          <div style={{ textAlign: 'center', animation: 'qFadeUp 300ms var(--ease-fluid)' }}>
+          <div role="status" aria-live="polite" style={{ textAlign: 'center', animation: 'qFadeUp 300ms var(--ease-fluid)' }}>
             <h1 style={{ margin: '0 0 6px', fontSize: 'clamp(26px,7vw,32px)', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--ink-1)' }}>Giriş Yap</h1>
             <p style={{ margin: '0 0 26px', fontSize: 15, fontWeight: 500, color: 'var(--ink-2)', lineHeight: 1.5 }}>Devam etmek için hesabınızla oturum açın.</p>
             <div style={{ width: 84, height: 84, margin: '0 auto 18px', borderRadius: '50%', display: 'grid', placeItems: 'center', color: '#fff', background: 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--ready))', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.5), 0 16px 30px -10px rgba(111,181,133,0.6)', animation: 'qPopIn 400ms var(--ease-fluid)' }}>
