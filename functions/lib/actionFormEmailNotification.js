@@ -15,23 +15,13 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -41,29 +31,10 @@ const admin = __importStar(require("firebase-admin"));
 const functions = __importStar(require("firebase-functions"));
 const firebase_functions_1 = require("firebase-functions");
 const nodemailer = __importStar(require("nodemailer"));
-const jspdf_1 = require("jspdf");
-const jspdf_autotable_1 = __importDefault(require("jspdf-autotable"));
 const node_fetch_1 = __importDefault(require("node-fetch"));
-const QRCode = __importStar(require("qrcode"));
 const whatsapp_1 = require("./lib/whatsapp");
+const clay_pdf_1 = require("./lib/clay-pdf");
 const db = admin.firestore();
-// --- Turkish -> ASCII transliteration for PDF (font does not support TR glyphs) ---
-const TR_ASCII_MAP = {
-    'ç': 'c', 'Ç': 'C',
-    'ğ': 'g', 'Ğ': 'G',
-    'ı': 'i', 'İ': 'I',
-    'ö': 'o', 'Ö': 'O',
-    'ş': 's', 'Ş': 'S',
-    'ü': 'u', 'Ü': 'U',
-};
-function tr(s) {
-    if (s === null || s === undefined)
-        return '';
-    return String(s).replace(/[çÇğĞıİöÖşŞüÜ]/g, (ch) => { var _a; return (_a = TR_ASCII_MAP[ch]) !== null && _a !== void 0 ? _a : ch; });
-}
-function trRows(rows) {
-    return rows.map((row) => row.map((cell) => tr(cell)));
-}
 // --- Assets cache ---
 let turkishFontBase64 = null;
 let headerLogoBase64 = null;
@@ -103,26 +74,27 @@ async function loadSystemLogo() {
     systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
     return systemLogoBase64;
 }
-function setupTurkishFont(doc, fontBase64) {
-    try {
-        doc.addFileToVFS('NotoSans-Regular.ttf', fontBase64);
-        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'normal');
-        doc.addFont('NotoSans-Regular.ttf', 'NotoSans', 'bold');
-        return true;
-    }
-    catch (e) {
-        firebase_functions_1.logger.warn('[actionFormEmail] Could not setup Turkish font:', e);
-        return false;
-    }
+// Nunito ağırlıkları (clay tasarım fontu) — jsDelivr üzerinden statik TTF olarak yüklenir.
+let nunitoSemiBold = null;
+let nunitoExtraBold = null;
+let nunitoBlack = null;
+async function loadNunito() {
+    if (!nunitoSemiBold)
+        nunitoSemiBold = await loadAssetBase64('https://cdn.jsdelivr.net/npm/@expo-google-fonts/nunito/Nunito_600SemiBold.ttf');
+    if (!nunitoExtraBold)
+        nunitoExtraBold = await loadAssetBase64('https://cdn.jsdelivr.net/npm/@expo-google-fonts/nunito/Nunito_800ExtraBold.ttf');
+    if (!nunitoBlack)
+        nunitoBlack = await loadAssetBase64('https://cdn.jsdelivr.net/npm/@expo-google-fonts/nunito/Nunito_900Black.ttf');
+    return { semibold: nunitoSemiBold, extrabold: nunitoExtraBold, black: nunitoBlack };
 }
-async function generateQRCodeDataUrl(text) {
-    try {
-        return await QRCode.toDataURL(text, { margin: 1, width: 200 });
-    }
-    catch (e) {
-        firebase_functions_1.logger.warn('[actionFormEmail] Could not generate QR code:', e);
-        return null;
-    }
+/** Clay PDF için tüm varlıkları (font + logo) yükler. */
+async function loadClayAssets() {
+    const [nun, noto, headerLogo, sysLogo] = await Promise.all([loadNunito(), loadTurkishFont(), loadHeaderLogo(), loadSystemLogo()]);
+    return {
+        fonts: { semibold: nun.semibold, extrabold: nun.extrabold, black: nun.black, noto },
+        invLogo: headerLogo ? Object.assign({ b64: headerLogo }, (0, clay_pdf_1.pngSize)(headerLogo)) : null,
+        qoreLogo: sysLogo ? Object.assign({ b64: sysLogo }, (0, clay_pdf_1.pngSize)(sysLogo)) : null,
+    };
 }
 // --- Labels ---
 const TEKNIK_ISLEM_TIPI_LABELS = {
@@ -195,292 +167,80 @@ function getTransporter() {
         },
     });
 }
-// --- PDF Generation (matching client-side template) ---
+// --- PDF Generation (clay tasarım — istemci tarafıyla birebir) ---
 async function generateActionFormPDF(data, formType, formId) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _j;
-    const doc = new jspdf_1.jsPDF({ unit: 'pt', format: 'a4' });
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const padX = 40;
-    // --- PREFETCH ASSETS ---
-    const [fontBase64, headerLogo, sysLogo] = await Promise.all([
-        loadTurkishFont(),
-        loadHeaderLogo(),
-        loadSystemLogo()
-    ]);
-    const useTurkish = fontBase64 ? setupTurkishFont(doc, fontBase64) : false;
-    const FONT = useTurkish ? 'NotoSans' : 'helvetica';
-    const ORANGE = { r: 199, g: 137, b: 65 };
-    doc.setFont(FONT);
-    // --- Orange page border ---
-    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-    doc.setLineWidth(1.5);
-    doc.rect(padX / 2, padX / 2, pageW - padX, pageH - padX);
-    // --- HEADER SECTION ---
-    const headerY = 50;
-    // Left: Title
-    doc.setTextColor(0, 0, 0);
-    doc.setFontSize(14);
-    doc.setFont(FONT, 'bold');
-    const title = formType === 'teknik_servis' ? 'Teknik Servis Formu' : 'Aplikasyon Formu';
-    doc.text(tr(title), padX, headerY);
-    // Center: Company Logo
-    if (headerLogo) {
-        try {
-            doc.addImage(`data:image/png;base64,${headerLogo}`, 'PNG', pageW / 2 - 60, headerY - 25, 120, 45, undefined, 'FAST');
-        }
-        catch (e) {
-            firebase_functions_1.logger.warn('Header logo addImage failed', e);
-        }
-    }
-    // Right: QR Code
-    const detailUrl = `https://qorengine.com/forms/${formType === 'teknik_servis' ? 'technical' : 'application'}/${formId}`;
-    const qrBase64 = await generateQRCodeDataUrl(detailUrl);
-    if (qrBase64) {
-        try {
-            doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-            doc.rect(pageW - padX - 70, headerY - 25, 70, 70);
-            doc.addImage(qrBase64, 'PNG', pageW - padX - 68, headerY - 23, 66, 66, undefined, 'FAST');
-        }
-        catch (e) {
-            firebase_functions_1.logger.warn('QR code addImage failed', e);
-        }
-    }
-    // System Logo below QR
-    if (sysLogo) {
-        try {
-            doc.addImage(`data:image/png;base64,${sysLogo}`, 'PNG', pageW - padX - 55, headerY + 48, 40, 30, undefined, 'FAST');
-        }
-        catch (e) {
-            firebase_functions_1.logger.warn('System logo addImage failed', e);
-        }
-    }
-    // --- FORM INFO SECTION ---
-    doc.setFontSize(10);
-    doc.setFont(FONT, 'normal');
-    let currentY = 100;
-    // Build personnel string with accompanying personnel
-    let personnelStr = data.createdByName || '-';
-    if (data.eslikEdenPersonel && data.eslikEdenPersonel.length > 0) {
-        const eslikNames = data.eslikEdenPersonel.map((p) => p.name).join(', ');
-        personnelStr += ` (Eşlik Eden: ${eslikNames})`;
-    }
-    // Use baslangicTarihi if available, otherwise createdAt
-    let dateStr;
-    if (data.baslangicTarihi && data.baslangicSaati) {
-        const parts = data.baslangicTarihi.split('-');
-        dateStr = `${parts[2]}.${parts[1]}.${parts[0]} ${data.baslangicSaati}`;
+    var _a, _b, _c, _d, _e, _f;
+    const assets = await loadClayAssets();
+    const actions = data.actions || [];
+    const isTeknik = formType === 'teknik_servis';
+    const turuLabels = isTeknik ? TEKNIK_ISLEM_TURU_LABELS : APLIKASYON_ISLEM_TURU_LABELS;
+    const opLabels = isTeknik ? TEKNIK_OPERATION_LABELS : APLIKASYON_OPERATION_LABELS;
+    const testsStr = ((_b = (_a = data.selectedTests) === null || _a === void 0 ? void 0 : _a.length) !== null && _b !== void 0 ? _b : 0) > 0 ? data.selectedTests.join(', ') : '';
+    const chips = [];
+    if (isTeknik) {
+        chips.push({ label: 'İşlem Tipi', value: TEKNIK_ISLEM_TIPI_LABELS[data.islemTipi || ''] || data.islemTipi || '-' });
+        chips.push({ label: 'İşlem Türü', value: turuLabels[data.islemTuru || ''] || data.islemTuru || '-' });
+        if (data.islemTuru === 'ariza' && data.selectedFaultName)
+            chips.push({ label: 'Tespit Edilen Arıza', value: data.selectedFaultName });
     }
     else {
-        dateStr = ((_a = data.createdAt) === null || _a === void 0 ? void 0 : _a.toDate)
-            ? formatDate(data.createdAt.toDate())
-            : (((_b = data.createdAt) === null || _b === void 0 ? void 0 : _b._seconds) ? formatDate(new Date(data.createdAt._seconds * 1000)) : '-');
-    }
-    const info = [
-        ['Form No:', data.formNo || formId],
-        ['Laboratuvar:', data.labName || '-'],
-        ['Cihaz:', `${data.cihazAdi || '-'} (SN: ${data.seriNumarasi || '-'})`],
-        ['İşlemi Yapan:', personnelStr],
-        ['Başlangıç:', data.baslangicTarihi ? `${data.baslangicTarihi.split('-').reverse().join('.')} ${data.baslangicSaati || ''}` : '-'],
-        ['Bitiş:', data.bitisTarihi ? `${data.bitisTarihi.split('-').reverse().join('.')} ${data.bitisSaati || ''}` : dateStr],
-    ];
-    (0, jspdf_autotable_1.default)(doc, {
-        body: trRows(info),
-        startY: currentY,
-        theme: 'plain',
-        styles: { font: FONT, fontSize: 10, cellPadding: { top: 4, bottom: 4 } },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
-    });
-    currentY = doc.lastAutoTable.finalY + 15;
-    // --- ACIKLAMA SECTION ---
-    if ((_c = data.aciklama) === null || _c === void 0 ? void 0 : _c.trim()) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(tr('Açıklama'), padX, currentY + 12);
-        currentY += 18;
-        (0, jspdf_autotable_1.default)(doc, {
-            body: [[tr(data.aciklama)]],
-            startY: currentY,
-            theme: 'grid',
-            styles: { font: FONT, fontSize: 10, cellPadding: { top: 6, bottom: 6 } },
-            margin: { left: padX, right: padX },
-        });
-        currentY = doc.lastAutoTable.finalY + 15;
-    }
-    // --- ISLEM TURUNE OZEL DETAYLAR ---
-    const hasPeriyodikDetay = data.islemTuru === 'periyodik_bakim' && ((_e = (_d = data.selectedMaintenanceTasks) === null || _d === void 0 ? void 0 : _d.length) !== null && _e !== void 0 ? _e : 0) > 0;
-    const hasArizaDetay = data.islemTuru === 'ariza' && (Boolean(data.selectedFaultName) || ((_g = (_f = data.selectedTests) === null || _f === void 0 ? void 0 : _f.length) !== null && _g !== void 0 ? _g : 0) > 0);
-    if (hasPeriyodikDetay || hasArizaDetay) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(tr('İşlem Türüne Özel Detaylar'), padX, currentY + 12);
-        currentY += 18;
-        const detailRows = [];
-        if (hasPeriyodikDetay) {
-            detailRows.push([
-                'Periyodik Bakım İşleri',
-                data.selectedMaintenanceTasks.map((task) => task.taskName).join(', '),
-            ]);
+        chips.push({ label: 'İşlem Türü', value: turuLabels[data.islemTuru || ''] || data.islemTuru || '-' });
+        if (data.islemTuru === 'ariza') {
+            chips.push({ label: 'Tespit Edilen Arıza', value: data.selectedFaultName || '—' });
+            chips.push({ label: 'Arıza ile İlişkili Testler', value: testsStr || '—' });
         }
-        if (hasArizaDetay) {
-            detailRows.push([
-                'Tespit Edilen Arıza',
-                data.selectedFaultName || '-',
-            ]);
-            if (((_j = (_h = data.selectedTests) === null || _h === void 0 ? void 0 : _h.length) !== null && _j !== void 0 ? _j : 0) > 0) {
-                detailRows.push([
-                    'Arıza ile İlişkili Testler',
-                    data.selectedTests.join(', '),
-                ]);
-            }
-        }
-        (0, jspdf_autotable_1.default)(doc, {
-            body: trRows(detailRows),
-            startY: currentY,
-            theme: 'grid',
-            styles: { font: FONT, fontSize: 10, cellPadding: { top: 5, bottom: 5 } },
-            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 160 } },
-            margin: { left: padX, right: padX },
-        });
-        currentY = doc.lastAutoTable.finalY + 15;
-    }
-    // --- ISLEM TIPI & TURU SECTION ---
-    doc.setFont(FONT, 'bold');
-    doc.setFontSize(10);
-    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-    doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text(tr('İşlem Tipi ve Türü'), padX, currentY + 12);
-    currentY += 18;
-    doc.setFont(FONT, 'normal');
-    const islemRows = [];
-    if (formType === 'teknik_servis' && data.islemTipi) {
-        islemRows.push(['İşlem Tipi:', TEKNIK_ISLEM_TIPI_LABELS[data.islemTipi] || data.islemTipi]);
-    }
-    const turuLabels = formType === 'teknik_servis' ? TEKNIK_ISLEM_TURU_LABELS : APLIKASYON_ISLEM_TURU_LABELS;
-    islemRows.push(['İşlem Türü:', turuLabels[data.islemTuru || ''] || data.islemTuru || '-']);
-    (0, jspdf_autotable_1.default)(doc, {
-        body: trRows(islemRows),
-        startY: currentY,
-        theme: 'plain',
-        styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
-        margin: { left: padX, right: padX },
-    });
-    currentY = doc.lastAutoTable.finalY + 15;
-    // --- YAPILAN ISLEMLER SECTION ---
-    const operationLabels = formType === 'teknik_servis' ? TEKNIK_OPERATION_LABELS : APLIKASYON_OPERATION_LABELS;
-    const operations = (data.actions || []).filter((a) => a.type === 'operation');
-    if (operations.length > 0) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(tr('Yapılan İşlemler'), padX, currentY + 12);
-        currentY += 18;
-        (0, jspdf_autotable_1.default)(doc, {
-            head: [[tr('İşlem'), tr('Adet')]],
-            body: trRows(operations.map((act) => [
-                operationLabels[act.action] || act.action,
-                String(act.quantity),
-            ])),
-            startY: currentY,
-            theme: 'grid',
-            styles: { font: FONT, fontSize: 10 },
-            headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
-            margin: { left: padX, right: padX },
-        });
-        currentY = doc.lastAutoTable.finalY + 15;
-    }
-    // --- DEGISEN PARCALAR SECTION ---
-    const parts = (data.actions || []).filter((a) => a.type === 'part_change');
-    if (parts.length > 0) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, currentY, pageW - padX, currentY);
-        doc.text(tr('Değişen Parçalar'), padX, currentY + 12);
-        currentY += 18;
-        (0, jspdf_autotable_1.default)(doc, {
-            head: [[tr('Parça'), tr('Kod'), tr('Seri No'), tr('Adet'), tr('Birim')]],
-            body: trRows(parts.map((act) => {
-                let partName = act.stokAdi || act.action;
-                if (act.isManualEntry && act.stokKodu && act.stokAdi) {
-                    partName = `${act.stokKodu} - ${act.stokAdi}`;
-                }
-                const serial = (act.serialNumber || '').trim();
-                const displayPartName = serial ? `${partName} (SN: ${serial})` : partName;
-                return [
-                    displayPartName,
-                    act.stokKodu || '-',
-                    serial || '-',
-                    String(act.quantity),
-                    act.anaBirim ? act.anaBirim.toLowerCase() : 'adet',
-                ];
-            })),
-            startY: currentY,
-            theme: 'grid',
-            styles: { font: FONT, fontSize: 10 },
-            headStyles: { fillColor: [224, 224, 224], textColor: [0, 0, 0], fontStyle: 'bold' },
-            margin: { left: padX, right: padX },
-        });
-        currentY = doc.lastAutoTable.finalY + 15;
-    }
-    // --- CIHAZ DURUMU SECTION ---
-    doc.setFont(FONT, 'bold');
-    doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-    doc.line(padX, currentY, pageW - padX, currentY);
-    doc.text(tr('Cihaz Durumu'), padX, currentY + 12);
-    currentY += 18;
-    let cihazDurumuStr = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
-    if (data.cihazDurumu === 'diger' && data.cihazDurumuAciklama) {
-        cihazDurumuStr += ` (${data.cihazDurumuAciklama})`;
-    }
-    (0, jspdf_autotable_1.default)(doc, {
-        body: trRows([['Durum:', cihazDurumuStr]]),
-        startY: currentY,
-        theme: 'plain',
-        styles: { font: FONT, fontSize: 10, cellPadding: { top: 3, bottom: 3 } },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 100 } },
-        margin: { left: padX, right: padX },
-    });
-    const finalY = doc.lastAutoTable.finalY;
-    // --- IMZALAR (SIGNATURES) SECTION ---
-    const signatureY = finalY + 40;
-    if (signatureY < pageH - 140) {
-        doc.setFont(FONT, 'bold');
-        doc.setDrawColor(ORANGE.r, ORANGE.g, ORANGE.b);
-        doc.line(padX, signatureY - 15, pageW - padX, signatureY - 15);
-        doc.text(tr('İmzalar'), padX, signatureY - 3);
-        doc.setFont(FONT, 'normal');
-        doc.setFontSize(10);
-        // Personnel signature with name
-        doc.text(tr('İşlemi Yapan Personel'), padX, signatureY + 15);
-        doc.setFont(FONT, 'bold');
-        doc.text(tr(data.createdByName || '-'), padX, signatureY + 28);
-        doc.setFont(FONT, 'normal');
-        doc.line(padX, signatureY + 32, padX + 150, signatureY + 32);
-        if (data.personnelSignature) {
-            try {
-                doc.addImage(data.personnelSignature, 'PNG', padX, signatureY + 37, 150, 40, undefined, 'FAST');
-            }
-            catch (e) { /* signature image may fail in server context */ }
-        }
-        // Technician signature with name
-        doc.text(tr('Teknisyen'), pageW / 2 + 20, signatureY + 15);
-        doc.setFont(FONT, 'bold');
-        doc.text(tr(data.technicianName || '-'), pageW / 2 + 20, signatureY + 28);
-        doc.setFont(FONT, 'normal');
-        doc.line(pageW / 2 + 20, signatureY + 32, pageW / 2 + 170, signatureY + 32);
-        if (data.technicianSignature) {
-            try {
-                doc.addImage(data.technicianSignature, 'PNG', pageW / 2 + 20, signatureY + 37, 150, 40, undefined, 'FAST');
-            }
-            catch (e) { /* signature image may fail in server context */ }
+        else if (testsStr) {
+            chips.push({ label: 'İlişkili Testler', value: testsStr });
         }
     }
-    // Return as Buffer
-    const arrayBuffer = doc.output('arraybuffer');
-    return Buffer.from(arrayBuffer);
+    const details = [];
+    if (data.islemTuru === 'periyodik_bakim' && ((_d = (_c = data.selectedMaintenanceTasks) === null || _c === void 0 ? void 0 : _c.length) !== null && _d !== void 0 ? _d : 0) > 0) {
+        details.push({ label: 'Periyodik Bakım İşleri', value: data.selectedMaintenanceTasks.map((t) => t.taskName).join(', ') });
+    }
+    if (isTeknik && testsStr)
+        details.push({ label: 'Arıza ile İlişkili Testler', value: testsStr });
+    let durumStr = CIHAZ_DURUMU_LABELS[data.cihazDurumu || ''] || '-';
+    if (data.cihazDurumu === 'diger' && data.cihazDurumuAciklama)
+        durumStr += ` (${data.cihazDurumuAciklama})`;
+    const durumTone = data.cihazDurumu === 'calisiyor' ? 'green' : data.cihazDurumu === 'arizali' ? 'red' : 'neutral';
+    const eslik = (data.eslikEdenPersonel || []).map((p) => p.name).filter(Boolean).join(', ');
+    const createdDate = ((_e = data.createdAt) === null || _e === void 0 ? void 0 : _e.toDate) ? data.createdAt.toDate() : (((_f = data.createdAt) === null || _f === void 0 ? void 0 : _f._seconds) ? new Date(data.createdAt._seconds * 1000) : null);
+    const fallbackStr = createdDate ? formatDate(createdDate).replace(' ', ' · ') : '-';
+    const fmtDT = (t, s, fb) => (t && s ? `${t.split('-').reverse().join('.')} · ${s}` : (fb || '-'));
+    const input = {
+        title: isTeknik ? 'Teknik Servis Formu' : 'Aplikasyon Formu',
+        formNo: data.formNo || formId,
+        qrPayload: `https://qorengine.com/forms/${isTeknik ? 'technical' : 'application'}/${formId}`,
+        labName: data.labName || '-',
+        cihaz: `${data.cihazAdi || '-'} · SN ${data.seriNumarasi || '-'}`,
+        islemiYapan: data.createdByName || '-',
+        eslikEden: eslik || null,
+        baslangic: fmtDT(data.baslangicTarihi, data.baslangicSaati, fallbackStr),
+        bitis: fmtDT(data.bitisTarihi, data.bitisSaati, '-'),
+        cihazDurumu: durumStr,
+        durumTone,
+        chips,
+        details,
+        aciklama: data.aciklama,
+        operations: actions.filter((a) => a.type === 'operation').map((a) => ({ ad: opLabels[a.action] || a.action, adet: a.quantity })),
+        parts: actions.filter((a) => a.type === 'part_change').map((a) => {
+            let partName = a.stokAdi || a.action;
+            if (a.isManualEntry && a.stokKodu && a.stokAdi)
+                partName = `${a.stokKodu} - ${a.stokAdi}`;
+            return { parca: partName, kod: a.stokKodu || '-', seri: (a.serialNumber || '').trim() || '-', adet: a.quantity, birim: a.anaBirim ? String(a.anaBirim).toLowerCase() : 'adet' };
+        }),
+        hucreChanges: actions.filter((a) => a.type === 'hucre_degisimi').map((a) => {
+            var _a;
+            return ({
+                parca: a.stokAdi || '-', kod: a.stokKodu || '-',
+                takilanCikan: `H:${a.hucreNumarasi || '-'} / H:${a.removedHucreNumarasi || '-'}`,
+                kanal: ((_a = a.channelSelections) === null || _a === void 0 ? void 0 : _a.join(', ')) || '-',
+            });
+        }),
+        leftSign: { label: 'İşlemi Yapan', name: data.createdByName, sig: data.personnelSignature },
+        rightSign: { label: 'Kurum Yetkilisi', name: data.technicianName, sig: data.technicianSignature },
+    };
+    return (0, clay_pdf_1.buildActionFormPdf)(input, assets);
 }
 function formatDate(date) {
     const d = String(date.getDate()).padStart(2, '0');
