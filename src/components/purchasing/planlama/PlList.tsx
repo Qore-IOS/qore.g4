@@ -201,7 +201,9 @@ const PlDayLoad = ({ mobile, tasks }: { mobile: boolean; tasks: Task[] }) => {
   const WORK = 480;
   const timed = tasks.filter(t => t.time);
   const booked = timed.reduce((a, t) => a + plWorkMinutes(t.time, t.end), 0);
+  const completedBooked = timed.filter(t => t.done).reduce((a, t) => a + plWorkMinutes(t.time, t.end), 0);
   const pct = Math.min(100, Math.round(booked / WORK * 100));
+  const completedPct = booked ? Math.round(completedBooked / booked * 100) : 0;
   const state = pct === 0 ? { l: 'Boş gün', c: 'var(--water-deep)', bg: 'rgba(111,181,133,0.14)', ico: 'check', msg: 'Henüz saatli görev yok' }
     : pct < 45 ? { l: 'Rahat', c: 'var(--water-deep)', bg: 'rgba(111,181,133,0.14)', ico: 'check', msg: 'Günün bol boş zamanı var' }
     : pct < 75 ? { l: 'Dengeli', c: 'var(--sky)', bg: 'rgba(124,168,222,0.16)', ico: 'clock', msg: 'Akışında, kontrollü bir gün' }
@@ -210,6 +212,7 @@ const PlDayLoad = ({ mobile, tasks }: { mobile: boolean; tasks: Task[] }) => {
   const SI = PLIco[state.ico];
   const slots = WORK / 30;
   const filled = Math.round(pct / 100 * slots);
+  const completedFilled = Math.min(filled, Math.floor(completedBooked / 30));
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 12 : 16, padding: mobile ? '14px 15px' : '15px 18px', marginBottom: mobile ? 16 : 18, borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', animation: 'plPopIn 320ms var(--ease-fluid)' }}>
       <span style={{ width: 42, height: 42, flexShrink: 0, borderRadius: 13, display: 'grid', placeItems: 'center', color: state.c, background: state.bg, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><SI s={20} /></span>
@@ -217,11 +220,12 @@ const PlDayLoad = ({ mobile, tasks }: { mobile: boolean; tasks: Task[] }) => {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', rowGap: 6 }}>
           <span style={{ fontSize: 14.5, fontWeight: 800, color: 'var(--ink-1)', whiteSpace: 'nowrap' }}>Gün doluluğu</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: state.bg, color: state.c, fontSize: 11.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{state.l} · %{pct}</span>
+          {completedBooked > 0 && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px', borderRadius: 'var(--radius-pill)', background: 'rgba(111,181,133,0.14)', color: 'var(--water-deep)', fontSize: 11.5, fontWeight: 800, whiteSpace: 'nowrap' }}>%{completedPct} tamamlandı</span>}
         </div>
         <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-3)', marginTop: 3 }}>09:00–17:00 mesai</div>
         <div style={{ display: 'flex', gap: 3, marginTop: 9 }}>
           {Array.from({ length: slots }).map((_, i) => (
-            <span key={i} style={{ flex: 1, height: 8, borderRadius: 3, background: i < filled ? state.c : 'var(--surface-2)', boxShadow: i < filled ? 'none' : 'var(--clay-inset)', opacity: i < filled ? 1 : 0.8, transition: `background 400ms ${i * 35}ms var(--ease-fluid)` }} />
+            <span key={i} style={{ flex: 1, height: 8, borderRadius: 3, background: i < completedFilled ? 'var(--water-deep)' : i < filled ? state.c : 'var(--surface-2)', boxShadow: i < filled ? 'none' : 'var(--clay-inset)', opacity: i < filled ? 1 : 0.8, transition: `background 400ms ${i * 35}ms var(--ease-fluid)` }} />
           ))}
         </div>
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink-2)', marginTop: 7 }}>{state.msg} · {Number.isInteger(booked / 60) ? booked / 60 : (booked / 60).toFixed(1)}s / 8s planlı</div>
