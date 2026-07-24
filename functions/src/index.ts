@@ -15,6 +15,7 @@ export { nfcLoginWithSerial } from './nfc-login';
 export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionFormEmailNotification';
 export { onDeviceFaultReportResolved } from './faultReportNotification';
 export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail';
+export { onSupplierOrderCreatedSendMail } from './supplierOrderEmail';
 export { onPeripheralOrderCreatedSendWhatsApp } from './peripheralOrderWhatsApp';
 export { onDepoStokAccepted } from './peripheralOrderReconcile';
 export { onUserClaimSync } from './userClaimSync';

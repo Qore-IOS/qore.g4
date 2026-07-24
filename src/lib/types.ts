@@ -145,6 +145,61 @@ export interface Depot {
   ceomedEnabled?: boolean; // true ise bu depo Ceomed ERP'den senkronize edilir
   ceomedDepoKodu?: string; // Ceomed'deki depo kodu (örn. "77") — selectMerkezDepoListesi'ndeki DEPO{kod} alanını okur
   sevkiyatMalKabulden?: boolean; // true ise total verimlilik ay başı sevkiyat bu depoya bağlı lablar için mal kabul/transfer geçmişinden alınır (Ceomed sorgusundan hariç)
+  // Tedarikçi sipariş (ana depo) alanları
+  isAnaDepo?: boolean; // true ise bu depo tedarikçi siparişlerinde baz alınacak ana stok deposudur (tenant başına tek)
+  linkedSideDepotIds?: string[]; // Tedarikçi sipariş hesabında talebe dahil edilecek yan depo ID'leri
+  [k: string]: any;
+}
+
+/**
+ * Marka tanımı (def_brands). Firmadan bağımsız global tanım. Tedarikçi sipariş
+ * maili gönderimi için iletişim bilgileri (numara, adres, mail) taşıyabilir.
+ */
+export interface BrandDefinition {
+  id: string;
+  name: string;
+  numara?: string; // Tedarikçi telefon/iletişim numarası
+  adres?: string; // Tedarikçi adresi
+  mail?: string; // Otomatik sipariş mailinin gönderileceği adres
+  [k: string]: any;
+}
+
+/* ——— Tedarikçi Sipariş (lojistik → marka otomatik sipariş) ——— */
+
+export interface SupplierOrderItem {
+  stokKodu: string;
+  stokAdi: string;
+  /** Ana depodaki mevcut stok adedi (hesap anındaki fotoğraf) */
+  anaDepoStok: number;
+  /** Yeterlilik gün sayısına göre hesaplanan gerekli adet */
+  gerekliAdet: number;
+  /** Ana depo stoğu düşüldükten sonra sipariş edilecek adet */
+  siparisAdedi: number;
+}
+
+export interface SupplierOrder {
+  id: string;
+  status: 'bekliyor' | 'tamamlandi';
+  markaId: string;
+  markaAdi: string;
+  markaMail?: string;
+  /** Sipariş dönemi (örn. "07-2026") */
+  donem: string;
+  /** Hesapta kullanılan yeterlilik gün sayısı */
+  yeterlilikGun: number;
+  anaDepoId: string;
+  anaDepoAdi: string;
+  items: SupplierOrderItem[];
+  toplamKalem: number;
+  toplamAdet: number;
+  createdAt?: TimestampLike;
+  createdBy?: string;
+  createdById?: string;
+  completedAt?: TimestampLike;
+  completedBy?: string;
+  companyId?: string;
+  /** Otomatik mail gönderim durumu (Cloud Function tarafından yazılır) */
+  mailStatus?: 'pending' | 'sent' | 'failed' | 'skipped';
   [k: string]: any;
 }
 

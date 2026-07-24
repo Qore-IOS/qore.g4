@@ -20,6 +20,7 @@ import {
 } from '@/lib/lojistik/count-overview';
 import {
   LOJISTIK_COUNTS_PATH,
+  LOJISTIK_TEDARIKCI_SIPARIS_PATH,
 } from '@/lib/lojistik/navigation';
 import { CountStatusChip, UploadStatusChip } from './count-status';
 
@@ -66,6 +67,72 @@ function EmptyFeatureCard({
           </p>
           <p className="mt-2 text-sm leading-6 text-[#587169] dark:text-[#a994b5]">
             Kart yapısı hazır; sipariş akışı belirlendiğinde bu alana bağlanacak.
+          </p>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function FeatureLinkCard({
+  title,
+  description,
+  icon: Icon,
+  accentClass,
+  onOpen,
+}: {
+  title: string;
+  description: string;
+  icon: typeof FlaskConical;
+  accentClass: string;
+  onOpen: () => void;
+}) {
+  return (
+    <section
+      className={`${cardClass} group flex min-h-[520px] cursor-pointer flex-col p-5 transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-emerald-400/45 hover:shadow-[0_30px_65px_-34px_rgba(5,150,105,0.48)] dark:hover:border-fuchsia-300/35 sm:p-6`}
+      onClick={onOpen}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl ${accentClass}`}
+          >
+            <Icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-xl font-extrabold tracking-[-0.02em] text-[#0f2a24] dark:text-[#f4ecfa]">
+              {title}
+            </h2>
+            <p className="mt-1 text-sm font-medium text-[#587169] dark:text-[#a994b5]">
+              {description}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-950/10 bg-white/70 text-emerald-700 transition-colors group-hover:bg-emerald-600 group-hover:text-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/50 dark:border-fuchsia-300/15 dark:bg-white/5 dark:text-fuchsia-200 dark:group-hover:bg-fuchsia-500 dark:focus-visible:ring-fuchsia-300/30"
+          aria-label={`${title} sayfasını aç`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen();
+          }}
+        >
+          <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        </button>
+      </div>
+      <div className="my-5 h-px bg-emerald-950/10 dark:bg-fuchsia-300/15" />
+      <div className="flex flex-1 items-center justify-center">
+        <div className="max-w-xs rounded-3xl border border-dashed border-emerald-950/15 bg-emerald-50/45 p-8 text-center dark:border-fuchsia-300/20 dark:bg-fuchsia-300/5">
+          <Boxes
+            className="mx-auto h-8 w-8 text-emerald-600/70 dark:text-fuchsia-300/70"
+            aria-hidden="true"
+          />
+          <p className="mt-4 text-base font-bold text-[#29473f] dark:text-[#d6bfe3]">
+            Marka ve dönem seçerek başlayın
+          </p>
+          <p className="mt-2 text-sm leading-6 text-[#587169] dark:text-[#a994b5]">
+            Min/max tanımlarından tedarikçi sipariş adetlerini hesaplayın ve
+            markaya otomatik sipariş maili gönderin.
           </p>
         </div>
       </div>
@@ -276,16 +343,17 @@ export default function LojistikDashboard() {
         </section>
 
         <EmptyFeatureCard
-          title="Laboratuvar Siparişleri"
+          title="Sevkiyatlar"
           description="Laboratuvar talepleri ve sevk hazırlığı"
           icon={FlaskConical}
           accentClass="bg-sky-100 text-sky-700 dark:bg-sky-400/15 dark:text-sky-200"
         />
-        <EmptyFeatureCard
+        <FeatureLinkCard
           title="Tedarikçi Sipariş"
-          description="Tedarik ve satın alma görünümü"
+          description="Markalara otomatik sipariş ve tedarik görünümü"
           icon={Building2}
           accentClass="bg-amber-100 text-amber-700 dark:bg-amber-400/15 dark:text-amber-200"
+          onOpen={() => router.push(LOJISTIK_TEDARIKCI_SIPARIS_PATH)}
         />
       </div>
     </div>

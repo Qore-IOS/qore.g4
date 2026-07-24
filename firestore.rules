@@ -222,6 +222,10 @@ service cloud.firestore {
       allow write: if writingInCompany();
       match /logs/{logId}                     { allow read, write: if isSignedIn(); }
     }
+    match /supplierOrders/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+    }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.
