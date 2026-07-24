@@ -95,10 +95,9 @@ function makeClay(doc, fonts) {
     const dot = (x, y, d, color, round = 3) => { doc.setFillColor(color[0], color[1], color[2]); doc.roundedRect(x, y, d, d, round, round, 'F'); };
     const hline = (x1, x2, yy, color, lw = 1) => { doc.setDrawColor(color[0], color[1], color[2]); doc.setLineWidth(lw); doc.line(x1, yy, x2, yy); };
     const section = (label, x, y, right) => {
-        const lw = measure(label, 900, 10.5, 1.6);
         T(label, x, y + 9, { size: 10.5, w: 900, color: C.orangeD, upper: true, spacing: 1.6 });
-        hline(x + lw + 12, right, y + 6, C.line);
-        return y + 20;
+        hline(x, right, y + 18, C.line);
+        return y + 26;
     };
     const table = (x, y, W, cols, rows, o = {}) => {
         var _a, _b;
@@ -203,8 +202,74 @@ function badgeTone(t) {
         return { bg: C.beige, ln: C.line, dt: C.orange, tx: C.orangeD };
     return { bg: C.greenBg, ln: C.greenLine, dt: C.green, tx: C.greenD };
 }
+/** Klasik-yuvarlak modüller, yumuşak bulucu çerçeveleri ve nokta merkezleriyle markalı QR. */
+function drawStyledQr(doc, qr, x, y, size, logoB64) {
+    const moduleCount = qr.modules.size;
+    const quiet = 4;
+    const moduleSize = size / (moduleCount + quiet * 2);
+    const startX = x + quiet * moduleSize;
+    const startY = y + quiet * moduleSize;
+    const center = Math.floor(moduleCount / 2);
+    const logoClearHalf = 5;
+    const inLogoClear = (row, col) => Math.abs(row - center) <= logoClearHalf && Math.abs(col - center) <= logoClearHalf;
+    const inFinder = (row, col) => (row < 7 && col < 7)
+        || (row < 7 && col >= moduleCount - 7)
+        || (row >= moduleCount - 7 && col < 7);
+    const isDrawnDark = (row, col) => row >= 0 && row < moduleCount
+        && col >= 0 && col < moduleCount
+        && !inFinder(row, col)
+        && !inLogoClear(row, col)
+        && Boolean(qr.modules.get(row, col));
+    doc.setFillColor(0, 0, 0);
+    const radius = moduleSize * 0.42;
+    const inset = moduleSize * 0.055;
+    for (let row = 0; row < moduleCount; row++) {
+        for (let col = 0; col < moduleCount; col++) {
+            if (!isDrawnDark(row, col))
+                continue;
+            const mx = startX + col * moduleSize;
+            const my = startY + row * moduleSize;
+            doc.roundedRect(mx + inset, my + inset, moduleSize - inset * 2, moduleSize - inset * 2, radius, radius, 'F');
+            const bridge = moduleSize * 0.38;
+            if (isDrawnDark(row, col - 1))
+                doc.rect(mx, my + (moduleSize - bridge) / 2, moduleSize / 2, bridge, 'F');
+            if (isDrawnDark(row, col + 1))
+                doc.rect(mx + moduleSize / 2, my + (moduleSize - bridge) / 2, moduleSize / 2, bridge, 'F');
+            if (isDrawnDark(row - 1, col))
+                doc.rect(mx + (moduleSize - bridge) / 2, my, bridge, moduleSize / 2, 'F');
+            if (isDrawnDark(row + 1, col))
+                doc.rect(mx + (moduleSize - bridge) / 2, my + moduleSize / 2, bridge, moduleSize / 2, 'F');
+        }
+    }
+    const drawFinder = (row, col) => {
+        const fx = startX + col * moduleSize;
+        const fy = startY + row * moduleSize;
+        doc.setFillColor(0, 0, 0);
+        doc.roundedRect(fx, fy, moduleSize * 7, moduleSize * 7, moduleSize * 1.9, moduleSize * 1.9, 'F');
+        doc.setFillColor(255, 255, 255);
+        doc.roundedRect(fx + moduleSize, fy + moduleSize, moduleSize * 5, moduleSize * 5, moduleSize * 1.35, moduleSize * 1.35, 'F');
+        doc.setFillColor(0, 0, 0);
+        doc.circle(fx + moduleSize * 3.5, fy + moduleSize * 3.5, moduleSize * 1.5, 'F');
+    };
+    drawFinder(0, 0);
+    drawFinder(0, moduleCount - 7);
+    drawFinder(moduleCount - 7, 0);
+    const shieldSize = moduleSize * 10.2;
+    const shieldX = startX + (center + 0.5) * moduleSize - shieldSize / 2;
+    const shieldY = startY + (center + 0.5) * moduleSize - shieldSize / 2;
+    doc.setFillColor(255, 255, 255);
+    doc.roundedRect(shieldX, shieldY, shieldSize, shieldSize, moduleSize * 1.3, moduleSize * 1.3, 'F');
+    if (logoB64) {
+        const logoSize = moduleSize * 8.2;
+        try {
+            doc.addImage(`data:image/png;base64,${logoB64}`, 'PNG', shieldX + (shieldSize - logoSize) / 2, shieldY + (shieldSize - logoSize) / 2, logoSize, logoSize, undefined, 'FAST');
+        }
+        catch ( /* QR, logo olmadan da okunabilir kalır. */_a) { /* QR, logo olmadan da okunabilir kalır. */ }
+    }
+}
 /** İşlem formu PDF'i üretir ve Buffer döner (WhatsApp/e-posta gönderimi için). */
 async function buildActionFormPdf(input, assets) {
+    var _a;
     const doc = new jspdf_1.jsPDF({ unit: 'px', format: 'a4', hotfixes: ['px_scaling'] });
     const fonts = setupFonts(doc, assets);
     const clay = makeClay(doc, fonts);
@@ -213,48 +278,32 @@ async function buildActionFormPdf(input, assets) {
     const PH = doc.internal.pageSize.getHeight();
     const PAD = PAGE.PAD, TOP = PAGE.TOP, RIGHT = PW - PAD, CW = PW - 2 * PAD;
     // header
+    const qrFrame = 96, qrPad = 5, qrX = RIGHT - qrFrame, qrY = TOP;
     if (assets.invLogo) {
-        const h = 30, w = h * (assets.invLogo.w / assets.invLogo.h);
+        const h = 60, w = h * (assets.invLogo.w / assets.invLogo.h);
         try {
-            doc.addImage(`data:image/png;base64,${assets.invLogo.b64}`, 'PNG', PAD, TOP + 8, w, h, undefined, 'FAST');
+            doc.addImage(`data:image/png;base64,${assets.invLogo.b64}`, 'PNG', PAD, TOP + (qrFrame - h) / 2, w, h, undefined, 'FAST');
         }
-        catch ( /* ignore */_a) { /* ignore */ }
+        catch ( /* ignore */_b) { /* ignore */ }
     }
-    const qrFrame = 64, qrPad = 6, qrX = RIGHT - qrFrame, qrY = TOP;
-    let qrData = '';
-    try {
-        qrData = await qrcode_1.default.toDataURL(input.qrPayload, { errorCorrectionLevel: 'M', margin: 0, scale: 6 });
-    }
-    catch ( /* ignore */_b) { /* ignore */ }
     clay.card(qrX, qrY, qrFrame, qrFrame, 10, C.white, C.line);
-    if (qrData) {
-        try {
-            doc.addImage(qrData, 'PNG', qrX + qrPad, qrY + qrPad, qrFrame - 2 * qrPad, qrFrame - 2 * qrPad, undefined, 'FAST');
-        }
-        catch ( /* ignore */_c) { /* ignore */ }
+    try {
+        const qr = qrcode_1.default.create(input.qrPayload, { errorCorrectionLevel: 'H' });
+        drawStyledQr(doc, qr, qrX + qrPad, qrY + qrPad, qrFrame - 2 * qrPad, (_a = assets.qoreLogo) === null || _a === void 0 ? void 0 : _a.b64);
     }
-    const qLogo = 17, qGap = 5, label = 'QORE', qoreTextSize = 13.5;
-    const lblW = clay.measure(label, 800, qoreTextSize, 1.1);
-    const sX = qrX + (qrFrame - (qLogo + qGap + lblW)) / 2, rowY = qrY + qrFrame + 6;
-    if (assets.qoreLogo) {
-        try {
-            doc.addImage(`data:image/png;base64,${assets.qoreLogo.b64}`, 'PNG', sX, rowY, qLogo, qLogo, undefined, 'FAST');
-        }
-        catch ( /* ignore */_d) { /* ignore */ }
-    }
-    clay.T(label, sX + qLogo + qGap, rowY + qLogo / 2 + 1, { size: qoreTextSize, w: 800, color: C.ink, spacing: 1.1, baseline: 'middle' });
+    catch ( /* QR üretimi başarısız olsa da form oluşturulmaya devam eder. */_c) { /* QR üretimi başarısız olsa da form oluşturulmaya devam eder. */ }
     // title band
-    let y = rowY + qLogo + 12;
+    let y = qrY + qrFrame + 12;
     const bandH = 54;
     clay.card(PAD, y, CW, bandH, 16, C.beige, C.line);
-    const chipW = 118, chipH = 38, chipX = RIGHT - 14 - chipW, chipY = y + (bandH - chipH) / 2;
+    const chipW = 118, chipH = 42, chipX = RIGHT - 14 - chipW, chipY = y + (bandH - chipH) / 2;
     const titleMaxW = chipX - (PAD + 20) - 18;
     const titleSize = clay.fitSize(input.title, 900, 24, titleMaxW, 17);
     clay.T(input.title, PAD + 20, y + bandH / 2 + 1, { size: titleSize, w: 900, color: C.ink, baseline: 'middle' });
     clay.card(chipX, chipY, chipW, chipH, 11, C.white, C.line);
-    clay.T('FORM NO', chipX + chipW - 13, chipY + 15, { size: 8, w: 800, color: C.mute, align: 'right', spacing: 1.2 });
+    clay.T('FORM NO', chipX + chipW / 2, chipY + 12, { size: 8, w: 800, color: C.mute, align: 'center', spacing: 1.2 });
     const formNoSize = clay.fitSize(input.formNo, 900, 14, chipW - 26, 9.5);
-    clay.T(input.formNo, chipX + chipW - 13, chipY + 30, { size: formNoSize, w: 900, color: C.ink, align: 'right' });
+    clay.T(input.formNo, chipX + chipW / 2, chipY + 33, { size: formNoSize, w: 900, color: C.ink, align: 'center' });
     y += bandH + 14;
     // info cards
     const gap = 12, cardW = (CW - gap) / 2;
@@ -415,7 +464,7 @@ async function buildActionFormPdf(input, assets) {
     drawSide(PAD, input.leftSign);
     drawSide(PAD + half + 40, input.rightSign);
     clay.hline(PAD, RIGHT, footY - 11, C.line2);
-    clay.T(FOOTER_TEXT, PW / 2, footY, { size: 9.5, w: 700, color: C.footer, align: 'center', spacing: 0.5 });
+    clay.T(FOOTER_TEXT, PW / 2, footY + 6, { size: 9.5, w: 700, color: C.footer, align: 'center', spacing: 0.5 });
     return Buffer.from(doc.output('arraybuffer'));
 }
 exports.buildActionFormPdf = buildActionFormPdf;

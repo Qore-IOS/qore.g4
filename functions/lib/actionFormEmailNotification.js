@@ -71,7 +71,10 @@ async function loadHeaderLogo() {
 async function loadSystemLogo() {
     if (systemLogoBase64)
         return systemLogoBase64;
-    systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+    systemLogoBase64 = await loadAssetBase64('https://qorengine.com/blk.png');
+    if (!systemLogoBase64) {
+        systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+    }
     return systemLogoBase64;
 }
 // Nunito ağırlıkları (clay tasarım fontu) — jsDelivr üzerinden statik TTF olarak yüklenir.
