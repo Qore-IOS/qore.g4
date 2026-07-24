@@ -207,6 +207,9 @@ async function generateActionFormPDF(data, formType, formId) {
     const createdDate = ((_e = data.createdAt) === null || _e === void 0 ? void 0 : _e.toDate) ? data.createdAt.toDate() : (((_f = data.createdAt) === null || _f === void 0 ? void 0 : _f._seconds) ? new Date(data.createdAt._seconds * 1000) : null);
     const fallbackStr = createdDate ? formatDate(createdDate).replace(' ', ' · ') : '-';
     const fmtDT = (t, s, fb) => (t && s ? `${t.split('-').reverse().join('.')} · ${s}` : (fb || '-'));
+    const signDate = data.bitisTarihi
+        ? String(data.bitisTarihi).split('-').reverse().join('.')
+        : (createdDate ? formatDate(createdDate).split(' ')[0] : '-');
     const input = {
         title: isTeknik ? 'Teknik Servis Formu' : 'Aplikasyon Formu',
         formNo: data.formNo || formId,
@@ -237,8 +240,8 @@ async function generateActionFormPDF(data, formType, formId) {
                 kanal: ((_a = a.channelSelections) === null || _a === void 0 ? void 0 : _a.join(', ')) || '-',
             });
         }),
-        leftSign: { label: 'İşlemi Yapan', name: data.createdByName, sig: data.personnelSignature },
-        rightSign: { label: 'Kurum Yetkilisi', name: data.technicianName, sig: data.technicianSignature },
+        leftSign: { label: 'İşlemi Yapan', name: data.createdByName, sig: data.personnelSignature, date: signDate },
+        rightSign: { label: 'Kurum Yetkilisi', name: data.technicianName, sig: data.technicianSignature, date: signDate },
     };
     return (0, clay_pdf_1.buildActionFormPdf)(input, assets);
 }

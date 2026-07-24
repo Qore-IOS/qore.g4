@@ -219,7 +219,7 @@ export function makeClay(doc: jsPDF, fonts: ClayFonts) {
 
     const drawHead = (yy: number) => {
       doc.setFillColor(C.beige2[0], C.beige2[1], C.beige2[2]);
-      doc.roundedRect(x, yy, W, headH + 8, 16, 16, 'F');
+      doc.roundedRect(x, yy, W, headH, 16, 16, 'F');
       doc.rect(x, yy + 8, W, headH - 8, 'F');
       hline(x, RIGHT, yy + headH, C.lineHead);
       cols.forEach((c, i) => {
@@ -294,7 +294,7 @@ export async function clayHeader(
   return rowY + qLogo;
 }
 
-/** Bej başlık bandı: eyebrow + büyük başlık, sağda beyaz bilgi çipi. Döner: bandın alt y'si. */
+/** Bej başlık bandı: büyük başlık, sağda beyaz bilgi çipi. Döner: bandın alt y'si. */
 export function clayTitleBand(
   doc: jsPDF, clay: Clay,
   o: {
@@ -313,9 +313,14 @@ export function clayTitleBand(
   const leftX = x + 20;
   const titleMaxW = Math.max(80, chipX - leftX - 18);
   const safeTitleSize = clay.fitSize(title, 900, titleSize, titleMaxW, 17);
-  const safeEyebrowSize = clay.fitSize(eyebrow.toLocaleUpperCase('tr-TR'), 800, 9, titleMaxW, 7.5);
-  clay.T(eyebrow, leftX, y + 21, { size: safeEyebrowSize, w: 800, color: C.mute, upper: true, spacing: 1.1 });
-  clay.T(title, leftX, y + 43, { size: safeTitleSize, w: 900, color: C.ink });
+  const hasEyebrow = Boolean(eyebrow.trim());
+  if (hasEyebrow) {
+    const safeEyebrowSize = clay.fitSize(eyebrow.toLocaleUpperCase('tr-TR'), 800, 9, titleMaxW, 7.5);
+    clay.T(eyebrow, leftX, y + 21, { size: safeEyebrowSize, w: 800, color: C.mute, upper: true, spacing: 1.1 });
+    clay.T(title, leftX, y + 43, { size: safeTitleSize, w: 900, color: C.ink });
+  } else {
+    clay.T(title, leftX, y + bandH / 2 + 1, { size: safeTitleSize, w: 900, color: C.ink, baseline: 'middle' });
+  }
   clay.card(chipX, chipY, chipW, chipH, 11, C.white, C.line);
   clay.T(rightLabel, chipX + chipW - 13, chipY + 15, { size: 8, w: 800, color: C.mute, align: 'right', spacing: 1.2, upper: true });
   const safeRightValueSize = clay.fitSize(rightValue, 900, rightValueSize, chipW - 26, 9.5);
@@ -323,7 +328,7 @@ export function clayTitleBand(
   return y + bandH;
 }
 
-export type SignSide = { label: string; name?: string | null; sig?: string | null };
+export type SignSide = { label: string; name?: string | null; sig?: string | null; date?: string | null };
 
 /**
  * İki sütunlu imza alanı + alt bilgi; sayfanın altına sabitlenir.
@@ -337,15 +342,18 @@ export function claySignaturesFooter(
   const C = CLAY;
   const { pad, right, pageH, left, right2 } = o;
   const CW = right - pad;
-  const footY = pageH - 30, sigY = footY - 58, half = (CW - 40) / 2;
+  const footY = pageH - 30, sigY = footY - 76, half = (CW - 40) / 2;
   if (o.contentBottom != null && o.contentBottom > sigY - 30) { doc.addPage(); }
 
   const drawSide = (x: number, side: SignSide) => {
-    if (side.sig) { try { doc.addImage(side.sig, 'PNG', x, sigY - 42, 130, 40, undefined, 'FAST'); } catch { /* ignore */ } }
-    else if (side.name) clay.T(side.name, x, sigY - 6, { size: 12, w: 800, color: C.sub });
+    if (side.sig) {
+      try { doc.addImage(side.sig, 'PNG', x, sigY - 48, 130, 44, undefined, 'FAST'); } catch { /* ignore */ }
+    }
     clay.hline(x, x + half, sigY, C.sign);
-    clay.T(side.label, x, sigY + 14, { size: 13, w: 800 });
-    clay.T('Ad Soyad · İmza · Tarih', x, sigY + 27, { size: 10, w: 700, color: C.mute, upper: true, spacing: 0.6 });
+    clay.T(side.label, x, sigY + 16, { size: 13, w: 800 });
+    const meta = `${side.name?.trim() || 'Ad soyad belirtilmedi'} · ${side.sig ? 'İmzalı' : 'İmza bekleniyor'} · ${side.date?.trim() || 'Tarih belirtilmedi'}`;
+    const metaSize = clay.fitSize(meta, 700, 10, half, 7.8);
+    clay.T(meta, x, sigY + 35, { size: metaSize, w: 700, color: C.mute });
   };
   drawSide(pad, left);
   drawSide(pad + half + 40, right2);
@@ -399,9 +407,9 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
   const PH = doc.internal.pageSize.getHeight();
   const PAD = CLAY_PAGE.PAD, TOP = CLAY_PAGE.TOP, RIGHT = PW - PAD, CW = PW - 2 * PAD;
 
-  await clayHeader(doc, clay, kit, { qrPayload: input.qrPayload, right: RIGHT });
-  let y = TOP + 64 + 22;
-  y = clayTitleBand(doc, clay, { x: PAD, y, w: CW, right: RIGHT, eyebrow: 'İnVitro Lab · Servis Belgesi', title: input.title, rightLabel: 'Form No', rightValue: input.formNo });
+  const headerBottom = await clayHeader(doc, clay, kit, { qrPayload: input.qrPayload, right: RIGHT });
+  let y = headerBottom + 12;
+  y = clayTitleBand(doc, clay, { x: PAD, y, w: CW, right: RIGHT, eyebrow: '', title: input.title, rightLabel: 'Form No', rightValue: input.formNo });
 
   // info cards
   y += 14;
@@ -418,7 +426,7 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
     subLines: sub ? clay.split(sub, 700, 10.5, infoInnerW) : [],
   }));
   const fieldHeight = (valueLines: string[], subLines: string[] = []) =>
-    27 + Math.max(0, valueLines.length - 1) * 15 + subLines.length * 13;
+    33 + Math.max(0, valueLines.length - 1) * 15 + subLines.length * 14;
   const leftH = 42 + preparedLeft.reduce((h, row) => h + fieldHeight(row.valueLines, row.subLines), 0) + 8;
   const preparedDates = [
     { label: 'Başlangıç', lines: clay.split(input.baslangic || '-', 800, 13, infoInnerW) },
@@ -429,7 +437,7 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
   const statusH = Math.max(24, statusLines.length * 14 + 8);
   const rightH = 42
     + preparedDates.reduce((h, row) => h + fieldHeight(row.lines), 0)
-    + 7 + statusH + 12;
+    + 10 + statusH + 12;
   const infoH = Math.max(leftH, rightH);
   clay.card(PAD, y, cardW, infoH, 14, C.white, C.line);
   clay.dot(PAD + 16, y + 16, 7, C.orange);
@@ -438,13 +446,13 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
   for (const row of preparedLeft) {
     clay.T(row.label, PAD + 16, ly, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
     row.valueLines.forEach((line, index) => {
-      clay.T(line, PAD + 16, ly + 15 + index * 15, { size: 13, w: 800 });
+      clay.T(line, PAD + 16, ly + 19 + index * 15, { size: 13, w: 800 });
     });
-    ly += 27 + Math.max(0, row.valueLines.length - 1) * 15;
+    ly += 33 + Math.max(0, row.valueLines.length - 1) * 15;
     row.subLines.forEach((line, index) => {
-      clay.T(line, PAD + 16, ly + 2 + index * 13, { size: 10.5, w: 700, color: C.soft });
+      clay.T(line, PAD + 16, ly + 1 + index * 14, { size: 10.5, w: 700, color: C.soft });
     });
-    ly += row.subLines.length * 13;
+    ly += row.subLines.length * 14;
   }
   const rx = PAD + cardW + gap;
   clay.card(rx, y, cardW, infoH, 14, C.white, C.line);
@@ -453,7 +461,7 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
   let ry = y + 42;
   preparedDates.forEach((row) => {
     clay.T(row.label, rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
-    row.lines.forEach((line, index) => clay.T(line, rx + 16, ry + 15 + index * 15, { size: 13, w: 800 }));
+    row.lines.forEach((line, index) => clay.T(line, rx + 16, ry + 19 + index * 15, { size: 13, w: 800 }));
     ry += fieldHeight(row.lines);
   });
   clay.T('Cihaz Durumu', rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
@@ -461,7 +469,7 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
   const bpadX = 11, bdot = 7, bgapd = 6;
   const widestStatusLine = Math.max(...statusLines.map((line) => clay.measure(line, 800, 11.5)));
   const bW = Math.min(infoInnerW, bpadX * 2 + bdot + bgapd + widestStatusLine);
-  const bH = statusH, bY = ry + 7;
+  const bH = statusH, bY = ry + 10;
   clay.card(rx + 16, bY, bW, bH, 8, tn.bg, tn.ln);
   clay.dot(rx + 16 + bpadX, bY + (bH - bdot) / 2, bdot, tn.dt, 3.5);
   const statusStartY = bY + bH / 2 - ((statusLines.length - 1) * 14) / 2;
@@ -479,17 +487,17 @@ export async function renderActionForm(kit: ClayKit, input: ActionFormInput): Pr
       labelLines: clay.split(chip.label, 800, 8.5, chW - 28),
       valueLines: clay.split(chip.value || '—', 800, 12.5, chW - 28),
     }));
-    const chipsH = Math.max(48, ...preparedChips.map((chip) =>
-      10 + chip.labelLines.length * 10 + 4 + chip.valueLines.length * 15 + 10));
+    const chipsH = Math.max(56, ...preparedChips.map((chip) =>
+      16 + Math.max(0, chip.labelLines.length - 1) * 11 + 20 + Math.max(0, chip.valueLines.length - 1) * 16 + 13));
     preparedChips.forEach((ch, i) => {
       const cx = PAD + i * (chW + cg);
       clay.card(cx, y, chW, chipsH, 13, C.beige, C.line);
       ch.labelLines.forEach((line, index) => {
-        clay.T(line, cx + 14, y + 15 + index * 10, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.45 });
+        clay.T(line, cx + 14, y + 16 + index * 11, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.45 });
       });
-      const valueY = y + 15 + ch.labelLines.length * 10 + 4;
+      const valueY = y + 16 + Math.max(0, ch.labelLines.length - 1) * 11 + 20;
       ch.valueLines.forEach((line, index) => {
-        clay.T(line, cx + 14, valueY + index * 15, { size: 12.5, w: 800 });
+        clay.T(line, cx + 14, valueY + index * 16, { size: 12.5, w: 800 });
       });
     });
     y += chipsH + 14;
@@ -591,10 +599,10 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
   const PH = doc.internal.pageSize.getHeight();
   const PAD = 44, TOP = 42, RIGHT = PW - 44, CW = PW - 88;
 
-  await clayHeader(doc, clay, kit, { qrPayload: input.qrPayload, pad: PAD, top: TOP, right: RIGHT, qrFrame: 66 });
-  let y = TOP + 66 + 22;
+  const headerBottom = await clayHeader(doc, clay, kit, { qrPayload: input.qrPayload, pad: PAD, top: TOP, right: RIGHT, qrFrame: 66 });
+  let y = headerBottom + 12;
   y = clayTitleBand(doc, clay, {
-    x: PAD, y, w: CW, right: RIGHT, eyebrow: input.eyebrow, title: input.title,
+    x: PAD, y, w: CW, right: RIGHT, eyebrow: '', title: input.title,
     titleSize: 28, rightLabel: 'Tarih / Saat', rightValue: input.tarihSaat,
     bandH: 60, rightWidth: 186, rightValueSize: 14,
   });
@@ -608,7 +616,7 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
     lines: sign ? [value || ''] : clay.split(value || '-', 800, 14.5, packetInnerW),
   }));
   const packetHeight = (rows: ReturnType<typeof preparePacket>) =>
-    46 + rows.reduce((height, row) => height + (row.sign ? 34 : 32 + Math.max(0, row.lines.length - 1) * 16), 0) + 10;
+    46 + rows.reduce((height, row) => height + (row.sign ? 40 : 36 + Math.max(0, row.lines.length - 1) * 17), 0) + 12;
   const senderRows = preparePacket([
     [input.gonderen.depoLabel || 'Depo', input.gonderen.depo],
     ['Teslim Eden', input.gonderen.teslimEden || '', true],
@@ -630,14 +638,14 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
       clay.T(row.label, x + 18, py, { size: 9.5, w: 800, color: C.mute, upper: true, spacing: 0.8 });
       if (row.sign) {
         const signatureSize = clay.fitSize(row.lines[0], 700, 13, packetInnerW, 9.5);
-        clay.T(row.lines[0], x + 18, py + 17, { size: signatureSize, w: 700, color: C.soft });
-        clay.hline(x + 18, x + cardW - 18, py + 22, [230, 220, 203]);
-        py += 34;
+        clay.T(row.lines[0], x + 18, py + 20, { size: signatureSize, w: 700, color: C.soft });
+        clay.hline(x + 18, x + cardW - 18, py + 27, [230, 220, 203]);
+        py += 40;
       } else {
-        row.lines.forEach((line, index) => clay.T(line, x + 18, py + 16 + index * 16, {
+        row.lines.forEach((line, index) => clay.T(line, x + 18, py + 20 + index * 17, {
           size: 14.5, w: 800,
         }));
-        py += 32 + Math.max(0, row.lines.length - 1) * 16;
+        py += 36 + Math.max(0, row.lines.length - 1) * 17;
       }
     });
   };
@@ -674,6 +682,14 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
   clay.T(String(input.toplamAdet), g2x + tW - 20, y + tH / 2 + 1, { size: 24, w: 900, color: C.white, align: 'right', baseline: 'middle' });
   y += tH;
 
-  claySignaturesFooter(doc, clay, { pad: PAD, right: RIGHT, pageH: PH, left: { label: 'Teslim Eden' }, right2: { label: 'Teslim Alan' }, contentBottom: y });
+  const transferDate = input.tarihSaat.split('·')[0]?.trim() || input.tarihSaat;
+  claySignaturesFooter(doc, clay, {
+    pad: PAD,
+    right: RIGHT,
+    pageH: PH,
+    left: { label: 'Teslim Eden', name: input.gonderen.teslimEden, date: transferDate },
+    right2: { label: 'Teslim Alan', name: input.teslimAlan.teslimAlan, date: transferDate },
+    contentBottom: y,
+  });
   return doc;
 }

@@ -156,6 +156,9 @@ export async function generateAplikasyonTutanakPDF(
     const durumTone: DurumTone = actionRecord.cihazDurumu === 'calisiyor' ? 'green' : actionRecord.cihazDurumu === 'arizali' ? 'red' : 'neutral';
 
     const eslik = (actionRecord.eslikEdenPersonel || []).map((p) => p.name).filter(Boolean).join(', ');
+    const signDate = actionRecord.bitisTarihi
+      ? actionRecord.bitisTarihi.split('-').reverse().join('.')
+      : format(actionRecord.createdAt.toDate(), 'dd.MM.yyyy');
 
     const input: ActionFormInput = {
       title: 'Aplikasyon Formu',
@@ -183,8 +186,8 @@ export async function generateAplikasyonTutanakPDF(
         takilanCikan: `H:${a.hucreNumarasi || '-'} / H:${a.removedHucreNumarasi || '-'}`,
         kanal: a.channelSelections?.join(', ') || '-',
       })),
-      leftSign: { label: 'İşlemi Yapan', name: actionRecord.createdByName, sig: actionRecord.personnelSignature },
-      rightSign: { label: 'Kurum Yetkilisi', name: actionRecord.technicianName, sig: actionRecord.technicianSignature },
+      leftSign: { label: 'İşlemi Yapan', name: actionRecord.createdByName, sig: actionRecord.personnelSignature, date: signDate },
+      rightSign: { label: 'Kurum Yetkilisi', name: actionRecord.technicianName, sig: actionRecord.technicianSignature, date: signDate },
     };
 
     const doc = await renderActionForm(kit, input);

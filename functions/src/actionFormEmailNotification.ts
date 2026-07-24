@@ -186,6 +186,9 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
   const createdDate = data.createdAt?.toDate ? data.createdAt.toDate() : (data.createdAt?._seconds ? new Date(data.createdAt._seconds * 1000) : null);
   const fallbackStr = createdDate ? formatDate(createdDate).replace(' ', ' · ') : '-';
   const fmtDT = (t?: string, s?: string, fb?: string) => (t && s ? `${t.split('-').reverse().join('.')} · ${s}` : (fb || '-'));
+  const signDate = data.bitisTarihi
+    ? String(data.bitisTarihi).split('-').reverse().join('.')
+    : (createdDate ? formatDate(createdDate).split(' ')[0] : '-');
 
   const input: ActionFormInput = {
     title: isTeknik ? 'Teknik Servis Formu' : 'Aplikasyon Formu',
@@ -213,8 +216,8 @@ async function generateActionFormPDF(data: any, formType: 'teknik_servis' | 'apl
       takilanCikan: `H:${a.hucreNumarasi || '-'} / H:${a.removedHucreNumarasi || '-'}`,
       kanal: a.channelSelections?.join(', ') || '-',
     })),
-    leftSign: { label: 'İşlemi Yapan', name: data.createdByName, sig: data.personnelSignature },
-    rightSign: { label: 'Kurum Yetkilisi', name: data.technicianName, sig: data.technicianSignature },
+    leftSign: { label: 'İşlemi Yapan', name: data.createdByName, sig: data.personnelSignature, date: signDate },
+    rightSign: { label: 'Kurum Yetkilisi', name: data.technicianName, sig: data.technicianSignature, date: signDate },
   };
 
   return buildActionFormPdf(input, assets);

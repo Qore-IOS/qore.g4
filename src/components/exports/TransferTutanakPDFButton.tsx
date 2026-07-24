@@ -53,7 +53,7 @@ export async function generateTransferTutanakPDF(header: HeaderInfo, rows: Row[]
 
   const doc = await renderTransferForm(kit, {
     title: 'Transfer Tutanağı',
-    eyebrow: 'İnVitro Lab · Transfer Belgesi',
+    eyebrow: '',
     qrPayload: `${origin}/transfer-gecmis/${encodeURIComponent(header.shipmentId)}`,
     tarihSaat: `${header.tarih} · ${header.saat}`,
     gonderen: { depo: header.depotName, teslimEden: header.karsilayan },

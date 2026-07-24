@@ -111,7 +111,7 @@ function makeClay(doc: jsPDF, fonts: ClayFonts) {
     const rowHs = wrapped.map((cells) => Math.max(minRowH, Math.max(...cells.map((l) => l.lines.length)) * lineH + 2 * vpad - lineH + 8));
     const drawHead = (yy: number) => {
       doc.setFillColor(C.beige2[0], C.beige2[1], C.beige2[2]);
-      doc.roundedRect(x, yy, W, headH + 8, 16, 16, 'F'); doc.rect(x, yy + 8, W, headH - 8, 'F');
+      doc.roundedRect(x, yy, W, headH, 16, 16, 'F'); doc.rect(x, yy + 8, W, headH - 8, 'F');
       hline(x, RIGHT, yy + headH, C.lineHead);
       cols.forEach((c, i) => { const tx = c.align === 'center' ? colX[i] + colW[i] / 2 : colX[i] + 14; T(c.label, tx, yy + headH / 2 + 1, { size: 9.5, w: 900, color: C.orangeText, upper: true, spacing: 0.8, align: c.align === 'center' ? 'center' : 'left', baseline: 'middle' }); });
     };
@@ -153,8 +153,8 @@ export type ActionFormInput = {
   operations: { ad: string; adet: number | string }[];
   parts: { parca: string; kod: string; seri: string; adet: number | string; birim: string }[];
   hucreChanges?: { parca: string; kod: string; takilanCikan: string; kanal: string }[];
-  leftSign: { label: string; name?: string | null; sig?: string | null };
-  rightSign: { label: string; name?: string | null; sig?: string | null };
+  leftSign: { label: string; name?: string | null; sig?: string | null; date?: string | null };
+  rightSign: { label: string; name?: string | null; sig?: string | null; date?: string | null };
 };
 
 function badgeTone(t: DurumTone) {
@@ -191,13 +191,12 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   clay.T(label, sX + qLogo + qGap, rowY + qLogo / 2 + 1, { size: qoreTextSize, w: 800, color: C.ink, spacing: 1.1, baseline: 'middle' });
 
   // title band
-  let y = TOP + qrFrame + 22; const bandH = 54;
+  let y = rowY + qLogo + 12; const bandH = 54;
   clay.card(PAD, y, CW, bandH, 16, C.beige, C.line);
   const chipW = 118, chipH = 38, chipX = RIGHT - 14 - chipW, chipY = y + (bandH - chipH) / 2;
   const titleMaxW = chipX - (PAD + 20) - 18;
   const titleSize = clay.fitSize(input.title, 900, 24, titleMaxW, 17);
-  clay.T('İnVitro Lab · Servis Belgesi', PAD + 20, y + 21, { size: 9, w: 800, color: C.mute, upper: true, spacing: 1.1 });
-  clay.T(input.title, PAD + 20, y + 43, { size: titleSize, w: 900, color: C.ink });
+  clay.T(input.title, PAD + 20, y + bandH / 2 + 1, { size: titleSize, w: 900, color: C.ink, baseline: 'middle' });
   clay.card(chipX, chipY, chipW, chipH, 11, C.white, C.line);
   clay.T('FORM NO', chipX + chipW - 13, chipY + 15, { size: 8, w: 800, color: C.mute, align: 'right', spacing: 1.2 });
   const formNoSize = clay.fitSize(input.formNo, 900, 14, chipW - 26, 9.5);
@@ -218,7 +217,7 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
     subLines: sub ? clay.split(sub, 700, 10.5, infoInnerW) : [],
   }));
   const fieldHeight = (valueLines: string[], subLines: string[] = []) =>
-    27 + Math.max(0, valueLines.length - 1) * 15 + subLines.length * 13;
+    33 + Math.max(0, valueLines.length - 1) * 15 + subLines.length * 14;
   const leftH = 42 + preparedLeft.reduce((h, row) => h + fieldHeight(row.valueLines, row.subLines), 0) + 8;
   const preparedDates = [
     { label: 'Başlangıç', lines: clay.split(input.baslangic || '-', 800, 13, infoInnerW) },
@@ -229,7 +228,7 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   const statusH = Math.max(24, statusLines.length * 14 + 8);
   const rightH = 42
     + preparedDates.reduce((h, row) => h + fieldHeight(row.lines), 0)
-    + 7 + statusH + 12;
+    + 10 + statusH + 12;
   const infoH = Math.max(leftH, rightH);
   clay.card(PAD, y, cardW, infoH, 14, C.white, C.line);
   clay.dot(PAD + 16, y + 16, 7, C.orange);
@@ -238,13 +237,13 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   for (const row of preparedLeft) {
     clay.T(row.label, PAD + 16, ly, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
     row.valueLines.forEach((line, index) => {
-      clay.T(line, PAD + 16, ly + 15 + index * 15, { size: 13, w: 800 });
+      clay.T(line, PAD + 16, ly + 19 + index * 15, { size: 13, w: 800 });
     });
-    ly += 27 + Math.max(0, row.valueLines.length - 1) * 15;
+    ly += 33 + Math.max(0, row.valueLines.length - 1) * 15;
     row.subLines.forEach((line, index) => {
-      clay.T(line, PAD + 16, ly + 2 + index * 13, { size: 10.5, w: 700, color: C.soft });
+      clay.T(line, PAD + 16, ly + 1 + index * 14, { size: 10.5, w: 700, color: C.soft });
     });
-    ly += row.subLines.length * 13;
+    ly += row.subLines.length * 14;
   }
   const rx = PAD + cardW + gap;
   clay.card(rx, y, cardW, infoH, 14, C.white, C.line);
@@ -253,7 +252,7 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   let ry = y + 42;
   preparedDates.forEach((row) => {
     clay.T(row.label, rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
-    row.lines.forEach((line, index) => clay.T(line, rx + 16, ry + 15 + index * 15, { size: 13, w: 800 }));
+    row.lines.forEach((line, index) => clay.T(line, rx + 16, ry + 19 + index * 15, { size: 13, w: 800 }));
     ry += fieldHeight(row.lines);
   });
   clay.T('Cihaz Durumu', rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
@@ -261,7 +260,7 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   const bpadX = 11, bdot = 7, bgapd = 6;
   const widestStatusLine = Math.max(...statusLines.map((line) => clay.measure(line, 800, 11.5)));
   const bW = Math.min(infoInnerW, bpadX * 2 + bdot + bgapd + widestStatusLine);
-  const bH = statusH, bY = ry + 7;
+  const bH = statusH, bY = ry + 10;
   clay.card(rx + 16, bY, bW, bH, 8, tn.bg, tn.ln);
   clay.dot(rx + 16 + bpadX, bY + (bH - bdot) / 2, bdot, tn.dt, 3.5);
   const statusStartY = bY + bH / 2 - ((statusLines.length - 1) * 14) / 2;
@@ -279,17 +278,17 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
       labelLines: clay.split(chip.label, 800, 8.5, chW - 28),
       valueLines: clay.split(chip.value || '—', 800, 12.5, chW - 28),
     }));
-    const chipsH = Math.max(48, ...preparedChips.map((chip) =>
-      10 + chip.labelLines.length * 10 + 4 + chip.valueLines.length * 15 + 10));
+    const chipsH = Math.max(56, ...preparedChips.map((chip) =>
+      16 + Math.max(0, chip.labelLines.length - 1) * 11 + 20 + Math.max(0, chip.valueLines.length - 1) * 16 + 13));
     preparedChips.forEach((ch, i) => {
       const cx = PAD + i * (chW + cg);
       clay.card(cx, y, chW, chipsH, 13, C.beige, C.line);
       ch.labelLines.forEach((line, index) => {
-        clay.T(line, cx + 14, y + 15 + index * 10, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.45 });
+        clay.T(line, cx + 14, y + 16 + index * 11, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.45 });
       });
-      const valueY = y + 15 + ch.labelLines.length * 10 + 4;
+      const valueY = y + 16 + Math.max(0, ch.labelLines.length - 1) * 11 + 20;
       ch.valueLines.forEach((line, index) => {
-        clay.T(line, cx + 14, valueY + index * 15, { size: 12.5, w: 800 });
+        clay.T(line, cx + 14, valueY + index * 16, { size: 12.5, w: 800 });
       });
     });
     y += chipsH + 14;
@@ -358,14 +357,17 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   }
 
   // signatures + footer
-  const footY = PH - 30, sigY = footY - 58, half = (CW - 40) / 2;
+  const footY = PH - 30, sigY = footY - 76, half = (CW - 40) / 2;
   if (y > sigY - 30) doc.addPage();
-  const drawSide = (x: number, side: { label: string; name?: string | null; sig?: string | null }) => {
-    if (side.sig) { try { doc.addImage(side.sig, 'PNG', x, sigY - 42, 130, 40, undefined, 'FAST'); } catch { /* ignore */ } }
-    else if (side.name) clay.T(side.name, x, sigY - 6, { size: 12, w: 800, color: C.sub });
+  const drawSide = (x: number, side: { label: string; name?: string | null; sig?: string | null; date?: string | null }) => {
+    if (side.sig) {
+      try { doc.addImage(side.sig, 'PNG', x, sigY - 48, 130, 44, undefined, 'FAST'); } catch { /* ignore */ }
+    }
     clay.hline(x, x + half, sigY, C.sign);
-    clay.T(side.label, x, sigY + 14, { size: 13, w: 800 });
-    clay.T('Ad Soyad · İmza · Tarih', x, sigY + 27, { size: 10, w: 700, color: C.mute, upper: true, spacing: 0.6 });
+    clay.T(side.label, x, sigY + 16, { size: 13, w: 800 });
+    const meta = `${side.name?.trim() || 'Ad soyad belirtilmedi'} · ${side.sig ? 'İmzalı' : 'İmza bekleniyor'} · ${side.date?.trim() || 'Tarih belirtilmedi'}`;
+    const metaSize = clay.fitSize(meta, 700, 10, half, 7.8);
+    clay.T(meta, x, sigY + 35, { size: metaSize, w: 700, color: C.mute });
   };
   drawSide(PAD, input.leftSign);
   drawSide(PAD + half + 40, input.rightSign);
