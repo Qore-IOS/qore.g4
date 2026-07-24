@@ -291,6 +291,53 @@ export async function getDepoStokForOrders(
 }
 
 /**
+ * Ceomed entegre bir deponun anlık stoğunu (stokKodu -> toplam adet) döndürür.
+ *
+ * Ceomed depolarında stok yerel `depoStok` yerine harici senkronla yazılan
+ * `ceomedDepoStok/{depotId}` dokümanında `items[]` olarak tutulur ve bu koleksiyon
+ * client güvenlik kurallarında kapalıdır — bu yüzden Admin SDK üzerinden okunur.
+ * Çapraz-tenant erişimi önlemek için depo dokümanının companyId'si doğrulanır.
+ */
+export async function getCeomedDepoStockByCode(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, number>> {
+  if (!depotId) return {};
+  try {
+    const depotSnap = await adminDb.collection('depots').doc(depotId).get();
+    if (!depotSnap.exists) return {};
+
+    if (!isSuperAdmin) {
+      const normalized = normalizeCompanyId(companyId);
+      const depotCompany = normalizeCompanyId((depotSnap.data() as any)?.companyId);
+      // __legacy__ (companyId'siz) depolar tüm tenant'larda görünür kalır (mevcut davranış).
+      if (depotCompany !== '__legacy__' && depotCompany !== normalized) {
+        return {};
+      }
+    }
+
+    const ceomedSnap = await adminDb.collection('ceomedDepoStok').doc(depotId).get();
+    if (!ceomedSnap.exists) return {};
+
+    const items = ((ceomedSnap.data() as any)?.items || []) as Array<{
+      stokKodu?: string;
+      adet?: number | string;
+    }>;
+    const map: Record<string, number> = {};
+    for (const it of items) {
+      const code = String(it?.stokKodu ?? '').trim();
+      if (!code) continue;
+      map[code] = (map[code] || 0) + (Number(it?.adet) || 0);
+    }
+    return map;
+  } catch (err) {
+    console.error('[getCeomedDepoStockByCode] Error for depot', depotId, ':', err);
+    return {};
+  }
+}
+
+/**
  * Bootstrap data for the Sipariş Toplama page.
  *
  * Replaces 4× getScopedDocs calls (≈10 Firestore reads through IndexedDB) with
