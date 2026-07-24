@@ -2,14 +2,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin, Database } from 'lucide-react';
+import { PlusCircle, Edit3, Trash2, SlidersHorizontal, Map, Loader2, Warehouse, MapPin, Database, Star } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -106,6 +106,7 @@ export default function DepoYonetimPanel() {
     }
     setIsLoading(true);
     try {
+      const isAnaDepo = currentDepot.isAnaDepo || false;
       const dataToSave: Partial<Depot> = {
         name: currentDepot.name.trim(),
         address: currentDepot.address || '',
@@ -117,12 +118,29 @@ export default function DepoYonetimPanel() {
         ceomedEnabled: currentDepot.ceomedEnabled || false,
         ceomedDepoKodu: currentDepot.ceomedEnabled ? (currentDepot.ceomedDepoKodu || '').toString().trim() : '',
         sevkiyatMalKabulden: currentDepot.sevkiyatMalKabulden || false,
+        isAnaDepo,
+        linkedSideDepotIds: currentDepot.isPoolWarehouse
+          ? []
+          : (currentDepot.linkedSideDepotIds || []).filter(id => Boolean(id) && id !== currentDepot.id),
       };
 
+      let savedId = currentDepot.id;
       if (currentDepot.id) {
         await setDoc(doc(db, 'depots', currentDepot.id), dataToSave, { merge: true });
       } else {
-        await addDoc(collection(db, 'depots'), withCompanyScope(dataToSave, currentUserProfile?.companyId));
+        const ref = await addDoc(collection(db, 'depots'), withCompanyScope(dataToSave, currentUserProfile?.companyId));
+        savedId = ref.id;
+      }
+
+      // Ana depo tenant başına tektir: bu depo ana depo yapıldıysa diğerlerinin
+      // bayrağını temizle (yalnızca şirket kapsamındaki depolar üzerinde).
+      if (isAnaDepo) {
+        const others = depots.filter(d => d.id !== savedId && d.isAnaDepo);
+        if (others.length > 0) {
+          const batch = writeBatch(db);
+          others.forEach(d => batch.set(doc(db, 'depots', d.id), { isAnaDepo: false }, { merge: true }));
+          await batch.commit();
+        }
       }
       toast({ title: 'Başarılı', description: 'Depo kaydedildi.' });
       fetchData();
@@ -196,14 +214,22 @@ export default function DepoYonetimPanel() {
                     <TableRow key={d.id}>
                       <TableCell className="font-medium">{d.name}</TableCell>
                       <TableCell>
-                        {d.isPoolWarehouse ? (
-                          <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
-                            <Database className="h-3 w-3" />
-                            Havuz
-                          </span>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">Standart</span>
-                        )}
+                        <div className="flex flex-wrap items-center gap-1">
+                          {d.isPoolWarehouse ? (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">
+                              <Database className="h-3 w-3" />
+                              Havuz
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Standart</span>
+                          )}
+                          {d.isAnaDepo && (
+                            <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">
+                              <Star className="h-3 w-3" />
+                              Ana Depo
+                            </span>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">{d.address || '-'}</TableCell>
                       <TableCell>
@@ -268,6 +294,23 @@ export default function DepoYonetimPanel() {
                 <Switch
                   checked={currentDepot.isPoolWarehouse || false}
                   onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, isPoolWarehouse: checked })}
+                />
+              </div>
+
+              {/* Ana Depo (Tedarikçi Sipariş) */}
+              <div className="flex items-start justify-between gap-3 p-3 rounded-lg border bg-amber-500/5">
+                <div className="space-y-0.5">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <Star className="h-4 w-4 text-amber-500" />
+                    Ana Depo
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Tedarikçi siparişlerinde baz alınacak ana stok deposu. Her firmada tek ana depo seçilir; bu depoyu ana depo yaparsanız diğerinin işareti kalkar.
+                  </p>
+                </div>
+                <Switch
+                  checked={currentDepot.isAnaDepo || false}
+                  onCheckedChange={(checked) => setCurrentDepot({ ...currentDepot, isAnaDepo: checked })}
                 />
               </div>
 
@@ -402,6 +445,40 @@ export default function DepoYonetimPanel() {
                     </div>
                   </ScrollArea>
                   <p className="text-xs text-muted-foreground mt-1">Bu seçim yalnızca Merkez/Toplu Sipariş hesaplarında kullanılır.</p>
+                </div>
+              )}
+
+              {!currentDepot.isPoolWarehouse && (
+                <div>
+                  <label className="text-sm text-muted-foreground">Bağlı Yan Depolar (Tedarikçi Sipariş için)</label>
+                  <ScrollArea className="h-40 border rounded-md p-2 mt-1">
+                    <div className="space-y-2">
+                      {depots.filter(d => d.id !== currentDepot.id).length === 0 ? (
+                        <p className="text-xs text-muted-foreground text-center py-4">
+                          Bağlanacak başka depo bulunmuyor.
+                        </p>
+                      ) : depots.filter(d => d.id !== currentDepot.id).map(d => {
+                        const selected = (currentDepot.linkedSideDepotIds || []).includes(d.id);
+                        return (
+                          <label key={d.id} className="flex items-center gap-2 text-sm cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={(e) => {
+                                const prev = currentDepot.linkedSideDepotIds || [];
+                                const next = e.target.checked ? [...prev, d.id] : prev.filter(id => id !== d.id);
+                                setCurrentDepot({ ...currentDepot, linkedSideDepotIds: next });
+                              }}
+                            />
+                            <span>{d.name}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Ana depo için tedarikçi sipariş hesabında bu yan depoların min/max tanımları da talebe dahil edilir.
+                  </p>
                 </div>
               )}
             </div>

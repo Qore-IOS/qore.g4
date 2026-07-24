@@ -9,6 +9,7 @@ import { db } from '@/lib/firebase';
 import { useToast } from '@/hooks/use-toast';
 import DefinitionManager from './DefinitionManager';
 import DeviceGroupManager from './DeviceGroupManager';
+import BrandManager from './BrandManager';
 
 type DefinitionType =
   | 'def_brands'
@@ -173,6 +174,8 @@ export default function UrunKodlariTanimlarPanel() {
         {DEFINITION_CONFIG.map(({ type, title, placeholder, isDeviceGroup }) => (
           isDeviceGroup ? (
             <DeviceGroupManager key={`${type}-${refreshKey}`} refreshKey={refreshKey} />
+          ) : type === 'def_brands' ? (
+            <BrandManager key={`${type}-${refreshKey}`} refreshKey={refreshKey} />
           ) : (
             <DefinitionManager key={`${type}-${refreshKey}`} type={type} title={title} placeholder={placeholder} refreshKey={refreshKey} />
           )
