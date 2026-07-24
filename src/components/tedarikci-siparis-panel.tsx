@@ -36,11 +36,7 @@ import type {
   SupplierOrder,
   SupplierOrderItem,
 } from '@/lib/types';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Select,
   SelectContent,
@@ -48,15 +44,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
+
+// Lojistik görünümüyle uyumlu ortak tasarım sınıfları (sayımlar sayfasıyla aynı).
+const PANEL_CLASS =
+  'rounded-[26px] border border-emerald-950/10 bg-white/85 shadow-[0_24px_55px_-32px_rgba(6,78,59,0.35)] backdrop-blur-xl dark:border-fuchsia-400/15 dark:bg-[#160e1e]/80 dark:shadow-[0_28px_65px_-34px_rgba(0,0,0,0.85)]';
+const FIELD_LABEL_CLASS =
+  'mb-1.5 block text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]';
+const CONTROL_CLASS =
+  'min-h-11 rounded-xl border-emerald-950/10 bg-white/85 font-bold text-[#29473f] dark:border-fuchsia-300/20 dark:bg-[#160e1e]/85 dark:text-[#d6bfe3]';
+const PRIMARY_BTN_CLASS =
+  'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 text-sm font-bold text-white transition-colors hover:bg-emerald-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/45 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-fuchsia-500 dark:hover:bg-fuchsia-600 dark:focus-visible:ring-fuchsia-300/30';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i + 1,
@@ -528,53 +526,61 @@ export default function TedarikciSiparisPanel() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-[1700px] px-2 py-4 space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => router.push(LOJISTIK_HOME_PATH)} className="gap-1">
-            <ArrowLeft className="h-4 w-4" />
-            Geri Dön
-          </Button>
-          <div>
-            <h1 className="text-2xl font-black tracking-tight flex items-center gap-2">
-              <Building2 className="h-6 w-6 text-amber-500" />
-              Tedarikçi Sipariş
-            </h1>
-            <p className="text-sm text-muted-foreground">
-              Marka ve dönem seçin; min/max tanımlarından sipariş adetlerini hesaplayın ve markaya otomatik sipariş maili gönderin.
-            </p>
+    <div className="mx-auto w-full max-w-[1700px] px-1 py-2 sm:px-2 sm:py-4">
+      <header className="mb-5 flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+        <div>
+          <button
+            type="button"
+            className="inline-flex min-h-11 items-center gap-2 rounded-xl px-2 text-sm font-bold text-[#587169] transition-colors hover:bg-white/60 hover:text-emerald-700 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/45 dark:text-[#a994b5] dark:hover:bg-white/5 dark:hover:text-fuchsia-200 dark:focus-visible:ring-fuchsia-300/30"
+            onClick={() => router.push(LOJISTIK_HOME_PATH)}
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            Lojistik ana sayfa
+          </button>
+          <div className="mt-2 flex items-center gap-2 text-emerald-600 dark:text-fuchsia-300">
+            <Building2 className="h-5 w-5" aria-hidden="true" />
+            <span className="text-xs font-extrabold uppercase tracking-[0.18em]">Lojistik çalışma alanı</span>
           </div>
+          <h1 className="mt-2 text-3xl font-black tracking-[-0.035em] text-[#0f2a24] dark:text-[#f4ecfa] sm:text-4xl">
+            Tedarikçi Sipariş
+          </h1>
+          <p className="mt-2 max-w-3xl text-sm font-medium leading-6 text-[#587169] dark:text-[#a994b5] sm:text-base">
+            Marka ve dönem seçin; min/max tanımlarından sipariş adetlerini hesaplayın ve markaya otomatik sipariş maili gönderin.
+          </p>
         </div>
-        <Button
+        <button
+          type="button"
           onClick={handleCreateOrder}
           disabled={isSaving || !anaDepo || !selectedBrand || orderableRows.length === 0}
-          className="gap-2"
+          className={`${PRIMARY_BTN_CLASS} self-start py-2 xl:self-auto`}
         >
           {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
           Siparişi Oluştur
           {orderableRows.length > 0 && (
-            <Badge variant="secondary" className="ml-1">{orderableRows.length}</Badge>
+            <span className="ml-1 inline-flex min-w-5 items-center justify-center rounded-full bg-white/25 px-1.5 text-xs font-extrabold">
+              {orderableRows.length}
+            </span>
           )}
-        </Button>
-      </div>
+        </button>
+      </header>
 
       {!depotsLoading && !anaDepo && (
-        <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200 flex items-start gap-2">
-          <Star className="h-5 w-5 mt-0.5 shrink-0" />
+        <div className="mb-5 flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/10 dark:text-amber-200">
+          <Star className="mt-0.5 h-5 w-5 shrink-0" />
           <div>
-            <p className="font-semibold">Ana depo seçilmemiş.</p>
-            <p>Tedarikçi sipariş hesabı için Yönetim → Tanımlar → Depo Yönetimi üzerinden bir depoyu <b>Ana Depo</b> olarak işaretleyin.</p>
+            <p className="font-bold">Ana depo seçilmemiş.</p>
+            <p className="font-medium">Tedarikçi sipariş hesabı için Yönetim → Tanımlar → Depo Yönetimi üzerinden bir depoyu <b>Ana Depo</b> olarak işaretleyin.</p>
           </div>
         </div>
       )}
 
       {/* Seçim alanı */}
-      <div className="rounded-2xl border bg-card p-4 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      <section className={`${PANEL_CLASS} mb-5 p-5`}>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
           <div>
-            <Label className="text-sm">Marka</Label>
+            <label className={FIELD_LABEL_CLASS}>Marka</label>
             <Select value={selectedBrandId} onValueChange={setSelectedBrandId} disabled={brandsLoading}>
-              <SelectTrigger className="mt-1">
+              <SelectTrigger className={CONTROL_CLASS}>
                 <SelectValue placeholder={brandsLoading ? 'Yükleniyor...' : 'Marka seçin'} />
               </SelectTrigger>
               <SelectContent>
@@ -587,7 +593,7 @@ export default function TedarikciSiparisPanel() {
               </SelectContent>
             </Select>
             {selectedBrand && (
-              <p className="mt-1 flex items-center gap-1 text-[11px] text-muted-foreground">
+              <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#587169] dark:text-[#a994b5]">
                 {selectedBrand.mail ? (
                   <><Mail className="h-3 w-3" /> {selectedBrand.mail}</>
                 ) : (
@@ -599,63 +605,63 @@ export default function TedarikciSiparisPanel() {
             )}
           </div>
           <div>
-            <Label className="text-sm">Dönem (Ay)</Label>
+            <label className={FIELD_LABEL_CLASS}>Dönem (Ay)</label>
             <Select value={String(selectedMonth)} onValueChange={(v) => setSelectedMonth(Number(v))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger className={CONTROL_CLASS}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {MONTHS.map(m => <SelectItem key={m.value} value={String(m.value)}>{m.label}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label className="text-sm">Dönem (Yıl)</Label>
+            <label className={FIELD_LABEL_CLASS}>Dönem (Yıl)</label>
             <Select value={String(selectedYear)} onValueChange={(v) => setSelectedYear(Number(v))}>
-              <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <SelectTrigger className={CONTROL_CLASS}><SelectValue /></SelectTrigger>
               <SelectContent>
                 {YEARS.map(y => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label className="text-sm">Ana Depo</Label>
-            <div className="mt-1 h-10 flex items-center gap-2 rounded-md border bg-muted/40 px-3 text-sm">
+            <label className={FIELD_LABEL_CLASS}>Ana Depo</label>
+            <div className="flex min-h-11 items-center gap-2 rounded-xl border border-emerald-950/10 bg-white/60 px-3 text-sm font-bold text-[#29473f] dark:border-fuchsia-300/20 dark:bg-white/[0.035] dark:text-[#d6bfe3]">
               {anaDepo ? (
                 <>
-                  <span className="flex items-center gap-1 font-medium min-w-0 truncate"><Star className="h-3.5 w-3.5 shrink-0 text-amber-500" /><span className="truncate">{anaDepo.name}</span></span>
+                  <span className="flex min-w-0 items-center gap-1 truncate"><Star className="h-3.5 w-3.5 shrink-0 text-amber-500" /><span className="truncate">{anaDepo.name}</span></span>
                   {anaDepo.ceomedEnabled && (
-                    <span className="shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold text-sky-700 dark:bg-sky-400/15 dark:text-sky-200">Ceomed</span>
+                    <span className="shrink-0 rounded-full border border-sky-200 bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/15 dark:text-sky-200">Ceomed</span>
                   )}
                 </>
               ) : (
-                <span className="text-muted-foreground">Seçilmedi</span>
+                <span className="font-semibold text-[#587169] dark:text-[#a994b5]">Seçilmedi</span>
               )}
             </div>
           </div>
         </div>
         {anaDepo && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            Talep kapsamı: <b>{anaDepo.name}</b>
+          <p className="mt-3 text-xs font-semibold text-[#587169] dark:text-[#a994b5]">
+            Talep kapsamı: <b className="text-[#29473f] dark:text-[#d6bfe3]">{anaDepo.name}</b>
             {relevantDepotIds.length > 1 && ` + ${relevantDepotIds.length - 1} yan depo`}
             {relevantLabIds.length > 0 && ` + ${relevantLabIds.length} bağlı laboratuvar`}
           </p>
         )}
-      </div>
+      </section>
 
       {/* Hesap tablosu */}
-      <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b p-4 flex-wrap">
-          <h2 className="text-base font-bold flex items-center gap-2">
-            <PackageSearch className="h-4 w-4 text-primary" />
+      <section className={`${PANEL_CLASS} mb-5 overflow-hidden`}>
+        <div className="flex flex-col gap-3 border-b border-emerald-950/10 px-5 py-4 dark:border-fuchsia-300/15 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="flex items-center gap-2 text-lg font-extrabold text-[#0f2a24] dark:text-[#f4ecfa]">
+            <PackageSearch className="h-5 w-5 text-emerald-600 dark:text-fuchsia-300" />
             Hesaplanan Sipariş Listesi
-            {selectedBrand && <span className="text-muted-foreground font-normal">— {selectedBrand.name}</span>}
+            {selectedBrand && <span className="font-semibold text-[#587169] dark:text-[#a994b5]">— {selectedBrand.name}</span>}
           </h2>
           <div className="flex items-center gap-2">
-            <Label htmlFor="yeterlilik" className="text-sm whitespace-nowrap">Yeterlilik Gün Sayısı</Label>
+            <label htmlFor="yeterlilik" className="whitespace-nowrap text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">Yeterlilik Gün Sayısı</label>
             <Input
               id="yeterlilik"
               type="number"
               min={1}
-              className="w-28"
+              className={`w-28 ${CONTROL_CLASS}`}
               value={yeterlilikGun}
               onChange={(e) => setYeterlilikGun(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
               placeholder="Örn. 60"
@@ -664,169 +670,171 @@ export default function TedarikciSiparisPanel() {
         </div>
 
         {depotsLoading ? (
-          <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+          <div className="flex min-h-[360px] items-center justify-center gap-2 text-sm font-semibold text-[#587169] dark:text-[#a994b5]">
             <Loader2 className="h-5 w-5 animate-spin" /> Depolar yükleniyor…
           </div>
         ) : !anaDepo ? (
-          <div className="p-10 text-center text-sm text-muted-foreground">Önce bir ana depo tanımlayın.</div>
+          <div className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center">
+            <Star className="h-9 w-9 text-emerald-500/65 dark:text-fuchsia-300/65" />
+            <p className="mt-4 font-bold text-[#29473f] dark:text-[#d6bfe3]">Önce bir ana depo tanımlayın.</p>
+          </div>
         ) : !selectedBrand ? (
-          <div className="p-10 text-center text-sm text-muted-foreground">Listeyi görmek için bir marka seçin.</div>
+          <div className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center">
+            <PackageSearch className="h-9 w-9 text-emerald-500/65 dark:text-fuchsia-300/65" />
+            <p className="mt-4 font-bold text-[#29473f] dark:text-[#d6bfe3]">Listeyi görmek için bir marka seçin.</p>
+          </div>
         ) : dataLoading ? (
-          <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+          <div className="flex min-h-[360px] items-center justify-center gap-2 text-sm font-semibold text-[#587169] dark:text-[#a994b5]">
             <Loader2 className="h-5 w-5 animate-spin" /> Veriler hazırlanıyor…
           </div>
         ) : rows.length === 0 ? (
-          <div className="p-10 text-center text-sm text-muted-foreground">
-            Seçili markaya ait, ana depo/lab/yan depolarda min-max tanımlı ürün bulunamadı.
+          <div className="flex min-h-[360px] flex-col items-center justify-center p-8 text-center">
+            <PackageSearch className="h-9 w-9 text-emerald-500/65 dark:text-fuchsia-300/65" />
+            <p className="mt-4 font-bold text-[#29473f] dark:text-[#d6bfe3]">Ürün bulunamadı</p>
+            <p className="mt-2 max-w-lg text-sm text-[#587169] dark:text-[#a994b5]">Seçili markaya ait, ana depo/lab/yan depolarda min-max tanımlı ürün bulunamadı.</p>
           </div>
         ) : (
           <>
-            <ScrollArea className="max-h-[520px]">
-              <Table>
-                <TableHeader className="sticky top-0 bg-card z-10">
-                  <TableRow>
-                    <TableHead className="w-[140px]">Stok Kodu</TableHead>
-                    <TableHead>Stok Adı</TableHead>
-                    <TableHead className="text-right w-[130px]">Ana Depo Stok</TableHead>
-                    <TableHead className="text-right w-[120px]">
+            <div className="max-h-[560px] overflow-auto">
+              <table className="w-full min-w-[920px] border-separate border-spacing-0 text-left">
+                <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
+                  <tr>
+                    <th className="px-5 py-4">Stok Kodu</th>
+                    <th className="px-4 py-4">Stok Adı</th>
+                    <th className="px-4 py-4 text-right">Ana Depo Stok</th>
+                    <th className="px-4 py-4 text-right">
                       Test Adedi
-                      <span className="block text-[10px] font-normal text-muted-foreground">Küm. Total</span>
-                    </TableHead>
-                    <TableHead className="text-right w-[140px]">
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Küm. Total</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
                       Aylık Toplam Tüketim
-                      <span className="block text-[10px] font-normal text-muted-foreground">(Kutu)</span>
-                    </TableHead>
-                    <TableHead className="text-right w-[150px]">
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">(Kutu)</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
                       Gerekli Adet
                       {Number(yeterlilikGun) > 0 && (
-                        <span className="block text-[10px] font-normal text-muted-foreground">{yeterlilikGun} günlük</span>
+                        <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">{yeterlilikGun} günlük</span>
                       )}
-                    </TableHead>
-                    <TableHead className="text-right w-[130px]">Sipariş Adedi</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
+                    </th>
+                    <th className="px-5 py-4 text-right">Sipariş Adedi</th>
+                  </tr>
+                </thead>
+                <tbody>
                   {rows.map(row => (
-                    <TableRow key={row.stokKodu} className={row.siparisAdedi > 0 ? '' : 'opacity-60'}>
-                      <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
-                      <TableCell className="text-sm">{row.stokAdi}</TableCell>
-                      <TableCell className="text-right tabular-nums">{row.anaDepoStok}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {kumulatifLoading ? (
-                          <span className="text-muted-foreground">…</span>
-                        ) : row.testAdedi > 0 ? (
-                          row.testAdedi
-                        ) : (
-                          <span className="text-muted-foreground">0</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {kumulatifLoading ? (
-                          <span className="text-muted-foreground">…</span>
-                        ) : row.aylikTuketimKutu > 0 ? (
-                          row.aylikTuketimKutu
-                        ) : (
-                          <span className="text-muted-foreground">0</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {Number(yeterlilikGun) > 0 ? row.gerekliAdet : <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-bold">
+                    <tr
+                      key={row.stokKodu}
+                      className={`text-sm transition-colors hover:bg-emerald-50/70 dark:hover:bg-fuchsia-300/[0.055] ${row.siparisAdedi > 0 ? '' : 'opacity-60'}`}
+                    >
+                      <td className="border-t border-emerald-950/10 px-5 py-3.5 font-mono text-xs font-semibold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.stokKodu}</td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 font-semibold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.stokAdi}</td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.anaDepoStok}</td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.testAdedi > 0 ? row.testAdedi : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.aylikTuketimKutu > 0 ? row.aylikTuketimKutu : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {Number(yeterlilikGun) > 0 ? row.gerekliAdet : <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-5 py-3.5 text-right tabular-nums text-base font-black dark:border-fuchsia-300/15">
                         {row.siparisAdedi > 0 ? (
-                          <span className="text-emerald-600 dark:text-emerald-400">{row.siparisAdedi}</span>
+                          <span className="text-emerald-600 dark:text-fuchsia-300">{row.siparisAdedi}</span>
                         ) : (
-                          <span className="text-muted-foreground">0</span>
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>
                         )}
-                      </TableCell>
-                    </TableRow>
+                      </td>
+                    </tr>
                   ))}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-            <div className="flex items-center justify-between gap-3 border-t p-3 text-sm flex-wrap">
-              <span className="text-muted-foreground">
+                </tbody>
+              </table>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-950/10 px-5 py-3 text-sm dark:border-fuchsia-300/15">
+              <span className="font-semibold text-[#587169] dark:text-[#a994b5]">
                 {rows.length} ürün · sipariş edilecek {orderableRows.length} kalem
               </span>
-              <span className="font-bold">Toplam Sipariş Adedi: {totalSiparisAdedi}</span>
+              <span className="font-extrabold text-[#0f2a24] dark:text-[#f4ecfa]">Toplam Sipariş Adedi: {totalSiparisAdedi}</span>
             </div>
           </>
         )}
-      </div>
+      </section>
 
       {/* Açık tedarikçi siparişler */}
-      <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-        <div className="border-b p-4">
-          <h2 className="text-base font-bold">Açık Tedarikçi Siparişler</h2>
-          <p className="text-xs text-muted-foreground">Bekleyen siparişler. Teslim alındığında &quot;Tamamlandı&quot; ile kapatın.</p>
+      <section className={`${PANEL_CLASS} mb-5 overflow-hidden`}>
+        <div className="border-b border-emerald-950/10 px-5 py-4 dark:border-fuchsia-300/15">
+          <h2 className="text-lg font-extrabold text-[#0f2a24] dark:text-[#f4ecfa]">Açık Tedarikçi Siparişler</h2>
+          <p className="mt-1 text-sm font-medium text-[#587169] dark:text-[#a994b5]">Bekleyen siparişler. Teslim alındığında &quot;Tamamlandı&quot; ile kapatın.</p>
         </div>
         {ordersLoading ? (
-          <div className="flex items-center justify-center gap-2 p-8 text-sm text-muted-foreground">
+          <div className="flex min-h-[140px] items-center justify-center gap-2 text-sm font-semibold text-[#587169] dark:text-[#a994b5]">
             <Loader2 className="h-5 w-5 animate-spin" /> Siparişler yükleniyor…
           </div>
         ) : openOrders.length === 0 ? (
-          <div className="p-8 text-center text-sm text-muted-foreground">Bekleyen sipariş yok.</div>
+          <div className="flex min-h-[140px] flex-col items-center justify-center p-8 text-center">
+            <CheckCircle2 className="h-8 w-8 text-emerald-500/65 dark:text-fuchsia-300/65" />
+            <p className="mt-3 font-bold text-[#29473f] dark:text-[#d6bfe3]">Bekleyen sipariş yok.</p>
+          </div>
         ) : (
-          <div className="divide-y">
+          <div className="divide-y divide-emerald-950/10 dark:divide-fuchsia-300/15">
             {openOrders.map(order => (
-              <div key={order.id} className="flex items-center justify-between gap-3 p-4 flex-wrap">
+              <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
                 <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-semibold">{order.markaAdi}</span>
-                    <Badge variant="outline" className="border-amber-400 text-amber-700 dark:text-amber-300">Bekliyor</Badge>
-                    <span className="text-xs text-muted-foreground">{order.donem}</span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-extrabold text-[#29473f] dark:text-[#d6bfe3]">{order.markaAdi}</span>
+                    <span className="rounded-full border border-amber-200 bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/15 dark:text-amber-200">Bekliyor</span>
+                    <span className="text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">{order.donem}</span>
                     {order.mailStatus === 'sent' && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400"><Mail className="h-3 w-3" />mail gönderildi</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400"><Mail className="h-3 w-3" />mail gönderildi</span>
                     )}
                     {order.mailStatus === 'failed' && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-rose-600"><MailWarning className="h-3 w-3" />mail gönderilemedi</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600 dark:text-rose-400"><MailWarning className="h-3 w-3" />mail gönderilemedi</span>
                     )}
                     {order.mailStatus === 'skipped' && (
-                      <span className="inline-flex items-center gap-1 text-[11px] text-amber-600"><MailWarning className="h-3 w-3" />mail adresi yok</span>
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-600 dark:text-amber-400"><MailWarning className="h-3 w-3" />mail adresi yok</span>
                     )}
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
+                  <p className="mt-1 text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">
                     {order.toplamKalem} kalem · {order.toplamAdet} adet · {order.anaDepoAdi}
                     {toDate(order.createdAt) && ` · ${toDate(order.createdAt)!.toLocaleString('tr-TR')}`}
                   </p>
                 </div>
-                <Button
-                  size="sm"
+                <button
+                  type="button"
                   onClick={() => handleComplete(order)}
                   disabled={completingId === order.id}
-                  className="gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                  className={`${PRIMARY_BTN_CLASS} px-4`}
                 >
                   {completingId === order.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                   Tamamlandı
-                </Button>
+                </button>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </section>
 
       {/* Tamamlanan siparişler */}
       {completedOrders.length > 0 && (
-        <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
-          <div className="border-b p-4">
-            <h2 className="text-base font-bold">Tamamlanan Siparişler</h2>
+        <section className={`${PANEL_CLASS} overflow-hidden`}>
+          <div className="border-b border-emerald-950/10 px-5 py-4 dark:border-fuchsia-300/15">
+            <h2 className="text-lg font-extrabold text-[#0f2a24] dark:text-[#f4ecfa]">Tamamlanan Siparişler</h2>
           </div>
-          <div className="divide-y">
+          <div className="divide-y divide-emerald-950/10 dark:divide-fuchsia-300/15">
             {completedOrders.slice(0, 30).map(order => (
-              <div key={order.id} className="flex items-center justify-between gap-3 p-3 flex-wrap text-sm">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium">{order.markaAdi}</span>
-                  <Badge variant="outline" className="border-emerald-400 text-emerald-700 dark:text-emerald-300">Tamamlandı</Badge>
-                  <span className="text-xs text-muted-foreground">{order.donem}</span>
+              <div key={order.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-bold text-[#29473f] dark:text-[#d6bfe3]">{order.markaAdi}</span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/15 dark:text-emerald-200">Tamamlandı</span>
+                  <span className="text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">{order.donem}</span>
                 </div>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">
                   {order.toplamKalem} kalem · {order.toplamAdet} adet
                   {toDate(order.completedAt) && ` · ${toDate(order.completedAt)!.toLocaleDateString('tr-TR')}`}
                 </span>
               </div>
             ))}
           </div>
-        </div>
+        </section>
       )}
     </div>
   );
