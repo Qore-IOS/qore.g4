@@ -78,6 +78,7 @@ declare module "@/lib/types" {
     kategori?: string;
     marka?: string;
     laboratuvarGrubu?: string;
+    laboratuvarGruplari?: string[];
     testGrubu?: string;
     cihazGrubu?: string;
     aktif?: boolean;

@@ -1270,8 +1270,16 @@ export default function LaboratuvarSayimPage() {
         period: countPeriod,
         month: countMonth,
         year: countYear,
+        scopeProducts: scopeProducts.map(product => ({
+          stokKodu: product.stokKodu,
+          stokAdi: product.stokAdi,
+          laboratuvarGrubu: product.laboratuvarGrubu || '',
+          laboratuvarGruplari: product.laboratuvarGruplari || [],
+          ambalajDegeri: product.ambalajDegeri || 1,
+        })),
         cihazUstuUploaded: false,
         kumulatifUploaded: false,
+        batch,
         items: allCountedEntries.map(entry => {
           const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
           const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
@@ -1316,7 +1324,7 @@ export default function LaboratuvarSayimPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, productCodes, isSaving, countPeriod, countMonth, countYear, toast]);
+  }, [labId, labName, currentUserProfile, currentCompanyId, productEntries, productCodes, scopeProducts, isSaving, countPeriod, countMonth, countYear, toast]);
 
   const completeUploadStep = useCallback(() => {
     setModalFiles([]);

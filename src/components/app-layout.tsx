@@ -60,6 +60,15 @@ const PushNotificationsClient = dynamic(
 const QoreTechnicShell = dynamic(() => import('./qore-technic-shell'), { ssr: false });
 const LojistikTerminalShell = dynamic(() => import('./lojistik-terminal-shell'), { ssr: false });
 
+function MasterDataPrefetch() {
+  useProductCodes();
+  useBarcodeFormatsQuery();
+  useDepots();
+  useAddressDefinitions();
+  useUsers();
+  useHospitals();
+  return null;
+}
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const {
@@ -71,14 +80,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     toggleOrbAnimation,
     toggleNavMode,
   } = useAuth();
-
-  // Prefetch static master-data in the background to speed up panel loading (cached for 30m-1h)
-  useProductCodes();
-  useBarcodeFormatsQuery();
-  useDepots();
-  useAddressDefinitions();
-  useUsers();
-  useHospitals(); // Siparisler paneli ve LojistikSiparisView için
 
   const pathname = usePathname();
   const [calendarOpen, setCalendarOpen] = useState(false);
@@ -98,15 +99,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Lojistik terminal: lojistik_sorumlusu gets a dedicated work terminal
   // shell (its own collapsible sidebar, no global dock).
   const isLojistikTerminalRole = currentUserProfile?.role === 'lojistik_sorumlusu';
-  const isLojistikTerminalPath =
-    !!pathname &&
-    (
-      pathname === '/siparisler' ||
-      pathname.startsWith('/siparisler/') ||
-      pathname.startsWith('/merkez-siparis') ||
-      pathname.startsWith('/route-planlayici') ||
-      pathname.startsWith('/siparis-gecmis')
-    );
   const { setTheme } = useTheme();
   const router = useRouter();
 
@@ -170,6 +162,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (isSarfDagitimPersonel) {
     return (
       <>
+        <MasterDataPrefetch />
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -183,9 +176,10 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   // Lojistik terminal — dedicated shell for lojistik_sorumlusu role.
   // No global dock / sidebar / mobile dock. The shell provides its own navigation.
-  if (isLojistikTerminalRole && isLojistikTerminalPath) {
+  if (isLojistikTerminalRole) {
     return (
       <>
+        <MasterDataPrefetch />
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -207,6 +201,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   if (isQoreTechnicRole) {
     return (
       <>
+        <MasterDataPrefetch />
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -231,6 +226,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
     return (
       <SidebarProvider>
+        <MasterDataPrefetch />
         <PushNotificationsErrorBoundary>
           <PushNotificationsClient />
         </PushNotificationsErrorBoundary>
@@ -335,6 +331,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   // Default to Dock view
   return (
     <div className="flex min-h-screen flex-col items-center">
+      <MasterDataPrefetch />
       <PresenceManager />
       <PushNotificationsErrorBoundary>
         <PushNotificationsClient />

@@ -40,6 +40,27 @@ service firebase.storage {
       allow write: if request.auth != null && request.auth.uid == userId;
     }
 
+    function isCalculationCompany(companyId) {
+      return request.auth != null && (
+        request.auth.token.isSuperAdmin == true ||
+        request.auth.token.companyId == companyId
+      );
+    }
+
+    // Temporary calculation uploads are isolated by company, immutable after
+    // creation, and bounded to the report file formats accepted by the UI.
+    match /qore-calculation-pending-files/{companyId}/{pendingId}/{fileId} {
+      allow read, delete: if isCalculationCompany(companyId);
+      allow create: if isCalculationCompany(companyId)
+        && request.resource.size <= 20 * 1024 * 1024
+        && request.resource.metadata.companyId == companyId
+        && request.resource.metadata.pendingCalculationId == pendingId
+        && request.resource.contentType.matches(
+          'application/pdf|text/.*|application/csv|application/vnd.ms-excel|application/octet-stream'
+        );
+      allow update: if false;
+    }
+
     // Deny access to all other paths
     match /{allPaths=**} {
       allow read, write: if false;

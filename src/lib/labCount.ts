@@ -5,6 +5,7 @@ import {
   doc,
   setDoc,
   Timestamp,
+  type WriteBatch,
 } from 'firebase/firestore';
 
 export type DepoStokItem = {
@@ -38,6 +39,14 @@ export type LabCountItem = {
   currency?: 'EUR' | 'USD' | 'TRY';
 };
 
+export type LabCountScopeProduct = {
+  stokKodu: string;
+  stokAdi: string;
+  laboratuvarGrubu?: string;
+  laboratuvarGruplari?: string[];
+  ambalajDegeri?: number;
+};
+
 export type LabCountSession = {
   laboratoryId: string;
   laboratoryName: string;
@@ -49,6 +58,8 @@ export type LabCountSession = {
   period?: string;
   month?: number;
   year?: number;
+  /** Product/group scope snapshot used for reliable historical completion. */
+  scopeProducts?: LabCountScopeProduct[];
   cihazUstuUploaded?: boolean;
   kumulatifUploaded?: boolean;
 };
@@ -121,8 +132,11 @@ export async function saveLabCountSession(opts: {
   period?: string;
   month?: number;
   year?: number;
+  scopeProducts?: LabCountScopeProduct[];
   cihazUstuUploaded?: boolean;
   kumulatifUploaded?: boolean;
+  /** Optional existing batch so inventory reconciliation and history are atomic. */
+  batch?: WriteBatch;
 }): Promise<string> {
   const {
     laboratoryId,
@@ -136,8 +150,10 @@ export async function saveLabCountSession(opts: {
     period,
     month,
     year,
+    scopeProducts,
     cihazUstuUploaded,
     kumulatifUploaded,
+    batch,
   } = opts;
 
   if (!laboratoryId) throw new Error('laboratoryId is required');
@@ -166,6 +182,7 @@ export async function saveLabCountSession(opts: {
     period,
     month,
     year,
+    scopeProducts: scopeProducts ?? [],
     cihazUstuUploaded: cihazUstuUploaded ?? false,
     kumulatifUploaded: kumulatifUploaded ?? false,
   };
@@ -177,7 +194,11 @@ export async function saveLabCountSession(opts: {
       finishedAt: Timestamp.fromDate(payload.finishedAt),
   };
 
-  await setDoc(sessionRef, firestorePayload);
+  if (batch) {
+    batch.set(sessionRef, firestorePayload);
+  } else {
+    await setDoc(sessionRef, firestorePayload);
+  }
 
   return sessionRef.id;
 }

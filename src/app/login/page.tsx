@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, Lock, Eye, EyeOff, Check, ArrowRight, Loader2, Sparkle } from 'lucide-react';
+import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 
 const RIBBON_TURN_DURATION_MS = 480;
 const RIBBON_LAYER_STAGGER_MS = 120;
@@ -161,7 +162,7 @@ export default function LoginPage() {
 
     const target =
       currentUserProfile.role === 'lojistik_sorumlusu'
-        ? '/siparisler'
+        ? LOJISTIK_HOME_PATH
         : currentUserProfile.role === 'sarf_dagitim_personeli'
           ? '/sarf-teslimat'
           : '/dashboard';

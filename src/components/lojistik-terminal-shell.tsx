@@ -11,14 +11,19 @@ import {
   ChevronRight,
   ClipboardList,
   CheckCircle2,
+  House,
   History as HistoryIcon,
   FilePlus,
+  ListChecks,
   LogOut,
   Moon,
   Send,
   Sun,
-  UserCircle,
 } from 'lucide-react';
+import {
+  LOJISTIK_COUNTS_PATH,
+  LOJISTIK_HOME_PATH,
+} from '@/lib/lojistik/navigation';
 
 function QorelogisticsBrand({ collapsed = false }: { collapsed?: boolean }) {
   if (collapsed) {
@@ -41,6 +46,20 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  {
+    key: 'ana-sayfa',
+    label: 'Ana Sayfa',
+    icon: House,
+    href: LOJISTIK_HOME_PATH,
+    match: (p) => p === LOJISTIK_HOME_PATH,
+  },
+  {
+    key: 'sayimlar',
+    label: 'Sayımlar',
+    icon: ListChecks,
+    href: LOJISTIK_COUNTS_PATH,
+    match: (p) => p.startsWith(LOJISTIK_COUNTS_PATH),
+  },
   {
     key: 'bekleyen',
     label: 'Bekleyen Siparişler',
@@ -139,6 +158,7 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
 
   const extraNavItems: NavItem[] = React.useMemo(() => {
     const excluded = new Set<string>([
+      'dashboard',
       'siparisler',
       'route-planlayici',
       'planner',

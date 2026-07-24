@@ -332,6 +332,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         primaryLaboratories: additionalData.primaryLaboratories || [],
         assignedDepots: additionalData.assignedDepots || [],
         assignedBrands: additionalData.assignedBrands || [],
+        assignedLabGroups: additionalData.assignedLabGroups || [],
         phoneNumber: additionalData.phoneNumber || '',
         nfcId: additionalData.nfcId || '',
         notificationsEnabled: additionalData.notificationsEnabled ?? false,

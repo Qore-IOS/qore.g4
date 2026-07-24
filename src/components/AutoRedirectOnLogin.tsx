@@ -7,6 +7,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { hasOnlyProductUsagePermission } from '@/lib/permissions';
 import type { AppView } from '@/lib/types';
+import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 
 export default function AutoRedirectOnLogin() {
   const router = useRouter();
@@ -33,9 +34,9 @@ export default function AutoRedirectOnLogin() {
       return;
     }
 
-    // Lojistik sorumlusu doğrudan lojistik terminalde bekleyen siparişlere iner.
+    // Lojistik sorumlusu kendisine özel lojistik ana sayfasına iner.
     if (userRole === 'lojistik_sorumlusu' && pathname === '/dashboard') {
-      router.replace('/siparisler');
+      router.replace(LOJISTIK_HOME_PATH);
       return;
     }
 
