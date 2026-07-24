@@ -3,5 +3,5 @@
 import HastaneYonetimiPanel from '@/components/hastane-yonetimi-panel';
 
 export default function LaboratuvarYonetimiPage() {
-    return <HastaneYonetimiPanel />;
+    return <HastaneYonetimiPanel appearance="clay" />;
 }

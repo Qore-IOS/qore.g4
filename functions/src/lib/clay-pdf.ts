@@ -74,6 +74,10 @@ function makeClay(doc: jsPDF, fonts: ClayFonts) {
   };
   const measure = (str: any, w: number, size: number, spacing = 0) => { setFontW(w, size); let t = doc.getTextWidth(String(str)); if (spacing) t += spacing * Math.max(0, String(str).length - 1); return t; };
   const split = (str: any, w: number, size: number, maxW: number): string[] => { setFontW(w, size); return doc.splitTextToSize(String(str), maxW); };
+  const fitSize = (str: any, w: number, size: number, maxW: number, minSize = 8.5) => {
+    const measured = measure(str, w, size);
+    return measured > maxW ? Math.max(minSize, (size * maxW) / measured) : size;
+  };
   const card = (x: number, y: number, w: number, h: number, r: number, fill?: RGB | null, stroke?: RGB | null, lw = 1) => {
     if (fill) doc.setFillColor(fill[0], fill[1], fill[2]);
     if (stroke) { doc.setDrawColor(stroke[0], stroke[1], stroke[2]); doc.setLineWidth(lw); }
@@ -135,7 +139,7 @@ function makeClay(doc: jsPDF, fonts: ClayFonts) {
     }
     return y;
   };
-  return { C, T, measure, split, card, dot, hline, section, table };
+  return { C, T, measure, split, fitSize, card, dot, hline, section, table };
 }
 
 export type DurumTone = 'green' | 'red' | 'neutral';
@@ -180,21 +184,24 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   try { qrData = await QRCode.toDataURL(input.qrPayload, { errorCorrectionLevel: 'M', margin: 0, scale: 6 }); } catch { /* ignore */ }
   clay.card(qrX, qrY, qrFrame, qrFrame, 10, C.white, C.line);
   if (qrData) { try { doc.addImage(qrData, 'PNG', qrX + qrPad, qrY + qrPad, qrFrame - 2 * qrPad, qrFrame - 2 * qrPad, undefined, 'FAST'); } catch { /* ignore */ } }
-  const qLogo = 13, qGap = 4, label = 'QORE';
-  const lblW = clay.measure(label, 800, 11, 1);
+  const qLogo = 17, qGap = 5, label = 'QORE', qoreTextSize = 13.5;
+  const lblW = clay.measure(label, 800, qoreTextSize, 1.1);
   const sX = qrX + (qrFrame - (qLogo + qGap + lblW)) / 2, rowY = qrY + qrFrame + 6;
   if (assets.qoreLogo) { try { doc.addImage(`data:image/png;base64,${assets.qoreLogo.b64}`, 'PNG', sX, rowY, qLogo, qLogo, undefined, 'FAST'); } catch { /* ignore */ } }
-  clay.T(label, sX + qLogo + qGap, rowY + qLogo - 2, { size: 11, w: 800, color: C.ink, spacing: 1 });
+  clay.T(label, sX + qLogo + qGap, rowY + qLogo / 2 + 1, { size: qoreTextSize, w: 800, color: C.ink, spacing: 1.1, baseline: 'middle' });
 
   // title band
   let y = TOP + qrFrame + 22; const bandH = 54;
   clay.card(PAD, y, CW, bandH, 16, C.beige, C.line);
-  clay.T('İnVitro Lab · Servis Belgesi', PAD + 20, y + 21, { size: 9, w: 800, color: C.mute, upper: true, spacing: 1.5 });
-  clay.T(input.title, PAD + 20, y + 43, { size: 24, w: 900, color: C.ink });
   const chipW = 118, chipH = 38, chipX = RIGHT - 14 - chipW, chipY = y + (bandH - chipH) / 2;
+  const titleMaxW = chipX - (PAD + 20) - 18;
+  const titleSize = clay.fitSize(input.title, 900, 24, titleMaxW, 17);
+  clay.T('İnVitro Lab · Servis Belgesi', PAD + 20, y + 21, { size: 9, w: 800, color: C.mute, upper: true, spacing: 1.1 });
+  clay.T(input.title, PAD + 20, y + 43, { size: titleSize, w: 900, color: C.ink });
   clay.card(chipX, chipY, chipW, chipH, 11, C.white, C.line);
   clay.T('FORM NO', chipX + chipW - 13, chipY + 15, { size: 8, w: 800, color: C.mute, align: 'right', spacing: 1.2 });
-  clay.T(input.formNo, chipX + chipW - 13, chipY + 30, { size: 14, w: 900, color: C.ink, align: 'right' });
+  const formNoSize = clay.fitSize(input.formNo, 900, 14, chipW - 26, 9.5);
+  clay.T(input.formNo, chipX + chipW - 13, chipY + 30, { size: formNoSize, w: 900, color: C.ink, align: 'right' });
   y += bandH + 14;
 
   // info cards
@@ -204,46 +211,86 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
     ['Cihaz', input.cihaz, null],
     ['İşlemi Yapan', input.islemiYapan, input.eslikEden ? `Eşlik Eden: ${input.eslikEden}` : null],
   ];
-  const leftH = 42 + leftRows.reduce((h, r) => h + 27 + (r[2] ? 13 : 0), 0) + 6;
-  const rightH = 42 + 2 * 27 + 18 + 22 + 6;
+  const infoInnerW = cardW - 32;
+  const preparedLeft = leftRows.map(([label, value, sub]) => ({
+    label,
+    valueLines: clay.split(value || '-', 800, 13, infoInnerW),
+    subLines: sub ? clay.split(sub, 700, 10.5, infoInnerW) : [],
+  }));
+  const fieldHeight = (valueLines: string[], subLines: string[] = []) =>
+    27 + Math.max(0, valueLines.length - 1) * 15 + subLines.length * 13;
+  const leftH = 42 + preparedLeft.reduce((h, row) => h + fieldHeight(row.valueLines, row.subLines), 0) + 8;
+  const preparedDates = [
+    { label: 'Başlangıç', lines: clay.split(input.baslangic || '-', 800, 13, infoInnerW) },
+    { label: 'Bitiş', lines: clay.split(input.bitis || '-', 800, 13, infoInnerW) },
+  ];
+  const statusTextW = Math.max(80, infoInnerW - 35);
+  const statusLines = clay.split(input.cihazDurumu || '-', 800, 11.5, statusTextW);
+  const statusH = Math.max(24, statusLines.length * 14 + 8);
+  const rightH = 42
+    + preparedDates.reduce((h, row) => h + fieldHeight(row.lines), 0)
+    + 7 + statusH + 12;
   const infoH = Math.max(leftH, rightH);
   clay.card(PAD, y, cardW, infoH, 14, C.white, C.line);
   clay.dot(PAD + 16, y + 16, 7, C.orange);
   clay.T('İşlem Bilgileri', PAD + 30, y + 22, { size: 9.5, w: 900, color: C.orangeD, upper: true, spacing: 1.2 });
   let ly = y + 42;
-  for (const [lab, val, sub] of leftRows) {
-    clay.T(lab, PAD + 16, ly, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
-    clay.T(val || '-', PAD + 16, ly + 15, { size: 13, w: 800, maxWidth: cardW - 32 });
-    ly += 27;
-    if (sub) { clay.T(sub, PAD + 16, ly + 2, { size: 10.5, w: 700, color: C.soft, maxWidth: cardW - 32 }); ly += 13; }
+  for (const row of preparedLeft) {
+    clay.T(row.label, PAD + 16, ly, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
+    row.valueLines.forEach((line, index) => {
+      clay.T(line, PAD + 16, ly + 15 + index * 15, { size: 13, w: 800 });
+    });
+    ly += 27 + Math.max(0, row.valueLines.length - 1) * 15;
+    row.subLines.forEach((line, index) => {
+      clay.T(line, PAD + 16, ly + 2 + index * 13, { size: 10.5, w: 700, color: C.soft });
+    });
+    ly += row.subLines.length * 13;
   }
   const rx = PAD + cardW + gap;
   clay.card(rx, y, cardW, infoH, 14, C.white, C.line);
   clay.dot(rx + 16, y + 16, 7, C.green);
   clay.T('Zaman & Durum', rx + 30, y + 22, { size: 9.5, w: 900, color: C.greenD, upper: true, spacing: 1.2 });
   let ry = y + 42;
-  ([['Başlangıç', input.baslangic], ['Bitiş', input.bitis]] as [string, string][]).forEach(([lab, val]) => {
-    clay.T(lab, rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
-    clay.T(val, rx + 16, ry + 15, { size: 13, w: 800 }); ry += 27;
+  preparedDates.forEach((row) => {
+    clay.T(row.label, rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
+    row.lines.forEach((line, index) => clay.T(line, rx + 16, ry + 15 + index * 15, { size: 13, w: 800 }));
+    ry += fieldHeight(row.lines);
   });
   clay.T('Cihaz Durumu', rx + 16, ry, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6 });
   const tn = badgeTone(input.durumTone);
-  const bpadX = 11, bdot = 7, bgapd = 6, btw = clay.measure(input.cihazDurumu, 800, 12);
-  const bW = bpadX * 2 + bdot + bgapd + btw, bH = 22, bY = ry + 5;
+  const bpadX = 11, bdot = 7, bgapd = 6;
+  const widestStatusLine = Math.max(...statusLines.map((line) => clay.measure(line, 800, 11.5)));
+  const bW = Math.min(infoInnerW, bpadX * 2 + bdot + bgapd + widestStatusLine);
+  const bH = statusH, bY = ry + 7;
   clay.card(rx + 16, bY, bW, bH, 8, tn.bg, tn.ln);
   clay.dot(rx + 16 + bpadX, bY + (bH - bdot) / 2, bdot, tn.dt, 3.5);
-  clay.T(input.cihazDurumu, rx + 16 + bpadX + bdot + bgapd, bY + bH / 2, { size: 12, w: 800, color: tn.tx, baseline: 'middle' });
+  const statusStartY = bY + bH / 2 - ((statusLines.length - 1) * 14) / 2;
+  statusLines.forEach((line, index) => {
+    clay.T(line, rx + 16 + bpadX + bdot + bgapd, statusStartY + index * 14, { size: 11.5, w: 800, color: tn.tx, baseline: 'middle' });
+  });
   y += infoH + 12;
 
   // chips
   const chips = input.chips.slice(0, 3);
   if (chips.length) {
-    const cg = 12, chW = (CW - (chips.length - 1) * cg) / chips.length, chipsH = 44;
-    chips.forEach((ch, i) => {
+    const cg = 12, chW = (CW - (chips.length - 1) * cg) / chips.length;
+    const preparedChips = chips.map((chip) => ({
+      ...chip,
+      labelLines: clay.split(chip.label, 800, 8.5, chW - 28),
+      valueLines: clay.split(chip.value || '—', 800, 12.5, chW - 28),
+    }));
+    const chipsH = Math.max(48, ...preparedChips.map((chip) =>
+      10 + chip.labelLines.length * 10 + 4 + chip.valueLines.length * 15 + 10));
+    preparedChips.forEach((ch, i) => {
       const cx = PAD + i * (chW + cg);
       clay.card(cx, y, chW, chipsH, 13, C.beige, C.line);
-      clay.T(ch.label, cx + 14, y + 17, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.6, maxWidth: chW - 28 });
-      clay.T(ch.value || '—', cx + 14, y + 33, { size: 13, w: 800, maxWidth: chW - 28 });
+      ch.labelLines.forEach((line, index) => {
+        clay.T(line, cx + 14, y + 15 + index * 10, { size: 8.5, w: 800, color: C.mute, upper: true, spacing: 0.45 });
+      });
+      const valueY = y + 15 + ch.labelLines.length * 10 + 4;
+      ch.valueLines.forEach((line, index) => {
+        clay.T(line, cx + 14, valueY + index * 15, { size: 12.5, w: 800 });
+      });
     });
     y += chipsH + 14;
   }
@@ -252,14 +299,23 @@ export async function buildActionFormPdf(input: ActionFormInput, assets: ClayAss
   const details = (input.details || []).filter((d) => d.value && d.value.trim());
   if (details.length) {
     y = clay.section('İşlem Türü Detayları', PAD, y, RIGHT);
-    const rowsH = details.map((d) => clay.split(d.value, 700, 12.5, CW - 200).length);
-    const dH = 12 + details.reduce((s, _d, i) => s + rowsH[i] * 17, 0) + 8;
+    const detailLabelW = 190, detailValueW = CW - detailLabelW - 54;
+    const preparedDetails = details.map((detail) => ({
+      labelLines: clay.split(detail.label, 800, 9, detailLabelW),
+      valueLines: clay.split(detail.value, 700, 12.5, detailValueW),
+    }));
+    const detailRowHs = preparedDetails.map((row) => Math.max(row.labelLines.length * 11, row.valueLines.length * 17) + 6);
+    const dH = 14 + detailRowHs.reduce((sum, height) => sum + height, 0) + 8;
     clay.card(PAD, y, CW, dH, 16, C.beige3, C.line);
     let dy = y + 22;
-    details.forEach((d, i) => {
-      clay.T(d.label, PAD + 18, dy, { size: 9, w: 800, color: C.mute, upper: true, spacing: 0.6 });
-      clay.split(d.value, 700, 12.5, CW - 200).forEach((ln, li) => clay.T(ln, PAD + 176, dy + li * 17, { size: 12.5, w: 700, color: C.body }));
-      dy += Math.max(1, rowsH[i]) * 17;
+    preparedDetails.forEach((row, i) => {
+      row.labelLines.forEach((line, index) => clay.T(line, PAD + 18, dy + index * 11, {
+        size: 9, w: 800, color: C.mute, upper: true, spacing: 0.45,
+      }));
+      row.valueLines.forEach((line, index) => clay.T(line, PAD + 36 + detailLabelW, dy + index * 17, {
+        size: 12.5, w: 700, color: C.body,
+      }));
+      dy += detailRowHs[i];
     });
     y += dH + 14;
   }

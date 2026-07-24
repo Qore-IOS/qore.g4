@@ -112,10 +112,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
   const isMaliyetSayimRoute = pathname?.startsWith("/maliyet-sayim");
+  const isLaboratuvarSayimRoute = /^\/laboratuvar\/sayim\/[^/]+\/?$/.test(pathname || "");
+  const isLaboratuvarYonetimiRoute = pathname === "/laboratuvar-yonetimi";
   const isEdgeToEdgeRoute =
     pathname?.startsWith("/maliyet-gozlem") ||
     pathname?.startsWith("/maliyet-sayim") ||
     pathname?.startsWith("/depo-sayim") ||
+    isLaboratuvarYonetimiRoute ||
+    isLaboratuvarSayimRoute ||
     pathname?.startsWith("/cost-dashboard") ||
     pathname?.startsWith("/cihaz-test-dagilimi") ||
     pathname?.startsWith("/satin-alma") ||
@@ -341,12 +345,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PersistentNotificationToast />
         <PageShell
           edgeToEdge={isEdgeToEdgeRoute}
-          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""}`}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""} ${isLaboratuvarSayimRoute ? "!pb-0" : ""}`}
         >
           {children}
         </PageShell>
 
-        {!isMobile && !isTeknisyen && (
+        {!isMobile && !isTeknisyen && !isLaboratuvarSayimRoute && (
           /* Ortalanma flex ile (mobil dock deseni). Not: dock camını bozan
              gerçek neden sheen'deki mix-blend-mode idi; flex ortalama yine
              de translate'e eşdeğer ve daha sade olduğu için korunuyor. */
@@ -369,7 +373,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {!isTeknisyen && !isMaliyetSayimRoute && <MobileDock items={dockItems} />}
+        {!isTeknisyen && !isMaliyetSayimRoute && !isLaboratuvarSayimRoute && <MobileDock items={dockItems} />}
 
 
         <TaskPlannerPanel

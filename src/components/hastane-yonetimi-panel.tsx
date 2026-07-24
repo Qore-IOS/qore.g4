@@ -28,6 +28,7 @@ import { differenceInDays, isValid, parse } from 'date-fns';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
 import { withCompanyScope } from '@/lib/company-scope';
+import ClayLaboratoryManagementView from '@/components/lab/ClayLaboratoryManagementView';
 
 function normalizeKey(key: string): string {
   return key
@@ -157,7 +158,11 @@ function getRiskyBoxes(miadInfo: { days: number }, coverageInfo: { severity: str
   return Math.max(0, Math.ceil(riskyDays * coverageInfo.dailyNeed));
 }
 
-export default function LaboratuvarYonetimiPanel() {
+interface LaboratuvarYonetimiPanelProps {
+  appearance?: 'default' | 'clay';
+}
+
+export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: LaboratuvarYonetimiPanelProps) {
   const router = useRouter();
   const { toast } = useToast();
   const { isSuperAdmin, currentUserProfile, currentCompanyId } = useAuth();
@@ -909,6 +914,180 @@ export default function LaboratuvarYonetimiPanel() {
       setImportProgress('');
     }
   }, [validRows, selectedLabId, selectedLabName, currentCompanyId, toast, invalidateDepoStok]);
+
+  if (appearance === 'clay') {
+    return (
+      <>
+        <ClayLaboratoryManagementView
+          laboratories={laboratories.map(lab => ({ id: lab.id, name: lab.name }))}
+          selectedLabId={selectedLabId}
+          selectedLabName={selectedLabName}
+          onSelectLab={(id) => {
+            setSelectedLabId(id);
+            setCurrentPage(1);
+            setSearchQuery('');
+            setSelectedWarnings(new Set());
+          }}
+          isLoading={isLoading || labPoolsLoading}
+          searchQuery={searchQuery}
+          onSearchQueryChange={(value) => {
+            setSearchQuery(value);
+            setCurrentPage(1);
+          }}
+          rows={paginated}
+          allRows={summaryList}
+          warnings={stockWarningRows}
+          selectedWarnings={selectedWarnings}
+          onToggleWarning={(groupKey) => {
+            setSelectedWarnings(prev => {
+              const next = new Set(prev);
+              if (next.has(groupKey)) next.delete(groupKey);
+              else next.add(groupKey);
+              return next;
+            });
+          }}
+          onToggleWarningCategory={(groupKeys, checked) => {
+            setSelectedWarnings(prev => {
+              const next = new Set(prev);
+              groupKeys.forEach(groupKey => {
+                if (checked) next.add(groupKey);
+                else next.delete(groupKey);
+              });
+              return next;
+            });
+          }}
+          onDeleteSelectedWarnings={handleDeleteMultipleWarnings}
+          isDeletingWarning={isDeletingGroup === 'bulk-warning'}
+          minMaxRules={minMaxRules}
+          lotTrackedStockCodes={lotTrackedStockCodes}
+          currentPage={currentPage}
+          pageCount={pageCount}
+          rowsPerPage={rowsPerPage}
+          totalFilteredRows={sorted.length}
+          onCurrentPageChange={setCurrentPage}
+          onRowsPerPageChange={(count) => {
+            setRowsPerPage(count);
+            setCurrentPage(1);
+          }}
+          onStartCount={() => router.push(`/laboratuvar/sayim/${selectedLabId}`)}
+          onExport={handleExport}
+          onImportFile={handleFileSelect}
+          isParsingExcel={isParsingExcel}
+          isAdmin={isAdmin}
+          editingGroupKey={editingGroupKey}
+          editQuantity={editQuantity}
+          onEditQuantityChange={setEditQuantity}
+          onStartEdit={handleStartEdit}
+          onCancelEdit={handleCancelEdit}
+          onSaveEdit={handleQuantityUpdate}
+          onDeleteGroup={handleDeleteGroup}
+          deletingGroupKey={isDeletingGroup}
+          onOpenDetail={goToDetail}
+        />
+
+        <Dialog open={isImportModalOpen} onOpenChange={(open) => { if (!isImporting) setIsImportModalOpen(open); }}>
+          <DialogContent
+            className="max-w-3xl gap-0 overflow-hidden border-0 p-0"
+            style={{
+              borderRadius: 32,
+              background: 'linear-gradient(180deg, #FCFAF5, #F5F1E8)',
+              boxShadow: '0 44px 90px -30px rgba(90,72,40,0.6)',
+            }}
+          >
+            <DialogHeader className="border-b border-black/5 px-6 py-5">
+              <DialogTitle className="flex items-center gap-2 text-[#3D382F]">
+                <FileSpreadsheet className="h-5 w-5 text-[#C98A57]" />
+                Excel ile Stok Ekleme
+              </DialogTitle>
+              <DialogDescription className="text-[#908872]">
+                {selectedLabName} laboratuvarına eklenecek gerçek stok verilerini kontrol edin.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 p-6">
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2 text-sm text-[#3D382F]">
+                  <CheckCircle className="h-4 w-4 text-[#6FB585]" />
+                  <span className="font-semibold">{validRows.length} geçerli satır</span>
+                  <span className="text-[#908872]">({validRows.reduce((sum, row) => sum + row.adet, 0)} adet ürün)</span>
+                </div>
+                {invalidRows.length > 0 && (
+                  <div className="flex items-center gap-2 text-sm text-[#C0796A]">
+                    <AlertTriangle className="h-4 w-4" />
+                    <span className="font-semibold">{invalidRows.length} hatalı satır atlanacak</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl bg-[#F5F1E8] px-4 py-3 text-xs leading-5 text-[#908872] shadow-inner">
+                Stok Kodu zorunludur. Lot, miad, seri numarası ve adet sütunları başlık adlarına göre güvenli biçimde eşleştirilir.
+              </div>
+
+              <ScrollArea className="h-[min(350px,45vh)] rounded-2xl bg-white shadow-inner">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-[#FCFAF5]/95 backdrop-blur-sm">
+                    <TableRow>
+                      <TableHead className="w-8">#</TableHead>
+                      <TableHead>Stok Kodu</TableHead>
+                      <TableHead>Stok Adı</TableHead>
+                      <TableHead>Lot</TableHead>
+                      <TableHead>Miad</TableHead>
+                      <TableHead>Seri No</TableHead>
+                      <TableHead className="text-right">Adet</TableHead>
+                      <TableHead>Durum</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {parsedRows.map((row, index) => (
+                      <TableRow key={`${row.stokKodu}-${index}`} className={!row.valid ? 'bg-[#C0796A]/5' : ''}>
+                        <TableCell className="text-xs text-[#BBB2A0]">{index + 1}</TableCell>
+                        <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
+                        <TableCell className="text-sm">{row.stokAdi}</TableCell>
+                        <TableCell className="text-xs">{row.lotNumarasi || '-'}</TableCell>
+                        <TableCell className="text-xs">{row.miad || '-'}</TableCell>
+                        <TableCell className="text-xs">{row.seriNumarasi || '-'}</TableCell>
+                        <TableCell className="text-right font-semibold">{row.adet}</TableCell>
+                        <TableCell>
+                          {row.valid ? (
+                            <CheckCircle className="h-4 w-4 text-[#6FB585]" />
+                          ) : (
+                            <span className="text-xs text-[#C0796A]">{row.error}</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </ScrollArea>
+            </div>
+
+            <DialogFooter className="gap-2 border-t border-black/5 px-6 py-4">
+              {importProgress && <span className="mr-auto text-sm text-[#908872]">{importProgress}</span>}
+              <Button
+                variant="outline"
+                onClick={() => setIsImportModalOpen(false)}
+                disabled={isImporting}
+                className="rounded-2xl border-0 bg-[#F5F1E8] text-[#3D382F] shadow-md"
+              >
+                İptal
+              </Button>
+              <Button
+                onClick={handleImportConfirm}
+                disabled={isImporting || validRows.length === 0}
+                className="rounded-2xl border-0 bg-gradient-to-b from-[#E0B776] to-[#C98A57] text-white shadow-lg"
+              >
+                {isImporting ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Ekleniyor...</>
+                ) : (
+                  <><Upload className="mr-2 h-4 w-4" /> {validRows.reduce((sum, row) => sum + row.adet, 0)} Adet Stok Ekle</>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
 
   return (
     <div className="space-y-6">

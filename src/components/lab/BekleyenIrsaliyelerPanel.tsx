@@ -30,12 +30,36 @@ interface BekleyenIrsaliyelerPanelProps {
   locationType: 'hospital' | 'depot';
   locationId: string;
   locationName: string;
+  /** Laboratuvar yönetimi ekranındaki clay aksiyon düğmesi + modal görünümü. */
+  presentation?: 'inline' | 'clay-trigger';
 }
+
+const clayPortalStyle: React.CSSProperties & Record<`--${string}`, string> = {
+  '--surface': '#FCFAF5',
+  '--surface-2': '#F5F1E8',
+  '--surface-hi': '#FFFFFF',
+  '--ink-1': '#3D382F',
+  '--ink-2': '#908872',
+  '--ink-3': '#BBB2A0',
+  '--line': 'rgba(90,72,40,0.07)',
+  '--accent': '#C98A57',
+  '--danger': '#C0796A',
+  '--water-solid': '#6FB585',
+  '--water-deep': '#4E9E6B',
+  '--radius': '24px',
+  '--radius-sm': '16px',
+  '--radius-lg': '32px',
+  '--radius-pill': '999px',
+  '--clay': 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
+  '--clay-flat': 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+  fontFamily: "'Plus Jakarta Sans', system-ui, -apple-system, sans-serif",
+};
 
 export default function BekleyenIrsaliyelerPanel({
   locationType,
   locationId,
   locationName,
+  presentation = 'inline',
 }: BekleyenIrsaliyelerPanelProps) {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
@@ -43,6 +67,7 @@ export default function BekleyenIrsaliyelerPanel({
   const [allItems, setAllItems] = useState<BekleyenIrsaliye[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIrsaliye, setSelectedIrsaliye] = useState<BekleyenIrsaliye | null>(null);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [transferring, setTransferring] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
 
@@ -255,6 +280,281 @@ export default function BekleyenIrsaliyelerPanel({
   };
 
   if (!locationId) return null;
+
+  if (presentation === 'clay-trigger') {
+    return (
+      <>
+        <style>{`
+          .lab-clay-dialog > button {
+            width: 40px;
+            height: 40px;
+            display: grid;
+            place-items: center;
+            padding: 0;
+            color: #908872;
+            background: linear-gradient(180deg, #fff, #f5f1e8);
+            box-shadow: inset 0 1px 1px rgba(255,255,255,.9), 0 8px 18px -9px rgba(150,128,96,.42);
+          }
+          .lab-pending-trigger[data-has-items="true"] {
+            background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(124,168,222,.13)) !important;
+          }
+          .lab-pending-trigger[data-has-items="true"] .lab-pending-badge {
+            animation: labPendingPulse 1.9s ease-in-out infinite;
+          }
+          @keyframes labPendingPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(78,118,176,.28); }
+            55% { box-shadow: 0 0 0 6px rgba(78,118,176,0); }
+          }
+          @media (max-width: 639px) {
+            .lab-pending-trigger { flex: 1 1 160px; }
+            .lab-pending-detail-footer {
+              flex-direction: column !important;
+              align-items: stretch !important;
+            }
+            .lab-pending-detail-footer > div:last-child {
+              display: grid !important;
+              grid-template-columns: 1fr 1fr;
+              width: 100%;
+            }
+            .lab-pending-list-dialog {
+              inset: auto 0 0 0 !important;
+              width: 100% !important;
+              max-width: none !important;
+              max-height: 92vh !important;
+              transform: none !important;
+              border-radius: 32px 32px 0 0 !important;
+            }
+          }
+        `}</style>
+        <button
+          type="button"
+          className="lab-pending-trigger"
+          data-has-items={items.length > 0}
+          onClick={() => setPanelOpen(true)}
+          aria-label={`Bekleyen irsaliyeler, ${items.length} kayıt`}
+          style={{
+            all: 'unset',
+            boxSizing: 'border-box',
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 8,
+            minHeight: 44,
+            padding: '0 16px',
+            borderRadius: 'var(--radius-pill)',
+            color: items.length > 0 ? '#4E76B0' : 'var(--ink-2)',
+            background: 'linear-gradient(180deg, var(--surface-hi), var(--surface-2))',
+            boxShadow: 'var(--clay)',
+            fontSize: 13.5,
+            fontWeight: 800,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <FileText size={17} />
+          Bekleyen İrsaliyeler
+          {items.length > 0 && <span className="lab-pending-badge" style={{
+            minWidth: 26,
+            height: 26,
+            padding: '0 7px',
+            display: 'grid',
+            placeItems: 'center',
+            borderRadius: 999,
+            color: '#fff',
+            background: '#4E76B0',
+            fontSize: 12,
+          }}>
+            {loading ? '…' : items.length}
+          </span>}
+        </button>
+
+        <Dialog open={panelOpen} onOpenChange={setPanelOpen}>
+          <DialogContent
+            className="lab-clay-dialog lab-pending-list-dialog max-w-[620px] gap-0 overflow-hidden border-0 p-0"
+            style={{
+              ...clayPortalStyle,
+              borderRadius: 'var(--radius-lg)',
+              color: 'var(--ink-1)',
+              background: 'linear-gradient(180deg, var(--surface), var(--surface-2))',
+              boxShadow: '0 44px 90px -30px rgba(90,72,40,0.6), var(--clay)',
+            }}
+          >
+            <DialogHeader className="border-b border-[var(--line)] px-6 py-5 text-left">
+              <div className="flex items-start gap-3">
+                <span
+                  className="grid h-11 w-11 shrink-0 place-items-center rounded-[14px] text-[var(--accent)]"
+                  style={{ background: 'rgba(201,138,87,0.11)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,.8)' }}
+                >
+                  <Inbox size={21} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <DialogTitle className="text-xl font-extrabold text-[var(--ink-1)]">Bekleyen İrsaliyeler</DialogTitle>
+                  <DialogDescription className="mt-1 text-sm font-medium leading-5 text-[var(--ink-2)]">
+                    Dosya yönetiminde taranıp onaylanmış irsaliyeler. Bir kayda dokunup ürünleri stoğa aktarabilirsiniz.
+                  </DialogDescription>
+                </div>
+              </div>
+            </DialogHeader>
+
+            <div className="max-h-[min(66vh,560px)] overflow-y-auto p-5">
+              {loading ? (
+                <div className="grid min-h-44 place-items-center">
+                  <Loader2 className="h-6 w-6 animate-spin text-[var(--ink-3)]" />
+                </div>
+              ) : items.length === 0 ? (
+                <div
+                  className="grid min-h-48 place-items-center rounded-[24px] px-6 text-center"
+                  style={{ background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)' }}
+                >
+                  <div>
+                    <Inbox className="mx-auto mb-3 h-9 w-9 text-[var(--ink-3)]" />
+                    <p className="text-sm font-extrabold text-[var(--ink-1)]">Bekleyen irsaliye bulunmuyor</p>
+                    <p className="mt-1 text-xs font-medium text-[var(--ink-2)]">
+                      Dosya yönetiminde onaylanan kayıtlar burada görünür.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {items.map((it) => (
+                    <button
+                      type="button"
+                      key={it.id}
+                      onClick={() => {
+                        setSelectedIrsaliye(it);
+                        setPanelOpen(false);
+                      }}
+                      className="flex w-full items-center gap-[14px] px-[18px] py-[15px] text-left transition-transform hover:-translate-y-0.5"
+                      style={{
+                        borderRadius: 'var(--radius)',
+                        color: 'var(--ink-1)',
+                        background: 'var(--surface-hi)',
+                        boxShadow: 'var(--clay-flat)',
+                      }}
+                    >
+                      <span
+                        className="grid h-[42px] w-[42px] shrink-0 place-items-center rounded-[12px] text-[#4E76B0]"
+                        style={{ background: 'rgba(124,168,222,.16)' }}
+                      >
+                        <FileText size={21} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-mono text-[15.5px] font-extrabold">
+                          {it.irsaliyeNumber || it.dosyaName}
+                        </span>
+                        <span className="mt-1 block truncate text-xs font-semibold text-[var(--ink-2)]">
+                          {it.brands.length > 0 ? it.brands.join(' · ') : (it.supplierName || 'Tedarikçi belirtilmemiş')}
+                          {it.irsaliyeDate ? ` · ${it.irsaliyeDate}` : ''}
+                          {' · '}
+                          {it.itemCount} kalem
+                        </span>
+                      </span>
+                      <ChevronRight className="h-5 w-5 shrink-0 text-[var(--ink-2)]" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={!!selectedIrsaliye} onOpenChange={(open) => { if (!open) setSelectedIrsaliye(null); }}>
+          <DialogContent
+            className="lab-clay-dialog flex h-[min(86vh,760px)] max-w-4xl flex-col gap-0 overflow-hidden border-0 p-0"
+            style={{
+              ...clayPortalStyle,
+              borderRadius: 'var(--radius-lg)',
+              color: 'var(--ink-1)',
+              background: 'linear-gradient(180deg, var(--surface), var(--surface-2))',
+              boxShadow: '0 44px 90px -30px rgba(90,72,40,0.6), var(--clay)',
+            }}
+          >
+            <DialogHeader className="border-b border-[var(--line)] px-5 py-4 text-left">
+              <DialogTitle className="flex items-center gap-2 text-[var(--ink-1)]">
+                <FileText className="h-5 w-5 text-[var(--accent)]" />
+                {selectedIrsaliye?.dosyaName}
+              </DialogTitle>
+              <DialogDescription className="text-xs font-medium text-[var(--ink-2)]">
+                {selectedIrsaliye?.brands.length ? `Markalar: ${selectedIrsaliye.brands.join(', ')}` : ''}
+                {selectedIrsaliye?.irsaliyeNumber ? ` · No: ${selectedIrsaliye.irsaliyeNumber}` : ''}
+                {selectedIrsaliye?.irsaliyeDate ? ` · Tarih: ${selectedIrsaliye.irsaliyeDate}` : ''}
+              </DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="flex-1 px-5 py-3">
+              {selectedIrsaliye && (
+                <div className="space-y-2">
+                  {selectedIrsaliye.items.map((item: BekleyenIrsaliyeItem, index: number) => (
+                    <div
+                      key={`${item.stokKodu}-${index}`}
+                      className="grid grid-cols-12 items-center gap-2 p-3"
+                      style={{
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--surface-hi)',
+                        boxShadow: 'var(--clay-flat)',
+                      }}
+                    >
+                      <div className="col-span-12 min-w-0 sm:col-span-5">
+                        <p className="truncate text-sm font-extrabold">{item.stokAdi}</p>
+                        <p className="font-mono text-[10px] text-[var(--ink-3)]">{item.stokKodu}</p>
+                        {item.conversionReasoning && (
+                          <p className="mt-1 text-[10px] italic text-[var(--ink-2)]">{item.conversionReasoning}</p>
+                        )}
+                      </div>
+                      <div className="col-span-4 text-xs sm:col-span-2">
+                        <span className="text-[var(--ink-3)]">Lot:</span>{' '}
+                        <span className="font-mono">{item.lot || '-'}</span>
+                      </div>
+                      <div className="col-span-4 text-xs sm:col-span-2">
+                        <span className="text-[var(--ink-3)]">Miad:</span> {item.miad || '-'}
+                      </div>
+                      <div className="col-span-4 text-right text-xs sm:col-span-1">
+                        <p className="text-[10px] text-[var(--ink-3)]">Faturadaki</p>
+                        <p className="font-bold">{item.sourceQuantity} {item.sourceUnit || ''}</p>
+                      </div>
+                      <div className="col-span-12 text-right sm:col-span-2">
+                        <p className="text-[10px] font-bold text-[var(--water-deep)]">{item.anaBirim || item.convertedUnit || 'Adet'}</p>
+                        <p className="text-lg font-extrabold">{item.convertedQuantity}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </ScrollArea>
+
+            <DialogFooter className="lab-pending-detail-footer flex-row items-center justify-between gap-3 border-t border-[var(--line)] px-5 py-4">
+              <div className="text-xs font-semibold text-[var(--ink-2)]">
+                {selectedIrsaliye && (
+                  <span>Toplam: <strong>{selectedIrsaliye.itemCount}</strong> çeşit, <strong>{selectedIrsaliye.totalConvertedQuantity}</strong> birim</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => selectedIrsaliye && handleCancel(selectedIrsaliye)}
+                  disabled={deleting === selectedIrsaliye?.id || transferring === selectedIrsaliye?.id}
+                  className="rounded-2xl border-0"
+                  style={{ color: 'var(--danger)', background: 'var(--surface-2)', boxShadow: 'var(--clay)' }}
+                >
+                  {deleting === selectedIrsaliye?.id ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Trash2 className="mr-1 h-4 w-4" />}
+                  İptal Et
+                </Button>
+                <Button
+                  onClick={() => selectedIrsaliye && handleTransfer(selectedIrsaliye)}
+                  disabled={transferring === selectedIrsaliye?.id || deleting === selectedIrsaliye?.id}
+                  className="rounded-2xl border-0 text-white"
+                  style={{ background: 'linear-gradient(180deg, #8FD3A6, var(--water-solid))', boxShadow: '0 10px 18px -8px rgba(111,181,133,.6)' }}
+                >
+                  {transferring === selectedIrsaliye?.id ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-1 h-4 w-4" />}
+                  Stoğa Aktar
+                </Button>
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </>
+    );
+  }
 
   return (
     <div className="space-y-2">
