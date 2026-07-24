@@ -56,7 +56,7 @@ export async function generateTransferTutanakPDF(header: HeaderInfo, rows: Row[]
     eyebrow: '',
     qrPayload: `${origin}/transfer-gecmis/${encodeURIComponent(header.shipmentId)}`,
     tarihSaat: `${header.tarih} · ${header.saat}`,
-    gonderen: { depo: header.depotName, teslimEden: header.karsilayan },
+    gonderen: { depo: header.depotName, teslimEden: header.olusturan || header.karsilayan },
     teslimAlan: { kurum: header.kurumAdi, firma: header.company },
     rows: transferRows,
     toplamKalem: rows.length,

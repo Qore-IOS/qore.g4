@@ -159,6 +159,7 @@ export default function Page() {
                 kurumAdi: root.targetName,
                 tarih: format(root.timestamp.toDate(), 'dd.MM.yyyy'),
                 saat: format(root.timestamp.toDate(), 'HH:mm'),
+                olusturan: root.userName,
                 karsilayan: root.userName,
                 company: root.mode === 'borc' ? root.company : undefined,
             }}

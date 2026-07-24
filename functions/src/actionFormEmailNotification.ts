@@ -43,7 +43,10 @@ async function loadHeaderLogo(): Promise<string | null> {
 
 async function loadSystemLogo(): Promise<string | null> {
   if (systemLogoBase64) return systemLogoBase64;
-  systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+  systemLogoBase64 = await loadAssetBase64('https://qorengine.com/blk.png');
+  if (!systemLogoBase64) {
+    systemLogoBase64 = await loadAssetBase64('https://qorengine.com/newlogoblk.png');
+  }
   return systemLogoBase64;
 }
 
