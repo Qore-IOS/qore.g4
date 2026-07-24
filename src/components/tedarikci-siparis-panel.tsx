@@ -91,6 +91,10 @@ interface ComputedRow {
   stokKodu: string;
   stokAdi: string;
   anaDepoStok: number;
+  /** Total Verimlilik kümülatif total (Sütun 15) — tüm hastanelerin dönemsel toplamı */
+  testAdedi: number;
+  /** Aylık toplam tüketim (kutu) = testAdedi / ambalaj değeri */
+  aylikTuketimKutu: number;
   gunlukToplam: number; // günlük gereken adet (tüm kurumların toplamı)
   gerekliAdet: number;
   siparisAdedi: number;
@@ -149,6 +153,11 @@ export default function TedarikciSiparisPanel() {
   // gelir (yerel depoStok kayıtları yoktur). null = Ceomed dışı depo.
   const [ceomedStockByCode, setCeomedStockByCode] = useState<Map<string, number> | null>(null);
   const [ceomedStockLoading, setCeomedStockLoading] = useState(false);
+
+  // Seçili dönem için Total Verimlilik kümülatif total (Sütun 15) — stok koduna göre
+  // tüm hastanelerin toplamı (kanonik koda göre indekslenir).
+  const [kumulatifByCode, setKumulatifByCode] = useState<Map<string, number>>(new Map());
+  const [kumulatifLoading, setKumulatifLoading] = useState(false);
 
   useEffect(() => {
     if (currentUserProfile?.role && currentUserProfile.role !== 'lojistik_sorumlusu') {
@@ -286,6 +295,40 @@ export default function TedarikciSiparisPanel() {
     return () => { cancelled = true; };
   }, [anaDepo?.id, anaDepo?.ceomedEnabled, currentCompanyId, isSuperAdmin, toast]);
 
+  // Seçili döneme ait Total Verimlilik kümülatif total'i (Sütun 15) tüm hastaneler
+  // için stok koduna göre topla. Admin SDK aksiyonuyla okunur (totalEfficiencyRecords
+  // havuz + dönem başına saklanır). Dönem değişince yeniden çekilir.
+  useEffect(() => {
+    let cancelled = false;
+    const monthIndex = selectedMonth - 1; // total verimlilik ayları 0-indeksli
+    const load = async () => {
+      setKumulatifLoading(true);
+      try {
+        const { getTotalEfficiencyKumulatifByStok } = await import('@/actions/stokActions');
+        const record = await getTotalEfficiencyKumulatifByStok(
+          selectedYear,
+          monthIndex,
+          currentCompanyId,
+          isSuperAdmin,
+        );
+        const map = new Map<string, number>();
+        for (const [rawCode, value] of Object.entries(record)) {
+          const code = normCode(rawCode);
+          if (!code) continue;
+          map.set(code, (map.get(code) || 0) + (Number(value) || 0));
+        }
+        if (!cancelled) setKumulatifByCode(map);
+      } catch (e) {
+        console.error('[tedarikci-siparis] Kümülatif total okunamadı:', e);
+        if (!cancelled) setKumulatifByCode(new Map());
+      } finally {
+        if (!cancelled) setKumulatifLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
+
   // Ana depo stok haritası (kanonik stok koduna göre indekslenir).
   const anaDepoStockByCode = useMemo(() => {
     if (!anaDepo) return new Map<string, number>();
@@ -350,10 +393,17 @@ export default function TedarikciSiparisPanel() {
       const gerekliAdet = gunGecerli ? Math.ceil(gunlukToplam * hedefGun) : 0;
       const siparisAdedi = Math.max(0, gerekliAdet - anaDepoStok);
 
+      // Total Verimlilik kümülatif total (tüm hastaneler, seçili dönem).
+      const testAdedi = kumulatifByCode.get(normCode(code)) || 0;
+      const ambalaj = Number(product?.ambalajDegeri) || 0;
+      const aylikTuketimKutu = ambalaj > 0 ? Math.ceil(testAdedi / ambalaj) : 0;
+
       result.push({
         stokKodu: code,
         stokAdi: product?.stokAdi || code,
         anaDepoStok,
+        testAdedi,
+        aylikTuketimKutu,
         gunlukToplam,
         gerekliAdet,
         siparisAdedi,
@@ -374,6 +424,7 @@ export default function TedarikciSiparisPanel() {
     labRuleQueries,
     productByStockCode,
     anaDepoStockByCode,
+    kumulatifByCode,
   ]);
 
   const orderableRows = useMemo(() => rows.filter(r => r.siparisAdedi > 0), [rows]);
@@ -629,6 +680,14 @@ export default function TedarikciSiparisPanel() {
                     <TableHead className="w-[140px]">Stok Kodu</TableHead>
                     <TableHead>Stok Adı</TableHead>
                     <TableHead className="text-right w-[130px]">Ana Depo Stok</TableHead>
+                    <TableHead className="text-right w-[120px]">
+                      Test Adedi
+                      <span className="block text-[10px] font-normal text-muted-foreground">Küm. Total</span>
+                    </TableHead>
+                    <TableHead className="text-right w-[140px]">
+                      Aylık Toplam Tüketim
+                      <span className="block text-[10px] font-normal text-muted-foreground">(Kutu)</span>
+                    </TableHead>
                     <TableHead className="text-right w-[150px]">
                       Gerekli Adet
                       {Number(yeterlilikGun) > 0 && (
@@ -644,6 +703,24 @@ export default function TedarikciSiparisPanel() {
                       <TableCell className="font-mono text-xs">{row.stokKodu}</TableCell>
                       <TableCell className="text-sm">{row.stokAdi}</TableCell>
                       <TableCell className="text-right tabular-nums">{row.anaDepoStok}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {kumulatifLoading ? (
+                          <span className="text-muted-foreground">…</span>
+                        ) : row.testAdedi > 0 ? (
+                          row.testAdedi
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {kumulatifLoading ? (
+                          <span className="text-muted-foreground">…</span>
+                        ) : row.aylikTuketimKutu > 0 ? (
+                          row.aylikTuketimKutu
+                        ) : (
+                          <span className="text-muted-foreground">0</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {Number(yeterlilikGun) > 0 ? row.gerekliAdet : <span className="text-muted-foreground">—</span>}
                       </TableCell>
