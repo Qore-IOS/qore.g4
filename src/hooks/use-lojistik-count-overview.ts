@@ -122,6 +122,61 @@ async function loadProcessedHistoryDocs(
   return Array.from(docsById.values());
 }
 
+interface ShippedStockMaps {
+  /** hedefKurumId -> (stokKodu -> sevk edilmiş adet) */
+  byLabId: Map<string, Map<string, number>>;
+  /** hedefKurum (ad, legacy) -> (stokKodu -> adet); yalnızca hedefKurumId olmayan kayıtlar */
+  byLabName: Map<string, Map<string, number>>;
+  warning?: string;
+}
+
+/**
+ * PERF: Önceden her lab için 4 ayrı `depoStok` sorgusu (company+legacy × id+ad)
+ * TÜM sevk edilmiş birim doc'larını web SDK/IndexedDB üzerinden indiriyordu — büyük
+ * envanterde on binlerce doc → dakikalarca bekleme. Bunun yerine lean Admin SDK
+ * aksiyonuyla (yalnızca gerekli alanlar) şirketin sevk stoğu TEK sefer çekilir ve
+ * lab bazında haritalar istemci tarafında kurulur. Sayım/scope semantiği aynıdır.
+ */
+async function loadShippedStockByLab(
+  currentCompanyId: string | null | undefined,
+  isSuperAdmin: boolean | undefined,
+): Promise<ShippedStockMaps> {
+  const byLabId = new Map<string, Map<string, number>>();
+  const byLabName = new Map<string, Map<string, number>>();
+  try {
+    const { getDepoStokForOrders } = await import('@/actions/stokActions');
+    const items = await getDepoStokForOrders(currentCompanyId, isSuperAdmin);
+    for (const item of items) {
+      if (item.isShipped !== true) continue;
+      const code = String(item.stokKodu || '').trim();
+      if (!code) continue;
+      const hedefKurumId = String(item.hedefKurumId || '').trim();
+      if (hedefKurumId) {
+        const map = byLabId.get(hedefKurumId) ?? new Map<string, number>();
+        map.set(code, (map.get(code) || 0) + 1);
+        byLabId.set(hedefKurumId, map);
+      } else {
+        const name = String(item.hedefKurum || '').trim();
+        if (!name) continue;
+        const map = byLabName.get(name) ?? new Map<string, number>();
+        map.set(code, (map.get(code) || 0) + 1);
+        byLabName.set(name, map);
+      }
+    }
+    return { byLabId, byLabName };
+  } catch (error) {
+    console.warn(
+      '[lojistik-count-overview] Sevk edilen stok özeti okunamadı.',
+      error,
+    );
+    return {
+      byLabId,
+      byLabName,
+      warning: 'Sevk edilen stok özeti alınamadı.',
+    };
+  }
+}
+
 async function loadLogisticsCountOverview({
   period,
   assignedLabIds,
@@ -146,10 +201,11 @@ async function loadLogisticsCountOverview({
     };
   }
 
-  const [hospitalDocs, productDocs, groupDocs] = await Promise.all([
+  const [hospitalDocs, productDocs, groupDocs, shippedStock] = await Promise.all([
     getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
     getScopedDocs('productCodes', currentCompanyId, isSuperAdmin),
     getScopedDocs('def_labGroups', currentCompanyId, isSuperAdmin),
+    loadShippedStockByLab(currentCompanyId, isSuperAdmin),
   ]);
 
   const hospitalById = new Map<string, Hospital>();
@@ -217,6 +273,7 @@ async function loadLogisticsCountOverview({
     ),
   ]);
   const sourceWarnings: string[] = [];
+  if (shippedStock.warning) sourceWarnings.push(shippedStock.warning);
   const pendingFileDocs = settledDocs(
     optionalResults[0],
     'Bekleyen rapor dosyaları okunamadı.',
@@ -238,34 +295,19 @@ async function loadLogisticsCountOverview({
       const labName = String(lab.name || lab.ad || lab.id);
       const stockCountsRef = collection(db, 'hospitals', lab.id, 'stockCounts');
       const minMaxRulesRef = collection(db, 'hospitals', lab.id, 'minMaxRules');
-      const [sessionResults, minMaxSnapshot, byIdDocs, legacyNameDocs] =
-        await Promise.all([
-          Promise.allSettled([
-            getDocs(query(stockCountsRef, where('period', '==', period))),
-            getDocs(
-              query(
-                stockCountsRef,
-                where('year', '==', parsedPeriod.year),
-                where('month', '==', parsedPeriod.monthIndex),
-              ),
+      const [sessionResults, minMaxSnapshot] = await Promise.all([
+        Promise.allSettled([
+          getDocs(query(stockCountsRef, where('period', '==', period))),
+          getDocs(
+            query(
+              stockCountsRef,
+              where('year', '==', parsedPeriod.year),
+              where('month', '==', parsedPeriod.monthIndex),
             ),
-          ]),
-          getDocs(minMaxRulesRef),
-          getScopedDocs(
-            'depoStok',
-            currentCompanyId,
-            isSuperAdmin,
-            where('isShipped', '==', true),
-            where('hedefKurumId', '==', lab.id),
           ),
-          getScopedDocs(
-            'depoStok',
-            currentCompanyId,
-            isSuperAdmin,
-            where('isShipped', '==', true),
-            where('hedefKurum', '==', labName),
-          ),
-        ]);
+        ]),
+        getDocs(minMaxRulesRef),
+      ]);
       const successfulSessionResults = sessionResults.filter(
         (
           result,
@@ -296,31 +338,26 @@ async function loadLogisticsCountOverview({
         );
       });
 
-      const stockById = new Map<
-        string,
-        QueryDocumentSnapshot<DocumentData>
-      >();
-      byIdDocs.forEach((document) => stockById.set(document.id, document));
-      legacyNameDocs.forEach((document) => {
-        if (!document.data()?.hedefKurumId && !stockById.has(document.id)) {
-          stockById.set(document.id, document);
-        }
-      });
-
       const labScopeCodes = new Set<string>();
       const currentStockQuantityByCode = new Map<string, number>();
       minMaxSnapshot.docs.forEach((document) => {
         const code = String(document.data()?.stokKodu || '').trim();
         if (code) labScopeCodes.add(code);
       });
-      stockById.forEach((document) => {
-        const code = String(document.data()?.stokKodu || '').trim();
-        if (!code) return;
-        labScopeCodes.add(code);
-        currentStockQuantityByCode.set(
-          code,
-          (currentStockQuantityByCode.get(code) || 0) + 1,
-        );
+      // Sevk edilmiş stok: id ile eşleşen + (id'siz) ad ile eşleşen legacy kayıtlar.
+      // Eski davranışla birebir aynı — sadece kaynak tek lean sorgudan geliyor.
+      [
+        shippedStock.byLabId.get(lab.id),
+        shippedStock.byLabName.get(labName),
+      ].forEach((codeCounts) => {
+        if (!codeCounts) return;
+        codeCounts.forEach((count, code) => {
+          labScopeCodes.add(code);
+          currentStockQuantityByCode.set(
+            code,
+            (currentStockQuantityByCode.get(code) || 0) + count,
+          );
+        });
       });
 
       const sessions: LogisticsCountSessionInput[] =
@@ -426,7 +463,9 @@ export function useLojistikCountOverview(period: string) {
     enabled:
       currentUserProfile?.role === 'lojistik_sorumlusu' &&
       Boolean(parseCalculationPeriod(period)),
-    staleTime: 20_000,
+    // PERF: 20 sn çok agresifti; her odaklanmada ağır sorgu yeniden koşuyordu.
+    // Lean sorguyla birlikte 2 dk tazelik dönemsel sayım paneli için yeterli.
+    staleTime: 120_000,
     refetchOnWindowFocus: true,
   });
 }
