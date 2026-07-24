@@ -29,6 +29,13 @@ export type LabCountItem = {
   counted: number;
   verifiedSerials: string[];
   unscannedSerials: string[];
+  /** Open/device tests recorded during count; informational and not physical stock. */
+  openTestQty?: number;
+  /** Package-derived tests plus open/device tests at the time of count. */
+  totalTests?: number;
+  /** Calculated product cost snapshot for count history. */
+  costAmount?: number;
+  currency?: 'EUR' | 'USD' | 'TRY';
 };
 
 export type LabCountSession = {

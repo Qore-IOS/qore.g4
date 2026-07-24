@@ -4,40 +4,21 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter, useParams } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import {
-  collection, doc, getDocs, where, query, Timestamp, writeBatch, getDoc, updateDoc,
+  collection, doc, getDocs, where, Timestamp, writeBatch, getDoc, updateDoc,
 } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
-  Check,
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  Circle,
   Loader2,
-  Save,
-  ScanBarcode,
-  Search,
-  TestTube,
-  X,
   PackageX,
-  ArrowRight,
   UploadCloud,
   FileText,
-  FileSpreadsheet,
-  Download,
 } from 'lucide-react';
-import { Input } from '@/components/ui/input';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { cn } from '@/lib/utils';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
 import { saveLabCountSession } from '@/lib/labCount';
-import { downloadLabCountTemplate, parseLabCountExcel } from '@/lib/labCountExcel';
+import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
 import { buildCalculationPeriod, savePendingCalculationFiles, type PendingCalculationKind } from '@/lib/qore-hesaplama/pending-calculation-files';
 import { formatMiad } from '@/lib/date';
 import { differenceInDays, parse, isValid } from 'date-fns';
@@ -129,14 +110,6 @@ function getMiadInfo(miadStr: string): { days: number; severity: MiadSeverity } 
   return { days, severity: 'normal' };
 }
 
-function miadBadgeClass(severity: MiadSeverity): string {
-  if (severity === 'expired' || severity === 'critical') return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300';
-  if (severity === 'warning') return 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300';
-  if (severity === 'caution') return 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
-  if (severity === 'notice') return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300';
-  return '';
-}
-
 function formatUrunGrubu(g?: string): string {
   if (!g) return '';
   if (g === 'kit') return 'Kit';
@@ -146,222 +119,8 @@ function formatUrunGrubu(g?: string): string {
 }
 
 // ============================================================================
-// SUB-COMPONENTS
+// CLAY SUB-COMPONENTS
 // ============================================================================
-
-interface SidebarChecklistItemProps {
-  label: string;
-  group: GroupProgress;
-  isActive: boolean;
-  onClick: () => void;
-}
-
-function SidebarChecklistItem({ label, group, isActive, onClick }: SidebarChecklistItemProps) {
-  const pct = group.total > 0 ? Math.round((group.completed / group.total) * 100) : 0;
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'w-full flex items-center gap-3 px-3 py-3 rounded-2xl text-left transition-all duration-200',
-        isActive
-          ? 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] border-l-[3px] border-l-[var(--dashboard-accent)]'
-          : 'hover:bg-[var(--dashboard-surface-2)]/50',
-      )}
-    >
-      <span className="shrink-0">
-        {group.status === 'completed' ? (
-          <CheckCircle2 className="w-5 h-5 text-emerald-500" />
-        ) : group.status === 'in_progress' ? (
-          <div className="w-5 h-5 rounded-full border-2 border-amber-500 flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-amber-500" />
-          </div>
-        ) : (
-          <Circle className="w-5 h-5 text-[var(--dashboard-muted)]" />
-        )}
-      </span>
-      <div className="flex-1 min-w-0">
-        <span className={cn('text-sm font-medium block truncate', isActive ? 'text-[var(--dashboard-text)]' : 'text-[var(--dashboard-text)]/80')}>
-          {label}
-        </span>
-        <span className="text-xs text-[var(--dashboard-muted)]">
-          {group.completed} / {group.total} ürün
-        </span>
-      </div>
-      <div className="shrink-0 w-10 h-10 relative">
-        <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-          <circle cx="18" cy="18" r="14" fill="none" stroke="var(--dashboard-stroke)" strokeWidth="3" />
-          <circle
-            cx="18" cy="18" r="14" fill="none"
-            stroke={group.status === 'completed' ? '#10b981' : group.status === 'in_progress' ? '#f59e0b' : 'var(--dashboard-stroke)'}
-            strokeWidth="3"
-            strokeDasharray={`${pct * 0.88} 88`}
-            strokeLinecap="round"
-            className="transition-all duration-500"
-          />
-        </svg>
-        <span className="absolute inset-0 flex items-center justify-center text-[10px] font-bold text-[var(--dashboard-muted)]">
-          {pct}
-        </span>
-      </div>
-    </button>
-  );
-}
-
-interface ProductRowProps {
-  product: ProductCode;
-  entry: ProductCountEntry;
-  isOutOfStock: boolean;
-  onEnteredChange: (val: string) => void;
-  onConfirmExisting: () => void;
-  onToggleCounted: () => void;
-}
-
-function ProductRow({ product, entry, isOutOfStock, onEnteredChange, onConfirmExisting, onToggleCounted }: ProductRowProps) {
-  const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
-  const effectiveCount = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
-  const delta = effectiveCount - entry.existingTotal;
-
-  return (
-    <div
-      className={cn(
-        'w-full px-4 sm:px-5 py-3 border-b border-[var(--dashboard-stroke)] last:border-b-0 transition-all',
-        entry.counted && 'bg-emerald-500/5',
-        isOutOfStock && !entry.counted && 'bg-slate-500/5',
-      )}
-    >
-      <div className="flex items-start gap-3">
-        {/* Product info */}
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-[var(--dashboard-text)] truncate">
-            {product.stokAdi}
-          </p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-0.5">
-            <span className="text-[11px] text-[var(--dashboard-muted)]">{product.stokKodu}</span>
-            {product.urunGrubu && (
-              <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
-                {formatUrunGrubu(product.urunGrubu)}
-              </span>
-            )}
-            {product.marka && (
-              <span className="text-[9px] font-semibold uppercase tracking-wide text-[var(--dashboard-muted)] bg-[var(--dashboard-surface-2)] px-1.5 py-0.5 rounded">
-                {product.marka}
-              </span>
-            )}
-            {isOutOfStock && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold bg-slate-200 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
-                <PackageX className="w-2.5 h-2.5" />
-                Stokta Yok
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Counted tick */}
-        <button
-          onClick={onToggleCounted}
-          title={entry.counted ? 'Onayı kaldır' : 'Sayımı onayla'}
-          className={cn(
-            'shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200',
-            entry.counted
-              ? 'bg-emerald-500 text-white shadow-md'
-              : 'bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-accent)]',
-          )}
-        >
-          <Check className="w-4 h-4" />
-        </button>
-      </div>
-
-      {/* Existing lots */}
-      {!isOutOfStock && entry.existingLots.length > 0 && (
-        <div className="mt-2 space-y-1">
-          {entry.existingLots.map((lot, i) => {
-            const info = getMiadInfo(lot.miad);
-            return (
-              <div
-                key={`${lot.lot}-${lot.miad}-${i}`}
-                className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg bg-[var(--dashboard-surface)] border border-[var(--dashboard-stroke)] text-xs"
-              >
-                <div className="flex items-center gap-2 min-w-0 flex-1">
-                  <span className="font-mono text-[var(--dashboard-text)] truncate">
-                    {lot.lot ? `Lot: ${lot.lot}` : 'Lot: —'}
-                  </span>
-                  {lot.miad && (
-                    <span className="text-[var(--dashboard-muted)]">{lot.miad}</span>
-                  )}
-                  {lot.miad && info.severity !== 'normal' && info.days !== Infinity && (
-                    <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-semibold', miadBadgeClass(info.severity))}>
-                      {info.days < 0 ? 'geçmiş' : `${info.days}g`}
-                    </span>
-                  )}
-                </div>
-                <span className="font-bold text-[var(--dashboard-text)] shrink-0">
-                  {lot.count}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* Inputs row */}
-      <div className="mt-2 flex items-center gap-2">
-        {/* Existing total + confirm button */}
-        <div className="flex items-center gap-1.5">
-          <span
-            className={cn(
-              'text-[11px] font-semibold px-2 py-1 rounded-md',
-              isOutOfStock
-                ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-                : 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
-            )}
-            title="Mevcut lab stoğu"
-          >
-            Stok: {entry.existingTotal}
-          </span>
-          {!isOutOfStock && (
-            <button
-              type="button"
-              onClick={onConfirmExisting}
-              className="h-7 px-2 rounded-md text-[10px] font-semibold bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/40 dark:text-blue-200 transition-colors flex items-center gap-1"
-              title="Stoktaki adedi sayım olarak onayla"
-            >
-              <Check className="w-3 h-3" />
-              Stoğu Onayla
-            </button>
-          )}
-        </div>
-
-        {/* Manual entry input */}
-        <div className="flex-1 flex items-center gap-1.5">
-          <label className="text-[10px] font-medium text-[var(--dashboard-muted)] uppercase tracking-wider shrink-0">
-            Sayım
-          </label>
-          <Input
-            type="number"
-            min="0"
-            inputMode="numeric"
-            placeholder={String(entry.existingTotal)}
-            value={entry.enteredQty}
-            onChange={(e) => onEnteredChange(e.target.value)}
-            className="h-8 text-sm w-24"
-          />
-          {enteredNum != null && !isNaN(enteredNum) && delta !== 0 && (
-            <span
-              className={cn(
-                'text-[10px] font-semibold px-1.5 py-0.5 rounded',
-                delta > 0
-                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-                  : 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300',
-              )}
-            >
-              {delta > 0 ? `+${delta}` : delta}
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 const formatProductMoney = (amount: number, currency?: string) =>
   amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + currencySymbol(currency);
@@ -375,7 +134,17 @@ const toMetricEntry = (entry: ProductCountEntry) => ({
   counted: entry.counted,
 });
 
-function LabToolChip({ ico, label, onClick, live, tone, compact, disabled }: any) {
+interface LabToolChipProps {
+  ico: keyof typeof MLIco;
+  label: string;
+  onClick?: () => void;
+  live?: boolean;
+  tone?: 'red';
+  compact?: boolean;
+  disabled?: boolean;
+}
+
+function LabToolChip({ ico, label, onClick, live, tone, compact, disabled }: LabToolChipProps) {
   const Icon = MLIco[ico];
   const liveColor = tone === 'red' ? 'var(--danger)' : 'var(--water-deep)';
   const liveBackground = tone === 'red' ? 'rgba(192,121,106,0.16)' : 'rgba(111,181,133,0.16)';
@@ -1076,7 +845,15 @@ export default function LaboratuvarSayimPage() {
         nextCounted && cur.enteredQty.trim() === ''
           ? String(existing)
           : cur.enteredQty;
-      return { ...prev, [stokKodu]: { enteredQty: nextEntered, counted: nextCounted } };
+      return {
+        ...prev,
+        [stokKodu]: {
+          ...cur,
+          enteredQty: nextEntered,
+          openTestQty: cur.openTestQty ?? '',
+          counted: nextCounted,
+        },
+      };
     });
   }, [productEntries]);
 
@@ -1088,7 +865,9 @@ export default function LaboratuvarSayimPage() {
         const existing = productEntries[p.stokKodu]?.existingTotal ?? 0;
         const cur = next[p.stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
         next[p.stokKodu] = {
+          ...cur,
           enteredQty: cur.enteredQty.trim() === '' ? String(existing) : cur.enteredQty,
+          openTestQty: cur.openTestQty ?? '',
           counted: true,
         };
       });
@@ -1117,7 +896,7 @@ export default function LaboratuvarSayimPage() {
           marka: e.marka || '',
           stokKodu: e.stokKodu,
           stokAdi: e.stokAdi,
-          mevcutAdet: e.existingTotal,
+          mevcutStok: e.existingTotal,
         }))
         .sort((a, b) => {
           const byMarka = (a.marka || '').localeCompare(b.marka || '', 'tr');
@@ -1125,7 +904,7 @@ export default function LaboratuvarSayimPage() {
           return a.stokAdi.localeCompare(b.stokAdi, 'tr');
         });
       const safeName = (labName || 'Laboratuvar').replace(/[^\p{L}\p{N}]+/gu, '_');
-      await downloadLabCountTemplate(rows, `Sayim_Sablonu_${safeName}.xlsx`);
+      await downloadMaliyetSayimTemplate(rows, `Sayim_Sablonu_${safeName}.xlsx`);
       toast({ title: 'Şablon indirildi', description: 'Sayım şablonu Excel olarak indirildi.' });
     } catch (err: any) {
       console.error('Lab count template download error:', err);
@@ -1139,9 +918,9 @@ export default function LaboratuvarSayimPage() {
     if (!file) return;
     setIsExcelBusy(true);
     try {
-      const parsed = await parseLabCountExcel(file);
+      const parsed = await parseMaliyetSayimExcel(file);
       if (parsed.length === 0) {
-        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli "Sayım Adeti" girişi bulunamadı.', variant: 'destructive' });
+        toast({ title: 'Veri bulunamadı', description: 'Yüklenen dosyada geçerli stok veya cihaz üstü sayım girişi bulunamadı.', variant: 'destructive' });
         return;
       }
 
@@ -1149,15 +928,16 @@ export default function LaboratuvarSayimPage() {
       let unknown = 0;
       setCountData(prev => {
         const next = { ...prev };
-        parsed.forEach(({ stokKodu, sayimAdeti }) => {
+        parsed.forEach(({ stokKodu, stokAdedi, cihazUstuAdedi }) => {
           if (!productEntries[stokKodu]) {
             unknown++;
             return;
           }
+          const current = next[stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
           next[stokKodu] = {
-            ...next[stokKodu],
-            enteredQty: String(sayimAdeti),
-            openTestQty: next[stokKodu]?.openTestQty ?? '',
+            ...current,
+            enteredQty: stokAdedi !== null ? String(stokAdedi) : current.enteredQty,
+            openTestQty: cihazUstuAdedi !== null ? String(cihazUstuAdedi) : (current.openTestQty ?? ''),
             counted: true,
           };
           applied++;
@@ -1516,7 +1296,7 @@ export default function LaboratuvarSayimPage() {
             totalTests,
             costAmount,
             currency,
-          } as any;
+          };
         }),
       });
 
@@ -1662,7 +1442,7 @@ export default function LaboratuvarSayimPage() {
             </div>
           </div>
 
-          {!mobile && (
+          {!mobile && !tablet && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
               <LabToolChip ico="barcode" label={scannerActive ? 'Okuyucu Aktif' : 'Barkod'} live={scannerActive} onClick={() => setScannerActive(value => !value)} />
               <LabToolChip ico="mic" label={voiceActive ? 'Mikrofon Aktif' : 'Sesli'} live={voiceActive} tone="red" onClick={toggleVoice} />
@@ -1673,7 +1453,7 @@ export default function LaboratuvarSayimPage() {
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 8 : 14, paddingLeft: mobile ? 3 : 12, borderLeft: mobile ? 'none' : '1px solid var(--line)' }}>
-            {!mobile && (
+            {!mobile && !tablet && (
               <div style={{ textAlign: 'right', maxWidth: 180 }}>
                 <div style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Toplam Maliyet</div>
                 <div style={{ marginTop: 2, fontSize: 16, fontWeight: 800, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{grandMetrics.costLabel}</div>
@@ -1693,7 +1473,7 @@ export default function LaboratuvarSayimPage() {
             padding: '1px 2px 3px',
           }}
         >
-          {mobile && (
+          {(mobile || tablet) && (
             <>
               <LabToolChip compact ico="barcode" label={scannerActive ? 'Aktif' : 'Barkod'} live={scannerActive} onClick={() => setScannerActive(value => !value)} />
               <LabToolChip compact ico="mic" label={voiceActive ? 'Aktif' : 'Sesli'} live={voiceActive} tone="red" onClick={toggleVoice} />
@@ -1857,7 +1637,7 @@ export default function LaboratuvarSayimPage() {
                       product={product}
                       entry={entry}
                       isOutOfStock={entry.existingTotal === 0}
-                      mobile={mobile}
+                      mobile={mobile || tablet}
                       index={index}
                       onEnteredChange={value => handleEnteredChange(product.stokKodu, value)}
                       onOpenTestChange={value => handleOpenTestChange(product.stokKodu, value)}

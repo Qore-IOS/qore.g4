@@ -440,7 +440,7 @@ export default function ClayLaboratoryManagementView(props: ClayLaboratoryManage
       />
 
       <div style={{ width: 'min(1240px, 100%)', margin: '0 auto' }}>
-        <section style={{ display: 'flex', gap: 18, alignItems: mobile ? 'stretch' : 'flex-start', flexDirection: mobile ? 'column' : 'row', marginBottom: 18 }}>
+        <section style={{ display: 'flex', gap: 18, alignItems: (mobile || tablet) ? 'stretch' : 'flex-start', flexDirection: (mobile || tablet) ? 'column' : 'row', marginBottom: 18 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             {labSelector}
             <p style={{ margin: '7px 0 0', color: 'var(--ink-2)', fontSize: 13.5, fontWeight: 650 }}>
@@ -454,7 +454,7 @@ export default function ClayLaboratoryManagementView(props: ClayLaboratoryManage
               position: 'relative',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: mobile ? 'stretch' : 'flex-end',
+              justifyContent: (mobile || tablet) ? 'stretch' : 'flex-end',
               gap: 9,
               flexWrap: 'wrap',
             }}
@@ -464,7 +464,7 @@ export default function ClayLaboratoryManagementView(props: ClayLaboratoryManage
               onClick={onStartCount}
               style={{
                 ...clayButtonStyle,
-                flex: mobile ? '1 1 160px' : undefined,
+                flex: (mobile || tablet) ? '1 1 160px' : undefined,
                 color: '#fff',
                 background: 'linear-gradient(180deg, var(--accent-2), var(--accent))',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35), 0 12px 22px -11px var(--accent-glow)',
@@ -489,7 +489,7 @@ export default function ClayLaboratoryManagementView(props: ClayLaboratoryManage
               aria-expanded={warningsOpen}
               style={{
                 ...clayButtonStyle,
-                flex: mobile ? '1 1 160px' : undefined,
+                flex: (mobile || tablet) ? '1 1 160px' : undefined,
                 color: warnings.length ? 'var(--danger)' : 'var(--ink-2)',
                 background: warnings.length
                   ? 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(192,121,106,0.12))'

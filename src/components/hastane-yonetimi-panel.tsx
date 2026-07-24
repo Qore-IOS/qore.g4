@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
 import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
@@ -25,7 +25,7 @@ import { exportDataToExcel } from '@/lib/utils';
 import { formatMiad, normalizeMiad } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { differenceInDays, isValid, parse } from 'date-fns';
-import { resolveDefaultTrackingMode } from '@/lib/tracking';
+import { resolveDefaultTrackingMode, type TrackingMode } from '@/lib/tracking';
 import BekleyenIrsaliyelerPanel from '@/components/lab/BekleyenIrsaliyelerPanel';
 import { withCompanyScope } from '@/lib/company-scope';
 import ClayLaboratoryManagementView from '@/components/lab/ClayLaboratoryManagementView';
@@ -211,9 +211,16 @@ export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: Lab
   }, [products]);
 
   const productMeta = useMemo(() => {
-    const meta: Record<string, { anaBirim?: string; takipSekli?: string }> = {};
+    const meta: Record<string, { anaBirim?: string; trackingMode?: TrackingMode; marka?: string; stokAdi?: string }> = {};
     products.forEach(p => {
-      if (p.stokKodu) meta[p.stokKodu] = { anaBirim: p.anaBirim, takipSekli: p.takipSekli };
+      if (p.stokKodu) {
+        meta[p.stokKodu] = {
+          anaBirim: p.anaBirim,
+          trackingMode: p.trackingMode,
+          marka: p.marka,
+          stokAdi: p.stokAdi,
+        };
+      }
     });
     return meta;
   }, [products]);
@@ -324,8 +331,8 @@ export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: Lab
   const lotTrackedStockCodes = useMemo(() => {
     const set = new Set<string>();
     Object.entries(productMeta).forEach(([stokKodu, meta]) => {
-      const takipSekli = resolveDefaultTrackingMode(meta as any);
-      if (takipSekli === 'lot') set.add(stokKodu);
+      const trackingMode = resolveDefaultTrackingMode(meta);
+      if (trackingMode === 'lot_barcode' || trackingMode === 'lot_manual') set.add(stokKodu);
     });
     return set;
   }, [productMeta]);

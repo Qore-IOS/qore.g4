@@ -10,7 +10,6 @@ import {
   collection,
   onSnapshot,
   orderBy,
-  query,
   Timestamp,
   doc,
   writeBatch,
