@@ -338,6 +338,86 @@ export async function getCeomedDepoStockByCode(
 }
 
 /**
+ * Seçili dönem için tüm hastanelerin Total Verimlilik kümülatif total (Sütun 15)
+ * değerlerini stok koduna göre toplayıp `stokKodu -> toplam kümülatif test` haritası
+ * döndürür.
+ *
+ * Veri `totalEfficiencyRecords` koleksiyonunda havuz + dönem başına tutulur:
+ *   - Final kayıt:  `${poolId}-${year}-${month}`      (isAraKayit tanımsız)
+ *   - Ara kayıt:    `araKayit-${poolId}-${year}-${month}` (isAraKayit === true)
+ * Her havuz için final kayıt varsa o, yoksa ara kayıt kullanılır (çift sayım önlenir).
+ * `month` 0-indekslidir (total verimlilik paneli getMonth() kullanır). Satırlar
+ * inline (`rows`) veya `rowChunks` alt koleksiyonunda parçalı olabilir.
+ */
+export async function getTotalEfficiencyKumulatifByStok(
+  year: number,
+  monthIndex: number,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, number>> {
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return {};
+  try {
+    const base = adminDb
+      .collection('totalEfficiencyRecords')
+      .where('year', '==', year)
+      .where('month', '==', monthIndex);
+
+    let docs: AdminDocSnap[];
+    if (isSuperAdmin) {
+      docs = (await base.get()).docs as AdminDocSnap[];
+    } else {
+      const normalized = normalizeCompanyId(companyId);
+      const [cs, ls] = await Promise.all([
+        base.where('companyId', '==', normalized).get(),
+        base.where('companyId', '==', '__legacy__').get(),
+      ]);
+      const seen = new Set<string>();
+      docs = [];
+      for (const snap of [cs, ls]) {
+        for (const d of snap.docs as AdminDocSnap[]) {
+          if (!seen.has(d.id)) { seen.add(d.id); docs.push(d); }
+        }
+      }
+    }
+
+    // Havuz başına final kaydı ara kayda tercih et (çift sayımı önle).
+    const chosenByPool = new Map<string, { doc: AdminDocSnap; isFinal: boolean }>();
+    for (const d of docs) {
+      const data = d.data() as Record<string, any>;
+      const poolId = String(data.poolId || d.id);
+      const isFinal = data.isAraKayit !== true;
+      const existing = chosenByPool.get(poolId);
+      if (!existing || (isFinal && !existing.isFinal)) {
+        chosenByPool.set(poolId, { doc: d, isFinal });
+      }
+    }
+
+    const totals: Record<string, number> = {};
+    for (const { doc: d } of chosenByPool.values()) {
+      const data = d.data() as Record<string, any>;
+      let rows: Array<{ stokKodu?: string; kumulatifTotal?: number }> = [];
+      if (data.rowsChunked === true) {
+        const chunksSnap = await d.ref.collection('rowChunks').orderBy('index', 'asc').get();
+        rows = chunksSnap.docs.flatMap((c) => ((c.data().rows || []) as typeof rows));
+      } else {
+        rows = (data.rows || []) as typeof rows;
+      }
+      for (const r of rows) {
+        const code = String(r?.stokKodu ?? '').trim();
+        if (!code) continue;
+        const value = Number(r?.kumulatifTotal) || 0;
+        if (!value) continue;
+        totals[code] = (totals[code] || 0) + value;
+      }
+    }
+    return totals;
+  } catch (err) {
+    console.error('[getTotalEfficiencyKumulatifByStok] Error:', err);
+    return {};
+  }
+}
+
+/**
  * Bootstrap data for the Sipariş Toplama page.
  *
  * Replaces 4× getScopedDocs calls (≈10 Firestore reads through IndexedDB) with
