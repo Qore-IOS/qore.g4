@@ -10,7 +10,7 @@ import {
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
-import { useQueries } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   ArrowLeft,
   Building2,
@@ -28,11 +28,7 @@ import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import {
-  useDepots,
-  useProductCodes,
-  useDepoStok,
-} from '@/hooks/useFirebaseQueries';
+import { useDepots } from '@/hooks/useFirebaseQueries';
 import type {
   BrandDefinition,
   MinMaxRule,
@@ -132,8 +128,6 @@ export default function TedarikciSiparisPanel() {
   const { currentUserProfile, currentUser, currentCompanyId, isSuperAdmin } = useAuth();
 
   const { data: depots = [], isLoading: depotsLoading } = useDepots();
-  const { data: productCodes = [], isLoading: productsLoading } = useProductCodes();
-  const { data: depoStok = [], isLoading: stokLoading } = useDepoStok();
 
   const [brands, setBrands] = useState<BrandDefinition[]>([]);
   const [brandsLoading, setBrandsLoading] = useState(true);
@@ -149,10 +143,26 @@ export default function TedarikciSiparisPanel() {
   const [isSaving, setIsSaving] = useState(false);
   const [completingId, setCompletingId] = useState<string | null>(null);
 
-  // Ceomed entegre ana depoların anlık stoğu ceomedDepoStok/{depotId} dokümanından
-  // gelir (yerel depoStok kayıtları yoktur). null = Ceomed dışı depo.
-  const [ceomedStockByCode, setCeomedStockByCode] = useState<Map<string, number> | null>(null);
-  const [ceomedStockLoading, setCeomedStockLoading] = useState(false);
+  // Ağır veriler yalnızca bir marka seçildikten sonra indirilir.
+  const hasBrand = !!selectedBrandId;
+
+  // Ürün kataloğu — app genelindeki hook ile aynı cache anahtarını kullanır (paylaşımlı),
+  // ancak yalnızca marka seçilince etkinleşir.
+  const { data: productCodes = [], isLoading: productsLoading } = useQuery({
+    queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const { getProductCodesAction } = await import('@/actions/stokActions');
+      return (await getProductCodesAction(currentCompanyId, isSuperAdmin ?? false)) as ProductCode[];
+    },
+    enabled: hasBrand && (!!currentCompanyId || isSuperAdmin === true),
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+  });
+
+  // Ana depo stoğu (Ceomed ise ceomedDepoStok, değilse depoStok) — marka seçilince,
+  // yalnızca ilgili depo için çekilir. Kanonik stok koduna göre indekslenir.
+  const [anaDepoStockByCode, setAnaDepoStockByCode] = useState<Map<string, number>>(new Map());
+  const [stockLoading, setStockLoading] = useState(false);
 
   // Seçili dönem için Total Verimlilik kümülatif total (Sütun 15) — stok koduna göre
   // tüm hastanelerin toplamı (kanonik koda göre indekslenir).
@@ -190,6 +200,7 @@ export default function TedarikciSiparisPanel() {
       queryKey: ['tedarikci', 'minMaxRules', 'depot', id],
       queryFn: () => fetchMinMaxRules('depots', id),
       staleTime: 30 * 60 * 1000,
+      enabled: hasBrand,
     })),
   });
   const labRuleQueries = useQueries({
@@ -197,6 +208,7 @@ export default function TedarikciSiparisPanel() {
       queryKey: ['tedarikci', 'minMaxRules', 'hospital', id],
       queryFn: () => fetchMinMaxRules('hospitals', id),
       staleTime: 30 * 60 * 1000,
+      enabled: hasBrand,
     })),
   });
 
@@ -257,48 +269,55 @@ export default function TedarikciSiparisPanel() {
     [brands, selectedBrandId],
   );
 
-  // Ceomed entegre ana depoda anlık stok harici sunucudan senkronlanır ve
-  // ceomedDepoStok/{depotId} dokümanında items[] olarak tutulur (her satırda adet).
-  // Ceomed dışı depolarda stok yerel depoStok dokümanlarından sayılır.
+  // Ana depo stoğu marka seçilince, yalnızca ilgili depo için çekilir.
+  // Ceomed entegre depoda anlık stok ceomedDepoStok'tan; diğer depolarda yerel
+  // depoStok'tan (yalnızca o depo) alınır. Her ikisi de kanonik koda indekslenir.
   useEffect(() => {
-    if (!anaDepo?.ceomedEnabled) {
-      setCeomedStockByCode(null);
-      setCeomedStockLoading(false);
+    if (!hasBrand || !anaDepo) {
+      setAnaDepoStockByCode(new Map());
+      setStockLoading(false);
       return;
     }
     let cancelled = false;
     const depotId = anaDepo.id;
+    const isCeomed = !!anaDepo.ceomedEnabled;
     const load = async () => {
-      setCeomedStockLoading(true);
+      setStockLoading(true);
       try {
-        // Admin SDK üzerinden okunur (ceomedDepoStok client kurallarında kapalı).
-        const { getCeomedDepoStockByCode } = await import('@/actions/stokActions');
-        const record = await getCeomedDepoStockByCode(depotId, currentCompanyId, isSuperAdmin);
+        const stok = await import('@/actions/stokActions');
+        const record = isCeomed
+          ? await stok.getCeomedDepoStockByCode(depotId, currentCompanyId, isSuperAdmin)
+          : await stok.getDepotStockByCode(depotId, currentCompanyId, isSuperAdmin);
         const map = new Map<string, number>();
         for (const [rawCode, qty] of Object.entries(record)) {
           const code = normCode(rawCode);
           if (!code) continue;
           map.set(code, (map.get(code) || 0) + (Number(qty) || 0));
         }
-        if (!cancelled) setCeomedStockByCode(map);
+        if (!cancelled) setAnaDepoStockByCode(map);
       } catch (e) {
-        console.error('[tedarikci-siparis] Ceomed depo stoğu okunamadı:', e);
+        console.error('[tedarikci-siparis] Ana depo stoğu okunamadı:', e);
         if (!cancelled) {
-          setCeomedStockByCode(new Map());
-          toast({ title: 'Uyarı', description: 'Ceomed ana depo stoğu okunamadı.', variant: 'destructive' });
+          setAnaDepoStockByCode(new Map());
+          toast({ title: 'Uyarı', description: 'Ana depo stoğu okunamadı.', variant: 'destructive' });
         }
       } finally {
-        if (!cancelled) setCeomedStockLoading(false);
+        if (!cancelled) setStockLoading(false);
       }
     };
     load();
     return () => { cancelled = true; };
-  }, [anaDepo?.id, anaDepo?.ceomedEnabled, currentCompanyId, isSuperAdmin, toast]);
+  }, [hasBrand, anaDepo?.id, anaDepo?.ceomedEnabled, currentCompanyId, isSuperAdmin, toast]);
 
   // Seçili döneme ait Total Verimlilik kümülatif total'i (Sütun 15) tüm hastaneler
-  // için stok koduna göre topla. Admin SDK aksiyonuyla okunur (totalEfficiencyRecords
-  // havuz + dönem başına saklanır). Dönem değişince yeniden çekilir.
+  // için stok koduna göre topla. Yalnızca marka seçilince çekilir; dönem değişince
+  // yeniden çekilir.
   useEffect(() => {
+    if (!hasBrand) {
+      setKumulatifByCode(new Map());
+      setKumulatifLoading(false);
+      return;
+    }
     let cancelled = false;
     const monthIndex = selectedMonth - 1; // total verimlilik ayları 0-indeksli
     const load = async () => {
@@ -327,26 +346,7 @@ export default function TedarikciSiparisPanel() {
     };
     load();
     return () => { cancelled = true; };
-  }, [selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
-
-  // Ana depo stok haritası (kanonik stok koduna göre indekslenir).
-  const anaDepoStockByCode = useMemo(() => {
-    if (!anaDepo) return new Map<string, number>();
-    // Ceomed entegre depo: harici senkron stoğu kullan.
-    if (anaDepo.ceomedEnabled) {
-      return ceomedStockByCode ?? new Map<string, number>();
-    }
-    // Standart depo: sevk edilmemiş, ana depoya ait her doc = 1 adet.
-    const map = new Map<string, number>();
-    for (const st of depoStok) {
-      if (st.isShipped) continue;
-      if (st.depotId !== anaDepo.id) continue;
-      const code = normCode(st.stokKodu);
-      if (!code) continue;
-      map.set(code, (map.get(code) || 0) + 1);
-    }
-    return map;
-  }, [depoStok, anaDepo, ceomedStockByCode]);
+  }, [hasBrand, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
 
   // Seçili markaya ait, min/max tanımlı benzersiz ürün listesi + hesap.
   const rows = useMemo<ComputedRow[]>(() => {
@@ -378,14 +378,17 @@ export default function TedarikciSiparisPanel() {
       const marka = (product?.marka ?? '').trim();
       if (brandName && marka !== brandName) return;
 
-      // Günlük gereken adet: her kurumdaki max'ı 1 güne indirip topla.
+      // Günlük saha ihtiyacı: SADECE bağlı yan depolar + bağlı lablar üzerinden.
+      // Ana depo talebe dahil edilmez (yalnızca stok kaynağıdır). Her kurumun
+      // günlük kutu ihtiyacı = maxGün / max; tümü toplanır.
       let gunlukToplam = 0;
       rulesForCode.forEach(rule => {
+        if (rule.locationId === anaDepo.id) return; // ana depo talebe dahil değil
         const max = Number(rule.max ?? 0);
         if (max <= 0) return;
         const maxGun = Number(rule.maxGun ?? 0);
         const effectiveGun = maxGun > 0 ? maxGun : DEFAULT_MAX_GUN;
-        gunlukToplam += max / effectiveGun;
+        gunlukToplam += effectiveGun / max;
       });
       if (gunlukToplam <= 0) return;
 
@@ -434,7 +437,8 @@ export default function TedarikciSiparisPanel() {
   );
 
   const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
-  const isLoading = depotsLoading || productsLoading || stokLoading;
+  // Marka seçildikten sonra tabloyu besleyen ağır verilerin yüklenme durumu.
+  const dataLoading = hasBrand && (productsLoading || rulesLoading || stockLoading);
 
   const handleCreateOrder = async () => {
     if (!anaDepo) {
@@ -554,7 +558,7 @@ export default function TedarikciSiparisPanel() {
         </Button>
       </div>
 
-      {!isLoading && !anaDepo && (
+      {!depotsLoading && !anaDepo && (
         <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-200 flex items-start gap-2">
           <Star className="h-5 w-5 mt-0.5 shrink-0" />
           <div>
@@ -659,14 +663,18 @@ export default function TedarikciSiparisPanel() {
           </div>
         </div>
 
-        {isLoading || (selectedBrand && rulesLoading) || (anaDepo?.ceomedEnabled && ceomedStockLoading) ? (
+        {depotsLoading ? (
           <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-            <Loader2 className="h-5 w-5 animate-spin" /> Veriler hazırlanıyor…
+            <Loader2 className="h-5 w-5 animate-spin" /> Depolar yükleniyor…
           </div>
         ) : !anaDepo ? (
           <div className="p-10 text-center text-sm text-muted-foreground">Önce bir ana depo tanımlayın.</div>
         ) : !selectedBrand ? (
           <div className="p-10 text-center text-sm text-muted-foreground">Listeyi görmek için bir marka seçin.</div>
+        ) : dataLoading ? (
+          <div className="flex items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" /> Veriler hazırlanıyor…
+          </div>
         ) : rows.length === 0 ? (
           <div className="p-10 text-center text-sm text-muted-foreground">
             Seçili markaya ait, ana depo/lab/yan depolarda min-max tanımlı ürün bulunamadı.
