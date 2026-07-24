@@ -338,6 +338,49 @@ export async function getCeomedDepoStockByCode(
 }
 
 /**
+ * Standart (Ceomed dışı) bir deponun sevk edilmemiş stoğunu `stokKodu -> adet`
+ * haritası olarak döndürür (her doc = 1 adet). Tüm depoStok'u indiren `useDepoStok`
+ * yerine yalnızca ilgili depoyu, projeksiyonla (Admin SDK) çeker. Çapraz-tenant
+ * erişimi önlemek için depo dokümanının companyId'si doğrulanır.
+ */
+export async function getDepotStockByCode(
+  depotId: string,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, number>> {
+  if (!depotId) return {};
+  try {
+    const depotSnap = await adminDb.collection('depots').doc(depotId).get();
+    if (!depotSnap.exists) return {};
+    if (!isSuperAdmin) {
+      const normalized = normalizeCompanyId(companyId);
+      const depotCompany = normalizeCompanyId((depotSnap.data() as any)?.companyId);
+      if (depotCompany !== '__legacy__' && depotCompany !== normalized) {
+        return {};
+      }
+    }
+
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .where('isShipped', '==', false)
+      .select('stokKodu')
+      .get();
+
+    const map: Record<string, number> = {};
+    for (const d of snap.docs as AdminDocSnap[]) {
+      const code = String((d.data() as any)?.stokKodu ?? '').trim();
+      if (!code) continue;
+      map[code] = (map[code] || 0) + 1;
+    }
+    return map;
+  } catch (err) {
+    console.error('[getDepotStockByCode] Error for depot', depotId, ':', err);
+    return {};
+  }
+}
+
+/**
  * Seçili dönem için tüm hastanelerin Total Verimlilik kümülatif total (Sütun 15)
  * değerlerini stok koduna göre toplayıp `stokKodu -> toplam kümülatif test` haritası
  * döndürür.
