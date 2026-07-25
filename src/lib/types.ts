@@ -171,9 +171,13 @@ export interface SupplierOrderItem {
   stokAdi: string;
   /** Ana depodaki mevcut stok adedi (hesap anındaki fotoğraf) */
   anaDepoStok: number;
+  /** Dönem lab sayımları + yan depo stoğundan gelen saha stoğu */
+  sahaStok?: number;
+  /** Hesap anında bekleyen (yoldaki) tedarikçi sipariş adedi */
+  acikSiparis?: number;
   /** Yeterlilik gün sayısına göre hesaplanan gerekli adet */
   gerekliAdet: number;
-  /** Ana depo stoğu düşüldükten sonra sipariş edilecek adet */
+  /** Ana depo + saha stoğu ve yoldaki sipariş düşüldükten sonra sipariş edilecek adet */
   siparisAdedi: number;
 }
 

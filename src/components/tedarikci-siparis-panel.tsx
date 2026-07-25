@@ -81,16 +81,34 @@ const normCode = (value: unknown): string => {
 
 type RuleWithLocation = MinMaxRule & { locationId: string };
 
+/** Günlük saha ihtiyacının hangi kaynaktan hesaplanacağı. */
+type DemandBasis = 'buyuk' | 'minmax' | 'tuketim';
+
+const DEMAND_BASIS_OPTIONS: Array<{ value: DemandBasis; label: string }> = [
+  { value: 'buyuk', label: 'İkisinin büyüğü' },
+  { value: 'minmax', label: 'Min/Max tanımı' },
+  { value: 'tuketim', label: 'Gerçek tüketim' },
+];
+
 interface ComputedRow {
   stokKodu: string;
   stokAdi: string;
   anaDepoStok: number;
+  /** Dönem lab sayımları + yan depo stoğu */
+  sahaStok: number;
   /** Total Verimlilik kümülatif total (Sütun 15) — tüm hastanelerin dönemsel toplamı */
   testAdedi: number;
   /** Aylık toplam tüketim (kutu) = testAdedi / ambalaj değeri */
   aylikTuketimKutu: number;
-  gunlukToplam: number; // günlük gereken adet (tüm kurumların toplamı)
+  /** Min/Max tanımlarından türeyen günlük ihtiyaç */
+  gunlukMinMax: number;
+  /** Gerçek tüketimden türeyen günlük ihtiyaç */
+  gunlukTuketim: number;
+  /** Seçili kaynağa göre kullanılan günlük ihtiyaç */
+  gunlukToplam: number;
   gerekliAdet: number;
+  /** Bekleyen tedarikçi siparişlerinde yoldaki adet */
+  acikSiparis: number;
   siparisAdedi: number;
 }
 
@@ -167,6 +185,13 @@ export default function TedarikciSiparisPanel() {
   const [kumulatifByCode, setKumulatifByCode] = useState<Map<string, number>>(new Map());
   const [kumulatifLoading, setKumulatifLoading] = useState(false);
 
+  // Saha stoğu: seçili dönemin lab sayımları + yan depoların stoğu.
+  const [sahaStokByCode, setSahaStokByCode] = useState<Map<string, number>>(new Map());
+  const [sahaStokLoading, setSahaStokLoading] = useState(false);
+  const [sahaCoverage, setSahaCoverage] = useState<{ counted: number; total: number }>({ counted: 0, total: 0 });
+
+  const [demandBasis, setDemandBasis] = useState<DemandBasis>('buyuk');
+
   useEffect(() => {
     if (currentUserProfile?.role && currentUserProfile.role !== 'lojistik_sorumlusu') {
       router.replace('/dashboard');
@@ -183,6 +208,12 @@ export default function TedarikciSiparisPanel() {
     () => (anaDepo ? (anaDepo.linkedLaboratoryIds || []).filter(Boolean) : []),
     [anaDepo],
   );
+  /** Ana depoya bağlı yan depoların kendisi (Ceomed bayrağı stok kaynağını belirler). */
+  const sideDepotList = useMemo(() => {
+    if (!anaDepo) return [];
+    const ids = new Set((anaDepo.linkedSideDepotIds || []).filter(id => id && id !== anaDepo.id));
+    return depots.filter(d => ids.has(d.id));
+  }, [anaDepo, depots]);
 
   const productByStockCode = useMemo(() => {
     return productCodes.reduce<Record<string, ProductCode>>((acc, product) => {
@@ -346,6 +377,82 @@ export default function TedarikciSiparisPanel() {
     return () => { cancelled = true; };
   }, [hasBrand, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
 
+  // Saha stoğu: siparişin verildiği DÖNEME ait laboratuvar sayımları (anlık stok
+  // değil) + yan depoların stoğu. Depo sayımları depoStok'u doğrudan senkronladığı
+  // için yan depoda güncel stok, son sayımın sonucudur.
+  useEffect(() => {
+    if (!hasBrand || !anaDepo) {
+      setSahaStokByCode(new Map());
+      setSahaCoverage({ counted: 0, total: 0 });
+      setSahaStokLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const labIds = relevantLabIds;
+    const sideDepots = sideDepotList;
+    const monthIndex = selectedMonth - 1;
+    const load = async () => {
+      setSahaStokLoading(true);
+      try {
+        const stok = await import('@/actions/stokActions');
+        const [labResult, ...depotRecords] = await Promise.all([
+          stok.getLabCountStockForPeriod(labIds, selectedYear, monthIndex),
+          ...sideDepots.map(d =>
+            d.ceomedEnabled
+              ? stok.getCeomedDepoStockByCode(d.id, currentCompanyId, isSuperAdmin)
+              : stok.getDepotStockByCode(d.id, currentCompanyId, isSuperAdmin),
+          ),
+        ]);
+
+        const map = new Map<string, number>();
+        const add = (record: Record<string, number>) => {
+          for (const [rawCode, qty] of Object.entries(record)) {
+            const code = normCode(rawCode);
+            if (!code) continue;
+            map.set(code, (map.get(code) || 0) + (Number(qty) || 0));
+          }
+        };
+        add(labResult.byCode);
+        depotRecords.forEach(record => add(record as Record<string, number>));
+
+        if (!cancelled) {
+          setSahaStokByCode(map);
+          setSahaCoverage({ counted: labResult.countedLabIds.length, total: labIds.length });
+        }
+      } catch (e) {
+        console.error('[tedarikci-siparis] Saha stoğu okunamadı:', e);
+        if (!cancelled) {
+          setSahaStokByCode(new Map());
+          setSahaCoverage({ counted: 0, total: labIds.length });
+        }
+      } finally {
+        if (!cancelled) setSahaStokLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [hasBrand, anaDepo, relevantLabIds, sideDepotList, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
+
+  // Bekleyen tedarikçi siparişlerindeki (yoldaki) adetler — aynı ihtiyacı iki kez
+  // sipariş etmemek için talepten düşülür.
+  const acikSiparisByCode = useMemo(() => {
+    const map = new Map<string, number>();
+    openOrders.forEach(order => {
+      (order.items || []).forEach(item => {
+        const code = normCode(item?.stokKodu);
+        if (!code) return;
+        map.set(code, (map.get(code) || 0) + (Number(item?.siparisAdedi) || 0));
+      });
+    });
+    return map;
+  }, [openOrders]);
+
+  /** Seçili dönemin gün sayısı — gerçek tüketimi günlüğe çevirmek için. */
+  const daysInPeriod = useMemo(
+    () => new Date(selectedYear, selectedMonth, 0).getDate() || 30,
+    [selectedYear, selectedMonth],
+  );
+
   // Seçili markaya ait, min/max tanımlı benzersiz ürün listesi + hesap.
   const rows = useMemo<ComputedRow[]>(() => {
     if (!anaDepo || !selectedBrand) return [];
@@ -376,37 +483,54 @@ export default function TedarikciSiparisPanel() {
       const marka = (product?.marka ?? '').trim();
       if (brandName && marka !== brandName) return;
 
-      // Günlük saha ihtiyacı: SADECE bağlı yan depolar + bağlı lablar üzerinden.
-      // Ana depo talebe dahil edilmez (yalnızca stok kaynağıdır). Her kurumun
-      // günlük kutu ihtiyacı = maxGün / max; tümü toplanır.
-      let gunlukToplam = 0;
+      const canonical = normCode(code);
+
+      // (1) Min/Max kaynaklı günlük saha ihtiyacı: SADECE bağlı yan depolar +
+      // bağlı lablar üzerinden. Ana depo talebe dahil edilmez (stok kaynağıdır).
+      let gunlukMinMax = 0;
       rulesForCode.forEach(rule => {
         if (rule.locationId === anaDepo.id) return; // ana depo talebe dahil değil
         const max = Number(rule.max ?? 0);
         if (max <= 0) return;
         const maxGun = Number(rule.maxGun ?? 0);
         const effectiveGun = maxGun > 0 ? maxGun : DEFAULT_MAX_GUN;
-        gunlukToplam += effectiveGun / max;
+        gunlukMinMax += effectiveGun / max;
       });
-      if (gunlukToplam <= 0) return;
 
-      const anaDepoStok = anaDepoStockByCode.get(normCode(code)) || 0;
-      const gerekliAdet = gunGecerli ? Math.ceil(gunlukToplam * hedefGun) : 0;
-      const siparisAdedi = Math.max(0, gerekliAdet - anaDepoStok);
-
-      // Total Verimlilik kümülatif total (tüm hastaneler, seçili dönem).
-      const testAdedi = kumulatifByCode.get(normCode(code)) || 0;
+      // (2) Gerçek tüketim kaynaklı günlük ihtiyaç: Total Verimlilik kümülatif
+      // total'i kutuya çevrilip dönemin gün sayısına bölünür.
+      const testAdedi = kumulatifByCode.get(canonical) || 0;
       const ambalaj = Number(product?.ambalajDegeri) || 0;
       const aylikTuketimKutu = ambalaj > 0 ? Math.ceil(testAdedi / ambalaj) : 0;
+      const gunlukTuketim = ambalaj > 0 ? testAdedi / ambalaj / daysInPeriod : 0;
+
+      const gunlukToplam =
+        demandBasis === 'minmax' ? gunlukMinMax
+        : demandBasis === 'tuketim' ? gunlukTuketim
+        : Math.max(gunlukMinMax, gunlukTuketim);
+      if (gunlukToplam <= 0) return;
+
+      const anaDepoStok = anaDepoStockByCode.get(canonical) || 0;
+      const sahaStok = sahaStokByCode.get(canonical) || 0;
+      const acikSiparis = acikSiparisByCode.get(canonical) || 0;
+
+      // Boru hattı (echelon) mantığı: dönem ihtiyacı sistemde zaten bulunan
+      // stoktan (ana depo + saha) ve yoldaki siparişten düşülür.
+      const gerekliAdet = gunGecerli ? Math.ceil(gunlukToplam * hedefGun) : 0;
+      const siparisAdedi = Math.max(0, gerekliAdet - anaDepoStok - sahaStok - acikSiparis);
 
       result.push({
         stokKodu: code,
         stokAdi: product?.stokAdi || code,
         anaDepoStok,
+        sahaStok,
         testAdedi,
         aylikTuketimKutu,
+        gunlukMinMax,
+        gunlukTuketim,
         gunlukToplam,
         gerekliAdet,
+        acikSiparis,
         siparisAdedi,
       });
     });
@@ -426,6 +550,10 @@ export default function TedarikciSiparisPanel() {
     productByStockCode,
     anaDepoStockByCode,
     kumulatifByCode,
+    sahaStokByCode,
+    acikSiparisByCode,
+    demandBasis,
+    daysInPeriod,
   ]);
 
   const orderableRows = useMemo(() => rows.filter(r => r.siparisAdedi > 0), [rows]);
@@ -436,7 +564,7 @@ export default function TedarikciSiparisPanel() {
 
   const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
   // Marka seçildikten sonra tabloyu besleyen ağır verilerin yüklenme durumu.
-  const dataLoading = hasBrand && (productsLoading || rulesLoading || stockLoading);
+  const dataLoading = hasBrand && (productsLoading || rulesLoading || stockLoading || sahaStokLoading);
 
   const handleCreateOrder = async () => {
     if (!anaDepo) {
@@ -463,6 +591,8 @@ export default function TedarikciSiparisPanel() {
       stokKodu: r.stokKodu,
       stokAdi: r.stokAdi,
       anaDepoStok: r.anaDepoStok,
+      sahaStok: r.sahaStok,
+      acikSiparis: r.acikSiparis,
       gerekliAdet: r.gerekliAdet,
       siparisAdedi: r.siparisAdedi,
     }));
@@ -474,6 +604,8 @@ export default function TedarikciSiparisPanel() {
       markaMail: (selectedBrand.mail || '').trim(),
       donem: periodKey,
       yeterlilikGun: hedefGun,
+      /** Hesapta kullanılan ihtiyaç kaynağı (izlenebilirlik için) */
+      ihtiyacKaynagi: demandBasis,
       anaDepoId: anaDepo.id,
       anaDepoAdi: anaDepo.name,
       items,
@@ -655,17 +787,30 @@ export default function TedarikciSiparisPanel() {
             Hesaplanan Sipariş Listesi
             {selectedBrand && <span className="font-semibold text-[#587169] dark:text-[#a994b5]">— {selectedBrand.name}</span>}
           </h2>
-          <div className="flex items-center gap-2">
-            <label htmlFor="yeterlilik" className="whitespace-nowrap text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">Yeterlilik Gün Sayısı</label>
-            <Input
-              id="yeterlilik"
-              type="number"
-              min={1}
-              className={`w-28 ${CONTROL_CLASS}`}
-              value={yeterlilikGun}
-              onChange={(e) => setYeterlilikGun(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
-              placeholder="Örn. 60"
-            />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <label htmlFor="ihtiyac-kaynagi" className="whitespace-nowrap text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">İhtiyaç Kaynağı</label>
+              <Select value={demandBasis} onValueChange={(v) => setDemandBasis(v as DemandBasis)}>
+                <SelectTrigger id="ihtiyac-kaynagi" className={`w-44 ${CONTROL_CLASS}`}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {DEMAND_BASIS_OPTIONS.map(o => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label htmlFor="yeterlilik" className="whitespace-nowrap text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">Yeterlilik Gün Sayısı</label>
+              <Input
+                id="yeterlilik"
+                type="number"
+                min={1}
+                className={`w-28 ${CONTROL_CLASS}`}
+                value={yeterlilikGun}
+                onChange={(e) => setYeterlilikGun(e.target.value === '' ? '' : Math.max(0, Number(e.target.value)))}
+                placeholder="Örn. 60"
+              />
+            </div>
           </div>
         </div>
 
@@ -696,12 +841,16 @@ export default function TedarikciSiparisPanel() {
         ) : (
           <>
             <div className="max-h-[560px] overflow-auto">
-              <table className="w-full min-w-[920px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
                   <tr>
                     <th className="px-5 py-4">Stok Kodu</th>
                     <th className="px-4 py-4">Stok Adı</th>
                     <th className="px-4 py-4 text-right">Ana Depo Stok</th>
+                    <th className="px-4 py-4 text-right">
+                      Saha Stoğu
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Dönem sayımı</span>
+                    </th>
                     <th className="px-4 py-4 text-right">
                       Test Adedi
                       <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Küm. Total</span>
@@ -729,6 +878,9 @@ export default function TedarikciSiparisPanel() {
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 font-semibold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.stokAdi}</td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.anaDepoStok}</td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {row.sahaStok > 0 ? row.sahaStok : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                         {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.testAdedi > 0 ? row.testAdedi : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
@@ -752,9 +904,22 @@ export default function TedarikciSiparisPanel() {
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-950/10 px-5 py-3 text-sm dark:border-fuchsia-300/15">
               <span className="font-semibold text-[#587169] dark:text-[#a994b5]">
                 {rows.length} ürün · sipariş edilecek {orderableRows.length} kalem
+                {sahaCoverage.total > 0 && (
+                  <>
+                    {' · '}
+                    <span className={sahaCoverage.counted < sahaCoverage.total ? 'text-amber-700 dark:text-amber-300' : ''}>
+                      saha sayımı {sahaCoverage.counted}/{sahaCoverage.total} lab
+                    </span>
+                  </>
+                )}
               </span>
               <span className="font-extrabold text-[#0f2a24] dark:text-[#f4ecfa]">Toplam Sipariş Adedi: {totalSiparisAdedi}</span>
             </div>
+            {sahaCoverage.total > 0 && sahaCoverage.counted < sahaCoverage.total && (
+              <p className="border-t border-emerald-950/10 px-5 py-2.5 text-xs font-semibold text-amber-700 dark:border-fuchsia-300/15 dark:text-amber-300">
+                {sahaCoverage.total - sahaCoverage.counted} laboratuvarın {periodKey} dönemi sayımı yok; bu labların saha stoğu 0 kabul edildi (sipariş adedi olduğundan yüksek çıkabilir).
+              </p>
+            )}
           </>
         )}
       </section>

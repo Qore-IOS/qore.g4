@@ -291,6 +291,82 @@ export async function getDepoStokForOrders(
 }
 
 /**
+ * Seçili dönemin laboratuvar sayımlarından saha stoğunu (stokKodu -> sayılan adet)
+ * döndürür. Tedarikçi sipariş hesabında "anlık" saha stoğu yerine, siparişin
+ * verildiği döneme ait sayım fotoğrafı kullanılır.
+ *
+ * Sayımlar `hospitals/{labId}/stockCounts` altında dönem bazlı tutulur; bir labda
+ * aynı dönemde birden fazla oturum olabilir, bu yüzden stok kodu başına **en son**
+ * oturumun değeri esas alınır (count-overview ile aynı semantik).
+ *
+ * Sayım yapmamış lablar `uncountedLabIds` ile geri bildirilir; çağıran taraf
+ * kapsama oranını kullanıcıya gösterebilsin diye stok 0 kabul edilir.
+ */
+export async function getLabCountStockForPeriod(
+  labIds: string[],
+  year: number,
+  monthIndex: number,
+): Promise<{ byCode: Record<string, number>; countedLabIds: string[]; uncountedLabIds: string[] }> {
+  const uniqueLabIds = Array.from(new Set((labIds || []).map(id => String(id || '').trim()).filter(Boolean)));
+  const empty = { byCode: {} as Record<string, number>, countedLabIds: [] as string[], uncountedLabIds: uniqueLabIds };
+  if (uniqueLabIds.length === 0 || !Number.isFinite(year) || !Number.isFinite(monthIndex)) return empty;
+
+  const periodKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+  const byCode: Record<string, number> = {};
+  const countedLabIds: string[] = [];
+  const uncountedLabIds: string[] = [];
+
+  try {
+    await Promise.all(uniqueLabIds.map(async (labId) => {
+      const ref = adminDb.collection('hospitals').doc(labId).collection('stockCounts');
+      // period alanı yeni kayıtlarda; year+month (0-indeksli) eski kayıtlarda bulunur.
+      const [byPeriod, byYearMonth] = await Promise.all([
+        ref.where('period', '==', periodKey).get(),
+        ref.where('year', '==', year).where('month', '==', monthIndex).get(),
+      ]);
+
+      const sessions = new Map<string, FirebaseFirestore.DocumentData>();
+      for (const snap of [byPeriod, byYearMonth]) {
+        snap.docs.forEach(d => sessions.set(d.id, d.data()));
+      }
+      if (sessions.size === 0) {
+        uncountedLabIds.push(labId);
+        return;
+      }
+      countedLabIds.push(labId);
+
+      const toMillis = (value: any): number => {
+        if (!value) return 0;
+        if (typeof value?.toMillis === 'function') return value.toMillis();
+        if (typeof value?.seconds === 'number') return value.seconds * 1000;
+        const parsed = new Date(value).getTime();
+        return Number.isNaN(parsed) ? 0 : parsed;
+      };
+
+      // En yeni oturum önce; bir stok kodu ilk görüldüğü (en güncel) oturumdan alınır.
+      const ordered = Array.from(sessions.values()).sort(
+        (a, b) => toMillis(b?.finishedAt) - toMillis(a?.finishedAt),
+      );
+      const seen = new Set<string>();
+      for (const session of ordered) {
+        const items = Array.isArray(session?.items) ? session.items : [];
+        for (const item of items) {
+          const code = String(item?.stokKodu ?? '').trim();
+          if (!code || seen.has(code)) continue;
+          seen.add(code);
+          byCode[code] = (byCode[code] || 0) + (Number(item?.counted) || 0);
+        }
+      }
+    }));
+
+    return { byCode, countedLabIds, uncountedLabIds };
+  } catch (err) {
+    console.error('[getLabCountStockForPeriod] Error:', err);
+    return empty;
+  }
+}
+
+/**
  * Ceomed entegre bir deponun anlık stoğunu (stokKodu -> toplam adet) döndürür.
  *
  * Ceomed depolarında stok yerel `depoStok` yerine harici senkronla yazılan
