@@ -487,6 +487,8 @@ export default function TedarikciSiparisPanel() {
 
       // (1) Min/Max kaynaklı günlük saha ihtiyacı: SADECE bağlı yan depolar +
       // bağlı lablar üzerinden. Ana depo talebe dahil edilmez (stok kaynağıdır).
+      // Bir kurumun max'ı maxGün günlük ihtiyacı karşıladığından günlük kutu
+      // ihtiyacı max / maxGün'dür (Merkez Sipariş paneliyle aynı semantik).
       let gunlukMinMax = 0;
       rulesForCode.forEach(rule => {
         if (rule.locationId === anaDepo.id) return; // ana depo talebe dahil değil
@@ -494,7 +496,7 @@ export default function TedarikciSiparisPanel() {
         if (max <= 0) return;
         const maxGun = Number(rule.maxGun ?? 0);
         const effectiveGun = maxGun > 0 ? maxGun : DEFAULT_MAX_GUN;
-        gunlukMinMax += effectiveGun / max;
+        gunlukMinMax += max / effectiveGun;
       });
 
       // (2) Gerçek tüketim kaynaklı günlük ihtiyaç: Total Verimlilik kümülatif
