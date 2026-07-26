@@ -468,13 +468,15 @@ export async function getDepotStockByCode(
  * `month` 0-indekslidir (total verimlilik paneli getMonth() kullanır). Satırlar
  * inline (`rows`) veya `rowChunks` alt koleksiyonunda parçalı olabilir.
  */
-export async function getTotalEfficiencyKumulatifByStok(
+async function loadKumulatifForPeriod(
   year: number,
   monthIndex: number,
   companyId?: string | null,
   isSuperAdmin?: boolean,
-): Promise<Record<string, number>> {
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) return {};
+): Promise<{ byCode: Record<string, number>; hasData: boolean }> {
+  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
+    return { byCode: {}, hasData: false };
+  }
   try {
     const base = adminDb
       .collection('totalEfficiencyRecords')
@@ -529,11 +531,49 @@ export async function getTotalEfficiencyKumulatifByStok(
         totals[code] = (totals[code] || 0) + value;
       }
     }
-    return totals;
+    // hasData: o dönem için hiç kayıt var mı — ortalama alınırken veri girilmemiş
+    // dönemleri 0 sayıp ortalamayı aşağı çekmemek için gerekli.
+    return { byCode: totals, hasData: chosenByPool.size > 0 };
   } catch (err) {
-    console.error('[getTotalEfficiencyKumulatifByStok] Error:', err);
-    return {};
+    console.error('[loadKumulatifForPeriod] Error:', err);
+    return { byCode: {}, hasData: false };
   }
+}
+
+export async function getTotalEfficiencyKumulatifByStok(
+  year: number,
+  monthIndex: number,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, number>> {
+  return (await loadKumulatifForPeriod(year, monthIndex, companyId, isSuperAdmin)).byCode;
+}
+
+/**
+ * Birden fazla dönemin kümülatif total'ini tek çağrıda döndürür.
+ * Anahtar `YYYY-MM` (1-indeksli ay) formatındadır. `hasData`, o dönemde hiç
+ * total verimlilik kaydı bulunup bulunmadığını belirtir; ortalama hesaplarken
+ * veri girilmemiş dönemler paydadan çıkarılabilsin diye taşınır.
+ */
+export async function getTotalEfficiencyKumulatifForPeriods(
+  periods: Array<{ year: number; monthIndex: number }>,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, { byCode: Record<string, number>; hasData: boolean }>> {
+  const unique = new Map<string, { year: number; monthIndex: number }>();
+  (periods || []).forEach((p) => {
+    if (!p || !Number.isFinite(p.year) || !Number.isFinite(p.monthIndex)) return;
+    unique.set(`${p.year}-${String(p.monthIndex + 1).padStart(2, '0')}`, p);
+  });
+  if (unique.size === 0) return {};
+
+  const entries = await Promise.all(
+    Array.from(unique.entries()).map(async ([key, p]) => {
+      const result = await loadKumulatifForPeriod(p.year, p.monthIndex, companyId, isSuperAdmin);
+      return [key, result] as const;
+    }),
+  );
+  return Object.fromEntries(entries);
 }
 
 /**
