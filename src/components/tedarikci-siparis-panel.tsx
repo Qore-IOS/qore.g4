@@ -1202,6 +1202,16 @@ export default function TedarikciSiparisPanel() {
                     {order.toplamKalem} kalem · {order.toplamAdet} adet · {order.anaDepoAdi}
                     {toDate(order.createdAt) && ` · ${toDate(order.createdAt)!.toLocaleString('tr-TR')}`}
                   </p>
+                  {(() => {
+                    // Ceomed entegre ana depoda mal girişi geldikçe kısmi ilerleme birikir.
+                    const alinan = (order.items || []).reduce((sum, i) => sum + (Number(i?.alinanAdet) || 0), 0);
+                    if (alinan <= 0 || alinan >= order.toplamAdet) return null;
+                    return (
+                      <p className="mt-1 text-[11px] font-bold text-sky-700 dark:text-sky-300">
+                        Depoya giriş: {alinan}/{order.toplamAdet} adet
+                      </p>
+                    );
+                  })()}
                 </div>
                 <button
                   type="button"
@@ -1230,6 +1240,14 @@ export default function TedarikciSiparisPanel() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-bold text-[#29473f] dark:text-[#d6bfe3]">{order.markaAdi}</span>
                   <span className="rounded-full border border-emerald-200 bg-emerald-100 px-2.5 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-400/25 dark:bg-emerald-400/15 dark:text-emerald-200">Tamamlandı</span>
+                  {order.autoCompleted && (
+                    <span
+                      className="rounded-full border border-sky-200 bg-sky-100 px-2.5 py-0.5 text-[11px] font-bold text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/15 dark:text-sky-200"
+                      title="Ceomed stok girişiyle otomatik tamamlandı"
+                    >
+                      Otomatik
+                    </span>
+                  )}
                   <span className="text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">{order.donem}</span>
                 </div>
                 <span className="text-xs font-semibold text-[#70857e] dark:text-[#8e7c9a]">

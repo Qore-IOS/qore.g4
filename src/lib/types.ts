@@ -179,6 +179,11 @@ export interface SupplierOrderItem {
   gerekliAdet: number;
   /** Ana depo + saha stoğu ve yoldaki sipariş düşüldükten sonra sipariş edilecek adet */
   siparisAdedi: number;
+  /**
+   * Ceomed entegre ana depoya yapılan stok girişlerinden bu kaleme düşen kümülatif
+   * adet. Tüm kalemlerde siparisAdedi'ne ulaşınca sipariş otomatik tamamlanır.
+   */
+  alinanAdet?: number;
 }
 
 export interface SupplierOrder {
@@ -201,6 +206,8 @@ export interface SupplierOrder {
   createdById?: string;
   completedAt?: TimestampLike;
   completedBy?: string;
+  /** Ceomed stok girişiyle otomatik tamamlandıysa true */
+  autoCompleted?: boolean;
   companyId?: string;
   /** Otomatik mail gönderim durumu (Cloud Function tarafından yazılır) */
   mailStatus?: 'pending' | 'sent' | 'failed' | 'skipped';

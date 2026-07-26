@@ -16,6 +16,7 @@ export { onTeknikServisFormCreated, onAplikasyonFormCreated } from './actionForm
 export { onDeviceFaultReportResolved } from './faultReportNotification';
 export { onPeripheralOrderCreatedSendMail } from './orderCreatedPeripheralEmail';
 export { onSupplierOrderCreatedSendMail } from './supplierOrderEmail';
+export { onCeomedStockSyncedCompleteSupplierOrders } from './supplierOrderAutoComplete';
 export { onPeripheralOrderCreatedSendWhatsApp } from './peripheralOrderWhatsApp';
 export { onDepoStokAccepted } from './peripheralOrderReconcile';
 export { onUserClaimSync } from './userClaimSync';
