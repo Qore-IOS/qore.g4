@@ -20,6 +20,7 @@ import {
   Loader2,
   Mail,
   MailWarning,
+  Clock,
   Minus,
   TrendingDown,
   TrendingUp,
@@ -768,6 +769,8 @@ export default function TedarikciSiparisPanel() {
         sahaStok,
         cihazUstuKutu,
         acikSiparis,
+        // Markanın teslim süresi acil eşiğini belirler (tedarikGun + 7).
+        tedarikGun: Math.max(0, Number(selectedBrand.tedarikGun) || 0),
         sayimEksikLab: Math.max(0, sahaCoverage.total - sahaCoverage.counted),
         toplamLab: sahaCoverage.total,
       });
@@ -914,6 +917,8 @@ export default function TedarikciSiparisPanel() {
       yeterlilikGun: hedefGun,
       /** Hesapta kullanılan ihtiyaç kaynağı (izlenebilirlik için) */
       ihtiyacKaynagi: demandBasis,
+      /** Hesapta kullanılan tedarik süresi (acil eşiği için) */
+      tedarikGun: Math.max(0, Number(selectedBrand.tedarikGun) || 0),
       anaDepoId: anaDepo.id,
       anaDepoAdi: anaDepo.name,
       items,
@@ -1033,14 +1038,23 @@ export default function TedarikciSiparisPanel() {
               </SelectContent>
             </Select>
             {selectedBrand && (
-              <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#587169] dark:text-[#a994b5]">
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-[#587169] dark:text-[#a994b5]">
                 {selectedBrand.mail ? (
-                  <><Mail className="h-3 w-3" /> {selectedBrand.mail}</>
+                  <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {selectedBrand.mail}</span>
                 ) : (
                   <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
                     <MailWarning className="h-3 w-3" /> Mail adresi tanımlı değil
                   </span>
                 )}
+                <span
+                  className="flex items-center gap-1"
+                  title="Acil eşiği: tedarik süresi + 7 gün"
+                >
+                  <Clock className="h-3 w-3" />
+                  {Number(selectedBrand.tedarikGun) > 0
+                    ? `${selectedBrand.tedarikGun} gün tedarik`
+                    : 'tedarik süresi yok (15 gün varsayılan)'}
+                </span>
               </p>
             )}
           </div>

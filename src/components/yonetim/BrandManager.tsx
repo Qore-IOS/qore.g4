@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
-import { Plus, Trash2, Loader2, Pencil, Mail, Phone, MapPin } from 'lucide-react';
+import { Plus, Trash2, Loader2, Pencil, Mail, Phone, MapPin, Clock } from 'lucide-react';
 import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -27,9 +27,10 @@ interface BrandDraft {
   numara: string;
   adres: string;
   mail: string;
+  tedarikGun: string;
 }
 
-const EMPTY_DRAFT: BrandDraft = { name: '', numara: '', adres: '', mail: '' };
+const EMPTY_DRAFT: BrandDraft = { name: '', numara: '', adres: '', mail: '', tedarikGun: '' };
 
 const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
   const { toast } = useToast();
@@ -102,6 +103,7 @@ const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
       numara: brand.numara || '',
       adres: brand.adres || '',
       mail: brand.mail || '',
+      tedarikGun: brand.tedarikGun ? String(brand.tedarikGun) : '',
     });
     setDialogOpen(true);
   };
@@ -122,6 +124,13 @@ const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
       return;
     }
 
+    const tedarikGunRaw = draft.tedarikGun.trim();
+    const tedarikGun = tedarikGunRaw === '' ? 0 : Number(tedarikGunRaw);
+    if (!Number.isFinite(tedarikGun) || tedarikGun < 0 || tedarikGun > 365) {
+      toast({ title: 'Hata', description: 'Tedarik süresi 0-365 gün aralığında olmalı.', variant: 'destructive' });
+      return;
+    }
+
     setSaving(true);
     try {
       const payload = {
@@ -129,6 +138,7 @@ const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
         numara: draft.numara.trim(),
         adres: draft.adres.trim(),
         mail,
+        tedarikGun,
       };
       if (draft.id) {
         await updateDoc(doc(db, 'def_brands', draft.id), payload);
@@ -220,6 +230,12 @@ const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
                             <span className="truncate">{item.adres}</span>
                           </span>
                         )}
+                        {Number(item.tedarikGun) > 0 && (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3 shrink-0" />
+                            {item.tedarikGun} gün
+                          </span>
+                        )}
                       </span>
                     ) : (
                       <span className="text-[11px] text-amber-600 dark:text-amber-400">İletişim bilgisi eksik</span>
@@ -275,6 +291,22 @@ const BrandManager: React.FC<{ refreshKey?: number }> = ({ refreshKey }) => {
               />
               <p className="text-[11px] text-muted-foreground mt-1">
                 Tedarikçi siparişleri bu adrese otomatik gönderilir.
+              </p>
+            </div>
+            <div>
+              <Label className="text-sm">Tedarik Süresi (gün)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={365}
+                value={draft.tedarikGun}
+                onChange={(e) => setDraft(prev => ({ ...prev, tedarikGun: e.target.value }))}
+                placeholder="Örn. 20"
+                className="mt-1"
+              />
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Siparişin ortalama teslim süresi. Tedarikçi sipariş panelinde acil uyarı eşiğini
+                belirler (tedarik süresi + 7 gün). Boş bırakılırsa 15 gün varsayılır.
               </p>
             </div>
             <div>
