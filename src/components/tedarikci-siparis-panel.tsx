@@ -20,6 +20,9 @@ import {
   Loader2,
   Mail,
   MailWarning,
+  Minus,
+  TrendingDown,
+  TrendingUp,
   PackageSearch,
   Send,
   Star,
@@ -101,6 +104,37 @@ const SAPMA_ESIGI = 2;
 const fmt = (value: number, digits = 2) =>
   value.toLocaleString('tr-TR', { maximumFractionDigits: digits });
 
+/** Bu bandın içindeki değişim "yatay" sayılır (yön rengi verilmez). */
+const DEGISIM_ESIGI = 5;
+
+/**
+ * Seçili dönemin önceki 3 ay ortalamasına göre değişimini yüzde çip olarak gösterir.
+ * Renkler yön bildirir (artış amber, azalış sky), iyi/kötü değeri taşımaz.
+ */
+function DegisimChip({ value }: { value: number | null }) {
+  if (value === null || !Number.isFinite(value)) {
+    return <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>;
+  }
+  const stable = Math.abs(value) < DEGISIM_ESIGI;
+  const up = value > 0;
+  const cls = stable
+    ? 'border-emerald-950/10 bg-white/70 text-[#587169] dark:border-fuchsia-300/20 dark:bg-white/5 dark:text-[#a994b5]'
+    : up
+      ? 'border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/15 dark:text-amber-200'
+      : 'border-sky-200 bg-sky-100 text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/15 dark:text-sky-200';
+  const Icon = stable ? Minus : up ? TrendingUp : TrendingDown;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}
+      title={`Önceki 3 ay ortalamasına göre ${up ? 'artış' : 'azalış'}`}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+      {value > 0 ? '+' : ''}{fmt(value, 0)}%
+    </span>
+  );
+}
+
 /** Bir ürünün günlük ihtiyacına tek bir kurumun katkısı. */
 interface KurumKatkisi {
   locationId: string;
@@ -122,6 +156,10 @@ interface ComputedRow {
   sahaStok: number;
   /** Total Verimlilik kümülatif total (Sütun 15) — tüm hastanelerin dönemsel toplamı */
   testAdedi: number;
+  /** Seçili dönemden önceki 3 dönemin kümülatif ortalaması (yoksa null) */
+  onceki3AyOrt: number | null;
+  /** Seçili dönemin önceki 3 ay ortalamasına göre değişimi (%) — taban yoksa null */
+  degisimYuzde: number | null;
   /** Aylık toplam tüketim (kutu) = testAdedi / ambalaj değeri */
   aylikTuketimKutu: number;
   /** Min/Max tanımlarından türeyen günlük ihtiyaç */
@@ -231,6 +269,10 @@ export default function TedarikciSiparisPanel() {
   // tüm hastanelerin toplamı (kanonik koda göre indekslenir).
   const [kumulatifByCode, setKumulatifByCode] = useState<Map<string, number>>(new Map());
   const [kumulatifLoading, setKumulatifLoading] = useState(false);
+  /** Seçili dönemden ÖNCEKİ 3 dönemin kümülatif ortalaması (veri olan aylar üzerinden). */
+  const [onceki3AyByCode, setOnceki3AyByCode] = useState<Map<string, number>>(new Map());
+  /** Ortalamaya giren ayların etiketi — sütun başlığında gösterilir. */
+  const [onceki3AyLabel, setOnceki3AyLabel] = useState('');
 
   // Saha stoğu: seçili dönemin lab sayımları + yan depoların stoğu.
   const [sahaStokByCode, setSahaStokByCode] = useState<Map<string, number>>(new Map());
@@ -393,6 +435,8 @@ export default function TedarikciSiparisPanel() {
   useEffect(() => {
     if (!hasBrand) {
       setKumulatifByCode(new Map());
+      setOnceki3AyByCode(new Map());
+      setOnceki3AyLabel('');
       setKumulatifLoading(false);
       return;
     }
@@ -401,23 +445,70 @@ export default function TedarikciSiparisPanel() {
     const load = async () => {
       setKumulatifLoading(true);
       try {
-        const { getTotalEfficiencyKumulatifByStok } = await import('@/actions/stokActions');
-        const record = await getTotalEfficiencyKumulatifByStok(
-          selectedYear,
-          monthIndex,
+        const { getTotalEfficiencyKumulatifForPeriods } = await import('@/actions/stokActions');
+        // Seçili dönem + kendisinden ÖNCEKİ 3 dönem (karşılaştırma tabanı).
+        const periods = [0, 1, 2, 3].map(back => {
+          const d = new Date(selectedYear, monthIndex - back, 1);
+          return { year: d.getFullYear(), monthIndex: d.getMonth() };
+        });
+        const result = await getTotalEfficiencyKumulatifForPeriods(
+          periods,
           currentCompanyId,
           isSuperAdmin,
         );
-        const map = new Map<string, number>();
-        for (const [rawCode, value] of Object.entries(record)) {
-          const code = normCode(rawCode);
-          if (!code) continue;
-          map.set(code, (map.get(code) || 0) + (Number(value) || 0));
+        const keyOf = (p: { year: number; monthIndex: number }) =>
+          `${p.year}-${String(p.monthIndex + 1).padStart(2, '0')}`;
+
+        const toMap = (record: Record<string, number> | undefined) => {
+          const map = new Map<string, number>();
+          for (const [rawCode, value] of Object.entries(record || {})) {
+            const code = normCode(rawCode);
+            if (!code) continue;
+            map.set(code, (map.get(code) || 0) + (Number(value) || 0));
+          }
+          return map;
+        };
+
+        const current = toMap(result[keyOf(periods[0])]?.byCode);
+
+        // Ortalama yalnızca VERİSİ OLAN önceki dönemler üzerinden alınır; veri
+        // girilmemiş bir ay 0 sayılıp ortalamayı aşağı çekmesin.
+        const previous = periods.slice(1).filter(p => result[keyOf(p)]?.hasData);
+        const average = new Map<string, number>();
+        if (previous.length > 0) {
+          const codes = new Set<string>();
+          previous.forEach(p => {
+            Object.keys(result[keyOf(p)]?.byCode || {}).forEach(c => codes.add(normCode(c)));
+          });
+          current.forEach((_, code) => codes.add(code));
+          codes.forEach(code => {
+            let sum = 0;
+            previous.forEach(p => {
+              sum += toMap(result[keyOf(p)]?.byCode).get(code) || 0;
+            });
+            average.set(code, sum / previous.length);
+          });
         }
-        if (!cancelled) setKumulatifByCode(map);
+
+        if (!cancelled) {
+          setKumulatifByCode(current);
+          setOnceki3AyByCode(average);
+          setOnceki3AyLabel(
+            previous.length > 0
+              ? previous
+                  .map(p => `${String(p.monthIndex + 1).padStart(2, '0')}.${p.year}`)
+                  .reverse()
+                  .join(', ')
+              : '',
+          );
+        }
       } catch (e) {
         console.error('[tedarikci-siparis] Kümülatif total okunamadı:', e);
-        if (!cancelled) setKumulatifByCode(new Map());
+        if (!cancelled) {
+          setKumulatifByCode(new Map());
+          setOnceki3AyByCode(new Map());
+          setOnceki3AyLabel('');
+        }
       } finally {
         if (!cancelled) setKumulatifLoading(false);
       }
@@ -575,6 +666,15 @@ export default function TedarikciSiparisPanel() {
       const aylikTuketimKutu = ambalaj > 0 ? Math.ceil(testAdedi / ambalaj) : 0;
       const gunlukTuketim = ambalaj > 0 ? testAdedi / ambalaj / daysInPeriod : 0;
 
+      // Önceki 3 ay ortalaması ve seçili dönemin bu tabana göre değişimi.
+      const onceki3AyOrt = onceki3AyByCode.size > 0
+        ? (onceki3AyByCode.get(canonical) || 0)
+        : null;
+      const degisimYuzde =
+        onceki3AyOrt === null || onceki3AyOrt <= 0
+          ? null
+          : ((testAdedi - onceki3AyOrt) / onceki3AyOrt) * 100;
+
       const gunlukToplam =
         demandBasis === 'minmax' ? gunlukMinMax
         : demandBasis === 'tuketim' ? gunlukTuketim
@@ -605,6 +705,8 @@ export default function TedarikciSiparisPanel() {
         anaDepoStok,
         sahaStok,
         testAdedi,
+        onceki3AyOrt,
+        degisimYuzde,
         aylikTuketimKutu,
         gunlukMinMax,
         gunlukTuketim,
@@ -632,6 +734,7 @@ export default function TedarikciSiparisPanel() {
     productByStockCode,
     anaDepoStockByCode,
     kumulatifByCode,
+    onceki3AyByCode,
     sahaStokByCode,
     acikSiparisByCode,
     demandBasis,
@@ -930,7 +1033,7 @@ export default function TedarikciSiparisPanel() {
         ) : (
           <>
             <div className="max-h-[560px] overflow-auto">
-              <table className="w-full min-w-[1080px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
                   <tr>
                     <th className="px-5 py-4">Stok Kodu</th>
@@ -942,7 +1045,17 @@ export default function TedarikciSiparisPanel() {
                     </th>
                     <th className="px-4 py-4 text-right">
                       Test Adedi
-                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Küm. Total</span>
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Küm. Total · {periodKey}</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Son 3 Ay Ort.
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">
+                        {onceki3AyLabel || 'veri yok'}
+                      </span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Değişim
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">3 ay ort.'ya göre</span>
                     </th>
                     <th className="px-4 py-4 text-right">
                       Aylık Toplam Tüketim
@@ -1002,6 +1115,22 @@ export default function TedarikciSiparisPanel() {
                         {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.testAdedi > 0 ? row.testAdedi : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {kumulatifLoading ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span>
+                        ) : row.onceki3AyOrt === null ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                        ) : (
+                          fmt(row.onceki3AyOrt, 0)
+                        )}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right dark:border-fuchsia-300/15">
+                        {kumulatifLoading ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span>
+                        ) : (
+                          <DegisimChip value={row.degisimYuzde} />
+                        )}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                         {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.aylikTuketimKutu > 0 ? row.aylikTuketimKutu : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
@@ -1017,7 +1146,7 @@ export default function TedarikciSiparisPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={8} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                        <td colSpan={10} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
                           <div className="grid gap-5 lg:grid-cols-2">
                             {/* Günlük ihtiyacın kurum kırılımı */}
                             <div>
@@ -1087,6 +1216,22 @@ export default function TedarikciSiparisPanel() {
                                   </dt>
                                   <dd className="tabular-nums">{fmt(row.gunlukTuketim)} kutu/gün</dd>
                                 </div>
+                                {row.onceki3AyOrt !== null && (
+                                  <div className="flex items-center justify-between gap-3">
+                                    <dt>
+                                      Son 3 ay ortalaması
+                                      {onceki3AyLabel && (
+                                        <span className="ml-1 text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                                          ({onceki3AyLabel})
+                                        </span>
+                                      )}
+                                    </dt>
+                                    <dd className="flex items-center gap-2">
+                                      <span className="tabular-nums">{fmt(row.onceki3AyOrt, 0)} test</span>
+                                      <DegisimChip value={row.degisimYuzde} />
+                                    </dd>
+                                  </div>
+                                )}
                                 <div className="flex justify-between gap-3 border-t border-emerald-950/10 pt-1 font-extrabold dark:border-fuchsia-300/15">
                                   <dt>Kullanılan ({DEMAND_BASIS_OPTIONS.find(o => o.value === demandBasis)?.label})</dt>
                                   <dd className="tabular-nums">{fmt(row.gunlukToplam)} kutu/gün</dd>
