@@ -161,6 +161,12 @@ export interface BrandDefinition {
   numara?: string; // Tedarikçi telefon/iletişim numarası
   adres?: string; // Tedarikçi adresi
   mail?: string; // Otomatik sipariş mailinin gönderileceği adres
+  /**
+   * Siparişin teslim edilmesi için geçen ortalama gün. Tedarikçi sipariş
+   * panelinde "acil" eşiğini belirler: kapsama günü (tedarikGun + 7) altına
+   * düşen ürünler acil olarak işaretlenir. Boşsa 15 günlük varsayılan geçerlidir.
+   */
+  tedarikGun?: number;
   [k: string]: any;
 }
 

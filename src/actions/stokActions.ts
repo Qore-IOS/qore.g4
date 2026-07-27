@@ -367,6 +367,88 @@ export async function getLabCountStockForPeriod(
 }
 
 /**
+ * Seçili dönemde sahadaki cihazlarda açık duran test adetlerini
+ * (`stokKodu -> test`) döndürür.
+ *
+ * Cihaz üstü testler fiziksel bir varlıktır: açılmış kitin kalan testleri
+ * sahada duruyordur ve o kadar sipariş edilmesine gerek yoktur. Kayıtlar
+ * `cihazUstuGecmisi` koleksiyonunda hastane + dönem başına tutulur; aynı
+ * dönemde birden çok kayıt olabileceğinden **en son** kayıt esas alınır
+ * (çift sayımı önler).
+ *
+ * Dönem alanı `MM-YYYY` biçimindedir; eski kayıtlar için year+month (1-indeksli)
+ * ile de sorgulanır.
+ */
+export async function getCihazUstuForPeriod(
+  labIds: string[],
+  year: number,
+  month: number,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, number>> {
+  const wanted = new Set((labIds || []).map(id => String(id || '').trim()).filter(Boolean));
+  if (wanted.size === 0 || !Number.isFinite(year) || !Number.isFinite(month)) return {};
+
+  const period = `${String(month).padStart(2, '0')}-${year}`;
+  try {
+    const base = adminDb.collection('cihazUstuGecmisi');
+    const runScoped = async (
+      build: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query,
+    ): Promise<AdminDocSnap[]> => {
+      if (isSuperAdmin) return (await build(base).get()).docs as AdminDocSnap[];
+      const normalized = normalizeCompanyId(companyId);
+      const [cs, ls] = await Promise.all([
+        build(base.where('companyId', '==', normalized)).get(),
+        build(base.where('companyId', '==', '__legacy__')).get(),
+      ]);
+      return [...cs.docs, ...ls.docs] as AdminDocSnap[];
+    };
+
+    const [byPeriod, byYearMonth] = await Promise.all([
+      runScoped(q => q.where('period', '==', period)),
+      runScoped(q => q.where('year', '==', year).where('month', '==', month)),
+    ]);
+
+    const docsById = new Map<string, AdminDocSnap>();
+    [...byPeriod, ...byYearMonth].forEach(d => docsById.set(d.id, d));
+    if (docsById.size === 0) return {};
+
+    const toMillis = (value: any): number => {
+      if (!value) return 0;
+      if (typeof value?.toMillis === 'function') return value.toMillis();
+      if (typeof value?.seconds === 'number') return value.seconds * 1000;
+      return 0;
+    };
+
+    // Hastane başına yalnızca en güncel kayıt sayılır.
+    const latestByHospital = new Map<string, AdminDocSnap>();
+    Array.from(docsById.values())
+      .sort((a, b) => toMillis(b.data()?.createdAt) - toMillis(a.data()?.createdAt))
+      .forEach(d => {
+        const hospitalId = String((d.data() as any)?.hospitalId || '').trim();
+        if (!hospitalId || !wanted.has(hospitalId)) return;
+        if (!latestByHospital.has(hospitalId)) latestByHospital.set(hospitalId, d);
+      });
+
+    const totals: Record<string, number> = {};
+    latestByHospital.forEach(d => {
+      const items = ((d.data() as any)?.items || []) as Array<{ productId?: string; value?: number | string }>;
+      items.forEach(item => {
+        const code = String(item?.productId ?? '').trim();
+        if (!code) return;
+        const value = Number(item?.value) || 0;
+        if (value <= 0) return;
+        totals[code] = (totals[code] || 0) + value;
+      });
+    });
+    return totals;
+  } catch (err) {
+    console.error('[getCihazUstuForPeriod] Error:', err);
+    return {};
+  }
+}
+
+/**
  * Ceomed entegre bir deponun anlık stoğunu (stokKodu -> toplam adet) döndürür.
  *
  * Ceomed depolarında stok yerel `depoStok` yerine harici senkronla yazılan

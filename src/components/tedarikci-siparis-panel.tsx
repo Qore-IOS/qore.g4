@@ -20,6 +20,7 @@ import {
   Loader2,
   Mail,
   MailWarning,
+  Clock,
   Minus,
   TrendingDown,
   TrendingUp,
@@ -50,6 +51,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
+import {
+  hesaplaOneri,
+  hesaplaTuketimTrendi,
+  type OneriSonucu,
+  type OneriTipi,
+  type TuketimTrendi,
+} from '@/lib/lojistik/supplier-order-advisor';
 
 // Lojistik görünümüyle uyumlu ortak tasarım sınıfları (sayımlar sayfasıyla aynı).
 const PANEL_CLASS =
@@ -135,6 +143,33 @@ function DegisimChip({ value }: { value: number | null }) {
   );
 }
 
+/** Öneri tipine göre çip görünümü — renk kararın aciliyetini taşır. */
+const ONERI_STILI: Record<OneriTipi, { chip: string; kisa: string }> = {
+  'acil-siparis': {
+    chip: 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-400/30 dark:bg-rose-500/20 dark:text-rose-200',
+    kisa: 'ACİL SİPARİŞ',
+  },
+  siparis: {
+    chip: 'border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-500/20 dark:text-emerald-200',
+    kisa: 'SİPARİŞ VER',
+  },
+  yeterli: {
+    chip: 'border-emerald-950/10 bg-white/70 text-[#587169] dark:border-fuchsia-300/20 dark:bg-white/5 dark:text-[#a994b5]',
+    kisa: 'GEREK YOK',
+  },
+  'fazla-stok': {
+    chip: 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/20 dark:text-amber-200',
+    kisa: 'FAZLA STOK',
+  },
+  'veri-yok': {
+    chip: 'border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-400/30 dark:bg-slate-500/20 dark:text-slate-200',
+    kisa: 'VERİ GİRİLMELİ',
+  },
+};
+
+/** Alt çubuktaki karar özetinin gösterim sırası (aciliyete göre). */
+const ONERI_OZET_SIRASI: OneriTipi[] = ['acil-siparis', 'siparis', 'veri-yok', 'fazla-stok', 'yeterli'];
+
 /** Bir ürünün günlük ihtiyacına tek bir kurumun katkısı. */
 interface KurumKatkisi {
   locationId: string;
@@ -176,6 +211,13 @@ interface ComputedRow {
   katkilar: KurumKatkisi[];
   /** Min/Max tanımı ile gerçek tüketimin uyumu */
   sapma: SapmaDurumu;
+  /** Cihazlarda açık duran testler (adet) ve kutu karşılığı */
+  cihazUstuTest: number;
+  cihazUstuKutu: number;
+  /** 6 aylık tüketim trendi ve ivmesi */
+  trend: TuketimTrendi;
+  /** Öneri motorunun nihai kararı */
+  oneri: OneriSonucu;
 }
 
 const toDate = (value: unknown): Date | undefined => {
@@ -217,7 +259,7 @@ export default function TedarikciSiparisPanel() {
   const [selectedBrandId, setSelectedBrandId] = useState<string>('');
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR);
-  const [yeterlilikGun, setYeterlilikGun] = useState<number | string>('');
+  const [yeterlilikGun, setYeterlilikGun] = useState<number | string>(45);
 
   const [openOrders, setOpenOrders] = useState<SupplierOrder[]>([]);
   const [completedOrders, setCompletedOrders] = useState<SupplierOrder[]>([]);
@@ -273,6 +315,11 @@ export default function TedarikciSiparisPanel() {
   const [onceki3AyByCode, setOnceki3AyByCode] = useState<Map<string, number>>(new Map());
   /** Ortalamaya giren ayların etiketi — sütun başlığında gösterilir. */
   const [onceki3AyLabel, setOnceki3AyLabel] = useState('');
+  /** 6 aylık test serisi (eskiden yeniye); veri olmayan ay null. Trend girdisi. */
+  const [aylikTestByCode, setAylikTestByCode] = useState<Map<string, Array<number | null>>>(new Map());
+  const [seriDonemleri, setSeriDonemleri] = useState<string[]>([]);
+  /** Seçili dönemde sahadaki cihazlarda açık duran testler (stok kodu -> test). */
+  const [cihazUstuByCode, setCihazUstuByCode] = useState<Map<string, number>>(new Map());
 
   // Saha stoğu: seçili dönemin lab sayımları + yan depoların stoğu.
   const [sahaStokByCode, setSahaStokByCode] = useState<Map<string, number>>(new Map());
@@ -446,8 +493,8 @@ export default function TedarikciSiparisPanel() {
       setKumulatifLoading(true);
       try {
         const { getTotalEfficiencyKumulatifForPeriods } = await import('@/actions/stokActions');
-        // Seçili dönem + kendisinden ÖNCEKİ 3 dönem (karşılaştırma tabanı).
-        const periods = [0, 1, 2, 3].map(back => {
+        // Seçili dönem + önceki 5 dönem = 6 aylık trend penceresi (eskiden yeniye).
+        const periods = [5, 4, 3, 2, 1, 0].map(back => {
           const d = new Date(selectedYear, monthIndex - back, 1);
           return { year: d.getFullYear(), monthIndex: d.getMonth() };
         });
@@ -458,6 +505,8 @@ export default function TedarikciSiparisPanel() {
         );
         const keyOf = (p: { year: number; monthIndex: number }) =>
           `${p.year}-${String(p.monthIndex + 1).padStart(2, '0')}`;
+        const etiketOf = (p: { year: number; monthIndex: number }) =>
+          `${String(p.monthIndex + 1).padStart(2, '0')}-${p.year}`;
 
         const toMap = (record: Record<string, number> | undefined) => {
           const map = new Map<string, number>();
@@ -469,37 +518,44 @@ export default function TedarikciSiparisPanel() {
           return map;
         };
 
-        const current = toMap(result[keyOf(periods[0])]?.byCode);
+        const perPeriod = periods.map(p => ({
+          period: p,
+          hasData: result[keyOf(p)]?.hasData === true,
+          map: toMap(result[keyOf(p)]?.byCode),
+        }));
+        const current = perPeriod[perPeriod.length - 1].map;
 
-        // Ortalama yalnızca VERİSİ OLAN önceki dönemler üzerinden alınır; veri
-        // girilmemiş bir ay 0 sayılıp ortalamayı aşağı çekmesin.
-        const previous = periods.slice(1).filter(p => result[keyOf(p)]?.hasData);
+        // Tüm dönemlerde geçen stok kodları — seri her kod için aynı uzunlukta olmalı.
+        const codes = new Set<string>();
+        perPeriod.forEach(p => p.map.forEach((_, code) => codes.add(code)));
+
+        // Aylık test serisi: verisi olmayan dönem null (0 değil) — böylece girilmemiş
+        // bir ay trendi yanlış yönde tetiklemez.
+        const seri = new Map<string, Array<number | null>>();
+        codes.forEach(code => {
+          seri.set(
+            code,
+            perPeriod.map(p => (p.hasData ? p.map.get(code) || 0 : null)),
+          );
+        });
+
+        // "Son 3 Ay Ort." sütunu seçili dönemden ÖNCEKİ 3 dönemi baz alır.
+        const oncekiler = perPeriod.slice(2, 5).filter(p => p.hasData);
         const average = new Map<string, number>();
-        if (previous.length > 0) {
-          const codes = new Set<string>();
-          previous.forEach(p => {
-            Object.keys(result[keyOf(p)]?.byCode || {}).forEach(c => codes.add(normCode(c)));
-          });
-          current.forEach((_, code) => codes.add(code));
+        if (oncekiler.length > 0) {
           codes.forEach(code => {
-            let sum = 0;
-            previous.forEach(p => {
-              sum += toMap(result[keyOf(p)]?.byCode).get(code) || 0;
-            });
-            average.set(code, sum / previous.length);
+            const sum = oncekiler.reduce((acc, p) => acc + (p.map.get(code) || 0), 0);
+            average.set(code, sum / oncekiler.length);
           });
         }
 
         if (!cancelled) {
           setKumulatifByCode(current);
+          setAylikTestByCode(seri);
+          setSeriDonemleri(periods.map(etiketOf));
           setOnceki3AyByCode(average);
           setOnceki3AyLabel(
-            previous.length > 0
-              ? previous
-                  .map(p => `${String(p.monthIndex + 1).padStart(2, '0')}.${p.year}`)
-                  .reverse()
-                  .join(', ')
-              : '',
+            oncekiler.length > 0 ? oncekiler.map(p => etiketOf(p.period)).join(', ') : '',
           );
         }
       } catch (e) {
@@ -523,6 +579,7 @@ export default function TedarikciSiparisPanel() {
   useEffect(() => {
     if (!hasBrand || !anaDepo) {
       setSahaStokByCode(new Map());
+      setCihazUstuByCode(new Map());
       setSahaCoverage({ counted: 0, total: 0 });
       setSahaStokLoading(false);
       return;
@@ -535,8 +592,9 @@ export default function TedarikciSiparisPanel() {
       setSahaStokLoading(true);
       try {
         const stok = await import('@/actions/stokActions');
-        const [labResult, ...depotRecords] = await Promise.all([
+        const [labResult, cihazUstuRecord, ...depotRecords] = await Promise.all([
           stok.getLabCountStockForPeriod(labIds, selectedYear, monthIndex),
+          stok.getCihazUstuForPeriod(labIds, selectedYear, selectedMonth, currentCompanyId, isSuperAdmin),
           ...sideDepots.map(d =>
             d.ceomedEnabled
               ? stok.getCeomedDepoStockByCode(d.id, currentCompanyId, isSuperAdmin)
@@ -555,14 +613,23 @@ export default function TedarikciSiparisPanel() {
         add(labResult.byCode);
         depotRecords.forEach(record => add(record as Record<string, number>));
 
+        const cihazMap = new Map<string, number>();
+        for (const [rawCode, tests] of Object.entries(cihazUstuRecord || {})) {
+          const code = normCode(rawCode);
+          if (!code) continue;
+          cihazMap.set(code, (cihazMap.get(code) || 0) + (Number(tests) || 0));
+        }
+
         if (!cancelled) {
           setSahaStokByCode(map);
+          setCihazUstuByCode(cihazMap);
           setSahaCoverage({ counted: labResult.countedLabIds.length, total: labIds.length });
         }
       } catch (e) {
         console.error('[tedarikci-siparis] Saha stoğu okunamadı:', e);
         if (!cancelled) {
           setSahaStokByCode(new Map());
+          setCihazUstuByCode(new Map());
           setSahaCoverage({ counted: 0, total: labIds.length });
         }
       } finally {
@@ -675,20 +742,46 @@ export default function TedarikciSiparisPanel() {
           ? null
           : ((testAdedi - onceki3AyOrt) / onceki3AyOrt) * 100;
 
-      const gunlukToplam =
-        demandBasis === 'minmax' ? gunlukMinMax
-        : demandBasis === 'tuketim' ? gunlukTuketim
-        : Math.max(gunlukMinMax, gunlukTuketim);
-      if (gunlukToplam <= 0) return;
+      // 6 aylık tüketim serisi (kutu) → trend ve ivme.
+      const testSerisi = aylikTestByCode.get(canonical);
+      const trend = hesaplaTuketimTrendi(
+        seriDonemleri.map((donem, i) => {
+          const test = testSerisi ? testSerisi[i] : null;
+          return { donem, kutu: test === null || test === undefined || ambalaj <= 0 ? null : test / ambalaj };
+        }),
+      );
 
       const anaDepoStok = anaDepoStockByCode.get(canonical) || 0;
       const sahaStok = sahaStokByCode.get(canonical) || 0;
       const acikSiparis = acikSiparisByCode.get(canonical) || 0;
+      // Cihazda açık duran testlerin kutu karşılığı: kısmen kullanılmış kit de
+      // sahadaki bir varlıktır ve talebi karşılar.
+      const cihazUstuTest = cihazUstuByCode.get(canonical) || 0;
+      const cihazUstuKutu = ambalaj > 0 ? Math.round(cihazUstuTest / ambalaj) : 0;
 
-      // Boru hattı (echelon) mantığı: dönem ihtiyacı sistemde zaten bulunan
-      // stoktan (ana depo + saha) ve yoldaki siparişten düşülür.
-      const gerekliAdet = gunGecerli ? Math.ceil(gunlukToplam * hedefGun) : 0;
-      const siparisAdedi = Math.max(0, gerekliAdet - anaDepoStok - sahaStok - acikSiparis);
+      const oneri = hesaplaOneri({
+        gunlukMinMax,
+        gunlukTuketim,
+        basis: demandBasis,
+        trend,
+        hedefGun: gunGecerli ? hedefGun : 0,
+        anaDepoStok,
+        sahaStok,
+        cihazUstuKutu,
+        acikSiparis,
+        // Markanın teslim süresi acil eşiğini belirler (tedarikGun + 7).
+        tedarikGun: Math.max(0, Number(selectedBrand.tedarikGun) || 0),
+        sayimEksikLab: Math.max(0, sahaCoverage.total - sahaCoverage.counted),
+        toplamLab: sahaCoverage.total,
+      });
+
+      // Talep sinyali olmayan ürünler listede kalır (veri eksiği görünsün diye),
+      // ancak min/max ve tüketimin ikisi de yoksa satır anlamsızdır.
+      if (gunlukMinMax <= 0 && gunlukTuketim <= 0) return;
+
+      const gunlukToplam = oneri.gunlukIhtiyac;
+      const gerekliAdet = oneri.gerekliAdet;
+      const siparisAdedi = oneri.oneriAdet;
 
       // Min/Max tanımı ile gerçek tüketim birbirini doğrular; ciddi ayrışma
       // genelde tanımın bayatladığını gösterir.
@@ -716,12 +809,26 @@ export default function TedarikciSiparisPanel() {
         siparisAdedi,
         katkilar,
         sapma,
+        cihazUstuTest,
+        cihazUstuKutu,
+        trend,
+        oneri,
       });
     });
 
+    // Aksiyon gerektirenler üste: önce acil, sonra sipariş, sonra veri eksiği.
+    const oncelik: Record<OneriTipi, number> = {
+      'acil-siparis': 0,
+      siparis: 1,
+      'veri-yok': 2,
+      'fazla-stok': 3,
+      yeterli: 4,
+    };
     return result.sort(
       (a, b) =>
-        a.stokAdi.localeCompare(b.stokAdi, 'tr') || a.stokKodu.localeCompare(b.stokKodu, 'tr'),
+        oncelik[a.oneri.tip] - oncelik[b.oneri.tip] ||
+        b.oneri.oneriAdet - a.oneri.oneriAdet ||
+        a.stokAdi.localeCompare(b.stokAdi, 'tr'),
     );
   }, [
     anaDepo,
@@ -735,6 +842,10 @@ export default function TedarikciSiparisPanel() {
     anaDepoStockByCode,
     kumulatifByCode,
     onceki3AyByCode,
+    aylikTestByCode,
+    seriDonemleri,
+    cihazUstuByCode,
+    sahaCoverage,
     sahaStokByCode,
     acikSiparisByCode,
     demandBasis,
@@ -744,6 +855,14 @@ export default function TedarikciSiparisPanel() {
   ]);
 
   const orderableRows = useMemo(() => rows.filter(r => r.siparisAdedi > 0), [rows]);
+  /** Karar dağılımı — alt çubukta tek bakışta operasyon özeti. */
+  const oneriOzeti = useMemo(() => {
+    const sayac: Record<OneriTipi, number> = {
+      'acil-siparis': 0, siparis: 0, yeterli: 0, 'fazla-stok': 0, 'veri-yok': 0,
+    };
+    rows.forEach(r => { sayac[r.oneri.tip] += 1; });
+    return sayac;
+  }, [rows]);
   /** Min/Max tanımı ile gerçek tüketimin ciddi ayrıştığı satırlar. */
   const sapmaliRows = useMemo(
     () => rows.filter(r => r.sapma === 'tanim-yuksek' || r.sapma === 'tanim-dusuk'),
@@ -798,6 +917,8 @@ export default function TedarikciSiparisPanel() {
       yeterlilikGun: hedefGun,
       /** Hesapta kullanılan ihtiyaç kaynağı (izlenebilirlik için) */
       ihtiyacKaynagi: demandBasis,
+      /** Hesapta kullanılan tedarik süresi (acil eşiği için) */
+      tedarikGun: Math.max(0, Number(selectedBrand.tedarikGun) || 0),
       anaDepoId: anaDepo.id,
       anaDepoAdi: anaDepo.name,
       items,
@@ -917,14 +1038,23 @@ export default function TedarikciSiparisPanel() {
               </SelectContent>
             </Select>
             {selectedBrand && (
-              <p className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-[#587169] dark:text-[#a994b5]">
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-[#587169] dark:text-[#a994b5]">
                 {selectedBrand.mail ? (
-                  <><Mail className="h-3 w-3" /> {selectedBrand.mail}</>
+                  <span className="flex items-center gap-1"><Mail className="h-3 w-3" /> {selectedBrand.mail}</span>
                 ) : (
                   <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
                     <MailWarning className="h-3 w-3" /> Mail adresi tanımlı değil
                   </span>
                 )}
+                <span
+                  className="flex items-center gap-1"
+                  title="Acil eşiği: tedarik süresi + 7 gün"
+                >
+                  <Clock className="h-3 w-3" />
+                  {Number(selectedBrand.tedarikGun) > 0
+                    ? `${selectedBrand.tedarikGun} gün tedarik`
+                    : 'tedarik süresi yok (15 gün varsayılan)'}
+                </span>
               </p>
             )}
           </div>
@@ -1033,7 +1163,7 @@ export default function TedarikciSiparisPanel() {
         ) : (
           <>
             <div className="max-h-[560px] overflow-auto">
-              <table className="w-full min-w-[1320px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1700px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
                   <tr>
                     <th className="px-5 py-4">Stok Kodu</th>
@@ -1044,8 +1174,16 @@ export default function TedarikciSiparisPanel() {
                       <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Dönem sayımı</span>
                     </th>
                     <th className="px-4 py-4 text-right">
-                      Test Adedi
-                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">Küm. Total · {periodKey}</span>
+                      Cihaz Üstü
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">kutu (test)</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Toplam Varlık
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">+ yoldaki</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Tüketim
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">test / kutu · {periodKey}</span>
                     </th>
                     <th className="px-4 py-4 text-right">
                       Son 3 Ay Ort.
@@ -1058,8 +1196,8 @@ export default function TedarikciSiparisPanel() {
                       <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">3 ay ort.'ya göre</span>
                     </th>
                     <th className="px-4 py-4 text-right">
-                      Aylık Toplam Tüketim
-                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">(Kutu)</span>
+                      Kapsama
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">elindekiyle kaç gün</span>
                     </th>
                     <th className="px-4 py-4 text-right">
                       Gerekli Adet
@@ -1067,7 +1205,10 @@ export default function TedarikciSiparisPanel() {
                         <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">{yeterlilikGun} günlük</span>
                       )}
                     </th>
-                    <th className="px-5 py-4 text-right">Sipariş Adedi</th>
+                    <th className="px-5 py-4 text-right">
+                      Öneri
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">ne yapmalı</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1112,7 +1253,33 @@ export default function TedarikciSiparisPanel() {
                         {row.sahaStok > 0 ? row.sahaStok : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
-                        {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.testAdedi > 0 ? row.testAdedi : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                        {row.cihazUstuKutu > 0 || row.cihazUstuTest > 0 ? (
+                          <>
+                            {row.cihazUstuKutu}
+                            <span className="block text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                              {fmt(row.cihazUstuTest, 0)} test
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>
+                        )}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-black text-[#0f2a24] dark:border-fuchsia-300/15 dark:text-[#f4ecfa]">
+                        {row.oneri.toplamVarlik}
+                      </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {kumulatifLoading ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span>
+                        ) : row.testAdedi > 0 ? (
+                          <>
+                            {row.testAdedi}
+                            <span className="block text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                              {row.aylikTuketimKutu} kutu
+                            </span>
+                          </>
+                        ) : (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>
+                        )}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                         {kumulatifLoading ? (
@@ -1130,23 +1297,87 @@ export default function TedarikciSiparisPanel() {
                           <DegisimChip value={row.degisimYuzde} />
                         )}
                       </td>
-                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
-                        {kumulatifLoading ? <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span> : row.aylikTuketimKutu > 0 ? row.aylikTuketimKutu : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold dark:border-fuchsia-300/15">
+                        {row.oneri.kapsamaGun === null ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                        ) : (
+                          <span
+                            className={
+                              row.oneri.tip === 'acil-siparis'
+                                ? 'text-rose-700 dark:text-rose-300'
+                                : 'text-[#29473f] dark:text-[#d6bfe3]'
+                            }
+                          >
+                            {fmt(row.oneri.kapsamaGun, 0)} gün
+                          </span>
+                        )}
                       </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                         {Number(yeterlilikGun) > 0 ? row.gerekliAdet : <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>}
                       </td>
-                      <td className="border-t border-emerald-950/10 px-5 py-3.5 text-right tabular-nums text-base font-black dark:border-fuchsia-300/15">
-                        {row.siparisAdedi > 0 ? (
-                          <span className="text-emerald-600 dark:text-fuchsia-300">{row.siparisAdedi}</span>
-                        ) : (
-                          <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>
-                        )}
+                      <td className="border-t border-emerald-950/10 px-5 py-3.5 text-right dark:border-fuchsia-300/15">
+                        <span className="flex flex-col items-end gap-1">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black tracking-tight ${ONERI_STILI[row.oneri.tip].chip}`}
+                          >
+                            {row.oneri.guvenilirlik !== 'yuksek' && (
+                              <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                            )}
+                            {ONERI_STILI[row.oneri.tip].kisa}
+                          </span>
+                          {row.oneri.oneriAdet > 0 && (
+                            <span className="text-lg font-black tabular-nums text-emerald-600 dark:text-fuchsia-300">
+                              {row.oneri.oneriAdet}
+                            </span>
+                          )}
+                          {row.oneri.trendEtkisi !== 0 && row.oneri.oneriAdet > 0 && (
+                            <span className="text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                              trend {row.oneri.trendEtkisi > 0 ? '+' : ''}{row.oneri.trendEtkisi}
+                            </span>
+                          )}
+                        </span>
                       </td>
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={10} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                        <td colSpan={12} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                          {/* Kararın kendisi ve tam gerekçesi — önce bu okunur. */}
+                          <div className="mb-4 rounded-2xl border border-emerald-950/10 bg-white/70 p-4 dark:border-fuchsia-300/15 dark:bg-white/[0.04]">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${ONERI_STILI[row.oneri.tip].chip}`}>
+                                {row.oneri.baslik}
+                              </span>
+                              {row.oneri.oneriAdet > 0 && (
+                                <span className="text-xl font-black tabular-nums text-emerald-600 dark:text-fuchsia-300">
+                                  {row.oneri.oneriAdet} kutu
+                                </span>
+                              )}
+                              <span className="text-[11px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                                güvenilirlik: {row.oneri.guvenilirlik === 'yuksek' ? 'yüksek' : row.oneri.guvenilirlik === 'orta' ? 'orta' : 'düşük'}
+                              </span>
+                            </div>
+                            <p className="mt-2 text-sm font-semibold leading-6 text-[#29473f] dark:text-[#d6bfe3]">
+                              {row.oneri.aciklama}
+                            </p>
+                            {row.oneri.uyarilar.length > 0 && (
+                              <ul className="mt-2 space-y-1">
+                                {row.oneri.uyarilar.map((u, i) => (
+                                  <li key={i} className="flex items-start gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                                    {u}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {row.trend.veriAyiSayisi > 0 && (
+                              <p className="mt-2 text-[11px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                                6 aylık tüketim (kutu):{' '}
+                                {row.trend.aylar
+                                  .map(a => `${a.donem.slice(0, 2)}: ${a.kutu === null ? '—' : fmt(a.kutu, 0)}`)
+                                  .join('  ·  ')}
+                              </p>
+                            )}
+                          </div>
                           <div className="grid gap-5 lg:grid-cols-2">
                             {/* Günlük ihtiyacın kurum kırılımı */}
                             <div>
@@ -1249,6 +1480,15 @@ export default function TedarikciSiparisPanel() {
                                   <dd className="tabular-nums">{row.sahaStok}</dd>
                                 </div>
                                 <div className="flex justify-between gap-3">
+                                  <dt>
+                                    − Cihaz üstü
+                                    <span className="ml-1 text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                                      ({fmt(row.cihazUstuTest, 0)} test)
+                                    </span>
+                                  </dt>
+                                  <dd className="tabular-nums">{row.cihazUstuKutu}</dd>
+                                </div>
+                                <div className="flex justify-between gap-3">
                                   <dt>− Yoldaki sipariş</dt>
                                   <dd className="tabular-nums">{row.acikSiparis}</dd>
                                 </div>
@@ -1279,8 +1519,20 @@ export default function TedarikciSiparisPanel() {
               </table>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-emerald-950/10 px-5 py-3 text-sm dark:border-fuchsia-300/15">
-              <span className="font-semibold text-[#587169] dark:text-[#a994b5]">
-                {rows.length} ürün · sipariş edilecek {orderableRows.length} kalem
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1 font-semibold text-[#587169] dark:text-[#a994b5]">
+                <span>{rows.length} ürün</span>
+                {ONERI_OZET_SIRASI.map(tip => {
+                  const adet = oneriOzeti[tip];
+                  if (!adet) return null;
+                  return (
+                    <span
+                      key={tip}
+                      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-black ${ONERI_STILI[tip].chip}`}
+                    >
+                      {ONERI_STILI[tip].kisa}: {adet}
+                    </span>
+                  );
+                })}
                 {sahaCoverage.total > 0 && (
                   <>
                     {' · '}
