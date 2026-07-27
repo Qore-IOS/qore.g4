@@ -61,6 +61,20 @@ const stockCodeVariants = (value: unknown) => {
   const trimmedZero = code.replace(/^0+/, '');
   return Array.from(new Set([code, trimmedZero].filter(Boolean)));
 };
+/**
+ * Seçimi mevcut seçeneklere indirger; hiçbir şey elenmediyse ÖNCEKİ diziyi
+ * aynen döndürür.
+ *
+ * `prev.filter(...)` içerik aynı olsa bile her zaman yeni bir dizi üretir; bunu
+ * doğrudan setState'e vermek her render'da yeni state referansı → yeni render
+ * döngüsü yaratır ve "Maximum update depth exceeded" ile sonuçlanır. Aynı
+ * referans dönünce React güncellemeyi atlar ve döngü kırılır.
+ */
+const keepAvailable = (prev: string[], available: string[]) => {
+  const next = prev.filter(value => available.includes(value));
+  return next.length === prev.length ? prev : next;
+};
+
 const normalizePeriodKey = (value: unknown) => {
   const raw = String(value ?? '').trim();
   const m = raw.match(/^(\d{1,2})-(\d{4})$/);
@@ -171,7 +185,12 @@ export default function MerkezSiparisPanel() {
   const [isSaving, setIsSaving] = useState(false);
 
   // Parallel fetching of min-max rules
-  const depotRulesQueries = useQueries({
+  // useQueries her render'da YENİ bir sonuç dizisi döndürür. Haritalar bu diziye
+  // bağlı bir useMemo ile kurulursa her render'da yeni referans üretir ve aşağıdaki
+  // türetilmiş memo zinciri (selectedRules → uniqueSelectedProducts → availableBrands)
+  // boşuna yeniden hesaplanır. `combine` sonucu React Query tarafından sonuçlara göre
+  // hafızada tutulduğundan referans, veri değişmedikçe sabit kalır.
+  const depotRulesMap = useQueries({
     queries: depots.map(d => ({
       queryKey: ['minMaxRules', 'depot', d.id],
       queryFn: async () => {
@@ -183,10 +202,18 @@ export default function MerkezSiparisPanel() {
         }, {});
       },
       staleTime: 30 * 60 * 1000,
-    }))
+    })),
+    combine: (results) => {
+      const map: Record<string, Record<string, MinMaxRule>> = {};
+      depots.forEach((d, i) => {
+        const data = results[i]?.data;
+        if (data) map[d.id] = data;
+      });
+      return map;
+    },
   });
 
-  const hospitalRulesQueries = useQueries({
+  const hospitalRulesMap = useQueries({
     queries: hospitals.map(h => ({
       queryKey: ['minMaxRules', 'hospital', h.id],
       queryFn: async () => {
@@ -198,24 +225,16 @@ export default function MerkezSiparisPanel() {
         }, {});
       },
       staleTime: 30 * 60 * 1000,
-    }))
+    })),
+    combine: (results) => {
+      const map: Record<string, Record<string, MinMaxRule>> = {};
+      hospitals.forEach((h, i) => {
+        const data = results[i]?.data;
+        if (data) map[h.id] = data;
+      });
+      return map;
+    },
   });
-
-  const depotRulesMap = useMemo(() => {
-    const map: Record<string, Record<string, MinMaxRule>> = {};
-    depots.forEach((d, i) => {
-      if (depotRulesQueries[i].data) map[d.id] = depotRulesQueries[i].data!;
-    });
-    return map;
-  }, [depots, depotRulesQueries]);
-
-  const hospitalRulesMap = useMemo(() => {
-    const map: Record<string, Record<string, MinMaxRule>> = {};
-    hospitals.forEach((h, i) => {
-      if (hospitalRulesQueries[i].data) map[h.id] = hospitalRulesQueries[i].data!;
-    });
-    return map;
-  }, [hospitals, hospitalRulesQueries]);
 
   const [selectedDepotIds, setSelectedDepotIds] = useState<string[]>([]);
   const [selectedLabIds, setSelectedLabIds] = useState<string[]>([]);
@@ -404,15 +423,15 @@ export default function MerkezSiparisPanel() {
   }, [productsAfterGroupFilter]);
 
   useEffect(() => {
-    setSelectedBrands(prev => prev.filter(brand => availableBrands.includes(brand)));
+    setSelectedBrands(prev => keepAvailable(prev, availableBrands));
   }, [availableBrands]);
 
   useEffect(() => {
-    setSelectedProductGroups(prev => prev.filter(group => availableProductGroups.includes(group)));
+    setSelectedProductGroups(prev => keepAvailable(prev, availableProductGroups));
   }, [availableProductGroups]);
 
   useEffect(() => {
-    setSelectedDeviceGroups(prev => prev.filter(group => availableDeviceGroups.includes(group)));
+    setSelectedDeviceGroups(prev => keepAvailable(prev, availableDeviceGroups));
   }, [availableDeviceGroups]);
   const toggleSelection = (value: string, selected: string[], setter: React.Dispatch<React.SetStateAction<string[]>>) => {
     setter(prev => (prev.includes(value) ? prev.filter(x => x !== value) : [...prev, value]));
