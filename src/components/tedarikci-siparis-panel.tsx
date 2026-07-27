@@ -25,6 +25,7 @@ import {
   TrendingDown,
   TrendingUp,
   PackageSearch,
+  RefreshCcw,
   Send,
   Star,
 } from 'lucide-react';
@@ -101,6 +102,7 @@ const DEMAND_BASIS_OPTIONS: Array<{ value: DemandBasis; label: string }> = [
   { value: 'buyuk', label: 'İkisinin büyüğü' },
   { value: 'minmax', label: 'Min/Max tanımı' },
   { value: 'tuketim', label: 'Gerçek tüketim' },
+  { value: 'cikis', label: 'Depo çıkışı' },
 ];
 
 /** Min/Max tanımı ile gerçek tüketimin ne kadar ayrıştığı. */
@@ -214,6 +216,10 @@ interface ComputedRow {
   /** Cihazlarda açık duran testler (adet) ve kutu karşılığı */
   cihazUstuTest: number;
   cihazUstuKutu: number;
+  /** Ana depodan son 3 ayın aylık ortalama çıkışı (veri yoksa null) */
+  aylikCikisOrt: number | null;
+  /** Aynı verinin günlük karşılığı (toplam adet ÷ toplam gün) */
+  gunlukCikis: number;
   /** 6 aylık tüketim trendi ve ivmesi */
   trend: TuketimTrendi;
   /** Öneri motorunun nihai kararı */
@@ -320,6 +326,18 @@ export default function TedarikciSiparisPanel() {
   const [seriDonemleri, setSeriDonemleri] = useState<string[]>([]);
   /** Seçili dönemde sahadaki cihazlarda açık duran testler (stok kodu -> test). */
   const [cihazUstuByCode, setCihazUstuByCode] = useState<Map<string, number>>(new Map());
+
+  // Ana depodan son 3 ayda (seçili dönem dahil) fiili çıkış — Ceomed irsaliyeleri.
+  /** stok kodu -> aylık ortalama çıkış adedi */
+  const [cikisOrtByCode, setCikisOrtByCode] = useState<Map<string, number>>(new Map());
+  /** stok kodu -> günlük çıkış (toplam adet ÷ toplam gün) */
+  const [gunlukCikisByCode, setGunlukCikisByCode] = useState<Map<string, number>>(new Map());
+  /** Ortalamaya giren dönemler ve eksik olanlar */
+  const [cikisDonemleri, setCikisDonemleri] = useState<{ olan: string[]; eksik: Array<{ year: number; month: number }> }>({ olan: [], eksik: [] });
+  const [cikisLoading, setCikisLoading] = useState(false);
+  /** Sevkiyat sorgusu kuyruğa alındıktan sonra yeniden okumayı tetikler. */
+  const [cikisRefreshKey, setCikisRefreshKey] = useState(0);
+  const [sevkiyatIsteniyor, setSevkiyatIsteniyor] = useState(false);
 
   // Saha stoğu: seçili dönemin lab sayımları + yan depoların stoğu.
   const [sahaStokByCode, setSahaStokByCode] = useState<Map<string, number>>(new Map());
@@ -640,6 +658,128 @@ export default function TedarikciSiparisPanel() {
     return () => { cancelled = true; };
   }, [hasBrand, anaDepo, relevantLabIds, sideDepotList, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin]);
 
+  // Ana depodan fiili çıkış: seçili dönem dahil son 3 ayın irsaliyeleri.
+  // Ceomed entegre depolarda anlamlıdır; sevkiyat verisi watchSevkiyatRequests
+  // işçisi tarafından ceomedSevkiyatResults'a yazılır.
+  useEffect(() => {
+    if (!hasBrand || !anaDepo?.ceomedEnabled || relevantLabIds.length === 0) {
+      setCikisOrtByCode(new Map());
+      setGunlukCikisByCode(new Map());
+      setCikisDonemleri({ olan: [], eksik: [] });
+      setCikisLoading(false);
+      return;
+    }
+    let cancelled = false;
+    const labIds = relevantLabIds;
+    // Seçili dönem + önceki 2 dönem (eskiden yeniye)
+    const periods = [2, 1, 0].map(back => {
+      const d = new Date(selectedYear, selectedMonth - 1 - back, 1);
+      return { year: d.getFullYear(), month: d.getMonth() + 1 };
+    });
+
+    const load = async () => {
+      setCikisLoading(true);
+      try {
+        const { getDepotOutflowForPeriods } = await import('@/actions/stokActions');
+        const result = await getDepotOutflowForPeriods(labIds, periods, currentCompanyId, isSuperAdmin);
+        const keyOf = (p: { year: number; month: number }) =>
+          `${p.year}-${String(p.month).padStart(2, '0')}`;
+
+        const olanlar = periods.filter(p => result[keyOf(p)]?.hasData);
+        const eksikler = periods.filter(p => !result[keyOf(p)]?.hasData);
+
+        const ortalama = new Map<string, number>();
+        const gunluk = new Map<string, number>();
+        if (olanlar.length > 0) {
+          // Günlük oran için ayların gerçek gün sayıları toplanır.
+          const toplamGun = olanlar.reduce(
+            (sum, p) => sum + new Date(p.year, p.month, 0).getDate(),
+            0,
+          );
+          const toplamByCode = new Map<string, number>();
+          olanlar.forEach(p => {
+            const byCode = result[keyOf(p)]?.byCode || {};
+            for (const [rawCode, adet] of Object.entries(byCode)) {
+              const code = normCode(rawCode);
+              if (!code) continue;
+              toplamByCode.set(code, (toplamByCode.get(code) || 0) + (Number(adet) || 0));
+            }
+          });
+          toplamByCode.forEach((toplam, code) => {
+            ortalama.set(code, toplam / olanlar.length);
+            if (toplamGun > 0) gunluk.set(code, toplam / toplamGun);
+          });
+        }
+
+        if (!cancelled) {
+          setCikisOrtByCode(ortalama);
+          setGunlukCikisByCode(gunluk);
+          setCikisDonemleri({
+            olan: olanlar.map(p => `${String(p.month).padStart(2, '0')}-${p.year}`),
+            eksik: eksikler,
+          });
+        }
+      } catch (e) {
+        console.error('[tedarikci-siparis] Depo çıkışı okunamadı:', e);
+        if (!cancelled) {
+          setCikisOrtByCode(new Map());
+          setGunlukCikisByCode(new Map());
+          setCikisDonemleri({ olan: [], eksik: [] });
+        }
+      } finally {
+        if (!cancelled) setCikisLoading(false);
+      }
+    };
+    load();
+    return () => { cancelled = true; };
+  }, [hasBrand, anaDepo?.ceomedEnabled, relevantLabIds, selectedMonth, selectedYear, currentCompanyId, isSuperAdmin, cikisRefreshKey]);
+
+  /**
+   * Eksik dönemler için Ceomed sevkiyat sorgusunu kuyruğa alır ve sonuç gelene
+   * kadar periyodik olarak yeniden okur. İşçi (watchSevkiyatRequests) sürekli
+   * çalıştığından sorgu birkaç dakika içinde tamamlanır.
+   */
+  const handleSevkiyatIste = async () => {
+    const eksikler = cikisDonemleri.eksik;
+    if (eksikler.length === 0 || sevkiyatIsteniyor) return;
+    setSevkiyatIsteniyor(true);
+    try {
+      const { requestCeomedSevkiyat } = await import('@/actions/stokActions');
+      const { queued, skipped } = await requestCeomedSevkiyat(
+        eksikler,
+        currentUserProfile?.uid || currentUser?.uid || '',
+      );
+      toast({
+        title: 'Sevkiyat sorgusu kuyruğa alındı',
+        description:
+          `${queued} dönem sorgulanıyor${skipped > 0 ? `, ${skipped} dönem zaten kuyrukta` : ''}. ` +
+          'Ceomed irsaliyeleri taranıyor, birkaç dakika sürebilir; tamamlanınca tabloya yansır.',
+      });
+
+      // Sonuç gelene kadar 30 sn'de bir yeniden dene (en fazla ~10 dk).
+      let denemeler = 0;
+      const interval = window.setInterval(() => {
+        denemeler += 1;
+        setCikisRefreshKey(value => value + 1);
+        if (denemeler >= 20) {
+          window.clearInterval(interval);
+          setSevkiyatIsteniyor(false);
+        }
+      }, 30_000);
+    } catch (e) {
+      console.error('[tedarikci-siparis] Sevkiyat sorgusu gönderilemedi:', e);
+      toast({ title: 'Hata', description: 'Sevkiyat sorgusu gönderilemedi.', variant: 'destructive' });
+      setSevkiyatIsteniyor(false);
+    }
+  };
+
+  // Eksik dönemlerin tamamı geldiğinde bekleme durumunu kapat.
+  useEffect(() => {
+    if (sevkiyatIsteniyor && cikisDonemleri.eksik.length === 0) {
+      setSevkiyatIsteniyor(false);
+    }
+  }, [sevkiyatIsteniyor, cikisDonemleri.eksik.length]);
+
   // Bekleyen tedarikçi siparişlerindeki (yoldaki) adetler — aynı ihtiyacı iki kez
   // sipariş etmemek için talepten düşülür.
   const acikSiparisByCode = useMemo(() => {
@@ -759,9 +899,14 @@ export default function TedarikciSiparisPanel() {
       const cihazUstuTest = cihazUstuByCode.get(canonical) || 0;
       const cihazUstuKutu = ambalaj > 0 ? Math.round(cihazUstuTest / ambalaj) : 0;
 
+      // Ana depodan fiili çıkış — son 3 ayın irsaliye ortalaması.
+      const aylikCikisOrt = cikisOrtByCode.size > 0 ? (cikisOrtByCode.get(canonical) ?? 0) : null;
+      const gunlukCikis = gunlukCikisByCode.get(canonical) || 0;
+
       const oneri = hesaplaOneri({
         gunlukMinMax,
         gunlukTuketim,
+        gunlukCikis,
         basis: demandBasis,
         trend,
         hedefGun: gunGecerli ? hedefGun : 0,
@@ -776,8 +921,8 @@ export default function TedarikciSiparisPanel() {
       });
 
       // Talep sinyali olmayan ürünler listede kalır (veri eksiği görünsün diye),
-      // ancak min/max ve tüketimin ikisi de yoksa satır anlamsızdır.
-      if (gunlukMinMax <= 0 && gunlukTuketim <= 0) return;
+      // ancak üç sinyalin üçü de yoksa satır anlamsızdır.
+      if (gunlukMinMax <= 0 && gunlukTuketim <= 0 && gunlukCikis <= 0) return;
 
       const gunlukToplam = oneri.gunlukIhtiyac;
       const gerekliAdet = oneri.gerekliAdet;
@@ -811,6 +956,8 @@ export default function TedarikciSiparisPanel() {
         sapma,
         cihazUstuTest,
         cihazUstuKutu,
+        aylikCikisOrt,
+        gunlukCikis,
         trend,
         oneri,
       });
@@ -845,6 +992,8 @@ export default function TedarikciSiparisPanel() {
     aylikTestByCode,
     seriDonemleri,
     cihazUstuByCode,
+    cikisOrtByCode,
+    gunlukCikisByCode,
     sahaCoverage,
     sahaStokByCode,
     acikSiparisByCode,
@@ -875,7 +1024,7 @@ export default function TedarikciSiparisPanel() {
 
   const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
   // Marka seçildikten sonra tabloyu besleyen ağır verilerin yüklenme durumu.
-  const dataLoading = hasBrand && (productsLoading || rulesLoading || stockLoading || sahaStokLoading);
+  const dataLoading = hasBrand && (productsLoading || rulesLoading || stockLoading || sahaStokLoading || cikisLoading);
 
   const handleCreateOrder = async () => {
     if (!anaDepo) {
@@ -1110,6 +1259,21 @@ export default function TedarikciSiparisPanel() {
             {selectedBrand && <span className="font-semibold text-[#587169] dark:text-[#a994b5]">— {selectedBrand.name}</span>}
           </h2>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {anaDepo?.ceomedEnabled && cikisDonemleri.eksik.length > 0 && (
+              <button
+                type="button"
+                onClick={handleSevkiyatIste}
+                disabled={sevkiyatIsteniyor}
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-emerald-950/10 bg-white/70 px-3 py-2 text-xs font-bold text-[#29473f] transition-colors hover:bg-emerald-50 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/45 disabled:opacity-60 dark:border-fuchsia-300/20 dark:bg-white/5 dark:text-[#d6bfe3] dark:hover:bg-fuchsia-300/10"
+                title={`${cikisDonemleri.eksik.length} dönemin irsaliye verisi yok — Ceomed'den sorgula`}
+              >
+                {sevkiyatIsteniyor ? (
+                  <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Sevkiyat sorgulanıyor…</>
+                ) : (
+                  <><RefreshCcw className="h-3.5 w-3.5" /> Çıkış verisini getir ({cikisDonemleri.eksik.length})</>
+                )}
+              </button>
+            )}
             <div className="flex items-center gap-2">
               <label htmlFor="ihtiyac-kaynagi" className="whitespace-nowrap text-xs font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">İhtiyaç Kaynağı</label>
               <Select value={demandBasis} onValueChange={(v) => setDemandBasis(v as DemandBasis)}>
@@ -1163,7 +1327,7 @@ export default function TedarikciSiparisPanel() {
         ) : (
           <>
             <div className="max-h-[560px] overflow-auto">
-              <table className="w-full min-w-[1700px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1850px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
                   <tr>
                     <th className="px-5 py-4">Stok Kodu</th>
@@ -1194,6 +1358,12 @@ export default function TedarikciSiparisPanel() {
                     <th className="px-4 py-4 text-right">
                       Değişim
                       <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">3 ay ort.'ya göre</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Aylık Çıkış Ort.
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">
+                        {cikisDonemleri.olan.length > 0 ? cikisDonemleri.olan.join(', ') : 'irsaliye verisi yok'}
+                      </span>
                     </th>
                     <th className="px-4 py-4 text-right">
                       Kapsama
@@ -1297,6 +1467,20 @@ export default function TedarikciSiparisPanel() {
                           <DegisimChip value={row.degisimYuzde} />
                         )}
                       </td>
+                      <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                        {cikisLoading ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">…</span>
+                        ) : row.aylikCikisOrt === null ? (
+                          <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                        ) : (
+                          <>
+                            {fmt(row.aylikCikisOrt, 0)}
+                            <span className="block text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                              {fmt(row.gunlukCikis)} /gün
+                            </span>
+                          </>
+                        )}
+                      </td>
                       <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold dark:border-fuchsia-300/15">
                         {row.oneri.kapsamaGun === null ? (
                           <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
@@ -1340,7 +1524,7 @@ export default function TedarikciSiparisPanel() {
                     </tr>
                     {isOpen && (
                       <tr>
-                        <td colSpan={12} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                        <td colSpan={13} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
                           {/* Kararın kendisi ve tam gerekçesi — önce bu okunur. */}
                           <div className="mb-4 rounded-2xl border border-emerald-950/10 bg-white/70 p-4 dark:border-fuchsia-300/15 dark:bg-white/[0.04]">
                             <div className="flex flex-wrap items-center gap-2">
@@ -1447,6 +1631,21 @@ export default function TedarikciSiparisPanel() {
                                   </dt>
                                   <dd className="tabular-nums">{fmt(row.gunlukTuketim)} kutu/gün</dd>
                                 </div>
+                                {row.aylikCikisOrt !== null && (
+                                  <div className="flex justify-between gap-3">
+                                    <dt>
+                                      Depo çıkışı (irsaliye)
+                                      {cikisDonemleri.olan.length > 0 && (
+                                        <span className="ml-1 text-[10px] font-bold text-[#70857e] dark:text-[#8e7c9a]">
+                                          ({cikisDonemleri.olan.join(', ')} ort.)
+                                        </span>
+                                      )}
+                                    </dt>
+                                    <dd className="tabular-nums">
+                                      {fmt(row.aylikCikisOrt, 0)} kutu/ay · {fmt(row.gunlukCikis)} kutu/gün
+                                    </dd>
+                                  </div>
+                                )}
                                 {row.onceki3AyOrt !== null && (
                                   <div className="flex items-center justify-between gap-3">
                                     <dt>

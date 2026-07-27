@@ -181,6 +181,48 @@ test('ihtiyaç kaynağı seçimi tabanı belirler', () => {
   assert.equal(tuketim.tabanGunluk, 4);
 });
 
+/* ——— Depo çıkışı (irsaliye) sinyali ——— */
+
+test('depo çıkışı diğerlerinden büyükse talebi o belirler', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ gunlukCikis: 9 }));
+  assert.equal(sonuc.tabanGunluk, 9, 'en büyük sinyal depo çıkışı olmalı');
+  assert.match(sonuc.aciklama, /depo çıkışı belirledi/);
+});
+
+test('depo çıkışı küçükse tabanı değiştirmez', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ gunlukCikis: 2 }));
+  assert.equal(sonuc.tabanGunluk, 6);
+});
+
+test('depo çıkışı kaynağı tek başına seçilebilir', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ basis: 'cikis', gunlukCikis: 9 }));
+  assert.equal(sonuc.tabanGunluk, 9);
+});
+
+test('depo çıkışı verisi yoksa uyarı üretilir ve hesap bozulmaz', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ gunlukCikis: 0 }));
+  assert.equal(sonuc.tabanGunluk, 6, 'çıkış verisi yokken diğer sinyaller çalışmalı');
+  assert.ok(sonuc.uyarilar.some(u => u.includes('çıkış')));
+});
+
+test('kullanıcı örneği: aylık ort. 191 çıkış, 185 varlık → sipariş üretir', () => {
+  // 3 aylık çıkış 208 + 158 + 208 = 574 kutu / 90 gün ≈ 6,38 kutu/gün
+  const gunlukCikis = (208 + 158 + 208) / 90;
+  const sonuc = hesaplaOneri(
+    temelGirdi({
+      gunlukMinMax: 0,
+      gunlukTuketim: 0,
+      gunlukCikis,
+      hedefGun: 30,
+      anaDepoStok: 185,
+    }),
+  );
+  // 30 günlük ihtiyaç ≈ 192; elde 185 → ortalamanın altında kalıyor
+  assert.equal(sonuc.tip, 'siparis');
+  assert.ok(sonuc.oneriAdet > 0, 'ortalama çıkışın altında kalan stok sipariş üretmeli');
+  assert.ok(sonuc.kapsamaGun !== null && sonuc.kapsamaGun < 30);
+});
+
 test('öneri hiçbir zaman negatif olmaz', () => {
   const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 100000 }));
   assert.equal(sonuc.oneriAdet, 0);
