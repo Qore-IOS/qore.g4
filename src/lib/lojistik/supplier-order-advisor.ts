@@ -13,8 +13,14 @@
  *  - Her sonuç, sayıları içeren tam bir Türkçe gerekçe taşır.
  */
 
-/** Günlük saha ihtiyacının hangi kaynaktan hesaplanacağı. */
-export type DemandBasis = 'buyuk' | 'minmax' | 'tuketim';
+/**
+ * Günlük saha ihtiyacının hangi kaynaktan hesaplanacağı.
+ * - `minmax`  : kurumların min/max tanımlarından
+ * - `tuketim` : Total Verimlilik kümülatif tüketiminden
+ * - `cikis`   : ana depodan kesilen irsaliyelerdeki fiili çıkıştan
+ * - `buyuk`   : üçünün en büyüğü (stoksuz kalmaya karşı güvenli taraf)
+ */
+export type DemandBasis = 'buyuk' | 'minmax' | 'tuketim' | 'cikis';
 
 /** 6 aylık tüketim serisinin yönü ve ivmesi. */
 export type IvmeDurumu =
@@ -74,6 +80,8 @@ export interface OneriGirdisi {
   gunlukMinMax: number;
   /** Gerçek tüketimden türeyen günlük kutu ihtiyacı */
   gunlukTuketim: number;
+  /** Ana depodan fiili çıkıştan (irsaliye) türeyen günlük kutu ihtiyacı */
+  gunlukCikis?: number;
   basis: DemandBasis;
   trend: TuketimTrendi;
   /** Depoda kaç günlük ihtiyaç tutulmak isteniyor */
@@ -211,6 +219,7 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
   const {
     gunlukMinMax,
     gunlukTuketim,
+    gunlukCikis = 0,
     basis,
     trend,
     hedefGun,
@@ -226,7 +235,8 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
   const tabanGunluk =
     basis === 'minmax' ? gunlukMinMax
     : basis === 'tuketim' ? gunlukTuketim
-    : Math.max(gunlukMinMax, gunlukTuketim);
+    : basis === 'cikis' ? gunlukCikis
+    : Math.max(gunlukMinMax, gunlukTuketim, gunlukCikis);
 
   const gunlukIhtiyac = tabanGunluk * trend.katsayi;
   const toplamVarlik = anaDepoStok + sahaStok + cihazUstuKutu + acikSiparis;
@@ -247,6 +257,9 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
   }
   if (gunlukMinMax <= 0 && gunlukTuketim > 0) {
     uyarilar.push('Kurumlarda min/max tanımı yok; hesap yalnızca gerçek tüketime dayanıyor.');
+  }
+  if (gunlukCikis <= 0) {
+    uyarilar.push('Son 3 ayda bu depodan çıkış (irsaliye) verisi bulunamadı.');
   }
 
   const guvenilirlik: Guvenilirlik =
@@ -297,6 +310,17 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
         )}); günlük ihtiyaç ${trend.katsayi >= 1 ? 'yukarı' : 'aşağı'} çekilerek ` +
         `${trNum(tabanGunluk)} → ${trNum(gunlukIhtiyac)} kutu/gün oldu.`;
 
+  // Hangi sinyalin talebi belirlediğini yaz — okuyan "bu sayı nereden geldi"
+  // diye sormasın.
+  const kaynakCumlesi =
+    basis !== 'buyuk'
+      ? ''
+      : gunlukCikis > 0 && gunlukCikis >= gunlukMinMax && gunlukCikis >= gunlukTuketim
+        ? `Talebi depo çıkışı belirledi (ayda ort. ${trNum(gunlukCikis * 30, 0)} kutu).`
+        : gunlukTuketim >= gunlukMinMax
+          ? 'Talebi gerçek tüketim belirledi.'
+          : 'Talebi Min/Max tanımı belirledi.';
+
   const temelCumle =
     `Günlük ihtiyaç ${trNum(gunlukIhtiyac)} kutu. Elde ${toplamVarlik} kutu var ` +
     `(${varlikDetayi}) → ${trNum(kapsamaGun, 0)} gün yeter.`;
@@ -311,13 +335,13 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     aciklama =
       `${temelCumle} Bu, kritik eşiğin (${kritikGun} gün) altında. ` +
       `${hedefGun} günlük hedef için ${gerekliAdet} kutu gerekiyor, ${oneriAdet} kutu sipariş edin. ` +
-      trendCumlesi;
+      `${kaynakCumlesi} ` + trendCumlesi;
   } else if (oneriAdet > 0) {
     tip = 'siparis';
     baslik = 'SİPARİŞ VER';
     aciklama =
       `${temelCumle} ${hedefGun} günlük hedef için ${gerekliAdet} kutu gerekiyor, ` +
-      `${oneriAdet} kutu sipariş edin. ` + trendCumlesi;
+      `${oneriAdet} kutu sipariş edin. ` + `${kaynakCumlesi} ` + trendCumlesi;
   } else if (kapsamaGun > hedefGun * FAZLA_STOK_KATI) {
     tip = 'fazla-stok';
     baslik = 'SİPARİŞ VERME — FAZLA STOK';
