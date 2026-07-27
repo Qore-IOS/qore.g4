@@ -713,7 +713,7 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
   let y = headerBottom + 12;
   y = clayTitleBand(doc, clay, {
     x: PAD, y, w: CW, right: RIGHT, eyebrow: '', title: input.title,
-    titleSize: 28, rightLabel: 'Tarih / Saat', rightValue: input.tarihSaat,
+    titleSize: 22, rightLabel: 'Tarih / Saat', rightValue: input.tarihSaat,
     bandH: 60, rightWidth: 186, rightValueSize: 14,
   });
 
@@ -767,13 +767,13 @@ export async function renderTransferForm(kit: ClayKit, input: TransferFormInput)
   y = clay.section(input.tableTitle || 'Ürün Bilgileri', PAD, y, RIGHT);
   const cols: Col[] = input.variant === 'yedek'
     ? [{ key: 'kod', label: 'Stok Kodu', w: 104, size: 11.5, w2: 700, color: C.soft, nowrap: true },
-        { key: 'urun', label: 'Parça', size: 14, w2: 800, color: C.ink },
+        { key: 'urun', label: 'Parça', size: 12.5, w2: 800, color: C.ink },
         { key: 'seri', label: 'Seri No', w: 116, size: 12, w2: 700, color: C.sub, nowrap: true },
         { key: 'adet', label: 'Adet', w: 56, align: 'center', badge: true },
         { key: 'birim', label: 'Birim', w: 84, size: 12, w2: 700, color: C.sub, nowrap: true },
         { key: 'tarih', label: 'İşlem Tarihi', w: 112, size: 11.5, w2: 700, color: C.sub, nowrap: true }]
     : [{ key: 'kod', label: 'Stok Kodu', w: 104, size: 11.5, w2: 700, color: C.soft, nowrap: true },
-        { key: 'urun', label: 'Ürün', size: 14, w2: 800, color: C.ink },
+        { key: 'urun', label: 'Ürün', size: 12.5, w2: 800, color: C.ink },
         { key: 'lot', label: 'Lot', w: 78, size: 12, w2: 700, color: C.sub, nowrap: true },
         { key: 'miad', label: 'Miad', w: 84, size: 12, w2: 700, color: C.sub, nowrap: true },
         { key: 'adet', label: 'Adet', w: 56, align: 'center', badge: true },

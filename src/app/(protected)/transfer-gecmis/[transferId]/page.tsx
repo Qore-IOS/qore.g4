@@ -33,7 +33,11 @@ type TransferRoot = {
   id: string; // Add id to TransferRoot type
   sourceDepotName: string;
   targetName: string;
+  // Transfer kaydı personeli `createdByName` ile yazar; `userName` eski
+  // kayıtlarda bulunabilir. Liste ekranıyla aynı sırayla okunur.
   userName?: string;
+  createdByName?: string;
+  createdBy?: string;
   timestamp?: any;
   mode?: 'borc' | 'lab';
   company?: string;
@@ -45,6 +49,8 @@ type TransferItem = {
   lotNumarasi: string;
   miad: string;
   seriNumarasi: string;
+  // Kısmi transferlerde bir kayıt birden fazla adet taşıyabilir.
+  adet?: number;
   anaBirim?: string;
   ambalajDegeri?: number | null;
 };
@@ -111,24 +117,35 @@ export default function Page() {
     return () => { mounted = false; };
   }, [transferId, router, toast]);
 
+  // Bir transfer kaydı birden fazla adet taşıyabildiğinden (kısmi transfer)
+  // satır sayısı değil, kayıttaki `adet` alanı toplanır. Alanı olmayan eski
+  // kayıtlar 1 adet sayılır.
+  const itemQuantity = (it: TransferItem) => {
+    const qty = Number(it.adet);
+    return Number.isFinite(qty) && qty > 0 ? qty : 1;
+  };
+
   const summary = useMemo(() => {
     const m = new Map<string, { stokKodu: string; stokAdi: string; lotNumarasi: string; miad: string; adet: number; anaBirim?: string; ambalajDegeri?: number | null }>();
     for (const it of items) {
       const key = `${it.stokKodu}||${it.lotNumarasi}||${it.miad}`;
       const prev = m.get(key);
-      if (prev) prev.adet += 1;
+      if (prev) prev.adet += itemQuantity(it);
       else m.set(key, {
         stokKodu: it.stokKodu,
         stokAdi: it.stokAdi,
         lotNumarasi: it.lotNumarasi,
         miad: it.miad,
-        adet: 1,
+        adet: itemQuantity(it),
         anaBirim: it.anaBirim || productCodeMap[it.stokKodu]?.anaBirim,
         ambalajDegeri: it.ambalajDegeri ?? productCodeMap[it.stokKodu]?.ambalajDegeri ?? null,
       });
     }
     return Array.from(m.values());
   }, [items, productCodeMap]);
+
+  // Personel adı: liste ekranıyla aynı alan sırası.
+  const personName = root?.userName || root?.createdByName || root?.createdBy || '';
   
   if (loading) {
     return (
@@ -159,8 +176,8 @@ export default function Page() {
                 kurumAdi: root.targetName,
                 tarih: format(root.timestamp.toDate(), 'dd.MM.yyyy'),
                 saat: format(root.timestamp.toDate(), 'HH:mm'),
-                olusturan: root.userName,
-                karsilayan: root.userName,
+                olusturan: personName,
+                karsilayan: personName,
                 company: root.mode === 'borc' ? root.company : undefined,
             }}
             rows={summary.map(s => ({
@@ -182,6 +199,7 @@ export default function Page() {
             Gönderen Depo: <span className="font-medium">{root?.sourceDepotName || '-'}</span> •{' '}
             Teslim Alan: <span className="font-medium">{root?.targetName || '-'}</span>
             {root?.mode === 'borc' && root.company && ` • Firma: ${root.company}`} •{' '}
+            Personel: <span className="font-medium">{personName || '-'}</span> •{' '}
             Tarih: <span className="font-medium"><TimestampText value={root?.timestamp} format="dd.MM.yyyy HH:mm"/></span>
           </CardDescription>
         </CardHeader>
@@ -195,6 +213,7 @@ export default function Page() {
                   <TableHead>Lot</TableHead>
                   <TableHead>Miad</TableHead>
                   <TableHead>Seri No</TableHead>
+                  <TableHead className="text-center">Adet</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -205,6 +224,7 @@ export default function Page() {
                     <TableCell>{it.lotNumarasi}</TableCell>
                     <TableCell><TimestampText value={it.miad} /></TableCell>
                     <TableCell className="font-mono text-xs">{it.seriNumarasi}</TableCell>
+                    <TableCell className="text-center font-medium">{itemQuantity(it)}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
