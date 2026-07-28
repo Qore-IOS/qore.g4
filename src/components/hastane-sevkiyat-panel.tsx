@@ -3,7 +3,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
-import { differenceInDays, isValid, parse } from 'date-fns';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -43,6 +42,7 @@ import {
   type RiskliSevkSonucu,
   type SevkLotu,
 } from '@/lib/lojistik/supplier-order-advisor';
+import { miadaKalanGun } from '@/lib/lojistik/miad';
 import type { DepoLotu } from '@/actions/stokActions';
 
 /* ——— Lojistik görünümüyle ortak tasarım ——— */
@@ -123,18 +123,11 @@ interface SevkSatiri {
   /** Sevk edilecek lotların miad riski */
   risk: RiskliSevkSonucu;
   /** Bu satıra ayrılan lotlar (FEFO) */
-  sevkLotlari: SevkLotu[];
+  sevkLotlari: AyrilanLot[];
 }
 
-/** "dd.MM.yyyy" biçimindeki miadın bugüne kalan gün sayısı; okunamazsa null. */
-function miadaKalanGun(miad: string): number | null {
-  if (!miad) return null;
-  const tarih = parse(miad, 'dd.MM.yyyy', new Date());
-  if (!isValid(tarih)) return null;
-  const bugun = new Date();
-  bugun.setHours(0, 0, 0, 0);
-  return differenceInDays(tarih, bugun);
-}
+/** Ayrılan lot + ham miad değeri (çözülemediğinde ekranda gösterilir). */
+type AyrilanLot = SevkLotu & { miadMetni: string };
 
 async function fetchMinMaxRules(
   parentCollection: 'depots' | 'hospitals',
@@ -231,7 +224,7 @@ export default function HastaneSevkiyatPanel() {
   });
 
   const [anaDepoStokByCode, setAnaDepoStokByCode] = useState<Map<string, number>>(new Map());
-  const [anaDepoLotlariByCode, setAnaDepoLotlariByCode] = useState<Map<string, SevkLotu[]>>(new Map());
+  const [anaDepoLotlariByCode, setAnaDepoLotlariByCode] = useState<Map<string, AyrilanLot[]>>(new Map());
   const [labStokByLab, setLabStokByLab] = useState<Map<string, Map<string, number>>>(new Map());
   const [cihazUstuByLab, setCihazUstuByLab] = useState<Map<string, Map<string, number>>>(new Map());
   const [kumulatifByLab, setKumulatifByLab] = useState<Map<string, Map<string, number>>>(new Map());
@@ -295,7 +288,7 @@ export default function HastaneSevkiyatPanel() {
         }
 
         // Lotlar FEFO sırasında tutulur; miadı okunamayanlar en sona düşer.
-        const lotMap = new Map<string, SevkLotu[]>();
+        const lotMap = new Map<string, AyrilanLot[]>();
         for (const [rawCode, lotlar] of Object.entries(
           (depoLotlari || {}) as Record<string, DepoLotu[]>,
         )) {
@@ -303,6 +296,7 @@ export default function HastaneSevkiyatPanel() {
           if (!code) continue;
           const liste = (lotlar || []).map(l => ({
             lot: l.lot || '—',
+            miadMetni: l.miad || '',
             miatGun: miadaKalanGun(l.miad),
             adet: Number(l.adet) || 0,
           }));
@@ -489,17 +483,22 @@ export default function HastaneSevkiyatPanel() {
       // hangi lotu aldığı — dolayısıyla riski — belli olur.
       const havuz = (anaDepoLotlariByCode.get(canonical) || []).map(l => ({ ...l }));
       let havuzIndex = 0;
-      const lotlarByKey = new Map<string, SevkLotu[]>();
+      const lotlarByKey = new Map<string, AyrilanLot[]>();
       [...grup]
         .sort((a, b) => (payByKey.get(a.key)?.sira ?? 0) - (payByKey.get(b.key)?.sira ?? 0))
         .forEach(satir => {
           let kalan = payByKey.get(satir.key)?.sevkAdedi ?? 0;
-          const ayrilan: SevkLotu[] = [];
+          const ayrilan: AyrilanLot[] = [];
           while (kalan > 0 && havuzIndex < havuz.length) {
             const lot = havuz[havuzIndex];
             const alinan = Math.min(kalan, lot.adet);
             if (alinan > 0) {
-              ayrilan.push({ lot: lot.lot, miatGun: lot.miatGun, adet: alinan });
+              ayrilan.push({
+                lot: lot.lot,
+                miadMetni: lot.miadMetni,
+                miatGun: lot.miatGun,
+                adet: alinan,
+              });
               lot.adet -= alinan;
               kalan -= alinan;
             }
@@ -603,6 +602,7 @@ export default function HastaneSevkiyatPanel() {
                   // Sevk anındaki lot ayrımı sonradan denetlenebilsin diye saklanır.
                   lotlar: s.sevkLotlari.map(l => ({
                     lot: l.lot,
+                    miad: l.miadMetni,
                     miatGun: l.miatGun,
                     adet: l.adet,
                   })),
@@ -963,11 +963,16 @@ export default function HastaneSevkiyatPanel() {
                                           >
                                             <span className="font-mono">{lot.lot}</span>
                                             <span>· {lot.adet} kutu</span>
-                                            <span className="opacity-70">
+                                            <span
+                                              className="opacity-70"
+                                              title={lot.miadMetni || undefined}
+                                            >
                                               ·{' '}
-                                              {lot.miatGun === null
-                                                ? 'miad yok'
-                                                : `${lot.miatGun} gün`}
+                                              {lot.miatGun !== null
+                                                ? `${lot.miatGun} gün`
+                                                : lot.miadMetni
+                                                  ? `miad okunamadı (${lot.miadMetni})`
+                                                  : 'miad girilmemiş'}
                                             </span>
                                             {riskli > 0 && <span>· {riskli} riskli</span>}
                                           </span>
@@ -984,8 +989,9 @@ export default function HastaneSevkiyatPanel() {
                                       </p>
                                     ) : row.risk.degerlendirilemeyenAdet > 0 ? (
                                       <p className="mt-2 text-xs font-semibold text-[#587169] dark:text-[#a994b5]">
-                                        {row.risk.degerlendirilemeyenAdet} kutunun miad bilgisi yok; miad riski
-                                        hesaplanamadı.
+                                        {row.risk.degerlendirilemeyenAdet} kutunun miadı okunamadığı için miad
+                                        riski hesaplanamadı ve bu lotlar FEFO sıralamasında en sona alındı.
+                                        Depodaki lot kaydını kontrol edin.
                                       </p>
                                     ) : (
                                       <p className="mt-2 text-xs font-semibold text-[#587169] dark:text-[#a994b5]">
