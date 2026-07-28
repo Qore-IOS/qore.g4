@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react'
 import {
   Archive,
   CheckCircle,
+  Database,
   Download,
   FileText,
   History,
@@ -73,6 +74,7 @@ export default function KumulatifHesaplamaPanel() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSavingHistory, setIsSavingHistory] = useState(false);
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false);
   const [rows, setRows] = useState<Array<CalculationProductRow & CumulativeRow & { matchedTests: string[] }>>([]);
   const [unmatchedTests, setUnmatchedTests] = useState<CumulativeRow[]>([]);
   const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
@@ -1023,6 +1025,67 @@ export default function KumulatifHesaplamaPanel() {
   }
 
 
+  /**
+   * Bu lab-dönem için kayıtlı kümülatif veriyi tabloya doldurur.
+   *
+   * Değerler normalde yüklenen dosyalardan türer; snapshot'ı otomatik
+   * uygulamak hangi sayının dosyadan hangisinin kayıttan geldiğini
+   * belirsizleştirirdi. Bu yüzden doldurma açık bir eylemdir.
+   *
+   * Yalnızca `total` (kümülatif toplam) yazılır — rutin/tekrar/kalibrasyon
+   * kırılımı snapshot'ta tutulmuyor, uydurulmaz.
+   */
+  async function handleKayittanDoldur() {
+    if (!hospitalId) return;
+    setIsLoadingSnapshot(true);
+    try {
+      const { getLabPeriodSnapshots } = await import('@/actions/labPeriodActions');
+      const snapshotlar = await getLabPeriodSnapshots(
+        [hospitalId],
+        year,
+        month + 1, // month 0-indekslidir
+        currentCompanyId,
+        isSuperAdmin,
+      );
+      const kayit = snapshotlar[hospitalId]?.kumulatif || {};
+      const kodlar = Object.keys(kayit);
+      if (kodlar.length === 0) {
+        toast({ title: 'Kayıt yok', description: 'Bu dönem için kayıtlı kümülatif verisi bulunamadı.' });
+        return;
+      }
+      // Tablo boşsa ürün listesinden kurulur; doluysa yalnızca toplam yazılır.
+      setRows(prev => {
+        const taban = prev.length > 0
+          ? prev
+          : filteredProducts.map(product => ({
+              ...product,
+              test: product.testAdi || product.stokKodu,
+              routine: 0,
+              rerun: 0,
+              calib: 0,
+              control: 0,
+              total: 0,
+              matchedTests: [] as string[],
+            }));
+        return taban.map(row =>
+          kayit[row.stokKodu] ? { ...row, total: kayit[row.stokKodu].deger } : row,
+        );
+      });
+      toast({
+        title: 'Kayıtlı veri yüklendi',
+        description: `${kodlar.length} ürün için kayıtlı kümülatif toplamları tabloya yazıldı.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Yüklenemedi',
+        description: e?.message || 'Kayıtlı veri okunamadı.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingSnapshot(false);
+    }
+  }
+
   async function handleSaveHistory() {
     if (!rows.length) return;
     setIsSavingHistory(true);
@@ -1296,6 +1359,9 @@ export default function KumulatifHesaplamaPanel() {
             >
               {isApplyingCounter ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <FileSpreadsheet size={17} />}
               Counter Verilerini Al
+            </SoftBtn>
+            <SoftBtn onClick={handleKayittanDoldur} disabled={!hospitalId || isLoadingSnapshot || combineMode}>
+              {isLoadingSnapshot ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Database size={17} />} Kayıtlı Veriden Doldur
             </SoftBtn>
             {hasComputed && (
               <>

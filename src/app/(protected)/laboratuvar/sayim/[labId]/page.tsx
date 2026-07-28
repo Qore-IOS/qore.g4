@@ -543,6 +543,20 @@ export default function LaboratuvarSayimPage() {
   const [isExcelBusy, setIsExcelBusy] = useState(false);
   const excelInputRef = useRef<HTMLInputElement | null>(null);
 
+  /**
+   * Bu lab-dönem için daha önce girilmiş sayımın özeti.
+   *
+   * Sayılan adetler kutulara YAZILMAZ — beklenen rakamı önceden göstermek
+   * sayımı yönlendirir ve bayat bir değeri sessizce doğrulatır. Burada yalnızca
+   * "bu dönem için zaten kayıt var, şu panelden girilmiş" bilgisi verilir;
+   * kullanıcı bilerek yeniden saymayı seçebilsin diye.
+   */
+  const [mevcutSayimOzeti, setMevcutSayimOzeti] = useState<{
+    urunSayisi: number;
+    kaynaklar: string[];
+    sonGuncelleme: number;
+  } | null>(null);
+
   const countPeriod = useMemo(() => buildCalculationPeriod(countMonth, countYear), [countMonth, countYear]);
   const countMonthOptions = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
     value: i,
@@ -552,6 +566,43 @@ export default function LaboratuvarSayimPage() {
     const y = new Date().getFullYear();
     return Array.from({ length: 7 }, (_, i) => y - 3 + i);
   }, []);
+
+  useEffect(() => {
+    if (!labId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [{ getLabPeriodSnapshots }, { alanOzeti }, { KAYNAK_ADI }] = await Promise.all([
+          import('@/actions/labPeriodActions'),
+          import('@/lib/lab-period/merge'),
+          import('@/lib/lab-period/types'),
+        ]);
+        const snapshotlar = await getLabPeriodSnapshots(
+          [labId],
+          countYear,
+          countMonth + 1, // countMonth 0-indekslidir
+          currentCompanyId,
+          isSuperAdmin,
+        );
+        if (cancelled) return;
+        const ozet = alanOzeti(snapshotlar[labId], 'stok');
+        setMevcutSayimOzeti(
+          ozet.urunSayisi > 0
+            ? {
+                urunSayisi: ozet.urunSayisi,
+                kaynaklar: ozet.kaynaklar.map(k => KAYNAK_ADI[k] ?? k),
+                sonGuncelleme: ozet.sonGuncelleme,
+              }
+            : null,
+        );
+      } catch (err) {
+        // Uyarı gösterilemezse sayım normal akışında devam eder.
+        console.error('[lab-sayim] Dönem kaydı okunamadı:', err);
+        if (!cancelled) setMevcutSayimOzeti(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [labId, countYear, countMonth, currentCompanyId, isSuperAdmin]);
 
   // ------------------------------------------------------------------
   // Data loading
@@ -1524,6 +1575,21 @@ export default function LaboratuvarSayimPage() {
               {countYearOptions.map(year => <option key={year} value={year}>{year}</option>)}
             </select>
           </div>
+          {mevcutSayimOzeti && (
+            <span
+              style={{ flex: '0 0 auto' }}
+              title={`Son güncelleme: ${
+                mevcutSayimOzeti.sonGuncelleme
+                  ? new Date(mevcutSayimOzeti.sonGuncelleme).toLocaleString('tr-TR')
+                  : 'bilinmiyor'
+              }. Sayılan adetler bilerek doldurulmadı — sayımın bağımsız olması için.`}
+            >
+              <MlPill tone="amber">
+                Bu dönem için zaten sayım var ({mevcutSayimOzeti.urunSayisi} ürün ·{' '}
+                {mevcutSayimOzeti.kaynaklar.join(', ')})
+              </MlPill>
+            </span>
+          )}
           {scanFeedback && (
             <MlPill tone={scanFeedback.type === 'success' ? 'ok' : 'amber'} style={{ flex: '0 0 auto' }}>
               {scanFeedback.message}

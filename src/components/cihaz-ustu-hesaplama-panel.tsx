@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   CheckCircle,
+  Database,
   FileText,
   History,
   Save,
@@ -70,6 +71,7 @@ export default function CihazUstuHesaplamaPanel() {
   const [isParsing, setIsParsing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSavingHistory, setIsSavingHistory] = useState(false);
+  const [isLoadingSnapshot, setIsLoadingSnapshot] = useState(false);
   const [rows, setRows] = useState<Array<CalculationProductRow & AggregatedReagentRow & { matchedTests: string[] }>>([]);
   const [unmatchedTests, setUnmatchedTests] = useState<AggregatedReagentRow[]>([]);
   const [brandFilter, setBrandFilter] = useState(ALL_FILTER_VALUE);
@@ -305,6 +307,61 @@ export default function CihazUstuHesaplamaPanel() {
   }
 
 
+  /**
+   * Bu lab-dönem için kayıtlı cihaz üstü verisini tabloya doldurur.
+   *
+   * Değerler normalde yüklenen dosyalardan türer; snapshot'ı otomatik
+   * uygulamak hangi sayının dosyadan hangisinin kayıttan geldiğini
+   * belirsizleştirirdi. Bu yüzden doldurma açık bir eylemdir: kullanıcı
+   * butona basar, ne olduğunu bilir.
+   */
+  async function handleKayittanDoldur() {
+    if (!hospitalId) return;
+    setIsLoadingSnapshot(true);
+    try {
+      const { getLabPeriodSnapshots } = await import('@/actions/labPeriodActions');
+      const snapshotlar = await getLabPeriodSnapshots(
+        [hospitalId],
+        year,
+        month + 1, // month 0-indekslidir
+        currentCompanyId,
+        isSuperAdmin,
+      );
+      const kayit = snapshotlar[hospitalId]?.cihazUstu || {};
+      const kodlar = Object.keys(kayit);
+      if (kodlar.length === 0) {
+        toast({ title: 'Kayıt yok', description: 'Bu dönem için kayıtlı cihaz üstü verisi bulunamadı.' });
+        return;
+      }
+      // Tablo boşsa ürün listesinden kurulur; doluysa yalnızca değerler yazılır.
+      setRows(prev => {
+        const taban = prev.length > 0
+          ? prev
+          : filteredProducts.map(product => ({
+              ...product,
+              test: product.testAdi || product.stokKodu,
+              available: 0,
+              matchedTests: [] as string[],
+            }));
+        return taban.map(row =>
+          kayit[row.stokKodu] ? { ...row, available: kayit[row.stokKodu].deger } : row,
+        );
+      });
+      toast({
+        title: 'Kayıtlı veri yüklendi',
+        description: `${kodlar.length} ürün için kayıtlı cihaz üstü değerleri tabloya yazıldı.`,
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Yüklenemedi',
+        description: e?.message || 'Kayıtlı veri okunamadı.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoadingSnapshot(false);
+    }
+  }
+
   async function handleSaveHistory() {
     if (!rows.length) return;
     setIsSavingHistory(true);
@@ -496,6 +553,14 @@ export default function CihazUstuHesaplamaPanel() {
               {isParsing ? <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} /> : <Activity size={17} />}
               {files.length > 0 ? `${files.length} Dosyayı Ayrıştır` : 'Ayrıştır'}
             </PrimaryBtn>
+            <SoftBtn onClick={handleKayittanDoldur} disabled={!hospitalId || isLoadingSnapshot || combineMode}>
+              {isLoadingSnapshot ? (
+                <Loader2 size={17} style={{ animation: 'cySpin 1s linear infinite' }} />
+              ) : (
+                <Database size={17} />
+              )}{' '}
+              Kayıtlı Veriden Doldur
+            </SoftBtn>
             {hasComputed && (
               <>
                 <SoftBtn onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>

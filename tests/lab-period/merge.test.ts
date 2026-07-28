@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   alanHaritasi,
+  alanOzeti,
   birlestir,
   bosSnapshot,
   kaynakOzeti,
@@ -235,4 +236,38 @@ test('doküman kimliği şirket-lab-dönem üçlüsünde tekildir', () => {
 test('dönem anahtarı sıfır dolgulu YYYY-MM üretir', () => {
   assert.equal(donemAnahtari(2026, 6), '2026-06');
   assert.equal(donemAnahtari(2026, 12), '2026-12');
+});
+
+/* ——— Alan özeti ——— */
+
+test('alan özeti ürün sayısını, toplamı ve kaynağı verir', () => {
+  const snap = birlestir(bos(), [girdi('A1', 12), girdi('A2', 8)], {
+    kaynak: 'lab-sayim',
+    zaman: 1000,
+  }).snapshot;
+  const ozet = alanOzeti(snap, 'stok');
+  assert.equal(ozet.urunSayisi, 2);
+  assert.equal(ozet.toplam, 20);
+  assert.deepEqual(ozet.kaynaklar, ['lab-sayim']);
+  assert.equal(ozet.sonGuncelleme, 1000);
+});
+
+test('alan özeti birden çok kaynağı listeler ve son güncellemeyi alır', () => {
+  let snap = birlestir(bos(), [girdi('A1', 12)], { kaynak: 'lab-sayim', zaman: 1000 }).snapshot;
+  snap = birlestir(snap, [girdi('A2', 5)], { kaynak: 'maliyet-sayim', zaman: 4000 }).snapshot;
+  const ozet = alanOzeti(snap, 'stok');
+  assert.equal(ozet.urunSayisi, 2);
+  assert.deepEqual(ozet.kaynaklar.sort(), ['lab-sayim', 'maliyet-sayim']);
+  assert.equal(ozet.sonGuncelleme, 4000);
+});
+
+test('veri olmayan alanın özeti boştur', () => {
+  const snap = birlestir(bos(), [girdi('A1', 12)], { kaynak: 'lab-sayim', zaman: 1000 }).snapshot;
+  assert.deepEqual(alanOzeti(snap, 'kumulatif'), {
+    urunSayisi: 0,
+    toplam: 0,
+    kaynaklar: [],
+    sonGuncelleme: 0,
+  });
+  assert.equal(alanOzeti(undefined, 'stok').urunSayisi, 0);
 });
