@@ -25,6 +25,7 @@ import {
 } from '@/lib/lojistik/count-overview';
 import {
   LOJISTIK_COUNTS_PATH,
+  LOJISTIK_SEVKIYAT_PATH,
   LOJISTIK_TEDARIKCI_SIPARIS_PATH,
 } from '@/lib/lojistik/navigation';
 import { CountStatusChip, UploadStatusChip } from './count-status';
@@ -32,33 +33,63 @@ import { CountStatusChip, UploadStatusChip } from './count-status';
 const cardClass =
   'rounded-[26px] border border-emerald-950/10 bg-white/85 shadow-[0_24px_55px_-32px_rgba(6,78,59,0.35)] backdrop-blur-xl dark:border-fuchsia-400/15 dark:bg-[#160e1e]/80 dark:shadow-[0_28px_65px_-34px_rgba(0,0,0,0.85)]';
 
-function EmptyFeatureCard({
+function FeatureCard({
   title,
   description,
   icon: Icon,
   accentClass,
+  onOpen,
+  bodyTitle,
+  bodyDescription,
 }: {
   title: string;
   description: string;
   icon: typeof FlaskConical;
   accentClass: string;
+  onOpen?: () => void;
+  bodyTitle: string;
+  bodyDescription: string;
 }) {
+  const interactive = Boolean(onOpen);
+
   return (
-    <section className={`${cardClass} flex min-h-[520px] flex-col p-5 sm:p-6`}>
-      <div className="flex items-center gap-3">
-        <span
-          className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl ${accentClass}`}
-        >
-          <Icon className="h-5 w-5" aria-hidden="true" />
-        </span>
-        <div>
-          <h2 className="text-xl font-extrabold tracking-[-0.02em] text-[#0f2a24] dark:text-[#f4ecfa]">
-            {title}
-          </h2>
-          <p className="mt-1 text-sm font-medium text-[#587169] dark:text-[#a994b5]">
-            {description}
-          </p>
+    <section
+      className={`${cardClass} flex min-h-[520px] flex-col p-5 sm:p-6${
+        interactive
+          ? ' group cursor-pointer transition-[border-color,box-shadow,transform] duration-200 hover:-translate-y-0.5 hover:border-emerald-400/45 hover:shadow-[0_30px_65px_-34px_rgba(5,150,105,0.48)] dark:hover:border-fuchsia-300/35'
+          : ''
+      }`}
+      onClick={onOpen}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span
+            className={`inline-flex h-12 w-12 items-center justify-center rounded-2xl ${accentClass}`}
+          >
+            <Icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+          <div>
+            <h2 className="text-xl font-extrabold tracking-[-0.02em] text-[#0f2a24] dark:text-[#f4ecfa]">
+              {title}
+            </h2>
+            <p className="mt-1 text-sm font-medium text-[#587169] dark:text-[#a994b5]">
+              {description}
+            </p>
+          </div>
         </div>
+        {onOpen ? (
+          <button
+            type="button"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-emerald-950/10 bg-white/70 text-emerald-700 transition-colors group-hover:bg-emerald-600 group-hover:text-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-emerald-300/50 dark:border-fuchsia-300/15 dark:bg-white/5 dark:text-fuchsia-200 dark:group-hover:bg-fuchsia-500 dark:focus-visible:ring-fuchsia-300/30"
+            aria-label={`${title} sayfasını aç`}
+            onClick={event => {
+              event.stopPropagation();
+              onOpen();
+            }}
+          >
+            <ArrowRight className="h-4 w-4" aria-hidden="true" />
+          </button>
+        ) : null}
       </div>
       <div className="my-5 h-px bg-emerald-950/10 dark:bg-fuchsia-300/15" />
       <div className="flex flex-1 items-center justify-center">
@@ -68,10 +99,10 @@ function EmptyFeatureCard({
             aria-hidden="true"
           />
           <p className="mt-4 text-base font-bold text-[#29473f] dark:text-[#d6bfe3]">
-            İçerik sonraki adımda tanımlanacak
+            {bodyTitle}
           </p>
           <p className="mt-2 text-sm leading-6 text-[#587169] dark:text-[#a994b5]">
-            Kart yapısı hazır; sipariş akışı belirlendiğinde bu alana bağlanacak.
+            {bodyDescription}
           </p>
         </div>
       </div>
@@ -447,11 +478,14 @@ export default function LojistikDashboard() {
           ) : null}
         </section>
 
-        <EmptyFeatureCard
+        <FeatureCard
           title="Sevkiyatlar"
           description="Laboratuvar talepleri ve sevk hazırlığı"
           icon={FlaskConical}
           accentClass="bg-sky-100 text-sky-700 dark:bg-sky-400/15 dark:text-sky-200"
+          onOpen={() => router.push(LOJISTIK_SEVKIYAT_PATH)}
+          bodyTitle="Hastane sevkiyat planı"
+          bodyDescription="Tedarikçi sipariş algoritmasıyla her laboratuvarın ihtiyacını hesaplar, ana depo stoğunu aciliyete göre dağıtır."
         />
         <SupplierOrderCard
           onOpen={() => router.push(LOJISTIK_TEDARIKCI_SIPARIS_PATH)}

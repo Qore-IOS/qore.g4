@@ -6,9 +6,11 @@ import {
   collection,
   doc,
   getDocs,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
@@ -55,6 +57,7 @@ import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 import {
   hesaplaOneri,
   hesaplaTuketimTrendi,
+  type DemandBasis,
   type OneriSonucu,
   type OneriTipi,
   type TuketimTrendi,
@@ -95,11 +98,8 @@ const normCode = (value: unknown): string => {
 
 type RuleWithLocation = MinMaxRule & { locationId: string };
 
-/** Günlük saha ihtiyacının hangi kaynaktan hesaplanacağı. */
-type DemandBasis = 'buyuk' | 'minmax' | 'tuketim';
-
 const DEMAND_BASIS_OPTIONS: Array<{ value: DemandBasis; label: string }> = [
-  { value: 'buyuk', label: 'İkisinin büyüğü' },
+  { value: 'buyuk', label: 'En büyüğü' },
   { value: 'minmax', label: 'Min/Max tanımı' },
   { value: 'tuketim', label: 'Gerçek tüketim' },
   { value: 'cikis', label: 'Depo çıkışı' },
@@ -638,7 +638,7 @@ export default function TedarikciSiparisPanel() {
         depotRecords.forEach(record => add(record as Record<string, number>));
 
         const cihazMap = new Map<string, number>();
-        for (const [rawCode, tests] of Object.entries(cihazUstuRecord || {})) {
+        for (const [rawCode, tests] of Object.entries(cihazUstuRecord?.byCode || {})) {
           const code = normCode(rawCode);
           if (!code) continue;
           cihazMap.set(code, (cihazMap.get(code) || 0) + (Number(tests) || 0));

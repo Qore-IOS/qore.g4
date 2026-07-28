@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  dagitimYap,
   hesaplaOneri,
   hesaplaTuketimTrendi,
   MIN_TREND_VERI_AYI,
@@ -226,4 +227,78 @@ test('kullanıcı örneği: aylık ort. 191 çıkış, 185 varlık → sipariş 
 test('öneri hiçbir zaman negatif olmaz', () => {
   const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 100000 }));
   assert.equal(sonuc.oneriAdet, 0);
+});
+
+/* ——— Sınırlı depo stoğunun hastanelere dağıtımı ——— */
+
+test('stok yeterliyse herkes ihtiyacının tamamını alır', () => {
+  const { paylar, kalanStok, toplamKarsilanamayan } = dagitimYap(
+    [
+      { id: 'a', ihtiyac: 40, kapsamaGun: 30 },
+      { id: 'b', ihtiyac: 60, kapsamaGun: 20 },
+    ],
+    200,
+  );
+  assert.deepEqual(paylar.map(p => p.sevkAdedi), [40, 60]);
+  assert.equal(kalanStok, 100);
+  assert.equal(toplamKarsilanamayan, 0);
+});
+
+test('stok kıtken en acil kurum tam karşılanır', () => {
+  // Depoda 100 var; b daha acil (5 gün) olduğu için önce o doyurulur.
+  const { paylar } = dagitimYap(
+    [
+      { id: 'a', ihtiyac: 80, kapsamaGun: 40 },
+      { id: 'b', ihtiyac: 80, kapsamaGun: 5 },
+    ],
+    100,
+  );
+  const a = paylar.find(p => p.id === 'a')!;
+  const b = paylar.find(p => p.id === 'b')!;
+  assert.equal(b.sevkAdedi, 80, 'acil olan tam karşılanmalı');
+  assert.equal(a.sevkAdedi, 20, 'kalan stok diğerine gitmeli');
+  assert.equal(a.karsilanamayan, 60);
+});
+
+test('stok yoksa hiçbir sevk önerilmez ama ihtiyaç korunur', () => {
+  const { paylar, toplamKarsilanamayan } = dagitimYap(
+    [{ id: 'a', ihtiyac: 50, kapsamaGun: 10 }],
+    0,
+  );
+  assert.equal(paylar[0].sevkAdedi, 0);
+  assert.equal(paylar[0].ihtiyac, 50);
+  assert.equal(toplamKarsilanamayan, 50);
+});
+
+test('talep sinyali olmayan kurum en sona düşer', () => {
+  const { paylar } = dagitimYap(
+    [
+      { id: 'bilinmeyen', ihtiyac: 50, kapsamaGun: null },
+      { id: 'acil', ihtiyac: 50, kapsamaGun: 3 },
+    ],
+    50,
+  );
+  assert.equal(paylar.find(p => p.id === 'acil')!.sevkAdedi, 50);
+  assert.equal(paylar.find(p => p.id === 'bilinmeyen')!.sevkAdedi, 0);
+});
+
+test('dağıtım çağıranın sırasını korur ve toplamı stoğu aşmaz', () => {
+  const adaylar = [
+    { id: 'x', ihtiyac: 30, kapsamaGun: 25 },
+    { id: 'y', ihtiyac: 30, kapsamaGun: 10 },
+    { id: 'z', ihtiyac: 30, kapsamaGun: 15 },
+  ];
+  const { paylar } = dagitimYap(adaylar, 45);
+  assert.deepEqual(paylar.map(p => p.id), ['x', 'y', 'z'], 'satır sırası bozulmamalı');
+  assert.equal(paylar.reduce((s, p) => s + p.sevkAdedi, 0), 45, 'toplam stoğu aşmamalı');
+});
+
+test('aynı girdi her zaman aynı dağıtımı üretir', () => {
+  const adaylar = [
+    { id: 'a', ihtiyac: 50, kapsamaGun: 10 },
+    { id: 'b', ihtiyac: 50, kapsamaGun: 10 },
+  ];
+  const ilk = dagitimYap(adaylar, 50).paylar.map(p => p.sevkAdedi);
+  const ikinci = dagitimYap(adaylar, 50).paylar.map(p => p.sevkAdedi);
+  assert.deepEqual(ilk, ikinci);
 });

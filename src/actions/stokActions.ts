@@ -307,13 +307,25 @@ export async function getLabCountStockForPeriod(
   labIds: string[],
   year: number,
   monthIndex: number,
-): Promise<{ byCode: Record<string, number>; countedLabIds: string[]; uncountedLabIds: string[] }> {
+): Promise<{
+  byCode: Record<string, number>;
+  /** labId -> stokKodu -> sayılan adet */
+  byLab: Record<string, Record<string, number>>;
+  countedLabIds: string[];
+  uncountedLabIds: string[];
+}> {
   const uniqueLabIds = Array.from(new Set((labIds || []).map(id => String(id || '').trim()).filter(Boolean)));
-  const empty = { byCode: {} as Record<string, number>, countedLabIds: [] as string[], uncountedLabIds: uniqueLabIds };
+  const empty = {
+    byCode: {} as Record<string, number>,
+    byLab: {} as Record<string, Record<string, number>>,
+    countedLabIds: [] as string[],
+    uncountedLabIds: uniqueLabIds,
+  };
   if (uniqueLabIds.length === 0 || !Number.isFinite(year) || !Number.isFinite(monthIndex)) return empty;
 
   const periodKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
   const byCode: Record<string, number> = {};
+  const byLab: Record<string, Record<string, number>> = {};
   const countedLabIds: string[] = [];
   const uncountedLabIds: string[] = [];
 
@@ -355,12 +367,15 @@ export async function getLabCountStockForPeriod(
           const code = String(item?.stokKodu ?? '').trim();
           if (!code || seen.has(code)) continue;
           seen.add(code);
-          byCode[code] = (byCode[code] || 0) + (Number(item?.counted) || 0);
+          const counted = Number(item?.counted) || 0;
+          byCode[code] = (byCode[code] || 0) + counted;
+          if (!byLab[labId]) byLab[labId] = {};
+          byLab[labId][code] = (byLab[labId][code] || 0) + counted;
         }
       }
     }));
 
-    return { byCode, countedLabIds, uncountedLabIds };
+    return { byCode, byLab, countedLabIds, uncountedLabIds };
   } catch (err) {
     console.error('[getLabCountStockForPeriod] Error:', err);
     return empty;
@@ -439,9 +454,10 @@ export async function getCihazUstuForPeriod(
   month: number,
   companyId?: string | null,
   isSuperAdmin?: boolean,
-): Promise<Record<string, number>> {
+): Promise<{ byCode: Record<string, number>; byLab: Record<string, Record<string, number>> }> {
   const wanted = new Set((labIds || []).map(id => String(id || '').trim()).filter(Boolean));
-  if (wanted.size === 0 || !Number.isFinite(year) || !Number.isFinite(month)) return {};
+  const bos = { byCode: {} as Record<string, number>, byLab: {} as Record<string, Record<string, number>> };
+  if (wanted.size === 0 || !Number.isFinite(year) || !Number.isFinite(month)) return bos;
 
   const period = `${String(month).padStart(2, '0')}-${year}`;
   try {
@@ -465,7 +481,7 @@ export async function getCihazUstuForPeriod(
 
     const docsById = new Map<string, AdminDocSnap>();
     [...byPeriod, ...byYearMonth].forEach(d => docsById.set(d.id, d));
-    if (docsById.size === 0) return {};
+    if (docsById.size === 0) return bos;
 
     const toMillis = (value: any): number => {
       if (!value) return 0;
@@ -485,7 +501,8 @@ export async function getCihazUstuForPeriod(
       });
 
     const totals: Record<string, number> = {};
-    latestByHospital.forEach(d => {
+    const byLab: Record<string, Record<string, number>> = {};
+    latestByHospital.forEach((d, hospitalId) => {
       const items = ((d.data() as any)?.items || []) as Array<{ productId?: string; value?: number | string }>;
       items.forEach(item => {
         const code = String(item?.productId ?? '').trim();
@@ -493,12 +510,14 @@ export async function getCihazUstuForPeriod(
         const value = Number(item?.value) || 0;
         if (value <= 0) return;
         totals[code] = (totals[code] || 0) + value;
+        if (!byLab[hospitalId]) byLab[hospitalId] = {};
+        byLab[hospitalId][code] = (byLab[hospitalId][code] || 0) + value;
       });
     });
-    return totals;
+    return { byCode: totals, byLab };
   } catch (err) {
     console.error('[getCihazUstuForPeriod] Error:', err);
-    return {};
+    return bos;
   }
 }
 
@@ -609,9 +628,14 @@ async function loadKumulatifForPeriod(
   monthIndex: number,
   companyId?: string | null,
   isSuperAdmin?: boolean,
-): Promise<{ byCode: Record<string, number>; hasData: boolean }> {
+): Promise<{
+  byCode: Record<string, number>;
+  /** labId -> stokKodu -> kümülatif test (hastane sevkiyatı için kırılım) */
+  byLab: Record<string, Record<string, number>>;
+  hasData: boolean;
+}> {
   if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return { byCode: {}, hasData: false };
+    return { byCode: {}, byLab: {}, hasData: false };
   }
   try {
     const base = adminDb
@@ -650,6 +674,7 @@ async function loadKumulatifForPeriod(
     }
 
     const totals: Record<string, number> = {};
+    const byLab: Record<string, Record<string, number>> = {};
     for (const { doc: d } of chosenByPool.values()) {
       const data = d.data() as Record<string, any>;
       let rows: Array<{ stokKodu?: string; kumulatifTotal?: number }> = [];
@@ -665,14 +690,20 @@ async function loadKumulatifForPeriod(
         const value = Number(r?.kumulatifTotal) || 0;
         if (!value) continue;
         totals[code] = (totals[code] || 0) + value;
+        // Hastane sevkiyatı lab kırılımı ister; satırlar zaten labId taşıyor.
+        const labId = String((r as any)?.labId ?? '').trim();
+        if (labId) {
+          if (!byLab[labId]) byLab[labId] = {};
+          byLab[labId][code] = (byLab[labId][code] || 0) + value;
+        }
       }
     }
     // hasData: o dönem için hiç kayıt var mı — ortalama alınırken veri girilmemiş
     // dönemleri 0 sayıp ortalamayı aşağı çekmemek için gerekli.
-    return { byCode: totals, hasData: chosenByPool.size > 0 };
+    return { byCode: totals, byLab, hasData: chosenByPool.size > 0 };
   } catch (err) {
     console.error('[loadKumulatifForPeriod] Error:', err);
-    return { byCode: {}, hasData: false };
+    return { byCode: {}, byLab: {}, hasData: false };
   }
 }
 
@@ -695,7 +726,7 @@ export async function getTotalEfficiencyKumulatifForPeriods(
   periods: Array<{ year: number; monthIndex: number }>,
   companyId?: string | null,
   isSuperAdmin?: boolean,
-): Promise<Record<string, { byCode: Record<string, number>; hasData: boolean }>> {
+): Promise<Record<string, { byCode: Record<string, number>; byLab: Record<string, Record<string, number>>; hasData: boolean }>> {
   const unique = new Map<string, { year: number; monthIndex: number }>();
   (periods || []).forEach((p) => {
     if (!p || !Number.isFinite(p.year) || !Number.isFinite(p.monthIndex)) return;
