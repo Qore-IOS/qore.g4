@@ -19,6 +19,11 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const argv = process.argv.slice(2);
+/** `--only <ad>` verilirse yalnızca o dosya koşulur (ör. kural testleri). */
+const yalnizcaIndex = argv.indexOf('--only');
+const yalnizca = yalnizcaIndex >= 0 ? argv[yalnizcaIndex + 1] : null;
+
 const KOK = path.join(__dirname, '..');
 const CIKTI = path.join(KOK, '.test-dist');
 const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
@@ -71,11 +76,17 @@ if (tipHatalari.length > 0) {
  */
 const EMULATOR_GEREKTIRENLER = ['firestore-rules.test.js'];
 
-const dosyalar = testDosyalari(path.join(CIKTI, 'tests')).filter(
-  d => !EMULATOR_GEREKTIRENLER.includes(path.basename(d)),
-);
+const tumu = testDosyalari(path.join(CIKTI, 'tests'));
+const dosyalar = yalnizca
+  ? tumu.filter(d => path.basename(d) === yalnizca)
+  : tumu.filter(d => !EMULATOR_GEREKTIRENLER.includes(path.basename(d)));
+
 if (dosyalar.length === 0) {
-  console.error('Derleme test çıktısı üretmedi — testler koşulamıyor.');
+  console.error(
+    yalnizca
+      ? `"${yalnizca}" derlenmiş testler arasında bulunamadı.`
+      : 'Derleme test çıktısı üretmedi — testler koşulamıyor.',
+  );
   process.exit(2);
 }
 
