@@ -924,6 +924,85 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
     return () => { cancelled = true; };
   }, [selectedLocationId, locationType, hospitals, currentCompanyId, isSuperAdmin]);
 
+  /**
+   * Seçili lab-dönem için daha önce girilmiş sayımı forma doldurur.
+   *
+   * Sayım hangi panelden yapılmış olursa olsun (lab sayım paneli, total
+   * verimlilik ay başı sütunları, cihaz üstü hesaplama) tek doğruluk
+   * kaynağında durur; burada aynı dönemi ikinci kez saymak gerekmesin diye
+   * geri okunur.
+   *
+   * Kullanıcının bu oturumda girdiği değerlerin üzerine YAZILMAZ: yalnızca
+   * boş hücreler doldurulur. Aksi halde sayarken elinizin altındaki rakam
+   * arka planda değişebilirdi.
+   */
+  useEffect(() => {
+    if (locationType !== 'lab' || !selectedLocationId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getLabPeriodSnapshots } = await import('@/actions/labPeriodActions');
+        const snapshotlar = await getLabPeriodSnapshots(
+          [selectedLocationId],
+          countYear,
+          countMonth + 1, // countMonth 0-indekslidir
+          currentCompanyId,
+          isSuperAdmin,
+        );
+        const snap = snapshotlar[selectedLocationId];
+        if (cancelled || !snap) return;
+
+        setCountData(prev => {
+          const next = { ...prev };
+          let doldurulan = 0;
+          const kodlar = new Set([
+            ...Object.keys(snap.stok || {}),
+            ...Object.keys(snap.cihazUstu || {}),
+          ]);
+          kodlar.forEach(stokKodu => {
+            const mevcut = next[stokKodu];
+            // Kullanıcı bu üründe zaten bir şey girdiyse dokunma.
+            if (mevcut?.counted || mevcut?.stokAdedi || mevcut?.cihazUstuAdedi) return;
+            const product = productCodes.find(p => p.stokKodu === stokKodu);
+            const stok = snap.stok?.[stokKodu];
+            const cihaz = snap.cihazUstu?.[stokKodu];
+            next[stokKodu] = {
+              stokKodu,
+              stokAdi: mevcut?.stokAdi || product?.stokAdi || stokKodu,
+              marka: mevcut?.marka || product?.marka || '',
+              stokAdedi: stok ? String(stok.deger) : (mevcut?.stokAdedi ?? ''),
+              cihazUstuAdedi: cihaz ? String(cihaz.deger) : (mevcut?.cihazUstuAdedi ?? ''),
+              counted: true,
+              lots: mevcut?.lots ?? [],
+              serials: mevcut?.serials ?? [],
+              expiryWarnings: mevcut?.expiryWarnings ?? [],
+            };
+            doldurulan += 1;
+          });
+          if (doldurulan === 0) return prev;
+          toast({
+            title: 'Kayıtlı sayım yüklendi',
+            description: `${doldurulan} ürün bu dönem için daha önce girilmiş verilerle dolduruldu.`,
+          });
+          return next;
+        });
+      } catch (err) {
+        // Ön-doldurma başarısız olursa sayım boş formla devam eder.
+        console.error('[maliyet-sayim] Lab-dönem verisi okunamadı:', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [
+    locationType,
+    selectedLocationId,
+    countYear,
+    countMonth,
+    currentCompanyId,
+    isSuperAdmin,
+    productCodes,
+    toast,
+  ]);
+
   // ---- Derived data ----
 
   const locationName = useMemo(() => {
