@@ -19,10 +19,12 @@ import {
   Moon,
   Send,
   Sun,
+  Truck,
 } from 'lucide-react';
 import {
   LOJISTIK_COUNTS_PATH,
   LOJISTIK_HOME_PATH,
+  LOJISTIK_SEVKIYAT_PATH,
 } from '@/lib/lojistik/navigation';
 
 function QorelogisticsBrand({ collapsed = false }: { collapsed?: boolean }) {
@@ -61,6 +63,13 @@ const NAV_ITEMS: NavItem[] = [
     match: (p) => p.startsWith(LOJISTIK_COUNTS_PATH),
   },
   {
+    key: 'sevkiyatlar',
+    label: 'Sevkiyatlar',
+    icon: Truck,
+    href: LOJISTIK_SEVKIYAT_PATH,
+    match: (p) => p.startsWith(LOJISTIK_SEVKIYAT_PATH),
+  },
+  {
     key: 'bekleyen',
     label: 'Bekleyen Siparişler',
     icon: ClipboardList,
@@ -76,8 +85,8 @@ const NAV_ITEMS: NavItem[] = [
     key: 'olustur',
     label: 'Sipariş Oluştur',
     icon: FilePlus,
-    href: '/merkez-siparis',
-    match: (p) => p.startsWith('/merkez-siparis') || p.startsWith('/siparisler/olustur'),
+    href: '/siparisler/olustur',
+    match: (p) => p.startsWith('/siparisler/olustur'),
   },
   {
     key: 'toplu',

@@ -372,3 +372,79 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     uyarilar,
   };
 }
+
+/* ——— Hastane sevkiyatı: sınırlı depo stoğunun dağıtımı ——— */
+
+export interface SevkAdayi {
+  /** Satırı geri eşlemek için serbest kimlik (ör. labId) */
+  id: string;
+  /** Bu kurumun ihtiyacı (kutu) */
+  ihtiyac: number;
+  /**
+   * Kurumun eldekiyle kaç gün idare edebileceği. Küçük olan daha aciildir;
+   * null "talep sinyali yok" demektir ve en sona düşer.
+   */
+  kapsamaGun: number | null;
+}
+
+export interface SevkPayi {
+  id: string;
+  ihtiyac: number;
+  /** Depoda olan kadarıyla sevk edilebilecek adet */
+  sevkAdedi: number;
+  /** Depo stoğu yetmediği için karşılanamayan adet */
+  karsilanamayan: number;
+}
+
+export interface DagitimSonucu {
+  paylar: SevkPayi[];
+  /** Dağıtım sonrası depoda kalan */
+  kalanStok: number;
+  /** Toplam karşılanamayan adet */
+  toplamKarsilanamayan: number;
+}
+
+/**
+ * Bir ürünün sınırlı ana depo stoğunu hastanelere dağıtır.
+ *
+ * Öncelik **aciliyettir**: kapsama günü en düşük olan kurum önce TAM karşılanır.
+ * Orantılı bölüştürme yerine bu seçildi; stok kıtken herkesi eksik bırakmak,
+ * tükenmek üzere olan labı da tükenmeyecek olanı da riske atar. Böylece stok
+ * biteceği ana en yakın kurumlar korunur.
+ *
+ * Eşit aciliyette büyük ihtiyaç önce gelir (deterministik olsun diye id ile
+ * sabitlenir), böylece aynı girdi her zaman aynı dağıtımı üretir.
+ */
+export function dagitimYap(adaylar: SevkAdayi[], depoStogu: number): DagitimSonucu {
+  const sirali = [...adaylar].sort((a, b) => {
+    const ak = a.kapsamaGun ?? Number.POSITIVE_INFINITY;
+    const bk = b.kapsamaGun ?? Number.POSITIVE_INFINITY;
+    if (ak !== bk) return ak - bk;
+    if (b.ihtiyac !== a.ihtiyac) return b.ihtiyac - a.ihtiyac;
+    return a.id.localeCompare(b.id);
+  });
+
+  let kalan = Math.max(0, Math.floor(depoStogu));
+  const payById = new Map<string, SevkPayi>();
+  sirali.forEach(aday => {
+    const ihtiyac = Math.max(0, Math.ceil(aday.ihtiyac));
+    const sevkAdedi = Math.min(ihtiyac, kalan);
+    kalan -= sevkAdedi;
+    payById.set(aday.id, {
+      id: aday.id,
+      ihtiyac,
+      sevkAdedi,
+      karsilanamayan: ihtiyac - sevkAdedi,
+    });
+  });
+
+  // Çağıranın verdiği sırayı koru — tablo sıralaması dağıtımdan bağımsız olsun.
+  const paylar = adaylar.map(
+    a => payById.get(a.id) ?? { id: a.id, ihtiyac: 0, sevkAdedi: 0, karsilanamayan: 0 },
+  );
+  return {
+    paylar,
+    kalanStok: kalan,
+    toplamKarsilanamayan: paylar.reduce((sum, p) => sum + p.karsilanamayan, 0),
+  };
+}

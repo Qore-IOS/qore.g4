@@ -14,6 +14,7 @@ import { useDepots } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
+import { LOJISTIK_SEVKIYAT_PATH } from '@/lib/lojistik/navigation';
 import LojistikSiparisView from '@/components/LojistikSiparisView';
 import { siparislerLogger } from '@/lib/logger';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
@@ -644,7 +645,7 @@ export default function SiparislerPanel() {
               {[
                 { label: 'Ürün Talep', icon: <ClipboardPlus className="h-4 w-4" />, href: '/urun-talep' },
                 { label: 'Ürün İade', icon: <Undo className="h-4 w-4" />, href: '/urun-iade' },
-                { label: 'Toplu Sipariş', icon: <FileSpreadsheet className="h-4 w-4" />, href: '/merkez-siparis' },
+                { label: 'Sevkiyat Planı', icon: <FileSpreadsheet className="h-4 w-4" />, href: LOJISTIK_SEVKIYAT_PATH },
               ].map(item => (
                 <button key={item.href}
                   onClick={() => { router.push(item.href); setMoreMenuOpen(false); }}

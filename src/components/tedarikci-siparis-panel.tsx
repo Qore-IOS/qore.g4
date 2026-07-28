@@ -638,7 +638,7 @@ export default function TedarikciSiparisPanel() {
         depotRecords.forEach(record => add(record as Record<string, number>));
 
         const cihazMap = new Map<string, number>();
-        for (const [rawCode, tests] of Object.entries(cihazUstuRecord || {})) {
+        for (const [rawCode, tests] of Object.entries(cihazUstuRecord?.byCode || {})) {
           const code = normCode(rawCode);
           if (!code) continue;
           cihazMap.set(code, (cihazMap.get(code) || 0) + (Number(tests) || 0));
