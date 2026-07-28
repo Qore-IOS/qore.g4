@@ -87,7 +87,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
-import type { OlcumGirdisi } from '@/lib/lab-period/types';
+import type { LabDonemSnapshot, OlcumGirdisi } from '@/lib/lab-period/types';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
 import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
@@ -741,6 +741,86 @@ function CtxMenu({ menu, onApply, onClose }: {
   );
 }
 
+/**
+ * Satırın türetilmiş sütunlarını (9, 14, 18 ve verimlilik farkları) yeniden
+ * hesaplar. Manuel sütunlar her değiştiğinde çağrılır; formül tek yerde dursun
+ * diye ayrıldı.
+ */
+function turetilmisAlanlariHesapla(row: TableRow): TableRow {
+  const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
+  const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
+  const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
+  const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
+  const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+
+  // Beklenen Test = Sevk.Sonrası − D.Sonu Toplam ; Stok Doğruluk = Beklenen − Kümülatif
+  const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
+  const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
+  const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
+  const rutin = row.hakEdis;
+  const kitVerimlilikFark = row.kumulatifTotal - rutin;
+  const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
+
+  return {
+    ...row,
+    totalAyBasiStok,
+    ayBasiSevkiyatTest,
+    sevkiyatlarSonrasiTotalTest,
+    donemSonuToplamTest,
+    beklenenTestSayisi,
+    stokDogrulukFark,
+    stokDogrulukYuzde,
+    kitVerimlilikFark,
+    kitVerimlilikYuzde,
+  };
+}
+
+/**
+ * Lab-dönem snapshot'ındaki ölçümleri tabloya uygular.
+ *
+ * Ay başı stok, ay başı cihaz üstü ve kümülatif artık tek doğruluk kaynağında
+ * tutuluyor: veri hangi panelden girilmiş olursa olsun (lab sayım, maliyet
+ * sayım, cihaz üstü/kümülatif hesaplama) tablo dolu açılır. Snapshot, önceki
+ * dönemden devredilen tahmini değerin ve bu dönemin ara kaydının önüne geçer —
+ * ikisi de bu üç sütun için snapshot'ın türevidir.
+ *
+ * Kullanıcı hücreyi değiştirip kaydederse snapshot da güncellenir, yani bir
+ * sonraki açılışta yeni değer gelir.
+ */
+function uygulaLabDonemSnapshot(
+  rows: TableRow[],
+  snapshotlar: Record<string, LabDonemSnapshot>,
+): { rows: TableRow[]; doldurulan: number } {
+  let doldurulan = 0;
+  const yeni = rows.map(row => {
+    const snap = snapshotlar[String(row.labId || '').trim()];
+    if (!snap) return row;
+    const kod = String(row.stokKodu || '').trim();
+    if (!kod) return row;
+
+    const stok = snap.stok?.[kod];
+    const cihaz = snap.cihazUstu?.[kod];
+    const kumulatif = snap.kumulatif?.[kod];
+    if (!stok && !cihaz && !kumulatif) return row;
+
+    const guncel: TableRow = {
+      ...row,
+      baslangicStokuKutu: stok ? stok.deger : row.baslangicStokuKutu,
+      ayBasiCihazUstuTest: cihaz ? cihaz.deger : row.ayBasiCihazUstuTest,
+      kumulatifTotal: kumulatif ? kumulatif.deger : row.kumulatifTotal,
+    };
+    if (
+      guncel.baslangicStokuKutu !== row.baslangicStokuKutu ||
+      guncel.ayBasiCihazUstuTest !== row.ayBasiCihazUstuTest ||
+      guncel.kumulatifTotal !== row.kumulatifTotal
+    ) {
+      doldurulan += 1;
+    }
+    return turetilmisAlanlariHesapla(guncel);
+  });
+  return { rows: yeni, doldurulan };
+}
+
 export default function TotalVerimlilikPanel({
   hospitals = [],
   productCodes = [],
@@ -1306,34 +1386,41 @@ export default function TotalVerimlilikPanel({
         }
 
         // Hesaplanan alanları güncelle
-        const computedRows = newRows.map(row => {
-          const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
-          const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
-          const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
-          const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
-          const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
+        const computedRows = newRows.map(turetilmisAlanlariHesapla);
 
-          // Beklenen Test = Sevk.Sonrası − D.Sonu Toplam ; Stok Doğruluk = Beklenen − Kümülatif
-          const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
-          const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
-          const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
-          const rutin = row.hakEdis;
-          const kitVerimlilikFark = row.kumulatifTotal - rutin;
-          const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
+        // Lab-dönem tek doğruluk kaynağı: sayım / cihaz üstü / kümülatif hangi
+        // panelden girilmiş olursa olsun tablo dolu açılsın.
+        let labDonemSnapshotlari: Record<string, LabDonemSnapshot> = {};
+        try {
+          const { getLabPeriodSnapshots } = await import('@/actions/labPeriodActions');
+          const labIdleri = Array.from(
+            new Set(newRows.map(r => String(r.labId || '').trim()).filter(Boolean)),
+          );
+          labDonemSnapshotlari = await getLabPeriodSnapshots(
+            labIdleri,
+            selectedYear,
+            selectedMonth + 1, // selectedMonth 0-indekslidir
+            currentCompanyId,
+            isSuperAdmin,
+          );
+        } catch (e) {
+          totalVerimlilikLogger.warn('Lab-dönem verileri okunamadı; tablo devir değerleriyle açılıyor', {
+            poolId: selectedPoolId,
+            error: e,
+          });
+        }
 
-          return {
-            ...row,
-            totalAyBasiStok,
-            ayBasiSevkiyatTest,
-            sevkiyatlarSonrasiTotalTest,
-            donemSonuToplamTest,
-            beklenenTestSayisi,
-            stokDogrulukFark,
-            stokDogrulukYuzde,
-            kitVerimlilikFark,
-            kitVerimlilikYuzde,
-          };
-        });
+        /** Snapshot'ı uygular ve kaç satırın dolduğunu bildirir. */
+        const snapshotluRows = (girdi: TableRow[]) => {
+          const { rows: cikti, doldurulan } = uygulaLabDonemSnapshot(girdi, labDonemSnapshotlari);
+          if (doldurulan > 0) {
+            toast({
+              title: 'Kayıtlı sayımlar yüklendi',
+              description: `${doldurulan} satır lab-dönem kaydından dolduruldu.`,
+            });
+          }
+          return cikti;
+        };
 
         // Ara kayıt kontrolü - varsa yükle
         const araKayitDocId = `araKayit-${selectedPoolId}-${selectedYear}-${selectedMonth}`;
@@ -1368,39 +1455,14 @@ export default function TotalVerimlilikPanel({
             });
 
             // Hesaplanan alanları yeniden hesapla
-            const recomputedRows = mergedRows.map(row => {
-              const totalAyBasiStok = (row.baslangicStokuKutu * row.ambalajDegeri) + row.ayBasiCihazUstuTest;
-              const ayBasiSevkiyatTest = row.ayBasiSevkiyatKutu * row.ambalajDegeri;
-              const sevkiyatlarKutuToplam = row.ayBasiSevkiyatKutu + row.goztepeSevkiyat + row.kurumlarArasiSevk + row.lojistikAraTransfer;
-              const sevkiyatlarSonrasiTotalTest = (sevkiyatlarKutuToplam * row.ambalajDegeri) + totalAyBasiStok;
-              const donemSonuToplamTest = (row.donemSonuStokKutu * row.ambalajDegeri) + row.donemSonuCihazUstuTest;
-              const beklenenTestSayisi = sevkiyatlarSonrasiTotalTest - donemSonuToplamTest;
-              const stokDogrulukFark = beklenenTestSayisi - row.kumulatifTotal;
-              const stokDogrulukYuzde = row.kumulatifTotal !== 0 ? (stokDogrulukFark / row.kumulatifTotal) * 100 : 0;
-              const rutin = row.hakEdis;
-              const kitVerimlilikFark = row.kumulatifTotal - rutin;
-              const kitVerimlilikYuzde = row.kumulatifTotal !== 0 ? (kitVerimlilikFark / row.kumulatifTotal) * 100 : 0;
-
-              return {
-                ...row,
-                totalAyBasiStok,
-                ayBasiSevkiyatTest,
-                sevkiyatlarSonrasiTotalTest,
-                donemSonuToplamTest,
-                beklenenTestSayisi,
-                stokDogrulukFark,
-                stokDogrulukYuzde,
-                kitVerimlilikFark,
-                kitVerimlilikYuzde,
-              };
-            });
+            const recomputedRows = mergedRows.map(turetilmisAlanlariHesapla);
 
             // Inter-lab transferleri de yükle
             if (araKayitData.interLabTransfers) {
               setInterLabTransfers(araKayitData.interLabTransfers);
             }
 
-            setRows(recomputedRows);
+            setRows(snapshotluRows(recomputedRows));
             setAraKayitInfo({
               exists: true,
               savedAt: araKayitData.updatedAt?.toDate?.() || new Date(),
@@ -1412,12 +1474,12 @@ export default function TotalVerimlilikPanel({
               description: `${araKayitData.createdByName || 'Bilinmiyor'} tarafından kaydedilen ara kayıt yüklendi.`,
             });
           } else {
-            setRows(computedRows);
+            setRows(snapshotluRows(computedRows));
             setAraKayitInfo({ exists: false });
           }
         } catch (araKayitError) {
           console.error('Error loading ara kayit:', araKayitError);
-          setRows(computedRows);
+          setRows(snapshotluRows(computedRows));
           setAraKayitInfo({ exists: false });
         }
       } catch (error) {
