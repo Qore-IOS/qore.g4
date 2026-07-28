@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import { differenceInDays, isValid, parse } from 'date-fns';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -34,11 +35,15 @@ import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 import {
   dagitimYap,
   hesaplaOneri,
+  hesaplaRiskliSevk,
   hesaplaTuketimTrendi,
   type DemandBasis,
   type OneriSonucu,
   type OneriTipi,
+  type RiskliSevkSonucu,
+  type SevkLotu,
 } from '@/lib/lojistik/supplier-order-advisor';
+import type { DepoLotu } from '@/actions/stokActions';
 
 /* ——— Lojistik görünümüyle ortak tasarım ——— */
 const PANEL_CLASS =
@@ -113,6 +118,22 @@ interface SevkSatiri {
   karsilanamayan: number;
   /** Bu ürün için ana depodaki toplam stok */
   anaDepoStok: number;
+  /** Kurumun tanımlı max adedi (0 = tanımsız) */
+  kurumMax: number;
+  /** Sevk edilecek lotların miad riski */
+  risk: RiskliSevkSonucu;
+  /** Bu satıra ayrılan lotlar (FEFO) */
+  sevkLotlari: SevkLotu[];
+}
+
+/** "dd.MM.yyyy" biçimindeki miadın bugüne kalan gün sayısı; okunamazsa null. */
+function miadaKalanGun(miad: string): number | null {
+  if (!miad) return null;
+  const tarih = parse(miad, 'dd.MM.yyyy', new Date());
+  if (!isValid(tarih)) return null;
+  const bugun = new Date();
+  bugun.setHours(0, 0, 0, 0);
+  return differenceInDays(tarih, bugun);
 }
 
 async function fetchMinMaxRules(
@@ -210,6 +231,7 @@ export default function HastaneSevkiyatPanel() {
   });
 
   const [anaDepoStokByCode, setAnaDepoStokByCode] = useState<Map<string, number>>(new Map());
+  const [anaDepoLotlariByCode, setAnaDepoLotlariByCode] = useState<Map<string, SevkLotu[]>>(new Map());
   const [labStokByLab, setLabStokByLab] = useState<Map<string, Map<string, number>>>(new Map());
   const [cihazUstuByLab, setCihazUstuByLab] = useState<Map<string, Map<string, number>>>(new Map());
   const [kumulatifByLab, setKumulatifByLab] = useState<Map<string, Map<string, number>>>(new Map());
@@ -250,10 +272,16 @@ export default function HastaneSevkiyatPanel() {
           return { year: d.getFullYear(), monthIndex: d.getMonth() };
         });
 
-        const [depoStok, sayim, cihazUstu, kumulatif] = await Promise.all([
+        const [depoStok, depoLotlari, sayim, cihazUstu, kumulatif] = await Promise.all([
           anaDepo.ceomedEnabled
             ? stok.getCeomedDepoStockByCode(anaDepo.id, currentCompanyId, isSuperAdmin)
             : stok.getDepotStockByCode(anaDepo.id, currentCompanyId, isSuperAdmin),
+          stok.getDepotLotsByCode(
+            anaDepo.id,
+            Boolean(anaDepo.ceomedEnabled),
+            currentCompanyId,
+            isSuperAdmin,
+          ),
           stok.getLabCountStockForPeriod(labIds, selectedYear, monthIndex),
           stok.getCihazUstuForPeriod(labIds, selectedYear, selectedMonth, currentCompanyId, isSuperAdmin),
           stok.getTotalEfficiencyKumulatifForPeriods(periods, currentCompanyId, isSuperAdmin),
@@ -264,6 +292,26 @@ export default function HastaneSevkiyatPanel() {
         for (const [rawCode, qty] of Object.entries(depoStok || {})) {
           const code = normCode(rawCode);
           if (code) depoMap.set(code, (depoMap.get(code) || 0) + (Number(qty) || 0));
+        }
+
+        // Lotlar FEFO sırasında tutulur; miadı okunamayanlar en sona düşer.
+        const lotMap = new Map<string, SevkLotu[]>();
+        for (const [rawCode, lotlar] of Object.entries(
+          (depoLotlari || {}) as Record<string, DepoLotu[]>,
+        )) {
+          const code = normCode(rawCode);
+          if (!code) continue;
+          const liste = (lotlar || []).map(l => ({
+            lot: l.lot || '—',
+            miatGun: miadaKalanGun(l.miad),
+            adet: Number(l.adet) || 0,
+          }));
+          liste.sort((a, b) => {
+            if (a.miatGun === null) return b.miatGun === null ? 0 : 1;
+            if (b.miatGun === null) return -1;
+            return a.miatGun - b.miatGun;
+          });
+          lotMap.set(code, [...(lotMap.get(code) || []), ...liste]);
         }
 
         const keyOf = (p: { year: number; monthIndex: number }) =>
@@ -289,6 +337,7 @@ export default function HastaneSevkiyatPanel() {
         });
 
         setAnaDepoStokByCode(depoMap);
+        setAnaDepoLotlariByCode(lotMap);
         setLabStokByLab(toLabMap(sayim.byLab));
         setCihazUstuByLab(toLabMap(cihazUstu.byLab));
         setKumulatifByLab(perPeriod[perPeriod.length - 1].byLab);
@@ -335,7 +384,8 @@ export default function HastaneSevkiyatPanel() {
     const eksikSayim = Math.max(0, sayimEksik.total - sayimEksik.counted);
 
     // 1) Kurum × ürün bazında ihtiyaç
-    const araSatirlar: Array<Omit<SevkSatiri, 'sevkAdedi' | 'karsilanamayan'>> = [];
+    type AraSatir = Omit<SevkSatiri, 'sevkAdedi' | 'karsilanamayan' | 'risk' | 'sevkLotlari'>;
+    const araSatirlar: AraSatir[] = [];
     labIds.forEach((labId, index) => {
       const rules = rulesByLab[index];
       if (!rules) return;
@@ -388,6 +438,8 @@ export default function HastaneSevkiyatPanel() {
           sahaStok: 0,
           cihazUstuKutu,
           acikSiparis: 0,
+          // Kurumun taşıyabileceği tavan: sevk sonrası eldeki toplam bunu aşmasın.
+          kurumMax: max,
           sayimEksikLab: eksikSayim,
           toplamLab: sayimEksik.total,
         });
@@ -404,6 +456,7 @@ export default function HastaneSevkiyatPanel() {
           testAdedi,
           oneri,
           anaDepoStok: anaDepoStokByCode.get(canonical) || 0,
+          kurumMax: max,
         });
       });
     });
@@ -429,12 +482,46 @@ export default function HastaneSevkiyatPanel() {
         depoStok,
       );
       const payByKey = new Map(paylar.map(p => [p.id, p]));
+
+      // 3) Lotlar depodan FEFO ile ayrılır ve aynı aciliyet sırasıyla kurumlara
+      // yazılır: en acil kurum en yakın miatlı lotu alır. Böylece hem miada
+      // yakın stok en hızlı tüketen kuruma gider hem de her satırın gerçekte
+      // hangi lotu aldığı — dolayısıyla riski — belli olur.
+      const havuz = (anaDepoLotlariByCode.get(canonical) || []).map(l => ({ ...l }));
+      let havuzIndex = 0;
+      const lotlarByKey = new Map<string, SevkLotu[]>();
+      [...grup]
+        .sort((a, b) => (payByKey.get(a.key)?.sira ?? 0) - (payByKey.get(b.key)?.sira ?? 0))
+        .forEach(satir => {
+          let kalan = payByKey.get(satir.key)?.sevkAdedi ?? 0;
+          const ayrilan: SevkLotu[] = [];
+          while (kalan > 0 && havuzIndex < havuz.length) {
+            const lot = havuz[havuzIndex];
+            const alinan = Math.min(kalan, lot.adet);
+            if (alinan > 0) {
+              ayrilan.push({ lot: lot.lot, miatGun: lot.miatGun, adet: alinan });
+              lot.adet -= alinan;
+              kalan -= alinan;
+            }
+            if (lot.adet <= 0) havuzIndex += 1;
+          }
+          lotlarByKey.set(satir.key, ayrilan);
+        });
+
       grup.forEach(satir => {
         const pay = payByKey.get(satir.key);
+        const sevkLotlari = lotlarByKey.get(satir.key) ?? [];
         sonuc.push({
           ...satir,
           sevkAdedi: pay?.sevkAdedi ?? 0,
           karsilanamayan: pay?.karsilanamayan ?? 0,
+          sevkLotlari,
+          risk: hesaplaRiskliSevk({
+            lotlar: sevkLotlari,
+            gunlukIhtiyac: satir.oneri.gunlukIhtiyac,
+            // Kurumda önce tüketilecek stok: sayım stoğu + cihaz üstü.
+            mevcutStok: satir.labStok + satir.cihazUstuKutu,
+          }),
         });
       });
     });
@@ -452,12 +539,18 @@ export default function HastaneSevkiyatPanel() {
   }, [
     anaDepo, enabled, yeterlilikGun, labIds, rulesByLab, labInfoById,
     labStokByLab, cihazUstuByLab, kumulatifByLab, seriByLab, seriDonemleri,
-    productByStockCode, anaDepoStokByCode, demandBasis, daysInPeriod, sayimEksik,
+    productByStockCode, anaDepoStokByCode, anaDepoLotlariByCode, demandBasis,
+    daysInPeriod, sayimEksik,
   ]);
 
   const sevkEdilecek = useMemo(() => rows.filter(r => r.sevkAdedi > 0), [rows]);
   const toplamSevk = useMemo(() => sevkEdilecek.reduce((s, r) => s + r.sevkAdedi, 0), [sevkEdilecek]);
   const toplamKarsilanamayan = useMemo(() => rows.reduce((s, r) => s + r.karsilanamayan, 0), [rows]);
+  const toplamRiskli = useMemo(() => rows.reduce((s, r) => s + r.risk.riskliAdet, 0), [rows]);
+  const maxKirpilanSatir = useMemo(
+    () => rows.filter(r => r.oneri.maxKirpma > 0).length,
+    [rows],
+  );
   const oneriOzeti = useMemo(() => {
     const sayac: Record<OneriTipi, number> = {
       'acil-siparis': 0, siparis: 0, yeterli: 0, 'fazla-stok': 0, 'veri-yok': 0,
@@ -501,12 +594,22 @@ export default function HastaneSevkiyatPanel() {
                   stokAdi: s.stokAdi,
                   labStok: s.labStok,
                   cihazUstuKutu: s.cihazUstuKutu,
+                  kurumMax: s.kurumMax,
                   gerekliAdet: s.oneri.gerekliAdet,
                   sevkAdedi: s.sevkAdedi,
                   karsilanamayan: s.karsilanamayan,
+                  maxKirpma: s.oneri.maxKirpma,
+                  riskliAdet: s.risk.riskliAdet,
+                  // Sevk anındaki lot ayrımı sonradan denetlenebilsin diye saklanır.
+                  lotlar: s.sevkLotlari.map(l => ({
+                    lot: l.lot,
+                    miatGun: l.miatGun,
+                    adet: l.adet,
+                  })),
                 })),
                 toplamKalem: satirlar.length,
                 toplamAdet: satirlar.reduce((sum, s) => sum + s.sevkAdedi, 0),
+                toplamRiskliAdet: satirlar.reduce((sum, s) => sum + s.risk.riskliAdet, 0),
                 createdBy: currentUserProfile?.name || currentUser?.email || 'Bilinmiyor',
                 createdById: currentUserProfile?.uid || currentUser?.uid || '',
                 createdAt: serverTimestamp(),
@@ -705,9 +808,16 @@ export default function HastaneSevkiyatPanel() {
                     <th className="px-4 py-4">Ürün</th>
                     <th className="px-4 py-4 text-right">Lab Stok</th>
                     <th className="px-4 py-4 text-right">Cihaz Üstü</th>
+                    <th className="px-4 py-4 text-right" title="Kurumun tanımlı max adedi">Kurum Max</th>
                     <th className="px-4 py-4 text-right">Kapsama</th>
                     <th className="px-4 py-4 text-right">Gerekli</th>
                     <th className="px-4 py-4 text-right">Ana Depo</th>
+                    <th
+                      className="px-4 py-4 text-right"
+                      title="Sevk edilen lotların miadı dolmadan tüketilemeyecek kısmı"
+                    >
+                      Riskli
+                    </th>
                     <th className="px-5 py-4 text-right">Sevk</th>
                   </tr>
                 </thead>
@@ -735,6 +845,26 @@ export default function HastaneSevkiyatPanel() {
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                             {row.cihazUstuKutu > 0 ? row.cihazUstuKutu : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
                           </td>
+                          <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-semibold dark:border-fuchsia-300/15">
+                            {row.kurumMax > 0 ? (
+                              <span
+                                className={
+                                  row.oneri.maxKirpma > 0
+                                    ? 'font-black text-amber-700 dark:text-amber-300'
+                                    : 'text-[#70857e] dark:text-[#8e7c9a]'
+                                }
+                                title={
+                                  row.oneri.maxKirpma > 0
+                                    ? `Tavan nedeniyle ${row.oneri.maxKirpma} kutu düşüldü`
+                                    : undefined
+                                }
+                              >
+                                {row.kurumMax}
+                              </span>
+                            ) : (
+                              <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                            )}
+                          </td>
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold dark:border-fuchsia-300/15">
                             {row.oneri.kapsamaGun === null ? (
                               <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
@@ -749,6 +879,27 @@ export default function HastaneSevkiyatPanel() {
                           </td>
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-semibold text-[#70857e] dark:border-fuchsia-300/15 dark:text-[#8e7c9a]">
                             {row.anaDepoStok}
+                          </td>
+                          <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums dark:border-fuchsia-300/15">
+                            {row.sevkAdedi === 0 ? (
+                              <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                            ) : row.risk.riskliAdet > 0 ? (
+                              <span
+                                className="font-black text-amber-700 dark:text-amber-300"
+                                title={`En yakın miad ${row.risk.enYakinMiatGun} gün`}
+                              >
+                                ⚠ {row.risk.riskliAdet}
+                              </span>
+                            ) : row.risk.degerlendirilemeyenAdet > 0 ? (
+                              <span
+                                className="font-bold text-[#70857e] dark:text-[#8e7c9a]"
+                                title="Miad bilgisi olmayan lotlar sevk ediliyor"
+                              >
+                                ?
+                              </span>
+                            ) : (
+                              <span className="font-bold text-emerald-600 dark:text-fuchsia-300">0</span>
+                            )}
                           </td>
                           <td className="border-t border-emerald-950/10 px-5 py-3.5 text-right dark:border-fuchsia-300/15">
                             <span className="flex flex-col items-end gap-1">
@@ -769,7 +920,7 @@ export default function HastaneSevkiyatPanel() {
                         </tr>
                         {isOpen && (
                           <tr>
-                            <td colSpan={8} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                            <td colSpan={10} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
                               <div className="rounded-2xl border border-emerald-950/10 bg-white/70 p-4 dark:border-fuchsia-300/15 dark:bg-white/[0.04]">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${ONERI_STILI[row.oneri.tip].chip}`}>
@@ -791,6 +942,57 @@ export default function HastaneSevkiyatPanel() {
                                     Ana depoda yeterli stok yok: {row.oneri.oneriAdet} gerekiyordu, {row.sevkAdedi} sevk edilebiliyor.
                                     Depoda bu üründen toplam {row.anaDepoStok} kutu var ve daha acil laboratuvarlara öncelik verildi.
                                   </p>
+                                )}
+                                {row.sevkLotlari.length > 0 && (
+                                  <div className="mt-3 border-t border-emerald-950/10 pt-3 dark:border-fuchsia-300/15">
+                                    <p className="text-[11px] font-extrabold uppercase tracking-[0.08em] text-[#587169] dark:text-[#a994b5]">
+                                      Ayrılan lotlar (miadı yakından uzağa)
+                                    </p>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                      {row.sevkLotlari.map((lot, i) => {
+                                        const riskli =
+                                          row.risk.detay.find(d => d.lot === lot.lot)?.riskliAdet ?? 0;
+                                        return (
+                                          <span
+                                            key={`${lot.lot}-${i}`}
+                                            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold ${
+                                              riskli > 0
+                                                ? 'border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/20 dark:text-amber-200'
+                                                : 'border-emerald-950/10 bg-white/70 text-[#29473f] dark:border-fuchsia-300/20 dark:bg-white/5 dark:text-[#d6bfe3]'
+                                            }`}
+                                          >
+                                            <span className="font-mono">{lot.lot}</span>
+                                            <span>· {lot.adet} kutu</span>
+                                            <span className="opacity-70">
+                                              ·{' '}
+                                              {lot.miatGun === null
+                                                ? 'miad yok'
+                                                : `${lot.miatGun} gün`}
+                                            </span>
+                                            {riskli > 0 && <span>· {riskli} riskli</span>}
+                                          </span>
+                                        );
+                                      })}
+                                    </div>
+                                    {row.risk.riskliAdet > 0 ? (
+                                      <p className="mt-2 flex items-start gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                                        Kurum günde {fmt(row.oneri.gunlukIhtiyac)} kutu tüketiyor ve sevkten
+                                        önce elinde {row.labStok + row.cihazUstuKutu} kutu var; bu hızla{' '}
+                                        {row.risk.riskliAdet} kutu miadı dolmadan kullanılamaz. Daha uzak miatlı
+                                        lot varsa onu sevk edin veya adedi düşürün.
+                                      </p>
+                                    ) : row.risk.degerlendirilemeyenAdet > 0 ? (
+                                      <p className="mt-2 text-xs font-semibold text-[#587169] dark:text-[#a994b5]">
+                                        {row.risk.degerlendirilemeyenAdet} kutunun miad bilgisi yok; miad riski
+                                        hesaplanamadı.
+                                      </p>
+                                    ) : (
+                                      <p className="mt-2 text-xs font-semibold text-[#587169] dark:text-[#a994b5]">
+                                        Sevk edilen tüm lotlar miadı dolmadan tüketilebiliyor.
+                                      </p>
+                                    )}
+                                  </div>
                                 )}
                                 {row.oneri.uyarilar.length > 0 && (
                                   <ul className="mt-2 space-y-1">
@@ -838,6 +1040,25 @@ export default function HastaneSevkiyatPanel() {
                 <span>
                   Ana depo stoğu {toplamKarsilanamayan} kutu yetersiz. Dağıtım aciliyet sırasına göre yapıldı;
                   eksik kalan laboratuvarlar için tedarikçi siparişi gerekebilir.
+                </span>
+              </p>
+            )}
+            {toplamRiskli > 0 && (
+              <p className="flex items-start gap-1.5 border-t border-emerald-950/10 px-5 py-2.5 text-xs font-semibold text-amber-700 dark:border-fuchsia-300/15 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Sevk edilecek lotların {toplamRiskli} kutusu kurumda miadı dolmadan tüketilemeyecek.
+                  Satırı açıp hangi lotun riskli olduğunu görebilir, daha uzak miatlı lot varsa onu tercih
+                  edebilirsiniz.
+                </span>
+              </p>
+            )}
+            {maxKirpilanSatir > 0 && (
+              <p className="flex items-start gap-1.5 border-t border-emerald-950/10 px-5 py-2.5 text-xs font-semibold text-[#587169] dark:border-fuchsia-300/15 dark:text-[#a994b5]">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {maxKirpilanSatir} satırda hedef gün daha fazlasını isterdi; kurumların tanımlı max adedi
+                  aşılmasın diye sevk miktarı düşürüldü.
                 </span>
               </p>
             )}

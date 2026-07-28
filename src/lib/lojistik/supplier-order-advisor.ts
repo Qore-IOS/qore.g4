@@ -99,6 +99,12 @@ export interface OneriGirdisi {
   sayimEksikLab?: number;
   /** Kapsamdaki toplam laboratuvar sayısı */
   toplamLab?: number;
+  /**
+   * Kurumun tanımlı max adedi (kutu). Verilirse öneri, sevk sonrası eldeki
+   * toplam varlık bu tavanı aşmayacak şekilde kırpılır. Hastane sevkiyatında
+   * zorunlu; tedarikçi siparişinde tavan yoktur (0/undefined geçilir).
+   */
+  kurumMax?: number;
 }
 
 export interface OneriSonucu {
@@ -114,6 +120,10 @@ export interface OneriSonucu {
   gerekliAdet: number;
   /** Nihai öneri (0 = sipariş verme) */
   oneriAdet: number;
+  /** Kurum max tavanı uygulanmadan önceki öneri */
+  tavansizOneriAdet: number;
+  /** Max tavanı yüzünden öneriden düşülen adet (0 = tavan devrede değil) */
+  maxKirpma: number;
   /** Trend uygulanmasaydı çıkacak öneri */
   tabanOneriAdet: number;
   /** Trendin öneriye etkisi (+ artırdı, − azalttı) */
@@ -230,6 +240,7 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     tedarikGun = 0,
     sayimEksikLab = 0,
     toplamLab = 0,
+    kurumMax = 0,
   } = girdi;
 
   const tabanGunluk =
@@ -277,6 +288,8 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
       kapsamaGun: null,
       gerekliAdet: 0,
       oneriAdet: 0,
+      tavansizOneriAdet: 0,
+      maxKirpma: 0,
       tabanOneriAdet: 0,
       trendEtkisi: 0,
       tip: 'veri-yok',
@@ -292,10 +305,25 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
 
   const kapsamaGun = toplamVarlik / gunlukIhtiyac;
   const gerekliAdet = Math.ceil(gunlukIhtiyac * hedefGun);
-  const oneriAdet = Math.max(0, gerekliAdet - toplamVarlik);
+  const tavansizOneriAdet = Math.max(0, gerekliAdet - toplamVarlik);
+
+  // Kurum max tavanı: hedef gün max/maxGün periyodundan uzun olduğunda ihtiyaç
+  // kurumun taşıyabileceğini aşar. Tavan, sevk sonrası eldeki toplam varlığa
+  // uygulanır — eldeki zaten max'ı aşıyorsa tavan boşluğu 0'dır.
+  const tavanBoslugu = kurumMax > 0 ? Math.max(0, Math.floor(kurumMax - toplamVarlik)) : Infinity;
+  const oneriAdet = Math.min(tavansizOneriAdet, tavanBoslugu);
+  const maxKirpma = tavansizOneriAdet - oneriAdet;
+
   const tabanGerekli = Math.ceil(tabanGunluk * hedefGun);
-  const tabanOneriAdet = Math.max(0, tabanGerekli - toplamVarlik);
+  const tabanOneriAdet = Math.min(Math.max(0, tabanGerekli - toplamVarlik), tavanBoslugu);
   const trendEtkisi = oneriAdet - tabanOneriAdet;
+
+  if (maxKirpma > 0) {
+    uyarilar.push(
+      `${hedefGun} günlük hedef ${tavansizOneriAdet} kutu gerektiriyordu; kurumun tanımlı max'ı ` +
+        `(${kurumMax} kutu) aşılmasın diye ${oneriAdet} kutuya çekildi.`,
+    );
+  }
 
   const kritikGun = tedarikGun > 0 ? tedarikGun + 7 : VARSAYILAN_KRITIK_GUN;
 
@@ -325,6 +353,14 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     `Günlük ihtiyaç ${trNum(gunlukIhtiyac)} kutu. Elde ${toplamVarlik} kutu var ` +
     `(${varlikDetayi}) → ${trNum(kapsamaGun, 0)} gün yeter.`;
 
+  // Tavan devredeyse gerekçe bunu açıkça söyler — okuyan, sayının neden
+  // hedeften düşük olduğunu tabloyu terk etmeden görsün.
+  const tavanCumlesi =
+    maxKirpma > 0
+      ? `Kurumun tanımlı max'ı ${kurumMax} kutu; ${tavansizOneriAdet} kutu bu tavanı aşacağı için ` +
+        `${maxKirpma} kutu düşüldü.`
+      : '';
+
   let tip: OneriTipi;
   let baslik: string;
   let aciklama: string;
@@ -335,13 +371,22 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     aciklama =
       `${temelCumle} Bu, kritik eşiğin (${kritikGun} gün) altında. ` +
       `${hedefGun} günlük hedef için ${gerekliAdet} kutu gerekiyor, ${oneriAdet} kutu sipariş edin. ` +
-      `${kaynakCumlesi} ` + trendCumlesi;
+      `${tavanCumlesi} ${kaynakCumlesi} ` + trendCumlesi;
   } else if (oneriAdet > 0) {
     tip = 'siparis';
     baslik = 'SİPARİŞ VER';
     aciklama =
       `${temelCumle} ${hedefGun} günlük hedef için ${gerekliAdet} kutu gerekiyor, ` +
-      `${oneriAdet} kutu sipariş edin. ` + `${kaynakCumlesi} ` + trendCumlesi;
+      `${oneriAdet} kutu sipariş edin. ` + `${tavanCumlesi} ${kaynakCumlesi} ` + trendCumlesi;
+  } else if (maxKirpma > 0) {
+    // Hedef daha fazlasını isterdi ama kurum tavanı doludur; bu "yeterli"den
+    // farklı bir durumdur ve fazla stok da sayılmaz.
+    tip = 'yeterli';
+    baslik = 'SEVK ETME — MAX DOLU';
+    aciklama =
+      `${temelCumle} ${hedefGun} günlük hedef ${gerekliAdet} kutu isterdi ama kurumun tanımlı max'ı ` +
+      `${kurumMax} kutu ve elde zaten ${toplamVarlik} kutu var; tavan aşılmasın diye sevk yapılmıyor. ` +
+      trendCumlesi;
   } else if (kapsamaGun > hedefGun * FAZLA_STOK_KATI) {
     tip = 'fazla-stok';
     baslik = 'SİPARİŞ VERME — FAZLA STOK';
@@ -363,6 +408,8 @@ export function hesaplaOneri(girdi: OneriGirdisi): OneriSonucu {
     kapsamaGun: round1(kapsamaGun),
     gerekliAdet,
     oneriAdet,
+    tavansizOneriAdet,
+    maxKirpma,
     tabanOneriAdet,
     trendEtkisi,
     tip,
@@ -394,6 +441,11 @@ export interface SevkPayi {
   sevkAdedi: number;
   /** Depo stoğu yetmediği için karşılanamayan adet */
   karsilanamayan: number;
+  /**
+   * Aciliyet sırasındaki 0 tabanlı konum. Lotlar depodan bu sırayla ayrıldığı
+   * için miad riski hesabında da aynı sıra kullanılır.
+   */
+  sira: number;
 }
 
 export interface DagitimSonucu {
@@ -426,7 +478,7 @@ export function dagitimYap(adaylar: SevkAdayi[], depoStogu: number): DagitimSonu
 
   let kalan = Math.max(0, Math.floor(depoStogu));
   const payById = new Map<string, SevkPayi>();
-  sirali.forEach(aday => {
+  sirali.forEach((aday, sira) => {
     const ihtiyac = Math.max(0, Math.ceil(aday.ihtiyac));
     const sevkAdedi = Math.min(ihtiyac, kalan);
     kalan -= sevkAdedi;
@@ -435,16 +487,128 @@ export function dagitimYap(adaylar: SevkAdayi[], depoStogu: number): DagitimSonu
       ihtiyac,
       sevkAdedi,
       karsilanamayan: ihtiyac - sevkAdedi,
+      sira,
     });
   });
 
   // Çağıranın verdiği sırayı koru — tablo sıralaması dağıtımdan bağımsız olsun.
   const paylar = adaylar.map(
-    a => payById.get(a.id) ?? { id: a.id, ihtiyac: 0, sevkAdedi: 0, karsilanamayan: 0 },
+    (a, i) =>
+      payById.get(a.id) ?? { id: a.id, ihtiyac: 0, sevkAdedi: 0, karsilanamayan: 0, sira: i },
   );
   return {
     paylar,
     kalanStok: kalan,
     toplamKarsilanamayan: paylar.reduce((sum, p) => sum + p.karsilanamayan, 0),
   };
+}
+
+/* ——— Sevk edilen lotların miad riski ——— */
+
+export interface SevkLotu {
+  lot: string;
+  /** Miada kalan gün; miad bilinmiyorsa null */
+  miatGun: number | null;
+  adet: number;
+}
+
+export interface RiskliLotDetayi {
+  lot: string;
+  miatGun: number;
+  adet: number;
+  /** Bu lottan miadı dolmadan tüketilemeyecek adet */
+  riskliAdet: number;
+}
+
+export interface RiskliSevkSonucu {
+  /** Miadı dolmadan tüketilemeyecek toplam kutu */
+  riskliAdet: number;
+  /** Riske giren lotların kırılımı (yalnızca riskliAdet > 0 olanlar) */
+  detay: RiskliLotDetayi[];
+  /** Miad ya da talep bilgisi olmadığı için değerlendirilemeyen kutu */
+  degerlendirilemeyenAdet: number;
+  /** Sevk edilen lotlar içindeki en yakın miad (gün); yoksa null */
+  enYakinMiatGun: number | null;
+}
+
+/**
+ * Sevk edilecek lotların kurumda miadı dolmadan tüketilip tüketilemeyeceğini
+ * hesaplar.
+ *
+ * Stok Yönetimi panelindeki riskli stok mantığının lot sıralı halidir: orada
+ * tek bir satır için `riskli = (kapsamaGün − miatGün) × günlükİhtiyaç` yazılır,
+ * yani "stok, miad gelene kadar tüketilebilecek miktarı aşıyorsa fazlası
+ * risklidir". Burada aynı kural, kurumda **önce tüketilecek** miktar hesaba
+ * katılarak uygulanır:
+ *
+ *  - Lotlar miadı yakın olandan uzağa sıralanır (FEFO — kurum da böyle tüketir).
+ *  - Bir lot, kendinden önce tüketilecek stok bittiğinde açılır:
+ *      `başlangıçGün = öncekiToplam / günlükİhtiyaç`
+ *  - Miada kalan sürede tüketilebilecek miktar `(miatGün − başlangıçGün) × günlükİhtiyaç`;
+ *    lotun bunu aşan kısmı risklidir.
+ *
+ * Tek lot ve sıfır mevcut stokta formül panelin formülüne indirgenir; fark,
+ * panelin `kapsamaGün`'ü aşağı yuvarlamasından gelen ≤1 günlük sapmadır —
+ * burada yuvarlama yapılmaz, yani risk asla olduğundan az gösterilmez.
+ *
+ * Miadı bilinmeyen lotlar riske sayılmaz ama sıranın sonuna konur (öndeki
+ * lotların riskini şişirmesinler) ve `degerlendirilemeyenAdet` ile raporlanır.
+ */
+export function hesaplaRiskliSevk(girdi: {
+  lotlar: SevkLotu[];
+  gunlukIhtiyac: number;
+  /** Sevkten önce kurumda bulunan ve önce tüketilecek stok (kutu) */
+  mevcutStok: number;
+}): RiskliSevkSonucu {
+  const { lotlar, gunlukIhtiyac, mevcutStok } = girdi;
+
+  const gecerli = lotlar.filter(l => l.adet > 0);
+  const miatli = gecerli.filter(
+    (l): l is SevkLotu & { miatGun: number } =>
+      typeof l.miatGun === 'number' && Number.isFinite(l.miatGun),
+  );
+  const miatsizAdet = gecerli
+    .filter(l => typeof l.miatGun !== 'number' || !Number.isFinite(l.miatGun))
+    .reduce((sum, l) => sum + l.adet, 0);
+
+  const enYakinMiatGun = miatli.length
+    ? miatli.reduce((min, l) => Math.min(min, l.miatGun), Number.POSITIVE_INFINITY)
+    : null;
+
+  // Talep sinyali yoksa "ne kadar sürede tüketilir" sorusunun cevabı yok;
+  // tahmin üretmek yerine değerlendirilemedi denir.
+  if (!(gunlukIhtiyac > 0)) {
+    return {
+      riskliAdet: 0,
+      detay: [],
+      degerlendirilemeyenAdet: gecerli.reduce((sum, l) => sum + l.adet, 0),
+      enYakinMiatGun,
+    };
+  }
+
+  const sirali = [...miatli].sort((a, b) => a.miatGun - b.miatGun || a.lot.localeCompare(b.lot));
+
+  let oncekiToplam = Math.max(0, mevcutStok);
+  let riskliAdet = 0;
+  const detay: RiskliLotDetayi[] = [];
+
+  sirali.forEach(lot => {
+    let riskli: number;
+    if (lot.miatGun <= 0) {
+      // Miadı geçmiş ya da bugün dolan lot: tamamı risklidir.
+      riskli = lot.adet;
+    } else {
+      const baslangicGun = oncekiToplam / gunlukIhtiyac;
+      const kalanGun = Math.max(0, lot.miatGun - baslangicGun);
+      const tuketilebilir = kalanGun * gunlukIhtiyac;
+      riskli = Math.min(lot.adet, Math.max(0, Math.ceil(lot.adet - tuketilebilir)));
+    }
+    if (riskli > 0) {
+      detay.push({ lot: lot.lot, miatGun: lot.miatGun, adet: lot.adet, riskliAdet: riskli });
+      riskliAdet += riskli;
+    }
+    oncekiToplam += lot.adet;
+  });
+
+  return { riskliAdet, detay, degerlendirilemeyenAdet: miatsizAdet, enYakinMiatGun };
 }

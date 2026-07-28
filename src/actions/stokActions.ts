@@ -521,6 +521,102 @@ export async function getCihazUstuForPeriod(
   }
 }
 
+/** Ana depodaki bir lotun sevkiyat riski için gereken asgari bilgisi. */
+export interface DepoLotu {
+  lot: string;
+  /** "dd.MM.yyyy" biçiminde miad; yoksa boş string */
+  miad: string;
+  adet: number;
+}
+
+/**
+ * Ana deponun stoğunu **lot/miad kırılımıyla** döndürür (stokKodu -> lotlar).
+ *
+ * Hastane sevkiyatında sevk edilecek adedin miad riskini hesaplayabilmek için
+ * toplam adet yetmez; hangi lotun ne zaman dolduğu gerekir. Ceomed depolarında
+ * lotlar `ceomedDepoStok/{depotId}.items[]` içinde (`lot`/`miyat`), standart
+ * depolarda her `depoStok` dokümanı 1 adet olacak şekilde `lotNumarasi`/`miad`
+ * alanlarında durur; ikisi de aynı şekle normalize edilir.
+ *
+ * Çapraz-tenant erişimi önlemek için depo dokümanının companyId'si doğrulanır.
+ */
+export async function getDepotLotsByCode(
+  depotId: string,
+  isCeomed: boolean,
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<Record<string, DepoLotu[]>> {
+  if (!depotId) return {};
+  try {
+    const depotSnap = await adminDb.collection('depots').doc(depotId).get();
+    if (!depotSnap.exists) return {};
+    if (!isSuperAdmin) {
+      const normalized = normalizeCompanyId(companyId);
+      const depotCompany = normalizeCompanyId((depotSnap.data() as any)?.companyId);
+      if (depotCompany !== '__legacy__' && depotCompany !== normalized) return {};
+    }
+
+    // (stokKodu, lot, miad) üçlüsünde topla — aynı lot birden çok kayıtta olabilir.
+    const acc = new Map<string, Map<string, DepoLotu>>();
+    const ekle = (stokKodu: string, lot: string, miad: string, adet: number) => {
+      const code = String(stokKodu ?? '').trim();
+      if (!code || !(adet > 0)) return;
+      const inner = acc.get(code) ?? new Map<string, DepoLotu>();
+      const key = `${lot}|${miad}`;
+      const mevcut = inner.get(key);
+      if (mevcut) mevcut.adet += adet;
+      else inner.set(key, { lot, miad, adet });
+      acc.set(code, inner);
+    };
+
+    if (isCeomed) {
+      const ceomedSnap = await adminDb.collection('ceomedDepoStok').doc(depotId).get();
+      if (!ceomedSnap.exists) return {};
+      const items = ((ceomedSnap.data() as any)?.items || []) as Array<{
+        stokKodu?: string; lot?: string; miyat?: string; adet?: number | string;
+      }>;
+      for (const it of items) {
+        ekle(
+          String(it?.stokKodu ?? ''),
+          String(it?.lot ?? '').trim(),
+          String(it?.miyat ?? '').trim(),
+          Number(it?.adet) || 0,
+        );
+      }
+    } else {
+      const snap = await adminDb
+        .collection('depoStok')
+        .where('depotId', '==', depotId)
+        .where('isShipped', '==', false)
+        .select('stokKodu', 'lotNumarasi', 'miad')
+        .get();
+      for (const d of snap.docs as AdminDocSnap[]) {
+        const data = d.data() as any;
+        // Admin SDK miad'ı Timestamp olarak döndürebilir — panelin beklediği
+        // dd.MM.yyyy biçimine normalize et.
+        const rawMiad = data?.miad;
+        let miad = '';
+        if (typeof rawMiad === 'string') {
+          miad = rawMiad.trim();
+        } else if (rawMiad?.toDate) {
+          const dt = rawMiad.toDate() as Date;
+          miad = `${String(dt.getDate()).padStart(2, '0')}.${String(dt.getMonth() + 1).padStart(2, '0')}.${dt.getFullYear()}`;
+        }
+        ekle(String(data?.stokKodu ?? ''), String(data?.lotNumarasi ?? '').trim(), miad, 1);
+      }
+    }
+
+    const out: Record<string, DepoLotu[]> = {};
+    acc.forEach((inner, code) => {
+      out[code] = Array.from(inner.values());
+    });
+    return out;
+  } catch (err) {
+    console.error('[getDepotLotsByCode] Error for depot', depotId, ':', err);
+    return {};
+  }
+}
+
 /**
  * Ceomed entegre bir deponun anlık stoğunu (stokKodu -> toplam adet) döndürür.
  *
