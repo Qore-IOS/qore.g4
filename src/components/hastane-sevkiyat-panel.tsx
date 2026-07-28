@@ -43,6 +43,8 @@ import {
   type SevkLotu,
 } from '@/lib/lojistik/supplier-order-advisor';
 import { miadaKalanGun } from '@/lib/lojistik/miad';
+import { alanHaritasi } from '@/lib/lab-period/merge';
+import type { OlcumAlani } from '@/lib/lab-period/types';
 import type { DepoLotu } from '@/actions/stokActions';
 
 /* ——— Lojistik görünümüyle ortak tasarım ——— */
@@ -233,20 +235,6 @@ export default function HastaneSevkiyatPanel() {
   const [sayimEksik, setSayimEksik] = useState<{ counted: number; total: number }>({ counted: 0, total: 0 });
   const [veriLoading, setVeriLoading] = useState(false);
 
-  const toLabMap = (record: Record<string, Record<string, number>> | undefined) => {
-    const outer = new Map<string, Map<string, number>>();
-    for (const [labId, byCode] of Object.entries(record || {})) {
-      const inner = new Map<string, number>();
-      for (const [rawCode, value] of Object.entries(byCode || {})) {
-        const code = normCode(rawCode);
-        if (!code) continue;
-        inner.set(code, (inner.get(code) || 0) + (Number(value) || 0));
-      }
-      outer.set(labId, inner);
-    }
-    return outer;
-  };
-
   // Dönem değişince hazırlanmış veri geçersizdir.
   useEffect(() => {
     setHazirla(false);
@@ -260,12 +248,16 @@ export default function HastaneSevkiyatPanel() {
       setVeriLoading(true);
       try {
         const stok = await import('@/actions/stokActions');
+        const labPeriod = await import('@/actions/labPeriodActions');
         const periods = [5, 4, 3, 2, 1, 0].map(back => {
           const d = new Date(selectedYear, monthIndex - back, 1);
           return { year: d.getFullYear(), monthIndex: d.getMonth() };
         });
 
-        const [depoStok, depoLotlari, sayim, cihazUstu, kumulatif] = await Promise.all([
+        // Saha verisi (stok / cihaz üstü / kümülatif) artık tek kaynaktan
+        // okunur: veri hangi panelden girilmiş olursa olsun lab-dönem
+        // snapshot'ında durur.
+        const [depoStok, depoLotlari, snapshotlar] = await Promise.all([
           anaDepo.ceomedEnabled
             ? stok.getCeomedDepoStockByCode(anaDepo.id, currentCompanyId, isSuperAdmin)
             : stok.getDepotStockByCode(anaDepo.id, currentCompanyId, isSuperAdmin),
@@ -275,9 +267,12 @@ export default function HastaneSevkiyatPanel() {
             currentCompanyId,
             isSuperAdmin,
           ),
-          stok.getLabCountStockForPeriod(labIds, selectedYear, monthIndex),
-          stok.getCihazUstuForPeriod(labIds, selectedYear, selectedMonth, currentCompanyId, isSuperAdmin),
-          stok.getTotalEfficiencyKumulatifForPeriods(periods, currentCompanyId, isSuperAdmin),
+          labPeriod.getLabPeriodSnapshotsForPeriods(
+            labIds,
+            periods.map(p => ({ yil: p.year, ay: p.monthIndex + 1 })),
+            currentCompanyId,
+            isSuperAdmin,
+          ),
         ]);
         if (cancelled) return;
 
@@ -310,10 +305,34 @@ export default function HastaneSevkiyatPanel() {
 
         const keyOf = (p: { year: number; monthIndex: number }) =>
           `${p.year}-${String(p.monthIndex + 1).padStart(2, '0')}`;
-        const perPeriod = periods.map(p => ({
-          hasData: kumulatif[keyOf(p)]?.hasData === true,
-          byLab: toLabMap(kumulatif[keyOf(p)]?.byLab),
-        }));
+
+        /** Bir dönemin snapshot'larından `labId -> stokKodu -> değer` çıkarır. */
+        const alandanLabMap = (donemKey: string, alan: OlcumAlani) => {
+          const donemSnap = snapshotlar[donemKey] || {};
+          const outer = new Map<string, Map<string, number>>();
+          Object.entries(donemSnap).forEach(([labId, snap]) => {
+            const inner = new Map<string, number>();
+            Object.entries(alanHaritasi(snap, alan)).forEach(([rawCode, deger]) => {
+              const code = normCode(rawCode);
+              if (code) inner.set(code, (inner.get(code) || 0) + deger);
+            });
+            outer.set(labId, inner);
+          });
+          return outer;
+        };
+
+        const secilenDonem = keyOf(periods[periods.length - 1]);
+        const perPeriod = periods.map(p => {
+          const anahtar = keyOf(p);
+          const donemSnap = snapshotlar[anahtar] || {};
+          return {
+            // Dönemde hiç kümülatif girilmemişse ortalamayı 0'la aşağı çekme.
+            hasData: Object.values(donemSnap).some(
+              s => Object.keys(s?.kumulatif || {}).length > 0,
+            ),
+            byLab: alandanLabMap(anahtar, 'kumulatif'),
+          };
+        });
 
         // Lab × ürün için 6 aylık seri (veri olmayan ay null).
         const seri = new Map<string, Map<string, Array<number | null>>>();
@@ -330,16 +349,22 @@ export default function HastaneSevkiyatPanel() {
           seri.set(labId, inner);
         });
 
+        // Seçili dönemde stok ölçümü olan lablar "sayımı yapılmış" sayılır —
+        // sayım hangi panelden girilmiş olursa olsun snapshot'ta durur.
+        const sayilanLablar = Object.values(snapshotlar[secilenDonem] || {}).filter(
+          s => Object.keys(s?.stok || {}).length > 0,
+        ).length;
+
         setAnaDepoStokByCode(depoMap);
         setAnaDepoLotlariByCode(lotMap);
-        setLabStokByLab(toLabMap(sayim.byLab));
-        setCihazUstuByLab(toLabMap(cihazUstu.byLab));
+        setLabStokByLab(alandanLabMap(secilenDonem, 'stok'));
+        setCihazUstuByLab(alandanLabMap(secilenDonem, 'cihazUstu'));
         setKumulatifByLab(perPeriod[perPeriod.length - 1].byLab);
         setSeriByLab(seri);
         setSeriDonemleri(
           periods.map(p => `${String(p.monthIndex + 1).padStart(2, '0')}-${p.year}`),
         );
-        setSayimEksik({ counted: sayim.countedLabIds.length, total: labIds.length });
+        setSayimEksik({ counted: sayilanLablar, total: labIds.length });
       } catch (e) {
         console.error('[hastane-sevkiyat] Veriler okunamadı:', e);
         if (!cancelled) toast({ title: 'Hata', description: 'Sevkiyat verileri okunamadı.', variant: 'destructive' });

@@ -230,6 +230,12 @@ service cloud.firestore {
       allow read: if inCompany();
       allow write: if writingInCompany();
     }
+    // Lab-dönem tek doğruluk kaynağı: sayım / cihaz üstü / kümülatif.
+    // Yazma Admin SDK üzerinden yapılır; client yalnızca okur.
+    match /labPeriodSnapshots/{id} {
+      allow read: if inCompany();
+      allow write: if false;
+    }
 
     // companies özel: id == userCompany() (her tenant kendi şirket dökümanını okur)
     // SuperAdmin tüm companies'i okur ve yazar.

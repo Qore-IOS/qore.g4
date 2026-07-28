@@ -20,6 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
 import Link from 'next/link';
@@ -309,7 +310,7 @@ export default function CihazUstuHesaplamaPanel() {
     setIsSavingHistory(true);
     try {
       const period = `${String(month + 1).padStart(2, '0')}-${year}`;
-      await addDoc(collection(db, 'cihazUstuGecmisi'), {
+      const gecmisRef = await addDoc(collection(db, 'cihazUstuGecmisi'), {
         companyId: currentCompanyId || '__legacy__',
         hospitalId,
         hospitalName,
@@ -330,6 +331,25 @@ export default function CihazUstuHesaplamaPanel() {
         createdByUid: currentUser?.uid || null,
         createdByName: currentUserProfile?.name || currentUser?.email || null,
       });
+      // Cihaz üstü, lab-dönem snapshot'ının tek doğruluk kaynağına da işlenir.
+      await labDonemineYaz({
+        labId: hospitalId,
+        labAdi: hospitalName,
+        yil: year,
+        ay: month + 1,
+        girdiler: rows
+          .map(r => ({
+            stokKodu: String(r.stokKodu || '').trim(),
+            alan: 'cihazUstu' as const,
+            deger: Number(r.available) || 0,
+          }))
+          .filter(g => g.stokKodu && g.deger > 0),
+        kaynak: 'cihaz-ustu-hesaplama',
+        kaynakKayitId: gecmisRef.id,
+        girenAdi: currentUserProfile?.name || currentUser?.email || undefined,
+        companyId: currentCompanyId,
+      });
+
       toast({ title: 'Kaydedildi', description: `${period} dönemi cihaz üstü hesaplama geçmişe kaydedildi.` });
     } catch (e: any) {
       toast({ title: 'Kayıt başarısız', description: e?.message || 'Geçmiş kaydı oluşturulamadı.', variant: 'destructive' });

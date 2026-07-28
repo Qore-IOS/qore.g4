@@ -22,6 +22,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { db, storage } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';
 import Link from 'next/link';
@@ -1027,7 +1028,7 @@ export default function KumulatifHesaplamaPanel() {
     setIsSavingHistory(true);
     try {
       const period = `${String(month + 1).padStart(2, '0')}-${year}`;
-      await addDoc(collection(db, 'kumulatifHesaplamaGecmisi'), {
+      const gecmisRef = await addDoc(collection(db, 'kumulatifHesaplamaGecmisi'), {
         companyId: currentCompanyId || '__legacy__',
         hospitalId,
         hospitalName,
@@ -1053,6 +1054,25 @@ export default function KumulatifHesaplamaPanel() {
         createdByUid: currentUser?.uid || null,
         createdByName: currentUserProfile?.name || currentUser?.email || null,
       });
+      // Kümülatif, lab-dönem snapshot'ının tek doğruluk kaynağına da işlenir.
+      await labDonemineYaz({
+        labId: hospitalId,
+        labAdi: hospitalName,
+        yil: year,
+        ay: month + 1,
+        girdiler: rows
+          .map(r => ({
+            stokKodu: String(r.stokKodu || '').trim(),
+            alan: 'kumulatif' as const,
+            deger: Number(r.total) || 0,
+          }))
+          .filter(g => g.stokKodu && g.deger > 0),
+        kaynak: 'kumulatif-hesaplama',
+        kaynakKayitId: gecmisRef.id,
+        girenAdi: currentUserProfile?.name || currentUser?.email || undefined,
+        companyId: currentCompanyId,
+      });
+
       const counterUpdateCount = await updateTestCountersFromRows();
       toast({ title: 'Kaydedildi', description: `${period} dönemi kümülatif hesaplama geçmişe kaydedildi.${counterUpdateCount ? ` ${counterUpdateCount} test counterı güncellendi.` : ''}` });
     } catch (e: any) {

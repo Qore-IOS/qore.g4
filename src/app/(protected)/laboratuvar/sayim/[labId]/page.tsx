@@ -1279,6 +1279,7 @@ export default function LaboratuvarSayimPage() {
         })),
         cihazUstuUploaded: false,
         kumulatifUploaded: false,
+        companyId: currentCompanyId,
         batch,
         items: allCountedEntries.map(entry => {
           const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
