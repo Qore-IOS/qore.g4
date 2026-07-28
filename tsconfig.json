@@ -22,7 +22,6 @@
       "@/*": ["./src/*"]
     },
     "baseUrl": ".",
-    "ignoreDeprecations": "6.0",
     "noImplicitAny": false,
     "strictNullChecks": false
   },

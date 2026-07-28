@@ -453,6 +453,12 @@ export async function backfillLabPeriodSnapshots(
           stokKodu: String(it?.productId || '').trim(),
           alan: 'kumulatif' as const,
           deger: Number(it?.total) || 0,
+          kirilim: {
+            routine: Number(it?.routine) || 0,
+            rerun: Number(it?.rerun) || 0,
+            calib: Number(it?.calib) || 0,
+            control: Number(it?.control) || 0,
+          },
         }))
         .filter(g => g.stokKodu && g.deger > 0);
       ekle(

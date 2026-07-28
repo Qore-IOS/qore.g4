@@ -98,7 +98,18 @@ export function matchTestName(
       if (!normalizedName) continue;
 
       if (input.trim().toLocaleLowerCase('tr-TR') === name.trim().toLocaleLowerCase('tr-TR')) {
-        return { input, normalizedInput, candidate, status: 'exact', score: 1, matchedBy: name };
+        // Takma adla birebir eşleşme `exact` değil `alias`tır: eşleşmenin
+        // kanonik addan mı yoksa bir takma addan mı geldiği çağıranı
+        // ilgilendirir. Aşağıdaki normalize dalı bu ayrımı zaten yapıyordu,
+        // burada yapılmıyordu.
+        return {
+          input,
+          normalizedInput,
+          candidate,
+          status: name === candidate.displayName ? 'exact' : 'alias',
+          score: 1,
+          matchedBy: name,
+        };
       }
 
       if (normalizedInput === normalizedName) {
