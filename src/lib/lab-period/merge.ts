@@ -205,6 +205,47 @@ export function olcumSayisi(snapshot: LabDonemSnapshot | undefined): number {
   return ALANLAR.reduce((sum, alan) => sum + Object.keys(snapshot[alan] || {}).length, 0);
 }
 
+/** Bir alanın panelde gösterilecek özeti. */
+export interface AlanOzeti {
+  /** Alanda kaç ürün için ölçüm var */
+  urunSayisi: number;
+  /** Ölçümlerin toplamı */
+  toplam: number;
+  /** İlk kaydı yapan panel(ler) */
+  kaynaklar: Kaynak[];
+  /** En son güncelleme (epoch ms); ölçüm yoksa 0 */
+  sonGuncelleme: number;
+}
+
+/**
+ * Bir alanın özetini çıkarır — "bu dönem için zaten veri var mı, nereden
+ * geldi, ne zaman girildi" sorularını tek çağrıda cevaplar.
+ */
+export function alanOzeti(
+  snapshot: LabDonemSnapshot | undefined,
+  alan: OlcumAlani,
+): AlanOzeti {
+  const bos: AlanOzeti = { urunSayisi: 0, toplam: 0, kaynaklar: [], sonGuncelleme: 0 };
+  if (!snapshot) return bos;
+  const olcumler = Object.values(snapshot[alan] || {});
+  if (olcumler.length === 0) return bos;
+  const kaynaklar = new Set<Kaynak>();
+  let toplam = 0;
+  let sonGuncelleme = 0;
+  olcumler.forEach(o => {
+    if (!o) return;
+    toplam += Number(o.deger) || 0;
+    kaynaklar.add(o.ilkKaynak);
+    sonGuncelleme = Math.max(sonGuncelleme, o.guncellemeZamani || 0);
+  });
+  return {
+    urunSayisi: olcumler.length,
+    toplam,
+    kaynaklar: Array.from(kaynaklar),
+    sonGuncelleme,
+  };
+}
+
 /** Bir ölçümün nereden geldiğini tek satırda anlatır. */
 export function kaynakOzeti(olcum: OlcumDegeri | undefined, adlar: Record<Kaynak, string>): string {
   if (!olcum) return 'Veri yok';
