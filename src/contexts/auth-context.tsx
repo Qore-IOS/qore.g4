@@ -174,9 +174,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               if (!userPermissions.includes('arama')) {
                   userPermissions.push('arama');
               }
-              if (!userPermissions.includes('kullanici-talepleri')) {
-                  userPermissions.push('kullanici-talepleri');
-              }
 
               const claimCompanyId = tokenResult?.claims.companyId as string | undefined;
               const claimIsSuperAdmin = tokenResult?.claims.isSuperAdmin as boolean | undefined;

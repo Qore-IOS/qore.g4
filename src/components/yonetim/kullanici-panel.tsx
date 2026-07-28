@@ -36,8 +36,6 @@ type NotificationTypeUI =
   | 'fault_opened'
   | 'fault_closed'
   | 'maliyet_sayim_davet'
-  | 'user_request_created'
-  | 'user_request_completed'
   | 'custom';
 
 
@@ -54,8 +52,6 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'fault_closed', label: 'Arıza Kaydı Kapandı' },
     { key: 'fault_reminder', label: 'Arıza Müdahale Hatırlatma (4 saat+)' },
     { key: 'stock_threshold', label: 'Stok Eşik Uyarısı' },
-    { key: 'user_request_created', label: 'Kullanıcı Talebi (Yeni Talep)' },
-    { key: 'user_request_completed', label: 'Kullanıcı Talebi (Tamamlandı)' },
 ];
 
 

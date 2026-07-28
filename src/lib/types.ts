@@ -731,7 +731,6 @@ export type AppView =
   | 'numune-arsivi'
   | 'nobet-yonetimi'
   | 'satin-alma'
-  | 'kullanici-talepleri'
   | 'maliyet-sayim'
   | 'cari-odeme'
   | 'cari-odeme-onay'
@@ -1750,47 +1749,6 @@ export interface PurchasingTaskDefinition {
   requiresLaboratory?: boolean;
   active?: boolean;
   createdAt?: TimestampLike;
-}
-
-// ============================================
-// KULLANICI TALEP SİSTEMİ
-// ============================================
-
-export type UserRequestCategory = 'bug' | 'improvement' | 'feature' | 'design';
-export type UserRequestPriority = 'low' | 'normal' | 'urgent';
-export type UserRequestStatus = 'open' | 'reviewing' | 'done';
-
-export interface UserRequestComment {
-  id: string;
-  text: string;
-  authorUid: string;
-  authorName: string;
-  authorRole: 'user' | 'admin' | 'admin_developer' | 'super_admin';
-  images?: string[];
-  createdAt: TimestampLike;
-}
-
-export interface UserRequest {
-  id: string;
-  title: string;
-  description: string;
-  images: string[]; // Storage URLs
-  category: UserRequestCategory;
-  priority: UserRequestPriority;
-  status: UserRequestStatus;
-  createdBy: string; // uid
-  createdByName: string;
-  assignedTo: string; // uid of assigned admin
-  assignedToName: string;
-  createdAt: TimestampLike;
-  updatedAt: TimestampLike;
-  resolvedAt?: TimestampLike;
-  resolvedBy?: string; // uid
-  resolvedByName?: string;
-  adminNote?: string;
-  reopenReason?: string;
-  comments?: UserRequestComment[];
-  unreadByUser: boolean;
 }
 
 /**

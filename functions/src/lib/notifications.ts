@@ -14,8 +14,6 @@ type NotificationType =
   | 'fault_closed'
   | 'spare_part_transfer'
   | 'maliyet_sayim_davet'
-  | 'user_request_created'
-  | 'user_request_completed'
   | 'fault_reminder'
   | 'maintenance_reminder'
   | 'external_stock_usage'
