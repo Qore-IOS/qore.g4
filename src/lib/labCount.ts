@@ -7,6 +7,8 @@ import {
   Timestamp,
   type WriteBatch,
 } from 'firebase/firestore';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
+import type { OlcumGirdisi } from '@/lib/lab-period/types';
 
 export type DepoStokItem = {
   id: string;
@@ -137,6 +139,8 @@ export async function saveLabCountSession(opts: {
   kumulatifUploaded?: boolean;
   /** Optional existing batch so inventory reconciliation and history are atomic. */
   batch?: WriteBatch;
+  /** Lab-dönem snapshot'ı doğru tenant altına yazılabilsin diye. */
+  companyId?: string | null;
 }): Promise<string> {
   const {
     laboratoryId,
@@ -198,6 +202,35 @@ export async function saveLabCountSession(opts: {
     batch.set(sessionRef, firestorePayload);
   } else {
     await setDoc(sessionRef, firestorePayload);
+  }
+
+  // Sayım, veriye ihtiyaç duyan panellerin tek kaynağına da işlenir.
+  // Başarısız olsa bile sayımın kendisi kaydedilmiş sayılır.
+  if (typeof year === 'number' && typeof month === 'number') {
+    const girdiler: OlcumGirdisi[] = [];
+    finalItems.forEach(item => {
+      const kod = String(item.stokKodu || '').trim();
+      if (!kod) return;
+      if (Number.isFinite(item.counted)) {
+        girdiler.push({ stokKodu: kod, alan: 'stok', deger: item.counted });
+      }
+      const acikTest = Number(item.openTestQty);
+      if (Number.isFinite(acikTest) && acikTest > 0) {
+        girdiler.push({ stokKodu: kod, alan: 'cihazUstu', deger: acikTest });
+      }
+    });
+    // `month` bu modülde 0-indekslidir; snapshot 1-12 bekler.
+    await labDonemineYaz({
+      labId: laboratoryId,
+      labAdi: laboratoryName,
+      yil: year,
+      ay: month + 1,
+      girdiler,
+      kaynak: 'lab-sayim',
+      kaynakKayitId: sessionRef.id,
+      girenAdi: user.name,
+      companyId: opts.companyId,
+    });
   }
 
   return sessionRef.id;

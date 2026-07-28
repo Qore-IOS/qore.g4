@@ -17,6 +17,7 @@
     "src/lib/utils.ts",
     "src/lib/mal-kabul/**/*.ts",
     "src/lib/lojistik/**/*.ts",
+    "src/lib/lab-period/**/*.ts",
     "src/lib/logger.ts",
     "src/lib/test-cost-calculator.ts",
     "src/lib/stock-quantity.ts",

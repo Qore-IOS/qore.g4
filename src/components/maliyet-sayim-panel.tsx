@@ -58,6 +58,8 @@ import { emitMaliyetSayimInvitation } from '@/lib/notifications';
 import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
 import TopluMaliyetSayimPanel from '@/components/toplu-maliyet-sayim-panel';
 import { normalizeCompanyId, filterByCompanyScope, filterByAssignedLabs } from '@/lib/company-scope';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
+import type { OlcumGirdisi } from '@/lib/lab-period/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 
@@ -1387,6 +1389,35 @@ export default function MaliyetSayimPanel({ hospitals: hospitalsProp, depots, pr
               month: countMonth,
               year: countYear,
               entryMethod: 'tekil',
+            });
+          }
+
+          // Lab sayımları, veriye ihtiyaç duyan panellerin tek kaynağına da
+          // işlenir. Depo sayımları lab-dönem kavramına girmediği için atlanır.
+          if (locationType === 'lab' && selectedLocationId) {
+            const girdiler = countedEntries.flatMap(entry => {
+              const kod = String(entry.stokKodu || '').trim();
+              if (!kod) return [];
+              const stok = parseInt(entry.stokAdedi, 10);
+              const cihaz = parseInt(entry.cihazUstuAdedi, 10);
+              const out: OlcumGirdisi[] = [];
+              if (Number.isFinite(stok)) out.push({ stokKodu: kod, alan: 'stok', deger: stok });
+              if (Number.isFinite(cihaz) && cihaz > 0) {
+                out.push({ stokKodu: kod, alan: 'cihazUstu', deger: cihaz });
+              }
+              return out;
+            });
+            await labDonemineYaz({
+              labId: selectedLocationId,
+              labAdi: locationName,
+              yil: countYear,
+              // countMonth 0-indekslidir (getMonth()); snapshot 1-12 bekler.
+              ay: countMonth + 1,
+              girdiler,
+              kaynak: 'maliyet-sayim',
+              kaynakKayitId: activeSessionId || `${selectedLocationId}-${selectedPeriod}`,
+              girenAdi: currentUserProfile?.name || undefined,
+              companyId: currentCompanyId,
             });
           }
 

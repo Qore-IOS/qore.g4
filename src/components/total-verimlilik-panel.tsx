@@ -86,6 +86,8 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
+import type { OlcumGirdisi } from '@/lib/lab-period/types';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { cn, exportDataToExcel } from '@/lib/utils';
 import { TOTAL_VERIMLILIK_AI_MASTER_PROMPT } from '@/lib/ai/totalVerimlilikMasterPrompt';
@@ -2208,6 +2210,57 @@ export default function TotalVerimlilikPanel({
   }, [toast, recomputeAllRows, interLabTransfers]);
 
   // Kaydetme
+  /**
+   * Tablodaki ay başı stok / cihaz üstü ve kümülatif değerlerini lab-dönem
+   * snapshot'ına işler.
+   *
+   * Satırlar zaten `labId` taşıdığı için kurum kırılımı buradan çıkar. Tabloyu
+   * dolu açıp değiştirmeden kaydetmek snapshot'ta düzenleme sayılmaz; yalnızca
+   * gerçekten değişen hücreler güncellenir.
+   */
+  const yazLabDonemSnapshotlari = useCallback(
+    async (kaynakKayitId: string) => {
+      const labBazli = new Map<string, { labAdi: string; girdiler: OlcumGirdisi[] }>();
+      rows.forEach(row => {
+        const labId = String(row.labId || '').trim();
+        const kod = String(row.stokKodu || '').trim();
+        if (!labId || !kod) return;
+        const kayit = labBazli.get(labId) || { labAdi: row.labName || labId, girdiler: [] };
+        const stokKutu = Number(row.baslangicStokuKutu);
+        if (Number.isFinite(stokKutu)) {
+          kayit.girdiler.push({ stokKodu: kod, alan: 'stok', deger: stokKutu });
+        }
+        const cihazTest = Number(row.ayBasiCihazUstuTest);
+        if (Number.isFinite(cihazTest) && cihazTest > 0) {
+          kayit.girdiler.push({ stokKodu: kod, alan: 'cihazUstu', deger: cihazTest });
+        }
+        const kumulatif = Number(row.kumulatifTotal);
+        if (Number.isFinite(kumulatif) && kumulatif > 0) {
+          kayit.girdiler.push({ stokKodu: kod, alan: 'kumulatif', deger: kumulatif });
+        }
+        labBazli.set(labId, kayit);
+      });
+
+      // selectedMonth 0-indekslidir; snapshot 1-12 bekler.
+      await Promise.all(
+        Array.from(labBazli.entries()).map(([labId, kayit]) =>
+          labDonemineYaz({
+            labId,
+            labAdi: kayit.labAdi,
+            yil: selectedYear,
+            ay: selectedMonth + 1,
+            girdiler: kayit.girdiler,
+            kaynak: 'total-verimlilik',
+            kaynakKayitId,
+            girenAdi: currentUser?.name || currentUser?.email || undefined,
+            companyId: currentCompanyId,
+          }),
+        ),
+      );
+    },
+    [rows, selectedYear, selectedMonth, currentUser, currentCompanyId],
+  );
+
   const handleSave = useCallback(async () => {
     if (!selectedPoolId || rows.length === 0) return;
 
@@ -2261,6 +2314,7 @@ export default function TotalVerimlilikPanel({
       }, currentCompanyId);
 
       await saveTotalEfficiencyRecord<TableRow>(docId, dataToSave);
+      await yazLabDonemSnapshotlari(docId);
       toast({ title: 'Kaydedildi', description: `Total verimlilik verileri kaydedildi. Genel Verimlilik: %${genelVerimlilik.toFixed(1)}` });
     } catch (error) {
       totalVerimlilikLogger.error('Total verimlilik kaydedilirken hata oluştu', error, {
@@ -2273,7 +2327,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSaving(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, toast, yazLabDonemSnapshotlari]);
 
   // Ara Kayıt (Checkpoint) Kaydetme
   const handleAraKayitSave = useCallback(async () => {
@@ -2299,6 +2353,7 @@ export default function TotalVerimlilikPanel({
       }, currentCompanyId);
 
       await saveTotalEfficiencyRecord<TableRow>(araKayitDocId, dataToSave);
+      await yazLabDonemSnapshotlari(araKayitDocId);
 
       setAraKayitInfo({
         exists: true,
@@ -2316,7 +2371,7 @@ export default function TotalVerimlilikPanel({
     } finally {
       setIsSavingAraKayit(false);
     }
-  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, interLabTransfers, araKayitInfo, toast]);
+  }, [selectedPoolId, rows, selectedYear, selectedMonth, currentUser, currentCompanyId, efficiencyPools, interLabTransfers, araKayitInfo, toast, yazLabDonemSnapshotlari]);
 
   // Laboratuvar gruplarını hesapla (aynı laboratuvarın satırlarını gruplamak için)
   const labGroups = useMemo(() => {
