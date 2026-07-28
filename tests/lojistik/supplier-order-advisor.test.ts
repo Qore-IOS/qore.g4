@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   dagitimYap,
   hesaplaOneri,
+  hesaplaRiskliSevk,
   hesaplaTuketimTrendi,
   MIN_TREND_VERI_AYI,
   type AylikTuketim,
@@ -301,4 +302,150 @@ test('aynı girdi her zaman aynı dağıtımı üretir', () => {
   const ilk = dagitimYap(adaylar, 50).paylar.map(p => p.sevkAdedi);
   const ikinci = dagitimYap(adaylar, 50).paylar.map(p => p.sevkAdedi);
   assert.deepEqual(ilk, ikinci);
+});
+
+/* ——— Kurum max tavanı ——— */
+
+test('kurum max tanımlıysa öneri tavanı aşmaz', () => {
+  // Günlük 6 kutu, 45 gün hedef → 270 gerekli. Elde 20 var → tavansız 250.
+  // Kurum max'ı 100 ise yalnızca 80 kutu sevk edilebilir.
+  const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 20, kurumMax: 100 }));
+  assert.equal(sonuc.tavansizOneriAdet, 250);
+  assert.equal(sonuc.oneriAdet, 80, 'max − eldeki = 80 kutu');
+  assert.equal(sonuc.maxKirpma, 170);
+});
+
+test('max tavanı yoksa öneri kırpılmaz', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 20 }));
+  assert.equal(sonuc.oneriAdet, sonuc.tavansizOneriAdet);
+  assert.equal(sonuc.maxKirpma, 0);
+});
+
+test('eldeki miktar max ile aynıysa sevk önerilmez', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 100, kurumMax: 100 }));
+  assert.equal(sonuc.oneriAdet, 0);
+  assert.equal(sonuc.tip, 'yeterli');
+  assert.equal(sonuc.baslik, 'SEVK ETME — MAX DOLU');
+});
+
+test('cihaz üstü de max tavanına sayılır', () => {
+  // 60 kutu stok + 40 kutu cihaz üstü = 100; max 100 → boşluk yok.
+  const sonuc = hesaplaOneri(
+    temelGirdi({ anaDepoStok: 60, cihazUstuKutu: 40, kurumMax: 100 }),
+  );
+  assert.equal(sonuc.toplamVarlik, 100);
+  assert.equal(sonuc.oneriAdet, 0);
+});
+
+test('max kırpması gerekçede ve uyarılarda görünür', () => {
+  const sonuc = hesaplaOneri(temelGirdi({ anaDepoStok: 20, kurumMax: 100 }));
+  assert.match(sonuc.aciklama, /max/i);
+  assert.ok(
+    sonuc.uyarilar.some(u => u.includes('max')),
+    'tavan uyarısı listelenmeli',
+  );
+});
+
+/* ——— Sevk edilen lotların miad riski ——— */
+
+test('miada kadar tüketilemeyen kısım riskli sayılır', () => {
+  // Günde 2 kutu, 30 gün sonra dolan lotta 100 kutu: 60 tüketilir, 40 riskli.
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 30, adet: 100 }],
+    gunlukIhtiyac: 2,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 40);
+  assert.equal(sonuc.detay.length, 1);
+  assert.equal(sonuc.detay[0].lot, 'L1');
+});
+
+test('miada kadar tamamı tüketilebiliyorsa risk yoktur', () => {
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 90, adet: 100 }],
+    gunlukIhtiyac: 2,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 0);
+  assert.deepEqual(sonuc.detay, []);
+});
+
+test('kurumdaki mevcut stok tüketim sırasını geciktirir ve riski artırır', () => {
+  // Aynı lot, ama kurumda önce tüketilecek 40 kutu daha var: lot 20. günde
+  // açılır, miada 10 gün kalır → yalnızca 20 kutu tüketilebilir, 80 riskli.
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 30, adet: 100 }],
+    gunlukIhtiyac: 2,
+    mevcutStok: 40,
+  });
+  assert.equal(sonuc.riskliAdet, 80);
+});
+
+test('lotlar FEFO sırasıyla değerlendirilir', () => {
+  // Günde 10 kutu. Yakın miatlı lot (20 gün) önce tüketilir ve tamamı erir;
+  // uzak miatlı lot (60 gün) 10. günde açılır, 50 günde 500 kutu tüketilebilir.
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [
+      { lot: 'UZAK', miatGun: 60, adet: 400 },
+      { lot: 'YAKIN', miatGun: 20, adet: 100 },
+    ],
+    gunlukIhtiyac: 10,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 0, 'FEFO ile ikisi de zamanında tükenir');
+  assert.equal(sonuc.enYakinMiatGun, 20);
+});
+
+test('miadı geçmiş lotun tamamı risklidir', () => {
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'GECMIS', miatGun: -5, adet: 30 }],
+    gunlukIhtiyac: 10,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 30);
+});
+
+test('miadı bilinmeyen lot riske sayılmaz ama ayrıca raporlanır', () => {
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [
+      { lot: 'BILINMEYEN', miatGun: null, adet: 25 },
+      { lot: 'L1', miatGun: 90, adet: 10 },
+    ],
+    gunlukIhtiyac: 2,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 0);
+  assert.equal(sonuc.degerlendirilemeyenAdet, 25);
+  assert.equal(sonuc.enYakinMiatGun, 90);
+});
+
+test('talep sinyali yoksa risk hesaplanmaz, tamamı değerlendirilemedi sayılır', () => {
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 10, adet: 40 }],
+    gunlukIhtiyac: 0,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 0);
+  assert.equal(sonuc.degerlendirilemeyenAdet, 40);
+});
+
+test('riskli adet hiçbir zaman lot adedini aşmaz', () => {
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 1, adet: 5 }],
+    gunlukIhtiyac: 0.01,
+    mevcutStok: 1000,
+  });
+  assert.equal(sonuc.riskliAdet, 5);
+});
+
+test('stok yönetimi panelindeki tek satır formülüne indirgenir', () => {
+  // Panel: dailyNeed = max/maxGun = 100/30 ≈ 3,33; stok 200, miat 30 gün.
+  // Tüketilebilir = 30 × 3,33 = 100 → riskli ≈ 100 kutu.
+  const gunlukIhtiyac = 100 / 30;
+  const sonuc = hesaplaRiskliSevk({
+    lotlar: [{ lot: 'L1', miatGun: 30, adet: 200 }],
+    gunlukIhtiyac,
+    mevcutStok: 0,
+  });
+  assert.equal(sonuc.riskliAdet, 100);
 });
