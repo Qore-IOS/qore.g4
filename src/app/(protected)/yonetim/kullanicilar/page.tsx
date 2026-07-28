@@ -38,8 +38,6 @@ type NotificationTypeUI =
   | 'fault_opened'
   | 'fault_closed'
   | 'fault_reminder'
-  | 'user_request_created'
-  | 'user_request_completed'
   | 'custom';
 
 const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
@@ -54,8 +52,6 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
   { key: 'fault_closed', label: 'Arıza Kaydı Kapandı' },
   { key: 'fault_reminder', label: 'Arıza Müdahale Hatırlatma (4 saat+)' },
   { key: 'stock_threshold', label: 'Stok Eşik Uyarısı' },
-  { key: 'user_request_created', label: 'Kullanıcı Talebi (Yeni Talep)' },
-  { key: 'user_request_completed', label: 'Kullanıcı Talebi (Tamamlandı)' },
 ];
 
 function cleanFirestoreData<T extends Record<string, any>>(data: T): Partial<T> {
@@ -69,14 +65,14 @@ const DEFAULT_ROLE_VIEW_PRESETS: Partial<Record<string, AppView[]>> = {
   super_admin: ALL_NAV_VIEW_KEYS,
   admin: ALL_NAV_VIEW_KEYS,
   admin_developer: ALL_NAV_VIEW_KEYS,
-  user: ['arama', 'kullanici-talepleri'],
-  teknik_servis: ['arama', 'kullanici-talepleri'],
-  aplikasyon: ['arama', 'kullanici-talepleri'],
-  teknisyen: ['arama', 'kullanici-talepleri'],
-  teknik_lojistik: ['arama', 'kullanici-talepleri'],
-  lojistik_sorumlusu: ['arama', 'kullanici-talepleri'],
-  satin_alma: ['arama', 'kullanici-talepleri'],
-  driver: ['arama', 'kullanici-talepleri'],
+  user: ['arama'],
+  teknik_servis: ['arama'],
+  aplikasyon: ['arama'],
+  teknisyen: ['arama'],
+  teknik_lojistik: ['arama'],
+  lojistik_sorumlusu: ['arama'],
+  satin_alma: ['arama'],
+  driver: ['arama'],
   // Sarf dağıtım personeli /sarf-teslimat ekranına kilitli; ek panel izni gerekmez.
   sarf_dagitim_personeli: [],
 };

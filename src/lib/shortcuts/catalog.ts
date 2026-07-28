@@ -455,12 +455,6 @@ export const SHORTCUT_CATALOG: ShortcutPanelCatalogItem[] = [
     ],
   },
   {
-    panelKey: 'kullanici-talepleri',
-    panelLabel: panelLabel('kullanici-talepleri', 'Talepler'),
-    requiredView: 'kullanici-talepleri',
-    actions: [navigationAction('kullanici-talepleri', 'Talepleri aç', '/kullanici-talepleri')],
-  },
-  {
     panelKey: 'cari-odeme',
     panelLabel: panelLabel('cari-odeme', 'Cari Ödeme'),
     requiredView: 'cari-odeme',

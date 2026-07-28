@@ -55,7 +55,6 @@ export const VIEW_TONES: Record<string, StartTone> = {
   'personel-islemleri': 'blue',
   tanimlar: 'slate',
   'satin-alma': 'orange',
-  'kullanici-talepleri': 'green',
   'cari-odeme': 'green',
   yonetim: 'slate',
 };

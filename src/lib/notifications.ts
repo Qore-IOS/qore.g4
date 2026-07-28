@@ -38,8 +38,6 @@ export type NotificationType =
   | "fault_transferred"
   | "fault_closed"
   | "maliyet_sayim_davet"
-  | "user_request_created"
-  | "user_request_completed"
   | "fault_reminder"
   | "maintenance_reminder"
   | "external_stock_usage"
@@ -521,60 +519,6 @@ export async function emitSparePartTransfer(params: {
       targetUid: params.targetUid,
       targetName: params.targetName,
       items: params.items,
-    },
-  });
-}
-
-export async function emitUserRequestCreated(params: {
-  actor: Actor;
-  requestId: string;
-  title: string;
-  assignedToUid: string;
-  assignedToName: string;
-  category: string;
-  priority: string;
-}) {
-  await createNotification({
-    type: "user_request_created",
-    title: "Yeni Kullanıcı Talebi",
-    message: `${params.actor.name} size bir talep gönderdi: "${params.title}"`,
-    href: "/kullanici-talepleri",
-    actor: params.actor,
-    targets: [`user:${params.assignedToUid}`],
-    meta: {
-      requestId: params.requestId,
-      requestTitle: params.title,
-      assignedToUid: params.assignedToUid,
-      assignedToName: params.assignedToName,
-      category: params.category,
-      priority: params.priority,
-    },
-  });
-}
-
-export async function emitUserRequestCompleted(params: {
-  actor: Actor;
-  requestId: string;
-  title: string;
-  requestCreatorUid: string;
-  requestCreatorName: string;
-}) {
-  const targets = Array.from(
-    new Set([`user:${params.requestCreatorUid}`, `user:${params.actor.uid}`])
-  );
-
-  await createNotification({
-    type: "user_request_completed",
-    title: "Talebiniz Tamamlandı",
-    message: `"${params.title}" başlıklı talebiniz ${params.actor.name} tarafından tamamlandı.`,
-    href: "/kullanici-talepleri",
-    actor: params.actor,
-    targets,
-    meta: {
-      requestId: params.requestId,
-      requestTitle: params.title,
-      requestCreatorUid: params.requestCreatorUid,
-      requestCreatorName: params.requestCreatorName,
     },
   });
 }

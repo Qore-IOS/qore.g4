@@ -51,7 +51,6 @@ const ICON_COLORS: Record<string, [string, string]> = {
   'personel-islemleri': ['#14b8a6', '#06b6d4'],   // teal-cyan
   'tanimlar': ['#6b7280', '#4b5563'],   // gray
   'satin-alma': ['#f97316', '#ef4444'],   // orange-red
-  'kullanici-talepleri': ['#22c55e', '#14b8a6'],   // green-teal
   'yonetim': ['#6b7280', '#374151'],   // gray-dark
   'notifications': ['#ef4444', '#f43f5e'],   // red-rose
   'logout': ['#ef4444', '#dc2626'],   // red
