@@ -3,7 +3,7 @@ import { useState, type FormEvent, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { Mail, Lock, Eye, EyeOff, Check, ArrowRight, Loader2, Sparkle } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, Check, ArrowRight, Loader2 } from 'lucide-react';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 
 const RIBBON_TURN_DURATION_MS = 480;
@@ -225,10 +225,11 @@ export default function LoginPage() {
 
       {/* card */}
       <div className="qlogin-card" style={{ borderRadius: 'var(--radius-lg)', background: 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)', boxShadow: 'var(--clay)', padding: 'clamp(26px,6vw,40px) clamp(22px,6vw,38px)', animation: `qFadeUp 500ms var(--ease-fluid)${shake ? `, qShake 400ms var(--ease-fluid)` : ''}` }} key={shake}>
-        {/* logo */}
+        {/* logo — çizim yerine gerçek QORE logosu */}
         <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 22 }}>
-          <span style={{ width: 76, height: 76, borderRadius: 22, display: 'grid', placeItems: 'center', color: '#fff', background: 'linear-gradient(160deg, var(--accent-2), var(--accent))', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.45), 0 14px 28px -10px var(--accent-glow)' }}>
-            <Sparkle size={38} strokeWidth={2.2} fill="#fff" />
+          <span style={{ width: 76, height: 76, borderRadius: 22, display: 'grid', placeItems: 'center', background: 'linear-gradient(160deg, var(--accent-2), var(--accent))', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.45), 0 14px 28px -10px var(--accent-glow)' }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/newlogowh.png" alt="QORE" width={46} height={46} style={{ width: 46, height: 46, objectFit: 'contain' }} />
           </span>
         </div>
 

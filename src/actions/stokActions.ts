@@ -985,9 +985,10 @@ export async function getExpiringProductsCountServer(
   isSuperAdmin?: boolean,
 ): Promise<number> {
   try {
+    // Tüm saha stoğu: depo (isShipped=false) + laboratuvar (isShipped=true).
+    // Önceki sürüm yalnızca depoyu sayıyordu, bu yüzden kart boş kalabiliyordu.
     const depoStokRef = collection(db, 'depoStok');
-    const q = query(depoStokRef, where('isShipped', '==', false));
-    const snapshot = await getDocs(q);
+    const snapshot = await getDocs(query(depoStokRef));
     const allItems = filterByCompanyScope(
       snapshot.docs.map(d => ({ stokKodu: d.data().stokKodu, lotNumarasi: d.data().lotNumarasi, miad: d.data().miad, companyId: d.data().companyId })),
       companyId,
@@ -999,14 +1000,30 @@ export async function getExpiringProductsCountServer(
     const seenKeys = new Set<string>();
     let count = 0;
 
+    // miad string ('dd.MM.yyyy') veya Firestore Timestamp/Date olabilir.
+    const toMiadDate = (raw: unknown): Date | null => {
+      if (typeof raw === 'string') {
+        const trimmed = raw.trim();
+        if (!trimmed) return null;
+        const d = parse(trimmed, 'dd.MM.yyyy', new Date());
+        return isValid(d) ? d : null;
+      }
+      if (raw && typeof raw === 'object') {
+        const anyRaw = raw as any;
+        const d: Date | null = typeof anyRaw.toDate === 'function'
+          ? anyRaw.toDate()
+          : (typeof anyRaw.seconds === 'number' ? new Date(anyRaw.seconds * 1000) : (raw instanceof Date ? raw : null));
+        return d && isValid(d) ? d : null;
+      }
+      return null;
+    };
+
     allItems.forEach(data => {
-      const miadStr = typeof data.miad === 'string' ? data.miad : '';
-      if (!miadStr) return;
-      const miadDate = parse(miadStr, 'dd.MM.yyyy', new Date());
-      if (!isValid(miadDate)) return;
+      const miadDate = toMiadDate(data.miad);
+      if (!miadDate) return;
       const days = differenceInDays(miadDate, today);
       if (days <= 45) {
-        const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadStr}`;
+        const key = `${data.stokKodu}-${data.lotNumarasi || ''}-${miadDate.getTime()}`;
         if (!seenKeys.has(key)) { seenKeys.add(key); count++; }
       }
     });

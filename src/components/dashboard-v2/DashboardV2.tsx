@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -114,15 +114,17 @@ function MiniCalendar({ month, selected, taskDays, onSelectDay, onPrevMonth, onN
   );
 }
 
-function ShortcutTile({ panel, i, dense }: { panel: any; i: number; dense?: boolean }) {
+function ShortcutTile({ panel, i, dense, compact }: { panel: any; i: number; dense?: boolean; compact?: boolean }) {
   const [p, setP] = useState(false);
   const Icon = panel.icon;
-  const iconSz = dense ? 40 : 46;
+  // compact: tüm kısayollar tek sıraya sığsın diye daha küçük ikon/yazı
+  const iconSz = compact ? 30 : dense ? 40 : 46;
+  const iconGlyph = compact ? 16 : dense ? 20 : 22;
   return (
-    <Link href={panel.href} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
-      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', height: '100%', minHeight: dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: dense ? 7 : 10, padding: dense ? '10px 6px' : '16px 8px', borderRadius: HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
-      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={dense ? 20 : 22} /></span>
-      <span style={{ fontSize: 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.2 }}>{panel.label}</span>
+    <Link href={panel.href} title={panel.label} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 68 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 5 : dense ? 7 : 10, padding: compact ? '8px 4px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 14 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
+      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 10 : 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={iconGlyph} /></span>
+      <span style={{ fontSize: compact ? 9.5 : 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.15, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{panel.label}</span>
     </Link>
   );
 }
@@ -227,26 +229,34 @@ export default function DashboardV2({
     try {
       const rates = await getExchangeRates();
       let productDocs: any[] = [], stockDocs: any[] = [], depotDocs: any[] = [];
-      try { const s = await getDocs(scopedQuery('productCodes', currentCompanyId, isSuperAdmin)); productDocs = s.docs; } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
-      try { const s = await getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin)); stockDocs = s.docs; } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
-      try { const s = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin)); depotDocs = s.docs; } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
+      // getScopedDocs: companyId etiketli + '__legacy__' + etiketsiz eski kayıtları da
+      // kapsar. scopedQuery tek başına where('companyId','==') uyguladığı için
+      // etiketsiz eski depoStok kayıtlarını eliyor ve toplam maliyet düşük çıkıyordu.
+      try { productDocs = await getScopedDocs('productCodes', currentCompanyId, isSuperAdmin); } catch (e) { console.warn('[Dashboard] productCodes fetch failed:', e); }
+      try { stockDocs = await getScopedDocs('depoStok', currentCompanyId, isSuperAdmin); } catch (e) { console.warn('[Dashboard] depoStok fetch failed:', e); }
+      try { depotDocs = await getScopedDocs('depots', currentCompanyId, isSuperAdmin); } catch (e) { console.warn('[Dashboard] depots fetch failed:', e); }
 
       const depotNames: Record<string, string> = {};
       depotDocs.forEach((d) => { depotNames[d.id] = String(d.data()?.name || d.id); });
       const hospitalNames: Record<string, string> = {};
       hospitals.forEach((h) => { hospitalNames[h.id] = h.name; });
 
-      // Depo bazlı minMaxRules — riskli stok hesabı için
+      // Riskli stok için min/max kuralları — hem depolardan hem laboratuvarlardan
+      // (saha genelinde riskli stok maliyeti).
       const minMaxRules: Record<string, { max: number; maxGun: number }> = {};
-      await Promise.all(depotDocs.map(async (dep) => {
+      const collectRules = async (parent: 'depots' | 'hospitals', id: string) => {
         try {
-          const rs = await getDocs(collection(db, 'depots', dep.id, 'minMaxRules'));
+          const rs = await getDocs(collection(db, parent, id, 'minMaxRules'));
           rs.docs.forEach((r) => {
             const rule = r.data();
-            if (rule.stokKodu && rule.max && rule.maxGun) minMaxRules[`${dep.id}__${rule.stokKodu}`] = { max: rule.max, maxGun: rule.maxGun };
+            if (rule.stokKodu && rule.max && rule.maxGun) minMaxRules[`${id}__${rule.stokKodu}`] = { max: rule.max, maxGun: rule.maxGun };
           });
-        } catch { /* rule fetch hatası riskli hesabı atlar */ }
-      }));
+        } catch { /* rule fetch hatası o lokasyonun riskli hesabını atlar */ }
+      };
+      await Promise.all([
+        ...depotDocs.map((dep) => collectRules('depots', dep.id)),
+        ...hospitals.map((h) => collectRules('hospitals', h.id)),
+      ]);
 
       const snapshot = computeStockCostSnapshot({
         products: productDocs.map((d) => d.data()),
@@ -916,8 +926,9 @@ export default function DashboardV2({
           <div style={{ flex: wide ? '1 1 auto' : '0 0 auto', minHeight: 0, display: 'flex', animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
           <ClayCard tone="brown" pad={isMobile ? 14 : 16} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <CardHead ico={<Search size={18} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
-            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : 8}, 1fr)`, gridAutoRows: wide ? '1fr' : 'auto', gap: isMobile ? 10 : 11, marginTop: 12 }}>
-              {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} dense={wide} />)}
+            {/* Geniş ekranda tüm kısayollar tek sırada: sütun sayısı = kısayol sayısı */}
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : Math.max(1, visiblePanels.length)}, minmax(0, 1fr))`, gridAutoRows: wide ? '1fr' : 'auto', gap: isMobile ? 10 : 8, marginTop: 12 }}>
+              {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} dense={wide} compact={wide} />)}
             </div>
           </ClayCard>
           </div>

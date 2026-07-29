@@ -78,6 +78,18 @@ export function parseProductCost(data: RawProductInput): { cost: number; currenc
   return { cost: num, currency: normalizeCurrency(data.currency) };
 }
 
+/** miad alanı string ('dd.MM.yyyy') ya da Timestamp/Date olabilir → 'dd.MM.yyyy'. */
+export function miadToStr(miad: unknown): string {
+  if (typeof miad === 'string') return miad.trim();
+  if (!miad || typeof miad !== 'object') return '';
+  const anyM = miad as any;
+  const d: Date | null = typeof anyM.toDate === 'function'
+    ? anyM.toDate()
+    : (typeof anyM.seconds === 'number' ? new Date(anyM.seconds * 1000) : (miad instanceof Date ? miad : null));
+  if (!d || isNaN(d.getTime())) return '';
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
 /** 'dd.MM.yyyy' string → bugüne göre kalan gün sayısı (yoksa null). */
 function miadDaysFrom(miad: string, now: Date): number | null {
   const m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec((miad || '').trim());
@@ -105,7 +117,8 @@ export interface ComputeInputs {
   stocks: RawStockInput[];
   depotNames: Record<string, string>;
   hospitalNames: Record<string, string>;
-  /** key = `${depotId}__${stokKodu}` → { max, maxGun } (riskli hesap için) */
+  /** key = `${locationId}__${stokKodu}` → { max, maxGun }. locationId depo VEYA
+   *  laboratuvar id'si olabilir; riskli stok tüm sahada (depo + lab) hesaplanır. */
   minMaxRules: Record<string, { max: number; maxGun: number }>;
   rates: CostRates;
   source: StockCostSnapshot['source'];
@@ -138,9 +151,9 @@ export function computeStockCostSnapshot(inputs: ComputeInputs): StockCostSnapsh
   const depotAcc = new Map<string, LocAcc>();
   const labAcc = new Map<string, LocAcc>();
 
-  // riskli hesap için depo stoğu topla
-  const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; depotId: string; quantity: number }> = [];
-  const groupedByDepotAndProduct = new Map<string, number>();
+  // riskli hesap için TÜM saha stoğu (depo + lab) toplanır
+  const activeStockItems: Array<{ stokKodu: string; lotNumarasi: string; miad: string; locationId: string; quantity: number }> = [];
+  const groupedByLocationAndProduct = new Map<string, number>();
   let itemCount = 0;
 
   stocks.forEach((data) => {
@@ -178,12 +191,17 @@ export function computeStockCostSnapshot(inputs: ComputeInputs): StockCostSnapsh
       prod.nativeTotals[pc.currency] += pc.cost * qty;
     }
 
-    // riskli — yalnızca depo (sevk edilmemiş) stoğu
-    if (data.isShipped !== true) {
-      const depotId = String(data.depotId || '');
-      activeStockItems.push({ stokKodu, lotNumarasi: String(data.lotNumarasi || ''), miad: typeof data.miad === 'string' ? data.miad : '', depotId, quantity: qty });
-      const gKey = `${depotId}__${stokKodu}`;
-      groupedByDepotAndProduct.set(gKey, (groupedByDepotAndProduct.get(gKey) || 0) + qty);
+    // riskli — tüm saha stoğu: depo için depotId, lab için hedefKurumId/labId
+    {
+      const isLab = data.isShipped === true;
+      const locationId = String(
+        isLab ? (data.hedefKurumId || data.labId || '') : (data.depotId || ''),
+      );
+      if (locationId) {
+        activeStockItems.push({ stokKodu, lotNumarasi: String(data.lotNumarasi || ''), miad: miadToStr(data.miad), locationId, quantity: qty });
+        const gKey = `${locationId}__${stokKodu}`;
+        groupedByLocationAndProduct.set(gKey, (groupedByLocationAndProduct.get(gKey) || 0) + qty);
+      }
     }
   });
 
@@ -197,18 +215,18 @@ export function computeStockCostSnapshot(inputs: ComputeInputs): StockCostSnapsh
   const byDepot = Array.from(depotAcc.values()).map(finalizeLoc).sort((a, b) => b.tryTotal - a.tryTotal);
   const byLab = Array.from(labAcc.values()).map(finalizeLoc).sort((a, b) => b.tryTotal - a.tryTotal);
 
-  // riskli stok değeri
-  const lotGroups = new Map<string, { stokKodu: string; depotId: string; miad: string; quantity: number }>();
+  // riskli stok değeri — depo + lab (saha) genelinde
+  const lotGroups = new Map<string, { stokKodu: string; locationId: string; miad: string; quantity: number }>();
   activeStockItems.forEach((item) => {
-    const key = `${item.depotId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
+    const key = `${item.locationId}__${item.stokKodu}__${item.lotNumarasi}__${item.miad}`;
     const ex = lotGroups.get(key);
     if (ex) ex.quantity += item.quantity;
-    else lotGroups.set(key, { stokKodu: item.stokKodu, depotId: item.depotId, miad: item.miad, quantity: item.quantity });
+    else lotGroups.set(key, { stokKodu: item.stokKodu, locationId: item.locationId, miad: item.miad, quantity: item.quantity });
   });
 
   const riskyPools = emptyPools();
   lotGroups.forEach((group) => {
-    const rule = minMaxRules[`${group.depotId}__${group.stokKodu}`];
+    const rule = minMaxRules[`${group.locationId}__${group.stokKodu}`];
     if (!rule || !rule.max || !rule.maxGun) return;
     const miadDays = miadDaysFrom(group.miad, now);
     if (miadDays === null || miadDays <= 0) return;
@@ -216,7 +234,7 @@ export function computeStockCostSnapshot(inputs: ComputeInputs): StockCostSnapsh
     if (periodDays <= 0) return;
     const dailyNeed = rule.max / periodDays;
     if (dailyNeed <= 0) return;
-    const totalStockForProduct = groupedByDepotAndProduct.get(`${group.depotId}__${group.stokKodu}`) || group.quantity;
+    const totalStockForProduct = groupedByLocationAndProduct.get(`${group.locationId}__${group.stokKodu}`) || group.quantity;
     const coverageDays = Math.floor(totalStockForProduct / dailyNeed);
     if (coverageDays <= miadDays) return;
     const riskyBoxes = Math.min(Math.max(0, Math.ceil((coverageDays - miadDays) * dailyNeed)), group.quantity);
