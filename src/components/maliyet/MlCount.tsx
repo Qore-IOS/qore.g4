@@ -5,6 +5,8 @@ import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore
 import { db } from '@/lib/firebase';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { normalizeCompanyId } from '@/lib/company-scope';
+import { labDonemineYaz } from '@/lib/lab-period/kaydet';
+import type { OlcumGirdisi } from '@/lib/lab-period/types';
 import { useAuth } from '@/contexts/auth-context';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import useHidScanner from '@/hooks/useHidScanner';
@@ -34,6 +36,29 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
   const mobile = mode === 'mobile', tablet = mode === 'tablet';
   const { currentUser, currentUserProfile, currentCompanyId } = useAuth() as any;
   const collaborative = !!session;
+
+  /**
+   * Sayımın ait olduğu dönem.
+   *
+   * Bu ekran daha önce dönem tutmuyordu; kayıtlar hangi aya ait olduğu
+   * belirsiz kalıyor ve lab-dönem kaynağına yazılamıyordu. Varsayılan içinde
+   * bulunulan ay, ama seçilebilir: ayın ilk günlerinde önceki ayın kapanışı
+   * sayıldığında sayım doğru döneme gitsin.
+   */
+  const [countMonth, setCountMonth] = React.useState(() => new Date().getMonth());
+  const [countYear, setCountYear] = React.useState(() => new Date().getFullYear());
+  const countPeriod = `${countYear}-${String(countMonth + 1).padStart(2, '0')}`;
+  const monthOptions = React.useMemo(
+    () => Array.from({ length: 12 }, (_, i) => ({
+      value: i,
+      label: new Date(0, i, 1).toLocaleString('tr-TR', { month: 'long' }),
+    })),
+    [],
+  );
+  const yearOptions = React.useMemo(() => {
+    const y = new Date().getFullYear();
+    return Array.from({ length: 5 }, (_, i) => y - 3 + i);
+  }, []);
 
   const [rules, setRules] = React.useState<MinMaxRule[]>([]);
   const [loadingRules, setLoadingRules] = React.useState(true);
@@ -190,12 +215,39 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
     try {
       if (collaborative && session?.id) {
         const finalItems = counted.map(p => { const e = countData[p.stokKodu]; const si = session.countData?.[p.stokKodu] as any; return { stokKodu: p.stokKodu, stokAdi: p.stokAdi, marka: p.marka || '', stokAdedi: parseInt(e?.stokAdedi || '0', 10) || 0, cihazUstuAdedi: parseInt(e?.cihazUstuAdedi || '0', 10) || 0, countedByUid: si?.countedByUid || currentUser?.uid || '', countedByName: si?.countedByName || currentUserProfile?.name || '', updates: si?.updates || [] }; });
-        await completeSession(session.id, finalItems as any, { locationType: kind, locationId: loc.id, locationName: loc.name, createdByUid: session.createdByUid, createdByName: session.createdByName, totalBrands: brands.length, participants: session.participants, companyId: currentCompanyId });
+        await completeSession(session.id, finalItems as any, { locationType: kind, locationId: loc.id, locationName: loc.name, createdByUid: session.createdByUid, createdByName: session.createdByName, totalBrands: brands.length, participants: session.participants, companyId: currentCompanyId, period: countPeriod, month: countMonth, year: countYear });
       } else {
         await addDoc(collection(db, 'maliyetSayimSessions'), {
           locationType: kind, locationId: loc.id, locationName: loc.name, createdAt: serverTimestamp(),
           createdByUid: currentUser?.uid ?? '', createdByName: currentUserProfile?.name ?? '',
           items, totalBrands: brands.length, totalProducts: items.length, companyId: normalizeCompanyId(currentCompanyId),
+          period: countPeriod, month: countMonth, year: countYear,
+        });
+      }
+
+      // Laboratuvar sayımları veriye ihtiyaç duyan panellerin tek kaynağına da
+      // işlenir. Depo sayımları lab-dönem kavramına girmediği için atlanır.
+      if (kind === 'lab' && loc.id) {
+        await labDonemineYaz({
+          labId: loc.id,
+          labAdi: loc.name,
+          yil: countYear,
+          ay: countMonth + 1, // countMonth 0-indekslidir
+          girdiler: items.flatMap(it => {
+            const kod = String(it.stokKodu || '').trim();
+            if (!kod) return [];
+            const out: OlcumGirdisi[] = [
+              { stokKodu: kod, alan: 'stok', deger: it.stokAdedi },
+            ];
+            if (it.cihazUstuAdedi > 0) {
+              out.push({ stokKodu: kod, alan: 'cihazUstu', deger: it.cihazUstuAdedi });
+            }
+            return out;
+          }),
+          kaynak: 'maliyet-sayim',
+          kaynakKayitId: session?.id || `${loc.id}-${countPeriod}`,
+          girenAdi: currentUserProfile?.name || undefined,
+          companyId: currentCompanyId,
         });
       }
     } catch (e) { console.error(e); }
@@ -296,6 +348,36 @@ export default function MlCount({ ac = AC, mode, loc, kind, productCodes, onBack
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: mobile ? 15.5 : 18, fontWeight: 800, letterSpacing: '-0.01em', color: 'var(--ink-1)', overflow: 'hidden', textOverflow: mobile ? 'clip' : 'ellipsis', whiteSpace: mobile ? 'normal' : 'nowrap', display: mobile ? '-webkit-box' : undefined, WebkitLineClamp: mobile ? 2 : undefined, WebkitBoxOrient: mobile ? 'vertical' : undefined, lineHeight: 1.12 }}>{loc.name}</div>
             <div style={{ fontSize: mobile ? 11 : 12, fontWeight: 600, color: 'var(--ink-3)', marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{brandsDone}/{brands.length} marka · {countedN}/{totalN} ürün</div>
+          </div>
+          {/* Sayımın ait olduğu dönem — sayım başladıktan sonra kilitlenir ki
+              yarısı bir aya yarısı diğerine yazılmasın. */}
+          <div
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0,
+              height: 36, padding: '0 12px', borderRadius: 'var(--radius-pill)',
+              background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)',
+            }}
+            title={countedN > 0 ? 'Sayım başladıktan sonra dönem değiştirilemez' : 'Sayımın ait olduğu dönem'}
+          >
+            <span style={{ fontSize: 11, fontWeight: 800, color: 'var(--ink-3)' }}>Dönem</span>
+            <select
+              value={countMonth}
+              onChange={e => setCountMonth(Number(e.target.value))}
+              disabled={saving || countedN > 0}
+              aria-label="Sayım ayı"
+              style={{ border: 0, outline: 0, background: 'transparent', color: 'var(--ink-1)', fontSize: 11.5, fontWeight: 700 }}
+            >
+              {monthOptions.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+            </select>
+            <select
+              value={countYear}
+              onChange={e => setCountYear(Number(e.target.value))}
+              disabled={saving || countedN > 0}
+              aria-label="Sayım yılı"
+              style={{ border: 0, outline: 0, background: 'transparent', color: 'var(--ink-1)', fontSize: 11.5, fontWeight: 700 }}
+            >
+              {yearOptions.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
           </div>
           {!mobile && (
             <div style={{ display: 'flex', gap: 8 }}>
