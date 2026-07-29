@@ -447,29 +447,19 @@ const DockItem = ({
   );
 };
 
+// Marka işareti: çizim yerine gerçek QORE logosu kullanılır.
 const DockBrandMark = () => (
-  <svg
-    viewBox="0 0 32 32"
-    aria-hidden="true"
-    className="h-7 w-7 shrink-0 overflow-visible"
-    fill="none"
-  >
-    <path
-      d="M16 2.75c2.05 0 3.15 4.15 4.6 5.6 1.45 1.45 5.6 2.55 5.6 4.6s-4.15 3.15-5.6 4.6c-1.45 1.45-2.55 5.6-4.6 5.6s-3.15-4.15-4.6-5.6c-1.45-1.45-5.6-2.55-5.6-4.6s4.15-3.15 5.6-4.6c1.45-1.45 2.55-5.6 4.6-5.6Z"
-      fill="currentColor"
-      fillOpacity="0.2"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    />
-    <ellipse cx="16" cy="13" rx="7.2" ry="3.2" stroke="currentColor" strokeWidth="1.7" transform="rotate(35 16 13)" />
-    <ellipse cx="16" cy="13" rx="7.2" ry="3.2" stroke="currentColor" strokeWidth="1.7" transform="rotate(-35 16 13)" />
-    <circle cx="16" cy="13" r="1.75" fill="currentColor" />
-    <path d="M11.25 25.5h9.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-  </svg>
+  <Image
+    src="/newlogowh.png"
+    alt="QORE"
+    width={34}
+    height={34}
+    priority
+    className="h-7 w-7 shrink-0 object-contain"
+  />
 );
 
-// Windows-vari "Başlat" düğmesi — Qore Start menüsünü açar. Marka işareti
-// satır içi SVG'dir; böylece görsel optimizasyonuna veya statik dosya yüklemeye bağlı değildir.
+// Windows-vari "Başlat" düğmesi — Qore Start menüsünü açar.
 const DockLogo = () => {
   const { toggle, isOpen } = useStartMenu();
   const [tooltipOpen, setTooltipOpen] = useState(false);

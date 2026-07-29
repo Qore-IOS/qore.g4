@@ -56,6 +56,25 @@ const ROW =
 /** On-brand orange gradient — the app's primary identity (hue ~35). */
 const BRAND = 'bg-gradient-to-br from-[#f99a52] to-[#f06f2c]';
 
+/**
+ * Henüz yayında olmayan alanları bulanıklaştırıp "Çok Yakında" rozetiyle
+ * işaretler. İçerik görsel olarak kalır ama tıklanamaz/odaklanamaz.
+ */
+function ComingSoon({ children, label = 'Çok Yakında' }: { children: React.ReactNode; label?: string }) {
+  return (
+    <div className="relative select-none" aria-disabled="true">
+      <div className="pointer-events-none blur-[3px] opacity-60 saturate-50" aria-hidden="true" {...{ inert: '' } as any}>
+        {children}
+      </div>
+      <div className="absolute inset-0 grid place-items-center rounded-2xl bg-white/25 dark:bg-black/25">
+        <span className="px-3 py-1.5 rounded-full text-[11.5px] font-extrabold tracking-wide text-white shadow-[0_8px_18px_-8px_rgba(240,111,44,.9)] bg-gradient-to-br from-[#f99a52] to-[#f06f2c]">
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 
 type ShortcutRunMode = 'manual' | 'scheduled' | 'manual_and_scheduled';
 
@@ -310,10 +329,9 @@ export function StartMenu() {
     close();
   };
 
+  // AI alanı şimdilik devre dışı ("Çok Yakında"). Panel araması çalışmaya devam eder.
   const askAI = () => {
-    if (!q) return;
-    openAI(q);
-    close();
+    toast.info('QORE AI çok yakında.');
   };
 
   const openShortcutBuilder = (draft: ShortcutDraft | null = null) => {
@@ -443,7 +461,7 @@ export function StartMenu() {
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={onSearchKey}
-                  placeholder="Qore AI'ya sorun ya da uygulamada arayın…"
+                  placeholder="Uygulamada arayın…"
                   className="flex-1 bg-transparent text-[14.5px] font-medium text-foreground placeholder:text-muted-foreground/70 focus:outline-none"
                 />
                 <kbd className="shrink-0 text-[11px] font-semibold text-muted-foreground px-2 py-1 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] border border-black/[0.04] dark:border-white/10">
@@ -522,6 +540,7 @@ export function StartMenu() {
                 /* ---- default sections ---- */
                 <>
                   {/* Günün özeti (placeholder — real AI digest wired later) */}
+                  <ComingSoon>
                   <div
                     className="rounded-2xl p-3 flex gap-2.5 items-start"
                     style={{
@@ -567,6 +586,7 @@ export function StartMenu() {
                       </div>
                     </div>
                   </div>
+                  </ComingSoon>
 
                   {/* Sık kullanılanlar (real — from accessible panels) */}
                   <section>
@@ -611,6 +631,7 @@ export function StartMenu() {
                   </section>
 
                   {/* Kestirmeler — kullanıcının erişebildiği panellerden kataloglanır. */}
+                  <ComingSoon>
                   <section>
                     <div className="flex items-baseline justify-between px-1">
                       <h3 className={SECTION_LABEL}>Kestirmeler</h3>
@@ -672,6 +693,7 @@ export function StartMenu() {
                       )}
                     </div>
                   </section>
+                  </ComingSoon>
 
                   {/* Son yapılan işlemler — 2 sütun, tek ekrana sığsın diye
                       (placeholder; gerçek aktivite akışı sonra bağlanacak) */}

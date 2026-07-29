@@ -47,6 +47,18 @@ function parseCost(data: any): { cost: number; currency: Currency } | null {
   if (!num || isNaN(num)) return null;
   return { cost: num, currency: normCur(data.currency) };
 }
+/** miad alanı string ('dd.MM.yyyy') ya da Timestamp/Date olabilir → 'dd.MM.yyyy'. */
+function miadToStr(miad: unknown): string {
+  if (typeof miad === 'string') return miad.trim();
+  if (!miad || typeof miad !== 'object') return '';
+  const anyM = miad as any;
+  const d: Date | null = typeof anyM.toDate === 'function'
+    ? anyM.toDate()
+    : (typeof anyM.seconds === 'number' ? new Date(anyM.seconds * 1000) : (miad instanceof Date ? miad : null));
+  if (!d || isNaN(d.getTime())) return '';
+  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+}
+
 function miadDaysFrom(miad: string, now: Date): number | null {
   const m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec((miad || '').trim());
   if (!m) return null;
@@ -91,15 +103,36 @@ interface LocationRow { id: string; name: string; type: 'depo' | 'lab'; quantity
 async function computeCompany(companyId: string, rates: Rates, now: Date): Promise<{ totalTRY: number; itemCount: number }> {
   const cid = normalizeCompanyId(companyId);
 
+  // Şirket etiketli + '__legacy__' + etiketsiz eski kayıtları birlikte topla:
+  // yalnızca companyId eşitliğiyle okumak etiketsiz depoStok kayıtlarını eler ve
+  // toplam maliyeti olduğundan düşük gösterirdi.
+  const scopedDocs = async (path: string) => {
+    const [own, legacy] = await Promise.all([
+      db.collection(path).where('companyId', '==', cid).get(),
+      db.collection(path).where('companyId', '==', LEGACY_COMPANY_ID).get(),
+    ]);
+    const byId = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+    own.docs.forEach((d) => byId.set(d.id, d));
+    legacy.docs.forEach((d) => { if (!byId.has(d.id)) byId.set(d.id, d); });
+    try {
+      const all = await db.collection(path).get();
+      all.docs.forEach((d) => {
+        const tag = String(d.data()?.companyId ?? '').trim();
+        if (!tag && !byId.has(d.id)) byId.set(d.id, d); // etiketsiz eski kayıt
+      });
+    } catch { /* okunamazsa etiketli sonuçlar geçerli kalır */ }
+    return Array.from(byId.values());
+  };
+
   const [prodSnap, stockSnap, depotSnap, hospSnap] = await Promise.all([
-    db.collection('productCodes').where('companyId', '==', cid).get(),
-    db.collection('depoStok').where('companyId', '==', cid).get(),
-    db.collection('depots').where('companyId', '==', cid).get(),
-    db.collection('hospitals').where('companyId', '==', cid).get(),
+    scopedDocs('productCodes'),
+    scopedDocs('depoStok'),
+    scopedDocs('depots'),
+    scopedDocs('hospitals'),
   ]);
 
   const costMap = new Map<string, { cost: number; currency: Currency; brand: string; stokAdi: string; urunGrubu: string }>();
-  prodSnap.docs.forEach((d) => {
+  prodSnap.forEach((d) => {
     const data = d.data();
     const parsed = parseCost(data);
     if (!parsed || !data.stokKodu) return;
@@ -112,18 +145,18 @@ async function computeCompany(companyId: string, rates: Rates, now: Date): Promi
   });
 
   const depotNames = new Map<string, string>();
-  depotSnap.docs.forEach((d) => depotNames.set(d.id, String(d.data()?.name || d.id)));
+  depotSnap.forEach((d) => depotNames.set(d.id, String(d.data()?.name || d.id)));
   const hospitalNames = new Map<string, string>();
-  hospSnap.docs.forEach((d) => hospitalNames.set(d.id, String(d.data()?.name || d.id)));
+  hospSnap.forEach((d) => hospitalNames.set(d.id, String(d.data()?.name || d.id)));
 
-  // depo bazlı minMaxRules (riskli hesabı)
+  // min/max kuralları — hem depolar hem laboratuvarlar (saha geneli riskli stok)
   const minMaxRules = new Map<string, { max: number; maxGun: number }>();
-  await Promise.all(depotSnap.docs.map(async (dep) => {
+  await Promise.all([...depotSnap, ...hospSnap].map(async (loc) => {
     try {
-      const rs = await dep.ref.collection('minMaxRules').get();
+      const rs = await loc.ref.collection('minMaxRules').get();
       rs.docs.forEach((r) => {
         const rule = r.data();
-        if (rule.stokKodu && rule.max && rule.maxGun) minMaxRules.set(`${dep.id}__${rule.stokKodu}`, { max: rule.max, maxGun: rule.maxGun });
+        if (rule.stokKodu && rule.max && rule.maxGun) minMaxRules.set(`${loc.id}__${rule.stokKodu}`, { max: rule.max, maxGun: rule.maxGun });
       });
     } catch { /* ignore */ }
   }));
@@ -131,11 +164,11 @@ async function computeCompany(companyId: string, rates: Rates, now: Date): Promi
   const totalPools = emptyPools();
   const depotAcc = new Map<string, LocationRow>();
   const labAcc = new Map<string, LocationRow>();
-  const activeItems: Array<{ stokKodu: string; lot: string; miad: string; depotId: string; qty: number }> = [];
-  const groupedByDepotProduct = new Map<string, number>();
+  const activeItems: Array<{ stokKodu: string; lot: string; miad: string; locationId: string; qty: number }> = [];
+  const groupedByLocationProduct = new Map<string, number>();
   let itemCount = 0;
 
-  stockSnap.docs.forEach((d) => {
+  stockSnap.forEach((d) => {
     const data = d.data();
     const stokKodu = String(data.stokKodu || '');
     const qty = Number(data.quantity ?? 1) || 1;
@@ -160,11 +193,15 @@ async function computeCompany(companyId: string, rates: Rates, now: Date): Promi
       prod.quantity += qty;
       prod.nativeTotals[pc.currency] += pc.cost * qty;
     }
-    if (data.isShipped !== true) {
-      const depotId = String(data.depotId || '');
-      activeItems.push({ stokKodu, lot: String(data.lotNumarasi || ''), miad: typeof data.miad === 'string' ? data.miad : '', depotId, qty });
-      const gKey = `${depotId}__${stokKodu}`;
-      groupedByDepotProduct.set(gKey, (groupedByDepotProduct.get(gKey) || 0) + qty);
+    {
+      // riskli stok tüm sahada: depo için depotId, lab için hedefKurumId/labId
+      const isLabItem = data.isShipped === true;
+      const locationId = String(isLabItem ? (data.hedefKurumId || data.labId || '') : (data.depotId || ''));
+      if (locationId) {
+        activeItems.push({ stokKodu, lot: String(data.lotNumarasi || ''), miad: miadToStr(data.miad), locationId, qty });
+        const gKey = `${locationId}__${stokKodu}`;
+        groupedByLocationProduct.set(gKey, (groupedByLocationProduct.get(gKey) || 0) + qty);
+      }
     }
   });
 
@@ -177,16 +214,16 @@ async function computeCompany(companyId: string, rates: Rates, now: Date): Promi
   const byLab = Array.from(labAcc.values()).map(finalize).sort((a, b) => b.tryTotal - a.tryTotal);
 
   // riskli stok
-  const lotGroups = new Map<string, { stokKodu: string; depotId: string; miad: string; qty: number }>();
+  const lotGroups = new Map<string, { stokKodu: string; locationId: string; miad: string; qty: number }>();
   activeItems.forEach((it) => {
-    const key = `${it.depotId}__${it.stokKodu}__${it.lot}__${it.miad}`;
+    const key = `${it.locationId}__${it.stokKodu}__${it.lot}__${it.miad}`;
     const ex = lotGroups.get(key);
     if (ex) ex.qty += it.qty;
-    else lotGroups.set(key, { stokKodu: it.stokKodu, depotId: it.depotId, miad: it.miad, qty: it.qty });
+    else lotGroups.set(key, { stokKodu: it.stokKodu, locationId: it.locationId, miad: it.miad, qty: it.qty });
   });
   const riskyPools = emptyPools();
   lotGroups.forEach((g) => {
-    const rule = minMaxRules.get(`${g.depotId}__${g.stokKodu}`);
+    const rule = minMaxRules.get(`${g.locationId}__${g.stokKodu}`);
     if (!rule || !rule.max || !rule.maxGun) return;
     const miadDays = miadDaysFrom(g.miad, now);
     if (miadDays === null || miadDays <= 0) return;
@@ -194,7 +231,7 @@ async function computeCompany(companyId: string, rates: Rates, now: Date): Promi
     if (periodDays <= 0) return;
     const dailyNeed = rule.max / periodDays;
     if (dailyNeed <= 0) return;
-    const totalStock = groupedByDepotProduct.get(`${g.depotId}__${g.stokKodu}`) || g.qty;
+    const totalStock = groupedByLocationProduct.get(`${g.locationId}__${g.stokKodu}`) || g.qty;
     const coverageDays = Math.floor(totalStock / dailyNeed);
     if (coverageDays <= miadDays) return;
     const riskyBoxes = Math.min(Math.max(0, Math.ceil((coverageDays - miadDays) * dailyNeed)), g.qty);

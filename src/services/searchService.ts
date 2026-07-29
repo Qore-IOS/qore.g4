@@ -45,7 +45,8 @@ export interface LedgerRow {
 
 export interface StockSummary {
   konum: string;
-  konumTipi: 'depo' | 'laboratuvar';
+  /** 'borc' = borç verilen (sevk edilmiş ama bir laboratuvara bağlı olmayan) stok */
+  konumTipi: 'depo' | 'laboratuvar' | 'borc';
   adet: number;
   birim: string;
 }
@@ -367,7 +368,20 @@ export async function searchProductLedger(
     }
   } else {
     // Calculate current stock by location for product/lot search
-    const stockByLocation: Record<string, { adet: number; konumTipi: 'depo' | 'laboratuvar' }> = {};
+    const stockByLocation: Record<string, { adet: number; konumTipi: 'depo' | 'laboratuvar' | 'borc' }> = {};
+
+    // Sevk edilmiş stoğun gerçek konumunu çözebilmek için laboratuvar adları.
+    // (Önceden hedefKurum boşsa düz "Laboratuvar" yazılıyordu.)
+    const hospitalNameById = new Map<string, string>();
+    try {
+      const hospSnap = await getDocs(scopedQuery('hospitals', companyId, isSuperAdmin));
+      hospSnap.docs.forEach((d) => hospitalNameById.set(d.id, String(d.data()?.name || '')));
+    } catch { /* isim çözülemezse mevcut alanlara düşülür */ }
+    const borcDepotNames = new Set<string>();
+    try {
+      const borcSnap = await getDocs(scopedQuery('borcDepots', companyId, isSuperAdmin));
+      borcSnap.docs.forEach((d) => { const n = String(d.data()?.name || '').trim(); if (n) borcDepotNames.add(n); });
+    } catch { /* borç depoları okunamazsa ad eşleşmesi atlanır */ }
 
     depoStok.forEach(item => {
       const matchesLot = searchType === 'lot'
@@ -381,10 +395,17 @@ export async function searchProductLedger(
         );
 
         if (!isConsumed) {
+          const hedefId = String((item as any).hedefKurumId || (item as any).labId || '').trim();
+          const hedefAd = String(item.hedefKurum || '').trim();
+          // Borç: sevk edilmiş ama bir laboratuvara bağlı olmayan stok
+          // (direkt transferde borç modu hedefKurumId'yi null bırakır).
+          const isBorc = !!item.isShipped && !hedefId && (borcDepotNames.has(hedefAd) || !!hedefAd);
           const konum = item.isShipped
-            ? (item.hedefKurum || 'Laboratuvar')
+            ? (hospitalNameById.get(hedefId) || hedefAd || 'Bilinmeyen konum')
             : (item.depotName || 'Depo');
-          const konumTipi = item.isShipped ? 'laboratuvar' : 'depo';
+          const konumTipi: 'depo' | 'laboratuvar' | 'borc' = !item.isShipped
+            ? 'depo'
+            : (isBorc ? 'borc' : 'laboratuvar');
 
           if (!stockByLocation[konum]) {
             stockByLocation[konum] = { adet: 0, konumTipi };
