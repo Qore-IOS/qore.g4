@@ -205,6 +205,12 @@ service cloud.firestore {
       allow write: if writingInCompany();
       match /lines/{lineId}                   { allow read, write: if isSignedIn(); }
     }
+    // Yönetici stok adedi düzeltme iz kaydı (artış/azalış). Silinemez.
+    match /stockAdjustmentLogs/{id} {
+      allow read: if inCompany();
+      allow create: if writingInCompany();
+      allow update, delete: if false;
+    }
     match /poolWarehouseStock/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /routes/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /draftActionForms/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }

@@ -32,7 +32,7 @@ import {
   ChevronLeft, ChevronRight, Eye,
   FileDown, ListChecks, BarChart3, ChevronsUpDown, FileText,
   AlertTriangle, FlaskConical, ShieldCheck, ArrowRight,
-  CheckCircle2, XCircle, Send, ClipboardPlus, History,
+  CheckCircle2, XCircle, Send, ClipboardPlus, History, Pencil,
 } from 'lucide-react';
 import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
@@ -594,6 +594,65 @@ export default function StokYonetimiPanel() {
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const mode = useMode();
   const mobile = mode === 'mobile';
+
+  // Adet düzenleme yalnızca yöneticilerde görünür.
+  const canAdjustStock = useMemo(() => {
+    const role = currentUserProfile?.role;
+    return !!isSuperAdmin || role === 'admin' || role === 'super_admin' || role === 'admin_developer';
+  }, [currentUserProfile?.role, isSuperAdmin]);
+  const [adjustRow, setAdjustRow] = useState<GroupedStockRow | null>(null);
+  const [adjustQty, setAdjustQty] = useState('');
+  const [adjustReason, setAdjustReason] = useState('');
+  const [adjustBusy, setAdjustBusy] = useState(false);
+  const openAdjust = useCallback((row: GroupedStockRow) => {
+    setAdjustRow(row);
+    setAdjustQty(String(row.quantity));
+    setAdjustReason('');
+  }, []);
+
+  const submitAdjust = useCallback(async () => {
+    if (!adjustRow) return;
+    const target = Math.floor(Number(adjustQty));
+    if (!Number.isFinite(target) || target < 0) {
+      toast({ title: 'Geçersiz adet', description: 'Sıfır veya pozitif bir sayı girin.', variant: 'destructive' });
+      return;
+    }
+    if (target === adjustRow.quantity) {
+      toast({ title: 'Adet değişmedi', description: 'Farklı bir adet girin.' });
+      return;
+    }
+    if (!adjustReason.trim()) {
+      toast({ title: 'Gerekçe gerekli', description: 'Düzeltme gerekçesini yazın.', variant: 'destructive' });
+      return;
+    }
+    setAdjustBusy(true);
+    try {
+      const { adjustGroupedStockQuantity } = await import('@/lib/stock-adjustment');
+      const depot = depots.find((d) => d.id === selectedDepotId) as any;
+      const res = await adjustGroupedStockQuantity({
+        row: adjustRow as any,
+        newQuantity: target,
+        depotId: selectedDepotId,
+        depotName: depot?.name || '',
+        companyId: currentCompanyId,
+        user: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen' },
+        reason: adjustReason.trim(),
+      });
+      toast({
+        title: res.direction === 'increase' ? 'Adet artırıldı' : 'Adet azaltıldı',
+        description: res.direction === 'increase'
+          ? `${res.created} adet eklendi ve mal kabul kaydı oluşturuldu.`
+          : `${res.deleted} adet düşüldü ve log kaydedildi.`,
+      });
+      setAdjustRow(null);
+      await paginatedQuery.refetch();
+    } catch (e: any) {
+      console.error('[StokYonetimi] adet düzeltme hatası:', e);
+      toast({ title: 'Düzeltme başarısız', description: e?.message || 'Bilinmeyen hata.', variant: 'destructive' });
+    } finally {
+      setAdjustBusy(false);
+    }
+  }, [adjustRow, adjustQty, adjustReason, depots, selectedDepotId, currentCompanyId, currentUserProfile, toast, paginatedQuery]);
 
   // Master data — TanStack Query backed (cache shared across panels & navigations)
   const depotsQuery = useDepots();
@@ -1977,10 +2036,23 @@ export default function StokYonetimiPanel() {
                         )}
                       </td>
 
-                      {/* Adet - chip */}
+                      {/* Adet - chip (+ yöneticiye özel düzenleme) */}
                       <td style={{ padding: '13px 12px', textAlign: 'center' }}>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 48, padding: '6px 12px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 800, color: C.ink1, whiteSpace: 'nowrap' }}>
-                          {row.quantity} {row.anaBirim}
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 48, padding: '6px 12px', borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset, fontSize: 13, fontWeight: 800, color: C.ink1, whiteSpace: 'nowrap' }}>
+                            {row.quantity} {row.anaBirim}
+                          </span>
+                          {canAdjustStock && (
+                            <button
+                              type="button"
+                              title="Adedi düzenle"
+                              aria-label="Adedi düzenle"
+                              onClick={(e) => { e.stopPropagation(); openAdjust(row); }}
+                              style={{ all: 'unset', cursor: 'pointer', width: 26, height: 26, borderRadius: 8, display: 'grid', placeItems: 'center', color: C.ink3, background: C.surface2, boxShadow: C.clayInset }}
+                            >
+                              <Pencil size={13} />
+                            </button>
+                          )}
                         </span>
                       </td>
 
@@ -2477,6 +2549,42 @@ export default function StokYonetimiPanel() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsBulkRescueModalOpen(false)}>Kapat</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Yöneticiye özel adet düzeltme */}
+      <Dialog open={!!adjustRow} onOpenChange={(o) => { if (!o) setAdjustRow(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Adet Düzenle</DialogTitle>
+            <DialogDescription>
+              {adjustRow ? `${adjustRow.stokAdi} · Lot ${adjustRow.lotNumarasi || '—'} · mevcut ${adjustRow.quantity} ${adjustRow.anaBirim}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-3">
+            <label className="text-[13px] font-semibold">Yeni adet</label>
+            <input
+              type="number" min={0} value={adjustQty}
+              onChange={(e) => setAdjustQty(e.target.value)}
+              className="h-10 rounded-lg border px-3 text-[14px]"
+            />
+            <label className="text-[13px] font-semibold">Gerekçe</label>
+            <input
+              value={adjustReason}
+              onChange={(e) => setAdjustReason(e.target.value)}
+              placeholder="Örn. sayım farkı düzeltmesi"
+              className="h-10 rounded-lg border px-3 text-[14px]"
+            />
+            <p className="text-[12px] text-muted-foreground">
+              Artırma mal kabul kaydı oluşturur; azaltma log olarak kaydedilir.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAdjustRow(null)} disabled={adjustBusy}>Vazgeç</Button>
+            <Button onClick={submitAdjust} disabled={adjustBusy}>
+              {adjustBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Kaydet'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
