@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { Warehouse, Building, Building2, Barcode, MapPin, Users, Beaker, QrCode, Pill } from 'lucide-react';
+import { Warehouse, Building, Building2, Barcode, Database, MapPin, Users, Beaker, QrCode, Pill } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -24,6 +24,7 @@ export default function TanimlarPage() {
     { icon: Users, label: 'Kullanıcı Yönetimi', description: 'Rol, yetki ve atama yönetimi', href: '/yonetim/kullanicilar', color: '#fb923c' },
     { icon: Beaker, label: 'Test Yönetimi', description: 'SUT kodu, hak ediş ve test–ürün eşleşmesi', href: '/yonetim/test-yonetimi', color: '#42e46d' },
     { icon: QrCode, label: 'Barkod Formatları', description: 'GS1, DataMatrix ve özel format kuralları', href: '/yonetim/barkod-formatlari', color: '#6ea8ff' },
+    { icon: Database, label: 'Lab-Dönem Aktarımı', description: 'Geçmiş sayım, kümülatif ve cihaz üstü verilerini tek kaynağa taşır', href: '/yonetim/lab-donem-aktarim', color: '#42e46d' },
     ...(isSuperAdmin
       ? [{ icon: Building2, label: 'Firma Yönetimi', description: 'Multi-tenant firma kayıtları', href: '/yonetim/firmalar', color: '#a78bfa' }]
       : []),
