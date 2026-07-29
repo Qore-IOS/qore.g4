@@ -91,6 +91,23 @@ function getCandidateModels(): string[] {
   return DEFAULT_GEMINI_MODELS;
 }
 
+function friendlyGeminiError(lastDebug: string): string | null {
+  if (lastDebug.includes('http_429')) {
+    return 'Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin veya farklı bir API anahtarı kullanın.';
+  }
+  if (lastDebug.includes('http_503')) {
+    return 'Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.';
+  }
+  if (lastDebug.includes('http_403')) {
+    const lower = lastDebug.toLowerCase();
+    if (lower.includes('dunning') || lower.includes('billing') || lower.includes('permission_denied')) {
+      return 'Gemini API erişimi faturalandırma sorunu nedeniyle reddedildi. Google Cloud hesabınızda ödeme/borç durumu olabilir — Google Cloud Console › Faturalandırma bölümünden kontrol edin veya sağlıklı bir projeden yeni API anahtarı oluşturun.';
+    }
+    return 'Gemini API erişimi reddedildi (403). API anahtarının geçerli olduğunu ve bağlı Google Cloud projesinin faturalandırmasının aktif olduğunu kontrol edin.';
+  }
+  return null;
+}
+
 export async function generateWithGemini(options: GenerateOptions): Promise<{ text: string; functionCalls: GeminiFunctionCall[]; model: string; debug?: string; }> {
   const apiKey = getGeminiApiKey();
   if (!apiKey) throw new Error('GEMINI_API_KEY environment variable ayarlanmamis');
@@ -180,13 +197,7 @@ export async function generateWithGemini(options: GenerateOptions): Promise<{ te
   }
 
   aiLogger.error('Gemini tum modellerde basarisiz oldu', { debug: lastDebug });
-  if (lastDebug.startsWith('gemini_http_429')) {
-    throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin veya farklı bir API anahtarı kullanın.');
-  }
-  if (lastDebug.startsWith('gemini_http_503')) {
-    throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
-  }
-  throw new Error(lastDebug);
+  throw new Error(friendlyGeminiError(lastDebug) || lastDebug);
 }
 
 /**
@@ -262,11 +273,5 @@ export async function generateVisionWithGemini(
   }
 
   aiLogger.error('Gemini Vision tum modellerde basarisiz oldu', { debug: lastDebug });
-  if (lastDebug.includes('http_429')) {
-    throw new Error('Gemini API kotası doldu (rate limit). Lütfen 30-60 saniye bekleyip tekrar deneyin.');
-  }
-  if (lastDebug.includes('http_503')) {
-    throw new Error('Gemini API geçici olarak meşgul. Lütfen birkaç saniye sonra tekrar deneyin.');
-  }
-  throw new Error(lastDebug);
+  throw new Error(friendlyGeminiError(lastDebug) || lastDebug);
 }
