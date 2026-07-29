@@ -121,7 +121,7 @@ function ShortcutTile({ panel, i, dense, compact }: { panel: any; i: number; den
   const iconSz = compact ? 34 : dense ? 40 : 46;
   const iconGlyph = compact ? 18 : dense ? 20 : 22;
   return (
-    <Link href={panel.href} title={panel.label} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
+    <Link href={panel.href} title={panel.label} aria-label={`${panel.label} panelini aç`} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
       style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 82 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 7 : dense ? 7 : 10, padding: compact ? '10px 5px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 16 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
       <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 11 : 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={iconGlyph} /></span>
       {/* etiket kesilmesin: en fazla 2 satır */}
@@ -819,9 +819,10 @@ export default function DashboardV2({
 
   return (
     <>
-      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '14px 24px 18px' : '18px 22px 26px' }}>
-        {/* Yükseklikten dock payı düşülür ki Sık Kullanılanlar kartı dock'un altında kalmasın */}
-        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap, height: wide ? 'calc(100dvh - var(--dock-h, 76px) - var(--dock-gap, 16px) - 26px)' : 'auto', overflow: wide ? 'hidden' : 'visible' }}>
+      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '14px 24px calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + 24px)' : '18px 22px 26px' }}>
+        {/* İçerik doğal yüksekliğinde kalır. Sabit viewport yüksekliği, kısa masaüstü
+            ekranlarında bu kartı küçültüp ikonları dock'un arkasına saklıyordu. */}
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap }}>
 
           {/* Header */}
           <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
@@ -957,7 +958,7 @@ export default function DashboardV2({
           </div>
 
           {/* Sık Kullanılanlar — kalan alanı doldurur, tüm butonlar kaydırmasız sığar */}
-          <div style={{ flex: wide ? '1 1 auto' : '0 0 auto', minHeight: 0, display: 'flex', animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
+          <div style={{ flex: '0 0 auto', minHeight: wide ? 126 : 0, display: 'flex', animation: `mkRise 560ms ${HOME_C.ease} 240ms both` }}>
           <ClayCard tone="brown" pad={isMobile ? 14 : 16} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <CardHead ico={<Search size={18} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
             {/* Geniş ekranda tüm kısayollar tek sırada: sütun sayısı = kısayol sayısı */}
