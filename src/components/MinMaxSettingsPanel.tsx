@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
 import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -11,6 +11,8 @@ import { Input } from '@/components/ui/input';
 import { Upload, Download, Loader2, Save, Trash2, SlidersHorizontal, Clock, Search, X, Plus } from 'lucide-react';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
+import type { MinMaxPeriodConfig } from '@/lib/types';
+import { DEFAULT_MIN_MAX_PERIOD_CONFIG, getActiveMinMaxPeriod, resolveSeasonalMinMaxRule } from '@/lib/seasonal-min-max';
 
 interface MinMaxSettingsPanelProps {
   isOpen: boolean;
@@ -32,6 +34,7 @@ interface RuleState {
     otomatikTransferAdedi?: number | string;
     counterEnabled?: boolean;
     counterPlusEnabled?: boolean;
+    donemDegerleri?: MinMaxRule['donemDegerleri'];
     enabled: boolean;
   }
 }
@@ -45,6 +48,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const [searchQuery, setSearchQuery] = useState('');
   const [existingRuleCodes, setExistingRuleCodes] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<PanelTab>('selected');
+  const [periodConfig, setPeriodConfig] = useState<MinMaxPeriodConfig>(DEFAULT_MIN_MAX_PERIOD_CONFIG);
 
   const collectionName = targetType === 'depot' ? 'depots' : targetType === 'spare_parts_depot' ? 'yedekParcaDepoMinMax' : 'hospitals';
   const isDepotLike = targetType === 'depot' || targetType === 'spare_parts_depot';
@@ -53,6 +57,16 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
   const locationLabel = targetType === 'depot' ? 'depo' : targetType === 'spare_parts_depot' ? 'yedek parça deposu' : 'hastane';
   const targetId = target?.id;
   const targetName = target?.name || 'Hedef';
+  const activePeriod = getActiveMinMaxPeriod(periodConfig);
+
+  useEffect(() => {
+    if (!isOpen || !currentCompanyId) return;
+    getDoc(doc(db, 'minMaxPeriodConfigs', currentCompanyId)).then(snapshot => {
+      if (!snapshot.exists()) return;
+      const data = snapshot.data();
+      setPeriodConfig({ periods: data.periods || DEFAULT_MIN_MAX_PERIOD_CONFIG.periods, monthPeriodMap: data.monthPeriodMap || DEFAULT_MIN_MAX_PERIOD_CONFIG.monthPeriodMap });
+    }).catch(error => console.error('[min-max] dönem ayarları yüklenemedi', error));
+  }, [isOpen, currentCompanyId]);
 
   useEffect(() => {
     if (!isOpen || !targetId) return;
@@ -63,7 +77,8 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         const rulesRef = collection(db, collectionName, targetId, "minMaxRules");
         const snapshot = await getDocs(rulesRef);
         snapshot.forEach(d => {
-          const data = d.data() as MinMaxRule;
+          const rawData = d.data() as MinMaxRule;
+          const data = resolveSeasonalMinMaxRule(rawData, periodConfig);
           if (data.stokKodu) {
             fetchedRules[data.stokKodu] = {
               min: data.min ?? 0,
@@ -75,6 +90,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
               otomatikTransferAdedi: (data.otomatikTransferAdedi ?? '') as string | number,
               counterEnabled: !!data.counterEnabled,
               counterPlusEnabled: !!data.counterPlusEnabled,
+              donemDegerleri: rawData.donemDegerleri,
               enabled: true
             };
           }
@@ -89,7 +105,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
       }
     };
     fetchRules();
-  }, [isOpen, targetId, toast, targetType, collectionName]);
+  }, [isOpen, targetId, toast, targetType, collectionName, periodConfig]);
 
   const handleCheckboxChange = (stockCode: string, checked: boolean | string) => {
     setRules(prev => {
@@ -285,6 +301,12 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
         if (ortalamaTuketimSuresi !== undefined) { dataToSet.ortalamaTuketimSuresi = ortalamaTuketimSuresi; dataToSet.tuketimSuresiBirimi = tuketimSuresiBirimi; }
         if (rule.counterEnabled !== undefined) dataToSet.counterEnabled = !!rule.counterEnabled;
         if (rule.counterPlusEnabled !== undefined) dataToSet.counterPlusEnabled = !!rule.counterPlusEnabled;
+        if (rule.donemDegerleri) {
+          dataToSet.donemDegerleri = {
+            ...rule.donemDegerleri,
+            [activePeriod.id]: { min, max },
+          };
+        }
         if (isConsumables) {
           const otomatikAdet = rule.otomatikTransferAdedi === '' || rule.otomatikTransferAdedi === undefined ? 0 : Number(rule.otomatikTransferAdedi);
           if (isNaN(otomatikAdet) || otomatikAdet < 0) {
@@ -295,7 +317,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           dataToSet.otomatikTransferAdedi = otomatikAdet;
         }
         
-        currentBatch.set(ruleRef, dataToSet);
+        currentBatch.set(ruleRef, dataToSet, { merge: true });
         commitOp();
         
         currentBatch.set(historyRef, withCompanyScope({ ...dataToSet, locationId: targetId, locationType: targetType, timestamp: serverTimestamp() }, currentCompanyId));
@@ -417,6 +439,7 @@ export default function MinMaxSettingsPanel({ isOpen, onClose, target, targetTyp
           <div className="min-w-0">
             <h1 className="text-sm font-bold truncate" style={{ color: 'var(--dashboard-text, #111)' }}>{isConsumables ? 'Otomatik Transfer Listesi' : 'Min-Max Stok Seviyeleri'}</h1>
             <p className="text-[11px] truncate" style={{ color: 'var(--dashboard-muted, #6b7280)' }}>{target.name} &middot; {selectedCount} ürün tanımlı{isConsumables ? ' · Sarf Dağıtım transfer ekranında adetler otomatik gelir' : ''}</p>
+            {!isConsumables && <p className="mt-0.5 text-[10px] font-bold text-cyan-700 dark:text-cyan-300">Etkin dönem: {activePeriod.name}</p>}
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">

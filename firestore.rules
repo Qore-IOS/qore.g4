@@ -189,6 +189,7 @@ service cloud.firestore {
     match /postClosurePartChangeLogs/{id}     { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /nfcDisposalEvents/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /minMaxHistory/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /minMaxPeriodConfigs/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /trashBinRecords/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /borcTransfers/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /ejectedKitRecords/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
