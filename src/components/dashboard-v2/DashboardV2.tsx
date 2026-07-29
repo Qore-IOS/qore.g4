@@ -118,13 +118,14 @@ function ShortcutTile({ panel, i, dense, compact }: { panel: any; i: number; den
   const [p, setP] = useState(false);
   const Icon = panel.icon;
   // compact: tüm kısayollar tek sıraya sığsın diye daha küçük ikon/yazı
-  const iconSz = compact ? 30 : dense ? 40 : 46;
-  const iconGlyph = compact ? 16 : dense ? 20 : 22;
+  const iconSz = compact ? 34 : dense ? 40 : 46;
+  const iconGlyph = compact ? 18 : dense ? 20 : 22;
   return (
     <Link href={panel.href} title={panel.label} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
-      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 68 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 5 : dense ? 7 : 10, padding: compact ? '8px 4px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 14 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
-      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 10 : 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={iconGlyph} /></span>
-      <span style={{ fontSize: compact ? 9.5 : 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.15, width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{panel.label}</span>
+      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 82 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 7 : dense ? 7 : 10, padding: compact ? '10px 5px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 16 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
+      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 11 : 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={iconGlyph} /></span>
+      {/* etiket kesilmesin: en fazla 2 satır */}
+      <span style={{ fontSize: compact ? 10 : 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.2, width: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word', hyphens: 'auto' }}>{panel.label}</span>
     </Link>
   );
 }
@@ -819,7 +820,8 @@ export default function DashboardV2({
   return (
     <>
       <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '14px 24px 18px' : '18px 22px 26px' }}>
-        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap, height: wide ? 'calc(100dvh - 32px)' : 'auto', overflow: wide ? 'hidden' : 'visible' }}>
+        {/* Yükseklikten dock payı düşülür ki Sık Kullanılanlar kartı dock'un altında kalmasın */}
+        <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap, height: wide ? 'calc(100dvh - var(--dock-h, 76px) - var(--dock-gap, 16px) - 26px)' : 'auto', overflow: wide ? 'hidden' : 'visible' }}>
 
           {/* Header */}
           <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
@@ -959,7 +961,7 @@ export default function DashboardV2({
           <ClayCard tone="brown" pad={isMobile ? 14 : 16} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             <CardHead ico={<Search size={18} />} title="Sık Kullanılanlar" onLight right={<Pill onLight>{visiblePanels.length}</Pill>} />
             {/* Geniş ekranda tüm kısayollar tek sırada: sütun sayısı = kısayol sayısı */}
-            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : Math.max(1, visiblePanels.length)}, minmax(0, 1fr))`, gridAutoRows: wide ? '1fr' : 'auto', gap: isMobile ? 10 : 8, marginTop: 12 }}>
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: `repeat(${isMobile ? 3 : tablet ? 5 : Math.max(1, visiblePanels.length)}, minmax(0, 1fr))`, gridAutoRows: wide ? 'minmax(82px, 1fr)' : 'auto', alignContent: 'center', gap: isMobile ? 10 : 7, marginTop: 12 }}>
               {visiblePanels.map((panel, i) => <ShortcutTile key={panel.key} panel={panel} i={i} dense={wide} compact={wide} />)}
             </div>
           </ClayCard>
