@@ -610,50 +610,6 @@ export default function StokYonetimiPanel() {
     setAdjustReason('');
   }, []);
 
-  const submitAdjust = useCallback(async () => {
-    if (!adjustRow) return;
-    const target = Math.floor(Number(adjustQty));
-    if (!Number.isFinite(target) || target < 0) {
-      toast({ title: 'Geçersiz adet', description: 'Sıfır veya pozitif bir sayı girin.', variant: 'destructive' });
-      return;
-    }
-    if (target === adjustRow.quantity) {
-      toast({ title: 'Adet değişmedi', description: 'Farklı bir adet girin.' });
-      return;
-    }
-    if (!adjustReason.trim()) {
-      toast({ title: 'Gerekçe gerekli', description: 'Düzeltme gerekçesini yazın.', variant: 'destructive' });
-      return;
-    }
-    setAdjustBusy(true);
-    try {
-      const { adjustGroupedStockQuantity } = await import('@/lib/stock-adjustment');
-      const depot = depots.find((d) => d.id === selectedDepotId) as any;
-      const res = await adjustGroupedStockQuantity({
-        row: adjustRow as any,
-        newQuantity: target,
-        depotId: selectedDepotId,
-        depotName: depot?.name || '',
-        companyId: currentCompanyId,
-        user: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen' },
-        reason: adjustReason.trim(),
-      });
-      toast({
-        title: res.direction === 'increase' ? 'Adet artırıldı' : 'Adet azaltıldı',
-        description: res.direction === 'increase'
-          ? `${res.created} adet eklendi ve mal kabul kaydı oluşturuldu.`
-          : `${res.deleted} adet düşüldü ve log kaydedildi.`,
-      });
-      setAdjustRow(null);
-      await paginatedQuery.refetch();
-    } catch (e: any) {
-      console.error('[StokYonetimi] adet düzeltme hatası:', e);
-      toast({ title: 'Düzeltme başarısız', description: e?.message || 'Bilinmeyen hata.', variant: 'destructive' });
-    } finally {
-      setAdjustBusy(false);
-    }
-  }, [adjustRow, adjustQty, adjustReason, depots, selectedDepotId, currentCompanyId, currentUserProfile, toast, paginatedQuery]);
-
   // Master data — TanStack Query backed (cache shared across panels & navigations)
   const depotsQuery = useDepots();
   const productCodesQuery = useProductCodes();
@@ -710,6 +666,53 @@ export default function StokYonetimiPanel() {
     columnFilters,
     riskyOnly: showOnlyRiskyStock,
   });
+
+  // Bağımlılıkları (depots, selectedDepotId, paginatedQuery) bu satırın
+  // altında bildirildiği için buraya taşındı: useCallback bağımlılık dizisini
+  // render anında değerlendirir, yukarıda kalınca TDZ hatası veriyordu.
+  const submitAdjust = useCallback(async () => {
+    if (!adjustRow) return;
+    const target = Math.floor(Number(adjustQty));
+    if (!Number.isFinite(target) || target < 0) {
+      toast({ title: 'Geçersiz adet', description: 'Sıfır veya pozitif bir sayı girin.', variant: 'destructive' });
+      return;
+    }
+    if (target === adjustRow.quantity) {
+      toast({ title: 'Adet değişmedi', description: 'Farklı bir adet girin.' });
+      return;
+    }
+    if (!adjustReason.trim()) {
+      toast({ title: 'Gerekçe gerekli', description: 'Düzeltme gerekçesini yazın.', variant: 'destructive' });
+      return;
+    }
+    setAdjustBusy(true);
+    try {
+      const { adjustGroupedStockQuantity } = await import('@/lib/stock-adjustment');
+      const depot = depots.find((d) => d.id === selectedDepotId) as any;
+      const res = await adjustGroupedStockQuantity({
+        row: adjustRow as any,
+        newQuantity: target,
+        depotId: selectedDepotId,
+        depotName: depot?.name || '',
+        companyId: currentCompanyId,
+        user: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || currentUserProfile?.email || 'Bilinmeyen' },
+        reason: adjustReason.trim(),
+      });
+      toast({
+        title: res.direction === 'increase' ? 'Adet artırıldı' : 'Adet azaltıldı',
+        description: res.direction === 'increase'
+          ? `${res.created} adet eklendi ve mal kabul kaydı oluşturuldu.`
+          : `${res.deleted} adet düşüldü ve log kaydedildi.`,
+      });
+      setAdjustRow(null);
+      await paginatedQuery.refetch();
+    } catch (e: any) {
+      console.error('[StokYonetimi] adet düzeltme hatası:', e);
+      toast({ title: 'Düzeltme başarısız', description: e?.message || 'Bilinmeyen hata.', variant: 'destructive' });
+    } finally {
+      setAdjustBusy(false);
+    }
+  }, [adjustRow, adjustQty, adjustReason, depots, selectedDepotId, currentCompanyId, currentUserProfile, toast, paginatedQuery]);
 
   // Ceomed entegre depo seçilince son senkronizasyon diff'ini toast olarak göster.
   useEffect(() => {

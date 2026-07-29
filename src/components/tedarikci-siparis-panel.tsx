@@ -55,6 +55,8 @@ import {
 } from '@/components/ui/select';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 import {
+  aylikKutudanGunluk,
+  aylikMaxKutu,
   hesaplaOneri,
   hesaplaTuketimTrendi,
   type DemandBasis,
@@ -182,6 +184,8 @@ interface KurumKatkisi {
   maxGun: number;
   /** maxGün kurumda tanımlı mı — tanımsızsa varsayılana düşülmüştür */
   maxGunTanimli: boolean;
+  /** Kurumun 30 güne ölçeklenip yukarı yuvarlanmış kutu ihtiyacı */
+  aylikKutu: number;
   gunluk: number;
 }
 
@@ -897,11 +901,16 @@ export default function TedarikciSiparisPanel() {
 
       const canonical = normCode(code);
 
-      // (1) Min/Max kaynaklı günlük saha ihtiyacı: SADECE bağlı yan depolar +
-      // bağlı lablar üzerinden. Ana depo talebe dahil edilmez (stok kaynağıdır).
-      // Bir kurumun max'ı maxGün günlük ihtiyacı karşıladığından günlük kutu
-      // ihtiyacı max / maxGün'dür (Merkez Sipariş paneliyle aynı semantik).
-      let gunlukMinMax = 0;
+      // (1) Min/Max kaynaklı saha ihtiyacı: SADECE bağlı yan depolar + bağlı
+      // lablar üzerinden. Ana depo talebe dahil edilmez (stok kaynağıdır).
+      //
+      // Saha ihtiyacı **aylık** tutulur: her kurumun max'ı 30 güne ölçeklenip
+      // tam kutuya yukarı yuvarlanır, sonra toplanır. Lojistik tarafının
+      // yöntemi budur ve yuvarlamanın kurum bazında olması önemli — toplamı
+      // yuvarlamak her kurumdaki küsuratı tek kutuya sıkıştırıp sahanın
+      // ihtiyacının altında kalır. Motor günlük çalıştığı için toplam en sonda
+      // günlüğe çevrilir.
+      let sahaAylikKutu = 0;
       const katkilar: KurumKatkisi[] = [];
       rulesForCode.forEach(rule => {
         if (rule.locationId === anaDepo.id) return; // ana depo talebe dahil değil
@@ -910,8 +919,9 @@ export default function TedarikciSiparisPanel() {
         const maxGun = Number(rule.maxGun ?? 0);
         const maxGunTanimli = maxGun > 0;
         const effectiveGun = maxGunTanimli ? maxGun : DEFAULT_MAX_GUN;
-        const gunluk = max / effectiveGun;
-        gunlukMinMax += gunluk;
+        const aylikKutu = aylikMaxKutu(max, effectiveGun);
+        sahaAylikKutu += aylikKutu;
+        const gunluk = aylikKutudanGunluk(aylikKutu);
 
         const isDepot = sideDepotNameById.has(rule.locationId);
         katkilar.push({
@@ -924,9 +934,11 @@ export default function TedarikciSiparisPanel() {
           max,
           maxGun: effectiveGun,
           maxGunTanimli,
+          aylikKutu,
           gunluk,
         });
       });
+      const gunlukMinMax = aylikKutudanGunluk(sahaAylikKutu);
       katkilar.sort((a, b) => b.gunluk - a.gunluk);
 
       // (2) Gerçek tüketim kaynaklı günlük ihtiyaç: Total Verimlilik kümülatif

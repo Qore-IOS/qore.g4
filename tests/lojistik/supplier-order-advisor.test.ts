@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  aylikKutudanGunluk,
+  aylikMaxKutu,
   dagitimYap,
   hesaplaOneri,
   hesaplaRiskliSevk,
@@ -448,4 +450,53 @@ test('stok yönetimi panelindeki tek satır formülüne indirgenir', () => {
     mevcutStok: 0,
   });
   assert.equal(sonuc.riskliAdet, 100);
+});
+
+/* ——— Aylık saha ihtiyacı (lojistik yöntemi) ——— */
+
+test('30 günlük max olduğu gibi aylık kutuya geçer', () => {
+  assert.equal(aylikMaxKutu(21, 30), 21);
+  assert.equal(aylikMaxKutu(42, 30), 42);
+});
+
+test('farklı maxGün 30 güne ölçeklenir', () => {
+  // 60 günlük 40 kutu → 30 günde 20 kutu
+  assert.equal(aylikMaxKutu(40, 60), 20);
+  // 15 günlük 10 kutu → 30 günde 20 kutu
+  assert.equal(aylikMaxKutu(10, 15), 20);
+});
+
+test('küsurat yukarı yuvarlanır — yarım kutu sipariş edilemez', () => {
+  // 45 günlük 10 kutu → 30 günde 6,67 → 7
+  assert.equal(aylikMaxKutu(10, 45), 7);
+  // 30 günlük 21,4 → 22
+  assert.equal(aylikMaxKutu(21.4, 30), 22);
+});
+
+test('kurum bazında yuvarlama toplamı eksik bırakmaz', () => {
+  // Üç kurum, her biri 30 günde 1,4 kutu. Toplamı yuvarlasak 5 (4,2→5) olurdu;
+  // kurum bazında yuvarlayınca 6 — sahanın gerçek ihtiyacı bu.
+  const kurumBazli = [1.4, 1.4, 1.4].reduce((s, m) => s + aylikMaxKutu(m, 30), 0);
+  assert.equal(kurumBazli, 6);
+});
+
+test('geçersiz girdiler sıfır döner, sıfıra bölme olmaz', () => {
+  assert.equal(aylikMaxKutu(0, 30), 0);
+  assert.equal(aylikMaxKutu(10, 0), 0);
+  assert.equal(aylikMaxKutu(-5, 30), 0);
+  assert.equal(aylikMaxKutu(Number.NaN, 30), 0);
+});
+
+test('aylık kutu günlük orana çevrilir', () => {
+  assert.equal(aylikKutudanGunluk(30), 1);
+  assert.equal(aylikKutudanGunluk(0), 0);
+  assert.equal(aylikKutudanGunluk(-3), 0);
+});
+
+test('lojistik formülü: 60 günlük hedef aylık toplamın iki katıdır', () => {
+  // Üç kurum 30 günlük max: 21 + 10 + 1 = 32 kutu/ay
+  const sahaAylik = [21, 10, 1].reduce((s, m) => s + aylikMaxKutu(m, 30), 0);
+  const gunluk = aylikKutudanGunluk(sahaAylik);
+  assert.equal(Math.ceil(gunluk * 60), 64, '32 × 2 = 64');
+  assert.equal(Math.ceil(gunluk * 30), 32, '30 günlük hedefte aylık toplamın kendisi');
 });

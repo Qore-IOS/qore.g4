@@ -587,7 +587,7 @@ export async function searchProductLedger(
   // --- Calculate Stock Summary ---
   const stockSummary = calculateStockSummary(
     depoStok, consumptionRecords, uniqueStockCodes,
-    searchType, needle, productCodes
+    searchType, needle, productCodes, hospitalNameById
   );
 
   return { ledgerRows, stockSummary, searchType };
@@ -1182,7 +1182,14 @@ function calculateStockSummary(
   uniqueStockCodes: string[],
   searchType: 'product' | 'lot' | 'serial',
   needle: string,
-  productCodes: ProductCode[]
+  productCodes: ProductCode[],
+  /**
+   * labId -> laboratuvar adı. Sevk edilmiş stoğun konumunu çözmek için
+   * gerekir; çağıran hastaneleri zaten okuduğu için buraya parametre olarak
+   * geçilir (daha önce çağıranın yerel değişkenine erişilmeye çalışılıyordu,
+   * o da bu kapsamda tanımlı olmadığı için çalışma anında hata veriyordu).
+   */
+  hospitalNameById: Map<string, string> = new Map()
 ): StockSummary[] {
   const stockSummary: StockSummary[] = [];
   const stokKodu = uniqueStockCodes[0];

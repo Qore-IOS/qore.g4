@@ -35,6 +35,8 @@ import {
 } from '@/components/ui/select';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
 import {
+  aylikKutudanGunluk,
+  aylikMaxKutu,
   dagitimYap,
   hesaplaOneri,
   hesaplaRiskliSevk,
@@ -463,7 +465,10 @@ export default function HastaneSevkiyatPanel() {
 
         const max = Number(rule.max ?? 0);
         const maxGun = Number(rule.maxGun ?? 0) > 0 ? Number(rule.maxGun) : DEFAULT_MAX_GUN;
-        const gunlukMinMax = max > 0 ? max / maxGun : 0;
+        // Saha ihtiyacı aylık tutulur ve tam kutuya yukarı yuvarlanır —
+        // tedarikçi sipariş paneliyle aynı kural, aynı ürün iki tabloda
+        // farklı ihtiyaç göstermesin.
+        const gunlukMinMax = aylikKutudanGunluk(aylikMaxKutu(max, maxGun));
 
         const testAdedi = kumMap?.get(canonical) || 0;
 
