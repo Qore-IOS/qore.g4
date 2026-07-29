@@ -610,7 +610,6 @@ export default function StokYonetimiPanel() {
     setAdjustReason('');
   }, []);
 
-
   // Master data — TanStack Query backed (cache shared across panels & navigations)
   const depotsQuery = useDepots();
   const productCodesQuery = useProductCodes();
@@ -668,6 +667,9 @@ export default function StokYonetimiPanel() {
     riskyOnly: showOnlyRiskyStock,
   });
 
+  // Bağımlılıkları (depots, selectedDepotId, paginatedQuery) bu satırın
+  // altında bildirildiği için buraya taşındı: useCallback bağımlılık dizisini
+  // render anında değerlendirir, yukarıda kalınca TDZ hatası veriyordu.
   const submitAdjust = useCallback(async () => {
     if (!adjustRow) return;
     const target = Math.floor(Number(adjustQty));

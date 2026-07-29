@@ -50,6 +50,44 @@ export const VARSAYILAN_KRITIK_GUN = 15;
 /** Hedefin bu katından fazla kapsama "fazla stok" uyarısı üretir. */
 export const FAZLA_STOK_KATI = 2;
 
+/** Saha ihtiyacının tutulduğu referans periyot (gün). */
+export const AYLIK_GUN = 30;
+
+/**
+ * Bir kurumun min/max tanımını **aylık kutu** ihtiyacına çevirir.
+ *
+ * Lojistik tarafı saha ihtiyacını günlük değil aylık tutuyor: her kurumun
+ * 30 günlük max'ı tam kutuya yuvarlanıp toplanıyor, sipariş bu toplamın
+ * hedef gün karşılığından hesaplanıyor. Yuvarlama **yukarı** yapılır — yarım
+ * kutu sipariş edilemez ve eksik kalmaktansa fazla gitmesi tercih edilir.
+ *
+ * Yuvarlamanın kurum bazında yapılması önemli: toplamı yuvarlamak, 15 kurumun
+ * her birindeki küsuratı tek bir kutuya sıkıştırır ve sahanın gerçek
+ * ihtiyacının altında kalır.
+ *
+ * `maxGun` tanımsızsa (0) çağıran varsayılanı geçmelidir; burada 0'a bölme
+ * yapılmaz.
+ */
+export function aylikMaxKutu(max: number, maxGun: number): number {
+  const m = Number(max);
+  const g = Number(maxGun);
+  if (!Number.isFinite(m) || m <= 0) return 0;
+  if (!Number.isFinite(g) || g <= 0) return 0;
+  return Math.ceil((m * AYLIK_GUN) / g);
+}
+
+/**
+ * Aylık kutu ihtiyacını motorun beklediği günlük orana çevirir.
+ *
+ * Motor günlük çalışır (kapsama günü, hedef gün çarpımı); saha ihtiyacı ise
+ * aylık tutulur. Dönüşüm tek yerde dursun diye ayrıldı.
+ */
+export function aylikKutudanGunluk(aylikKutu: number): number {
+  const a = Number(aylikKutu);
+  if (!Number.isFinite(a) || a <= 0) return 0;
+  return a / AYLIK_GUN;
+}
+
 export interface AylikTuketim {
   /** "MM-YYYY" biçiminde dönem etiketi */
   donem: string;
