@@ -7,7 +7,7 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
   Search, RefreshCw, X, Box, ArrowRight, ChevronRight, ChevronDown, Check,
-  FileSpreadsheet, Warehouse, Building2, Hash,
+  FileSpreadsheet, Warehouse, Building2, Hash, HandCoins,
 } from 'lucide-react';
 import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult, type ProductMatch } from '@/actions/searchActions';
 import { useAuth } from '@/contexts/auth-context';
@@ -247,16 +247,19 @@ function DetailView({ prod, stock, txns, onBack, wide }: {
           </div>
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
             {stock.map((s, i) => {
+              const isBorc = s.konumTipi === 'borc';
               const isLab = s.konumTipi === 'laboratuvar';
-              const col = isLab ? C.waterDeep : SKY_DEEP;
-              const gradBg = isLab
-                ? `linear-gradient(135deg, rgba(143,211,166,0.28) 0%, rgba(111,181,133,0.14) 100%)`
-                : `linear-gradient(135deg, rgba(160,192,230,0.28) 0%, rgba(124,168,222,0.14) 100%)`;
+              const col = isBorc ? '#C0796A' : isLab ? C.waterDeep : SKY_DEEP;
+              const gradBg = isBorc
+                ? `linear-gradient(135deg, rgba(214,150,133,0.30) 0%, rgba(192,121,106,0.15) 100%)`
+                : isLab
+                  ? `linear-gradient(135deg, rgba(143,211,166,0.28) 0%, rgba(111,181,133,0.14) 100%)`
+                  : `linear-gradient(135deg, rgba(160,192,230,0.28) 0%, rgba(124,168,222,0.14) 100%)`;
               return (
                 <div key={i} style={{ display: 'inline-flex', alignItems: 'center', gap: 12, padding: '13px 20px', borderRadius: C.radius, background: gradBg, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.8), 0 6px 14px -8px ${col}44`, animation: `mkPopIn ${280 + i * 60}ms ease` }}>
-                  <span style={{ width: 36, height: 36, borderRadius: 11, display: 'grid', placeItems: 'center', color: col, background: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.9)' }}>{isLab ? <Building2 size={18} /> : <Warehouse size={18} />}</span>
+                  <span style={{ width: 36, height: 36, borderRadius: 11, display: 'grid', placeItems: 'center', color: col, background: 'rgba(255,255,255,0.7)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.9)' }}>{isBorc ? <HandCoins size={18} /> : isLab ? <Building2 size={18} /> : <Warehouse size={18} />}</span>
                   <div>
-                    <div style={{ fontSize: 11, fontWeight: 700, color: col, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.8 }}>{isLab ? 'Laboratuvar' : 'Depo'}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: col, textTransform: 'uppercase', letterSpacing: '0.05em', opacity: 0.8 }}>{isBorc ? 'Borç' : isLab ? 'Laboratuvar' : 'Depo'}</div>
                     <div style={{ fontSize: 14.5, fontWeight: 700, color: C.ink1 }}>{s.konum}</div>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 5, marginLeft: 4 }}>

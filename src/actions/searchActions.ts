@@ -33,7 +33,8 @@ export interface LedgerRow {
 
 export interface StockSummary {
   konum: string;
-  konumTipi: 'depo' | 'laboratuvar';
+  /** 'borc' = borç verilen (sevk edilmiş, laboratuvara bağlı olmayan) stok */
+  konumTipi: 'depo' | 'laboratuvar' | 'borc';
   adet: number;
   birim: string;
 }
@@ -225,16 +226,22 @@ export async function searchProductLedger(
   const needleOriginal = q.trim();
 
   // --- Phase 0: Fetch master data ---
-  const [depotsSnap, pcSnap, usersSnap] = await withTimeout(
+  const [depotsSnap, pcSnap, usersSnap, hospitalsSnap] = await withTimeout(
     Promise.all([
       adminDb.collection('depots').get(),
       adminDb.collection('productCodes').get(),
       adminDb.collection('users').get(),
+      adminDb.collection('hospitals').get(),
     ]),
     QUERY_TIMEOUT
   );
 
   const depots = depotsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Depot));
+  // Sevk edilmiş stoğun gerçek laboratuvar adını çözmek için (hedefKurum boş
+  // olduğunda önceden düz "Laboratuvar" yazılıyordu).
+  const hospitalNameById = new Map<string, string>(
+    hospitalsSnap.docs.map(d => [d.id, String((d.data() as any)?.name || '')]),
+  );
   const productCodes = pcSnap.docs.map(d => ({ id: d.id, ...d.data() } as ProductCode));
   const usersMap = Object.fromEntries(usersSnap.docs.map(d => [d.id, d.data() as User]));
 
@@ -1186,9 +1193,11 @@ function calculateStockSummary(
     const inStockItem = depoStok.find(s => serialsOfDepoStok(s).some(sn => sn.toLowerCase() === needle));
     if (inStockItem) {
       if (inStockItem.isShipped) {
+        const hedefId = String((inStockItem as any).hedefKurumId || (inStockItem as any).labId || '').trim();
+        const hedefAd = String(inStockItem.hedefKurum || '').trim();
         stockSummary.push({
-          konum: inStockItem.hedefKurum || 'Laboratuvar',
-          konumTipi: 'laboratuvar',
+          konum: hospitalNameById.get(hedefId) || hedefAd || 'Bilinmeyen konum',
+          konumTipi: hedefId ? 'laboratuvar' : 'borc',
           adet: 1,
           birim,
         });
@@ -1212,7 +1221,7 @@ function calculateStockSummary(
       }
     }
   } else {
-    const stockByLocation: Record<string, { adet: number; konumTipi: 'depo' | 'laboratuvar' }> = {};
+    const stockByLocation: Record<string, { adet: number; konumTipi: 'depo' | 'laboratuvar' | 'borc' }> = {};
 
     depoStok.forEach(item => {
       const matchesLot = searchType === 'lot'
@@ -1226,10 +1235,17 @@ function calculateStockSummary(
         );
 
         if (!isConsumed) {
+          // Sevk edilmiş stok: gerçek laboratuvar adını hedefKurumId'den çöz.
+          // hedefKurumId yoksa bu stok borç olarak verilmiştir (direkt transfer
+          // borç modu hedefKurumId'yi boş bırakır).
+          const hedefId = String((item as any).hedefKurumId || (item as any).labId || '').trim();
+          const hedefAd = String(item.hedefKurum || '').trim();
           const konum = item.isShipped
-            ? (item.hedefKurum || 'Laboratuvar')
+            ? (hospitalNameById.get(hedefId) || hedefAd || 'Bilinmeyen konum')
             : (item.depotName || 'Depo');
-          const konumTipi = item.isShipped ? 'laboratuvar' : 'depo';
+          const konumTipi: 'depo' | 'laboratuvar' | 'borc' = !item.isShipped
+            ? 'depo'
+            : (hedefId ? 'laboratuvar' : 'borc');
 
           if (!stockByLocation[konum]) {
             stockByLocation[konum] = { adet: 0, konumTipi };

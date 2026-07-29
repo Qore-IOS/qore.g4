@@ -496,20 +496,52 @@ export default function DashboardV2({
   // Bugün kartı — etkileşimli takvim + seçili günün görevleri
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
   const [calMonth, setCalMonth] = useState<Date>(startOfMonth(new Date()));
+
+  // Planlama Birimi takvimi ('planlamaGorevler') — canlı abonelik. Dashboard
+  // önceden yalnızca 'purchasingTasks'i okuyordu; planlama görevleri farklı bir
+  // koleksiyonda tutulduğu için kart boş kalıyordu.
+  const [planlamaTasks, setPlanlamaTasks] = useState<any[]>([]);
+  useEffect(() => {
+    if (!currentCompanyId) { setPlanlamaTasks([]); return; }
+    const q = query(collection(db, 'planlamaGorevler'), where('companyId', '==', currentCompanyId));
+    const unsub = onSnapshot(q, (snap) => {
+      setPlanlamaTasks(snap.docs.map((d) => {
+        const t = d.data() as any;
+        return {
+          id: d.id,
+          title: t.title || '',
+          date: typeof t.date === 'string' ? t.date : '',
+          startTime: t.time || '',
+          completed: !!t.done,
+          ownerUid: t.userId || '',
+          invitedUids: Array.isArray(t.invitations) ? t.invitations.map((i: any) => i?.uid).filter(Boolean) : [],
+        };
+      }));
+    }, (err) => { console.warn('[Dashboard] planlamaGorevler listen failed:', err); setPlanlamaTasks([]); });
+    return () => unsub();
+  }, [currentCompanyId]);
+
   const tasksByDayKey = useMemo(() => {
     const m = new Map<string, any[]>();
-    if (!currentUserProfile?.uid) return m;
-    purchasingTasks.forEach((task) => {
-      const mine = task.createdByUid === currentUserProfile.uid
-        || task.assignedPersonnel?.some((p: any) => p.uid === currentUserProfile.uid)
-        || task.accompanyingPersonnel?.some((p: any) => p.uid === currentUserProfile.uid);
-      if (!mine || !task.date) return;
+    const uid = currentUserProfile?.uid;
+    if (!uid) return m;
+    const push = (task: any) => {
+      if (!task.date) return;
       const arr = m.get(task.date) || [];
       arr.push(task); m.set(task.date, arr);
+    };
+    purchasingTasks.forEach((task) => {
+      const mine = task.createdByUid === uid
+        || task.assignedPersonnel?.some((p: any) => p.uid === uid)
+        || task.accompanyingPersonnel?.some((p: any) => p.uid === uid);
+      if (mine) push(task);
     });
-    m.forEach((arr) => arr.sort((a, b) => a.startTime.localeCompare(b.startTime)));
+    planlamaTasks.forEach((task) => {
+      if (task.ownerUid === uid || task.invitedUids.includes(uid)) push(task);
+    });
+    m.forEach((arr) => arr.sort((a, b) => String(a.startTime || '').localeCompare(String(b.startTime || ''))));
     return m;
-  }, [purchasingTasks, currentUserProfile?.uid]);
+  }, [purchasingTasks, planlamaTasks, currentUserProfile?.uid]);
   const taskDaySet = useMemo(() => new Set(tasksByDayKey.keys()), [tasksByDayKey]);
   const selectedDayKey = format(selectedDay, 'yyyy-MM-dd');
   const selectedDayTasks = tasksByDayKey.get(selectedDayKey) || [];
