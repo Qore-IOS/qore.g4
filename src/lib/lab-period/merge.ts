@@ -98,6 +98,7 @@ export function birlestir(
     if (!onceki) {
       alanHaritasi[stokKodu] = {
         deger,
+        ...(girdi.kirilim ? { kirilim: girdi.kirilim } : {}),
         kaynak: baglam.kaynak,
         kaynakKayitId: baglam.kaynakKayitId,
         girenAdi: baglam.girenAdi,
@@ -111,6 +112,11 @@ export function birlestir(
     }
 
     if (onceki.deger === deger) {
+      // Değer aynı ama kırılım ilk kez geliyorsa eklenir: sayı değişmediği
+      // için bu bir düzenleme değil, mevcut ölçüme ayrıntı kazandırmaktır.
+      if (girdi.kirilim && !onceki.kirilim) {
+        alanHaritasi[stokKodu] = { ...onceki, kirilim: girdi.kirilim };
+      }
       sonuc.degismeyen += 1;
       return;
     }
@@ -118,6 +124,7 @@ export function birlestir(
     alanHaritasi[stokKodu] = {
       ...onceki,
       deger,
+      ...(girdi.kirilim ? { kirilim: girdi.kirilim } : {}),
       kaynak: baglam.kaynak,
       kaynakKayitId: baglam.kaynakKayitId,
       girenAdi: baglam.girenAdi,

@@ -1032,8 +1032,9 @@ export default function KumulatifHesaplamaPanel() {
    * uygulamak hangi sayının dosyadan hangisinin kayıttan geldiğini
    * belirsizleştirirdi. Bu yüzden doldurma açık bir eylemdir.
    *
-   * Yalnızca `total` (kümülatif toplam) yazılır — rutin/tekrar/kalibrasyon
-   * kırılımı snapshot'ta tutulmuyor, uydurulmaz.
+   * Toplam ve varsa rutin/tekrar/kalibrasyon/kontrol kırılımı yazılır. Eski
+   * kayıtlarda kırılım bulunmayabilir; o durumda yalnızca toplam yazılır ve
+   * kırılım sütunlarına dokunulmaz.
    */
   async function handleKayittanDoldur() {
     if (!hospitalId) return;
@@ -1067,13 +1068,33 @@ export default function KumulatifHesaplamaPanel() {
               total: 0,
               matchedTests: [] as string[],
             }));
-        return taban.map(row =>
-          kayit[row.stokKodu] ? { ...row, total: kayit[row.stokKodu].deger } : row,
-        );
+        return taban.map(row => {
+          const olcum = kayit[row.stokKodu];
+          if (!olcum) return row;
+          const k = olcum.kirilim;
+          return {
+            ...row,
+            total: olcum.deger,
+            // Kırılım kayıtta varsa yazılır; yoksa mevcut sütunlara dokunulmaz
+            // (uydurulmuş sıfırlar tabloyu yanlış doldurmasın).
+            ...(k
+              ? {
+                  routine: Number(k.routine) || 0,
+                  rerun: Number(k.rerun) || 0,
+                  calib: Number(k.calib) || 0,
+                  control: Number(k.control) || 0,
+                }
+              : {}),
+          };
+        });
       });
+      const kirilimliAdet = kodlar.filter(k => kayit[k]?.kirilim).length;
       toast({
         title: 'Kayıtlı veri yüklendi',
-        description: `${kodlar.length} ürün için kayıtlı kümülatif toplamları tabloya yazıldı.`,
+        description:
+          kirilimliAdet === kodlar.length
+            ? `${kodlar.length} ürün için kümülatif toplam ve kırılım tabloya yazıldı.`
+            : `${kodlar.length} ürün yazıldı; ${kodlar.length - kirilimliAdet} tanesinde yalnızca toplam vardı, kırılım sütunları değiştirilmedi.`,
       });
     } catch (e: any) {
       toast({
@@ -1128,6 +1149,14 @@ export default function KumulatifHesaplamaPanel() {
             stokKodu: String(r.stokKodu || '').trim(),
             alan: 'kumulatif' as const,
             deger: Number(r.total) || 0,
+            // Kırılım toplamla birlikte taşınır ki panel geri okurken
+            // rutin/tekrar/kalibrasyon/kontrol sütunlarını da doldurabilsin.
+            kirilim: {
+              routine: Number(r.routine) || 0,
+              rerun: Number(r.rerun) || 0,
+              calib: Number(r.calib) || 0,
+              control: Number(r.control) || 0,
+            },
           }))
           .filter(g => g.stokKodu && g.deger > 0),
         kaynak: 'kumulatif-hesaplama',

@@ -271,3 +271,77 @@ test('veri olmayan alanın özeti boştur', () => {
   });
   assert.equal(alanOzeti(undefined, 'stok').urunSayisi, 0);
 });
+
+/* ——— Ölçüm kırılımı ——— */
+
+const kumulatifGirdi = (stokKodu: string, total: number, kirilim?: Record<string, number>): OlcumGirdisi => ({
+  stokKodu,
+  alan: 'kumulatif',
+  deger: total,
+  ...(kirilim ? { kirilim } : {}),
+});
+
+test('kırılım ilk kayıtla birlikte saklanır', () => {
+  const { snapshot } = birlestir(
+    bos(),
+    [kumulatifGirdi('A1', 100, { routine: 70, rerun: 10, calib: 15, control: 5 })],
+    { kaynak: 'kumulatif-hesaplama', zaman: 1000 },
+  );
+  assert.equal(snapshot.kumulatif.A1.deger, 100);
+  assert.deepEqual(snapshot.kumulatif.A1.kirilim, {
+    routine: 70,
+    rerun: 10,
+    calib: 15,
+    control: 5,
+  });
+});
+
+test('düzenlemede kırılım da güncellenir', () => {
+  const ilk = birlestir(bos(), [kumulatifGirdi('A1', 100, { routine: 70, rerun: 30 })], {
+    kaynak: 'kumulatif-hesaplama',
+    zaman: 1000,
+  }).snapshot;
+  const sonra = birlestir(ilk, [kumulatifGirdi('A1', 120, { routine: 90, rerun: 30 })], {
+    kaynak: 'kumulatif-hesaplama',
+    zaman: 2000,
+  }).snapshot;
+  assert.equal(sonra.kumulatif.A1.deger, 120);
+  assert.deepEqual(sonra.kumulatif.A1.kirilim, { routine: 90, rerun: 30 });
+});
+
+test('değer aynıyken gelen kırılım düzenleme sayılmaz ama eklenir', () => {
+  // Total verimlilik kümülatifi kırılımsız yazar; kümülatif paneli sonra
+  // aynı toplamı kırılımla yazarsa bu ayrıntı kazanımıdır, düzenleme değil.
+  const ilk = birlestir(bos(), [kumulatifGirdi('A1', 100)], {
+    kaynak: 'total-verimlilik',
+    zaman: 1000,
+  }).snapshot;
+  assert.equal(ilk.kumulatif.A1.kirilim, undefined);
+
+  const sonuc = birlestir(ilk, [kumulatifGirdi('A1', 100, { routine: 80, rerun: 20 })], {
+    kaynak: 'kumulatif-hesaplama',
+    zaman: 2000,
+  });
+  assert.equal(sonuc.guncellenen, 0, 'sayı değişmediği için düzenleme olmamalı');
+  assert.equal(sonuc.degismeyen, 1);
+  assert.deepEqual(sonuc.snapshot.kumulatif.A1.kirilim, { routine: 80, rerun: 20 });
+  assert.equal(sonuc.snapshot.kumulatif.A1.ilkKaynak, 'total-verimlilik', 'sahip değişmemeli');
+  assert.equal(sonuc.snapshot.kumulatif.A1.duzenlemeSayisi, 0);
+});
+
+test('mevcut kırılım, kırılımsız aynı değerle silinmez', () => {
+  const ilk = birlestir(bos(), [kumulatifGirdi('A1', 100, { routine: 80, rerun: 20 })], {
+    kaynak: 'kumulatif-hesaplama',
+    zaman: 1000,
+  }).snapshot;
+  const sonra = birlestir(ilk, [kumulatifGirdi('A1', 100)], {
+    kaynak: 'total-verimlilik',
+    zaman: 2000,
+  }).snapshot;
+  assert.deepEqual(sonra.kumulatif.A1.kirilim, { routine: 80, rerun: 20 });
+});
+
+test('kırılım vermeyen alanlar etkilenmez', () => {
+  const snap = birlestir(bos(), [girdi('A1', 12)], { kaynak: 'lab-sayim', zaman: 1000 }).snapshot;
+  assert.equal(snap.stok.A1.kirilim, undefined);
+});

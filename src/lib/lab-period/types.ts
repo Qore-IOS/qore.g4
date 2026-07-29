@@ -36,6 +36,15 @@ export const KAYNAK_ADI: Record<Kaynak, string> = {
 export interface OlcumDegeri {
   /** stok → kutu, cihazUstu → test, kumulatif → test */
   deger: number;
+  /**
+   * Ölçümün alt kırılımı; yalnızca kaynağı taşıyorsa dolar.
+   *
+   * Kümülatifte `{ routine, rerun, calib, control }` olarak gelir — kümülatif
+   * hesaplama paneli bu kırılımı üretir ve geri okurken tabloya yazabilmelidir.
+   * Kırılım toplamla birlikte taşınır ama `deger` her zaman toplamdır; okuyan
+   * paneller kırılımı yoksayabilir.
+   */
+  kirilim?: Record<string, number>;
   /** Değeri en son yazan panel */
   kaynak: Kaynak;
   /** Kaynak koleksiyondaki kayıt id'si (denetim için) */
@@ -84,6 +93,8 @@ export interface OlcumGirdisi {
   stokKodu: string;
   alan: OlcumAlani;
   deger: number;
+  /** Varsa ölçümün alt kırılımı (bkz. `OlcumDegeri.kirilim`) */
+  kirilim?: Record<string, number>;
 }
 
 /** Bir yazma işleminin ortak bilgileri. */
