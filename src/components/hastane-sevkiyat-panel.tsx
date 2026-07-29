@@ -7,6 +7,9 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ArrowLeft,
+  Minus,
+  TrendingDown,
+  TrendingUp,
   ChevronRight,
   Loader2,
   PackageSearch,
@@ -71,6 +74,39 @@ const DEMAND_BASIS_OPTIONS: Array<{ value: DemandBasis; label: string }> = [
   { value: 'tuketim', label: 'Gerçek tüketim' },
 ];
 
+/** Bu bandın altındaki değişim "yatay" sayılır (%). */
+const DEGISIM_ESIGI = 8;
+
+/**
+ * Önceki 3 ay ortalamasına göre değişim çipi.
+ *
+ * Tedarikçi sipariş panelindekiyle aynı eşik ve aynı görünüm kullanılır;
+ * iki tabloda aynı ürünün eğilimi farklı okunmasın.
+ */
+function DegisimChip({ value }: { value: number | null }) {
+  if (value === null || !Number.isFinite(value)) {
+    return <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>;
+  }
+  const stable = Math.abs(value) < DEGISIM_ESIGI;
+  const up = value > 0;
+  const cls = stable
+    ? 'border-emerald-950/10 bg-white/70 text-[#587169] dark:border-fuchsia-300/20 dark:bg-white/5 dark:text-[#a994b5]'
+    : up
+      ? 'border-amber-200 bg-amber-100 text-amber-800 dark:border-amber-400/25 dark:bg-amber-400/15 dark:text-amber-200'
+      : 'border-sky-200 bg-sky-100 text-sky-700 dark:border-sky-400/25 dark:bg-sky-400/15 dark:text-sky-200';
+  const Icon = stable ? Minus : up ? TrendingUp : TrendingDown;
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-bold tabular-nums ${cls}`}
+      title={`Önceki 3 ay ortalamasına göre ${up ? 'artış' : 'azalış'}`}
+    >
+      <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+      {value > 0 ? '+' : ''}{fmt(value, 0)}%
+    </span>
+  );
+}
+
 const ONERI_STILI: Record<OneriTipi, { chip: string; kisa: string }> = {
   'acil-siparis': {
     chip: 'border-rose-300 bg-rose-100 text-rose-800 dark:border-rose-400/30 dark:bg-rose-500/20 dark:text-rose-200',
@@ -113,6 +149,10 @@ interface SevkSatiri {
   cihazUstuTest: number;
   cihazUstuKutu: number;
   testAdedi: number;
+  /** Seçili dönemden ÖNCEKİ 3 dönemin kümülatif ortalaması; veri yoksa null */
+  onceki3AyOrt: number | null;
+  /** Seçili dönemin o ortalamaya göre değişimi (%); hesaplanamıyorsa null */
+  degisimYuzde: number | null;
   oneri: OneriSonucu;
   /** Ana depo stoğu yettiği kadarıyla sevk edilecek adet */
   sevkAdedi: number;
@@ -426,6 +466,20 @@ export default function HastaneSevkiyatPanel() {
         const gunlukMinMax = max > 0 ? max / maxGun : 0;
 
         const testAdedi = kumMap?.get(canonical) || 0;
+
+        // "Son 3 Ay Ort." seçili dönemden ÖNCEKİ 3 dönemi baz alır (seri
+        // eskiden yeniye 6 dönem; son eleman seçili dönemin kendisi).
+        const oncekiSeri = (seriMap?.get(canonical) || []).slice(2, 5);
+        const oncekiVerili = oncekiSeri.filter(
+          (v): v is number => typeof v === 'number' && Number.isFinite(v),
+        );
+        const onceki3AyOrt = oncekiVerili.length > 0
+          ? oncekiVerili.reduce((sum, v) => sum + v, 0) / oncekiVerili.length
+          : null;
+        const degisimYuzde =
+          onceki3AyOrt === null || onceki3AyOrt <= 0
+            ? null
+            : ((testAdedi - onceki3AyOrt) / onceki3AyOrt) * 100;
         const gunlukTuketim = ambalaj > 0 ? testAdedi / ambalaj / daysInPeriod : 0;
 
         const testSerisi = seriMap?.get(canonical);
@@ -473,6 +527,8 @@ export default function HastaneSevkiyatPanel() {
           cihazUstuTest,
           cihazUstuKutu,
           testAdedi,
+          onceki3AyOrt,
+          degisimYuzde,
           oneri,
           anaDepoStok: anaDepoStokByCode.get(canonical) || 0,
           kurumMax: max,
@@ -584,6 +640,11 @@ export default function HastaneSevkiyatPanel() {
   }, [rows]);
 
   const periodKey = `${String(selectedMonth).padStart(2, '0')}-${selectedYear}`;
+  /** "Son 3 Ay Ort." sütununun hangi dönemleri kapsadığı — başlıkta yazılır. */
+  const onceki3AyLabel = useMemo(
+    () => seriDonemleri.slice(2, 5).join(', '),
+    [seriDonemleri],
+  );
   const dataLoading = enabled && (productsLoading || rulesLoading || veriLoading);
 
   /** Sevk listesini laboratuvar bazında `hospitalShipmentPlans` altına kaydeder. */
@@ -826,13 +887,27 @@ export default function HastaneSevkiyatPanel() {
         ) : (
           <>
             <div className="max-h-[600px] overflow-auto">
-              <table className="w-full min-w-[1280px] border-separate border-spacing-0 text-left">
+              <table className="w-full min-w-[1560px] border-separate border-spacing-0 text-left">
                 <thead className="sticky top-0 z-10 bg-[#f7fcf9]/95 text-xs font-extrabold uppercase tracking-[0.07em] text-[#587169] backdrop-blur dark:bg-[#160e1e]/95 dark:text-[#a994b5]">
                   <tr>
                     <th className="px-5 py-4">Laboratuvar</th>
                     <th className="px-4 py-4">Ürün</th>
                     <th className="px-4 py-4 text-right">Lab Stok</th>
                     <th className="px-4 py-4 text-right">Cihaz Üstü</th>
+                    <th className="px-4 py-4 text-right">
+                      Tüketim
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">kümülatif test · {periodKey}</span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Son 3 Ay Ort.
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">
+                        {onceki3AyLabel || 'veri yok'}
+                      </span>
+                    </th>
+                    <th className="px-4 py-4 text-right">
+                      Değişim
+                      <span className="block text-[10px] font-bold normal-case tracking-normal text-[#70857e] dark:text-[#8e7c9a]">3 ay ort.'ya göre</span>
+                    </th>
                     <th className="px-4 py-4 text-right" title="Kurumun tanımlı max adedi">Kurum Max</th>
                     <th className="px-4 py-4 text-right">Kapsama</th>
                     <th className="px-4 py-4 text-right">Gerekli</th>
@@ -869,6 +944,19 @@ export default function HastaneSevkiyatPanel() {
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">{row.labStok}</td>
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
                             {row.cihazUstuKutu > 0 ? row.cihazUstuKutu : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                          </td>
+                          <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                            {row.testAdedi > 0 ? fmt(row.testAdedi, 0) : <span className="text-[#70857e] dark:text-[#8e7c9a]">0</span>}
+                          </td>
+                          <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-bold text-[#29473f] dark:border-fuchsia-300/15 dark:text-[#d6bfe3]">
+                            {row.onceki3AyOrt === null ? (
+                              <span className="text-[#70857e] dark:text-[#8e7c9a]">—</span>
+                            ) : (
+                              fmt(row.onceki3AyOrt, 0)
+                            )}
+                          </td>
+                          <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right dark:border-fuchsia-300/15">
+                            <DegisimChip value={row.degisimYuzde} />
                           </td>
                           <td className="border-t border-emerald-950/10 px-4 py-3.5 text-right tabular-nums font-semibold dark:border-fuchsia-300/15">
                             {row.kurumMax > 0 ? (
@@ -945,7 +1033,7 @@ export default function HastaneSevkiyatPanel() {
                         </tr>
                         {isOpen && (
                           <tr>
-                            <td colSpan={10} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
+                            <td colSpan={13} className="border-t border-emerald-950/10 bg-emerald-50/45 px-5 py-4 dark:border-fuchsia-300/15 dark:bg-fuchsia-300/[0.04]">
                               <div className="rounded-2xl border border-emerald-950/10 bg-white/70 p-4 dark:border-fuchsia-300/15 dark:bg-white/[0.04]">
                                 <div className="flex flex-wrap items-center gap-2">
                                   <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-black ${ONERI_STILI[row.oneri.tip].chip}`}>
