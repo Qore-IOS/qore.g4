@@ -234,6 +234,19 @@ export interface MinMaxRule {
   otomatikTransferAdedi?: number;
   counterEnabled?: boolean;
   counterPlusEnabled?: boolean;
+  /** Dönem bazlı min/max değerleri. Ay-dönem eşlemesine göre istemcide etkin değer seçilir. */
+  donemDegerleri?: Record<string, { min: number; max: number }>;
+}
+
+export interface MinMaxPeriod {
+  id: string;
+  name: string;
+}
+
+export interface MinMaxPeriodConfig {
+  periods: MinMaxPeriod[];
+  /** 1 (Ocak) ile 12 (Aralık) arasındaki ayın hangi döneme bağlı olduğu. */
+  monthPeriodMap: Record<number, string>;
 }
 
 /* ——— Sarf Dağıtım (Hastane Sarf) transfer akışı ——— */

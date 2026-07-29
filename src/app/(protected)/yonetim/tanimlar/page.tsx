@@ -1,6 +1,6 @@
 'use client';
 import React from 'react';
-import { Warehouse, Building, Building2, Barcode, Database, MapPin, Users, Beaker, QrCode, Pill } from 'lucide-react';
+import { Warehouse, Building, Building2, Barcode, CalendarRange, Database, MapPin, Users, Beaker, QrCode, Pill } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/auth-context';
@@ -21,6 +21,7 @@ export default function TanimlarPage() {
     { icon: Barcode, label: 'Ürün Kodu Yönetimi', description: 'Stok kodu, ambalaj, maliyet tanımları', href: '/yonetim/urun-kodlari', color: '#6ea8ff' },
     { icon: MapPin, label: 'Adres Tanımları', description: 'Raf, koridor, lokasyon adresleri', href: '/yonetim/adresler', color: '#42e46d' },
     { icon: Pill, label: 'Laboratuvar Yönetimi', description: 'Lab kayıtları, çalışma saatleri, acil statüsü', href: '/yonetim/laboratuvarlar', color: '#a78bfa' },
+    { icon: CalendarRange, label: 'Dönemsel Min-Max Ayarları', description: 'Lab ve depolar için aylara bağlı min-max planı', href: '/yonetim/donemsel-min-max', color: '#0891b2' },
     { icon: Users, label: 'Kullanıcı Yönetimi', description: 'Rol, yetki ve atama yönetimi', href: '/yonetim/kullanicilar', color: '#fb923c' },
     { icon: Beaker, label: 'Test Yönetimi', description: 'SUT kodu, hak ediş ve test–ürün eşleşmesi', href: '/yonetim/test-yonetimi', color: '#42e46d' },
     { icon: QrCode, label: 'Barkod Formatları', description: 'GS1, DataMatrix ve özel format kuralları', href: '/yonetim/barkod-formatlari', color: '#6ea8ff' },
