@@ -87,6 +87,10 @@ const BulkBarcodeScanModal = dynamic(() => import('@/components/mal-kabul/BulkBa
   ssr: false,
 });
 
+const ExcelStokGirisModal = dynamic(() => import('@/components/mal-kabul/ExcelStokGirisModal'), {
+  ssr: false,
+});
+
 function AnaPanelSkeleton() {
   return (
     <div className="flex flex-col gap-6 p-6 animate-pulse">
@@ -670,6 +674,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   const [ceomedVerifyMap, setCeomedVerifyMap] = useState<Record<string, CeomedVerifyLine>>({});
   const [isBulkBarcodeScanOpen, setIsBulkBarcodeScanOpen] = useState(false);
   const [isBulkScanMode, setIsBulkScanMode] = useState(false);
+  const [isExcelImportOpen, setIsExcelImportOpen] = useState(false);
 
   const [showManualInline, setShowManualInline] = useState(false);
   
@@ -2342,6 +2347,7 @@ export default function AnaPanel(props: AnaPanelProps) {
           onManual={() => setShowManualInline(v => !v)}
           onIrsaliye={() => setIsOcrModalOpen(true)}
           onDepoda={handleDepotSerialCheck}
+          onExcel={() => setIsExcelImportOpen(true)}
           manualActive={showManualInline}
           irsaliyeBadge={pendingIrsaliyeCount}
           depodaDisabled={isCheckingDepotSerials || !selectedDepotId}
@@ -2917,6 +2923,17 @@ export default function AnaPanel(props: AnaPanelProps) {
           isOpen={isBulkBarcodeScanOpen}
           onClose={() => setIsBulkBarcodeScanOpen(false)}
           productCodes={productCodes}
+          onResults={handleBulkBarcodeResults}
+        />
+      )}
+
+      {/* Excel ile Stok Girişi */}
+      {isExcelImportOpen && (
+        <ExcelStokGirisModal
+          isOpen={isExcelImportOpen}
+          onClose={() => setIsExcelImportOpen(false)}
+          productCodes={productCodes}
+          productTracking={productTracking}
           onResults={handleBulkBarcodeResults}
         />
       )}

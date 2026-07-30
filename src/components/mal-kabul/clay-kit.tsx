@@ -8,7 +8,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Camera, Plus, FileText, Search, RefreshCw, Check, Package, QrCode, Box, Trash2, ArrowRight, MapPin, AlertTriangle } from 'lucide-react';
+import { Camera, Plus, FileText, Search, RefreshCw, Check, Package, QrCode, Box, Trash2, ArrowRight, MapPin, AlertTriangle, FileSpreadsheet } from 'lucide-react';
 
 // ── Cream clay design tokens (matches Siparişler / Direkt Transfer) ──────────
 export const MK_C = {
@@ -359,8 +359,8 @@ export function MkAddTile({ icon, label, onClick, disabled, highlight, badge, ac
   );
 }
 
-export function MkAddPanel({ ready, onTekli, onSeri, onManual, onIrsaliye, onDepoda, manualActive, irsaliyeBadge, depodaDisabled, depodaLoading }: {
-  ready: boolean; onTekli: () => void; onSeri: () => void; onManual: () => void; onIrsaliye: () => void; onDepoda: () => void;
+export function MkAddPanel({ ready, onTekli, onSeri, onManual, onIrsaliye, onDepoda, onExcel, manualActive, irsaliyeBadge, depodaDisabled, depodaLoading }: {
+  ready: boolean; onTekli: () => void; onSeri: () => void; onManual: () => void; onIrsaliye: () => void; onDepoda: () => void; onExcel?: () => void;
   manualActive?: boolean; irsaliyeBadge?: number; depodaDisabled?: boolean; depodaLoading?: boolean;
 }) {
   return (
@@ -373,12 +373,13 @@ export function MkAddPanel({ ready, onTekli, onSeri, onManual, onIrsaliye, onDep
           </span>
         )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 9, flex: 1 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: onExcel ? 'repeat(6, 1fr)' : 'repeat(5, 1fr)', gap: 9, flex: 1 }}>
         <MkAddTile icon={<Camera size={20} />} label="Tekli Tara" onClick={onTekli} disabled={!ready} />
         <MkAddTile icon={<Camera size={20} />} label="Seri Tarama" onClick={onSeri} disabled={!ready} highlight />
         <MkAddTile icon={<Plus size={20} />} label="Manuel Ekle" onClick={onManual} active={manualActive} />
         <MkAddTile icon={<FileText size={20} />} label="İrsaliye Tara" onClick={onIrsaliye} disabled={!ready} badge={irsaliyeBadge} />
         <MkAddTile icon={depodaLoading ? <span style={{ display: 'inline-flex', animation: 'mkSpin 1s linear infinite' }}><RefreshCw size={18} /></span> : <Search size={20} />} label={depodaLoading ? 'Sorgulanıyor…' : 'Depoda Kontrol'} onClick={onDepoda} disabled={depodaDisabled} />
+        {onExcel && <MkAddTile icon={<FileSpreadsheet size={20} />} label="Excel'den Gir" onClick={onExcel} disabled={!ready} />}
       </div>
     </div>
   );
