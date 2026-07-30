@@ -220,7 +220,7 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
     fire({ tone: 'ok', title: 'Sayım kaydediliyor', sub: `${countedN}/${totalN} ürün` });
     try {
       const res: SaveSummary = await saveDepoCount({ groups, states, depot, companyId: currentCompanyId, user: { uid: currentUserProfile?.uid || '', name: currentUserProfile?.name || '' } });
-      fire({ tone: 'ok', title: 'Sayım kaydedildi', sub: `${res.deleted} düşüldü · ${res.created} eklendi${res.skippedSerial ? ` · ${res.skippedSerial} seri korundu` : ''}` });
+      fire({ tone: 'ok', title: 'Sayım kaydedildi', sub: `${res.deleted} düşüldü · ${res.created} eklendi` });
       onBack();
     } catch (e) { console.error(e); fire({ title: 'Kayıt hatası' }); }
     finally { setSaving(false); }

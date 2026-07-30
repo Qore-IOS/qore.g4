@@ -1164,6 +1164,10 @@ export interface GroupedStockRow {
   rafAdresi: string;
   quantity: number;
   itemIds: string[];
+  /** itemId → its counted qty (a depoStok doc's `adet` field can be >1 for bulk-received
+      stock; defaults to 1 when the doc has no numeric adet). Lets quantity corrections
+      reduce/keep-in-sync at the same granularity `quantity` was summed at. */
+  itemAdets: Record<string, number>;
   /** Brand from productCodes — used by the marka column filter. */
   marka?: string;
   // Server-computed risk metadata (populated when minMaxRules are available).
@@ -1341,12 +1345,16 @@ export async function getPaginatedDepotStock(params: {
         rafAdresi: item.rafAdresi || '',
         quantity: 0,
         itemIds: [],
+        itemAdets: {},
         marka: product?.marka || '',
       };
     }
     const qty = (item.adet && typeof item.adet === 'number') ? item.adet : 1;
     grouped[key].quantity += qty;
-    if (item.id) grouped[key].itemIds.push(item.id);
+    if (item.id) {
+      grouped[key].itemIds.push(item.id);
+      grouped[key].itemAdets[item.id] = qty;
+    }
   }
 
   let rows = Object.values(grouped);

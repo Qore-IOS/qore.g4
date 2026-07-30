@@ -36,12 +36,29 @@ export interface ProductGroup {
   urunGrubu?: string;
   ambalajDegeri?: number;
   serial: boolean;        // serial-tracked
-  docs: DepoStokItem[];   // depot docs (one per physical unit, !isShipped)
+  docs: DepoStokItem[];   // depot docs (!isShipped) — a doc's `adet` field may be >1 (bulk mal kabul)
   serials: string[];      // distinct seriNumarasi across docs (serial products)
-  currentQty: number;     // = docs.length (mevcut stok)
+  currentQty: number;     // sum of each doc's qty (mevcut stok) — matches stok yönetimi's totals
 }
 
 export interface LabGroup { labId: string; labName: string; products: ProductGroup[]; }
+
+/* a depoStok doc can represent more than one physical unit (bulk mal kabul writes a
+   single doc with adet=N instead of N per-unit docs) — mirrors the same fallback
+   stok-yönetimi uses (getPaginatedDepotStock) so "mevcut" always matches reality. */
+function qtyOf(d: DepoStokItem): number {
+  const adet = (d as any).adet;
+  return (typeof adet === 'number' && adet > 0) ? adet : 1;
+}
+
+function docTimeMillis(d: DepoStokItem): number {
+  const v: any = (d as any).eklenmeTarihi;
+  if (!v) return 0;
+  if (typeof v.toMillis === 'function') return v.toMillis();
+  if (typeof v.seconds === 'number') return v.seconds * 1000;
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? 0 : t;
+}
 
 /* live per-product count state (keyed by stokKodu) */
 export interface CountState {
@@ -116,7 +133,7 @@ export function buildLabGroups(
       urunGrubu: p?.urunGrubu || docs[0]?.urunGrubu,
       ambalajDegeri: p?.ambalajDegeri ?? docs[0]?.ambalajDegeri,
       serial,
-      docs, serials, currentQty: docs.length,
+      docs, serials, currentQty: docs.reduce((s, d) => s + qtyOf(d), 0),
     };
     const lg = labMap.get(labId) || { labId, labName, products: [] };
     lg.products.push(group);
@@ -145,12 +162,15 @@ export function isCountedRow(g: ProductGroup, s?: CountState): boolean {
   return s.counted || (g.serial && s.scannedSerials.size > 0);
 }
 
-export interface SaveSummary { deleted: number; created: number; sessions: number; skippedSerial: number; touched: number; }
+export interface SaveSummary { deleted: number; created: number; sessions: number; touched: number; }
 
 /* Reconcile the depot's depoStok docs so the count matches the counted amount, then write a session.
-   - non-serial: delete oldest surplus docs / create shortage-fill docs
    - serial with scans: delete docs whose serial was NOT scanned (identity-based)
-   - serial with manual number: NEVER delete serial docs (preserve traceability); only create if counted>current */
+   - everything else (non-serial, or serial counted manually without scanning): reduce/increase
+     total quantity oldest-first. A doc can represent >1 unit (bulk mal kabul writes adet=N on
+     a single doc instead of N per-unit docs), so a partial reduction decrements `adet` instead
+     of deleting the doc outright — this keeps the count in sync with stok yönetimi, which sums
+     `adet` the same way (see getPaginatedDepotStock). */
 export async function saveDepoCount(params: {
   groups: LabGroup[];
   states: Record<string, CountState>;
@@ -161,7 +181,7 @@ export async function saveDepoCount(params: {
   const { groups, states, depot, companyId, user } = params;
   const now = Timestamp.now();
   const ops: ((batch: ReturnType<typeof writeBatch>) => void)[] = [];
-  let deleted = 0, created = 0, skippedSerial = 0, touched = 0;
+  let deleted = 0, created = 0, touched = 0;
   let totalCurrent = 0, totalCounted = 0;
 
   const allProducts = groups.flatMap(g => g.products);
@@ -189,12 +209,23 @@ export async function saveDepoCount(params: {
     if (diff === 0) return;
 
     if (diff < 0) {
-      if (g.serial) { skippedSerial++; return; } // manual reduction never deletes serials
-      // non-serial: delete oldest |diff| docs
-      g.docs.slice(0, Math.abs(diff)).forEach(item => {
-        ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
-        deleted++;
-      });
+      // reduce total quantity by |diff|, oldest docs first; partially decrement a doc's
+      // `adet` when only part of it needs to go (bulk-received docs can carry adet>1)
+      let toRemove = Math.abs(diff);
+      const sorted = [...g.docs].sort((a, b) => docTimeMillis(a) - docTimeMillis(b));
+      for (const item of sorted) {
+        if (toRemove <= 0) break;
+        const q = qtyOf(item);
+        if (q <= toRemove) {
+          ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
+          toRemove -= q;
+          deleted += q;
+        } else {
+          ops.push(b => b.update(doc(db, 'depoStok', item.id!), { adet: q - toRemove }));
+          deleted += toRemove;
+          toRemove = 0;
+        }
+      }
     } else {
       // surplus: create diff filler docs
       for (let i = 0; i < diff; i++) {
@@ -227,5 +258,5 @@ export async function saveDepoCount(params: {
     missingCount: Math.max(0, totalCurrent - totalCounted), extraCount: Math.max(0, totalCounted - totalCurrent),
   }, companyId));
 
-  return { deleted, created, sessions: 1, skippedSerial, touched };
+  return { deleted, created, sessions: 1, touched };
 }
