@@ -602,8 +602,23 @@ declare module "@/lib/types" {
   }
 
   // ---------- Min/Max & Settings ----------
+  /** Dönemsel (mevsimsel) min/max tanımı — bkz. src/lib/seasonal-min-max.ts */
+  export interface MinMaxPeriod {
+    id: string;
+    name: string;
+  }
+  export interface MinMaxPeriodConfig {
+    periods: MinMaxPeriod[];
+    /** 1 (Ocak) – 12 (Aralık) ayının hangi döneme bağlı olduğu */
+    monthPeriodMap: Record<number, string>;
+  }
+
   export interface MinMaxRule {
     id: ID;
+    /** donemId -> o dönemin min/max değerleri */
+    donemDegerleri?: Record<string, { min: number; max: number }>;
+    /** Düz min/max alanlarının hangi dönemden yazıldığı */
+    aktifDonemId?: string;
     hospitalId?: ID;
     productCodeId?: ID;
     min: number;

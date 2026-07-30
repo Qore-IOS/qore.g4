@@ -37,6 +37,7 @@ import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { donemiYururlugeAl } from '@/lib/min-max-donem-guard';
 import { useDepots } from '@/hooks/useFirebaseQueries';
 import type {
   BrandDefinition,
@@ -409,6 +410,13 @@ export default function TedarikciSiparisPanel() {
 
   const rulesLoading =
     depotRuleQueries.some(q => q.isLoading) || labRuleQueries.some(q => q.isLoading);
+
+  // Dönemsel min/max'ı yürürlüğe al. Marka seçilmeden (yani kurallar
+  // okunmadan) önce çalışsın diye açılışta tetiklenir: ay değişmişse düz
+  // min/max alanları hâlâ önceki dönemin değerlerini taşıyor olur.
+  useEffect(() => {
+    donemiYururlugeAl(currentCompanyId, isSuperAdmin);
+  }, [currentCompanyId, isSuperAdmin]);
 
   // Fetch brand definitions.
   useEffect(() => {

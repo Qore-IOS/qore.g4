@@ -39,3 +39,38 @@ export function normalizePeriodId(name: string) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 }
+
+/**
+ * Kuralın düz `min`/`max` alanları yürürlükteki dönemle uyumlu mu?
+ *
+ * Dönemsel değerler `donemDegerleri` içinde durur ama min/max okuyan 46 ayrı
+ * yer düz alanlara bakar. Düz alanlar yalnızca kayıt anında yazıldığı için ay
+ * değişip yeni döneme girildiğinde eskimiş kalırlar — tanım sessizce
+ * yürürlükten kalkar. Bu fonksiyon eskimeyi tespit eder; `applySeasonalMinMax`
+ * de düzeltir.
+ */
+export function seasonalMinMaxStale(
+  rule: MinMaxRule,
+  config: MinMaxPeriodConfig,
+  date = new Date(),
+): boolean {
+  const seasonal = rule.donemDegerleri?.[getActiveMinMaxPeriod(config, date).id];
+  if (!seasonal) return false; // dönem tanımı yoksa düz değerler zaten geçerli
+  return Number(rule.min) !== Number(seasonal.min) || Number(rule.max) !== Number(seasonal.max);
+}
+
+/**
+ * Aktif döneme göre yazılması gereken düz alanlar; gerekmiyorsa null.
+ * Ayrı tutuldu ki çağıran yalnızca değişen dokümanları yazsın.
+ */
+export function seasonalMinMaxPatch(
+  rule: MinMaxRule,
+  config: MinMaxPeriodConfig,
+  date = new Date(),
+): { min: number; max: number; aktifDonemId: string } | null {
+  const active = getActiveMinMaxPeriod(config, date);
+  const seasonal = rule.donemDegerleri?.[active.id];
+  if (!seasonal) return null;
+  if (!seasonalMinMaxStale(rule, config, date)) return null;
+  return { min: Number(seasonal.min), max: Number(seasonal.max), aktifDonemId: active.id };
+}
