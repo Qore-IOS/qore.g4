@@ -17,6 +17,7 @@ import {
   FileText,
 } from 'lucide-react';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
+import { getStockItemQuantity } from '@/lib/stock-quantity';
 import { saveLabCountSession } from '@/lib/labCount';
 import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
 import { buildCalculationPeriod, savePendingCalculationFiles, type PendingCalculationKind } from '@/lib/qore-hesaplama/pending-calculation-files';
@@ -58,8 +59,8 @@ type FilterMode = 'marka' | 'urunGrubu';
 interface ExistingLot {
   lot: string;
   miad: string;
-  count: number;
-  itemIds: string[]; // depoStok doc ids in this group
+  count: number; // total unit quantity (sums each doc's `adet`, not doc count)
+  items: { id: string; qty: number }[]; // depoStok docs in this group with their real quantity
 }
 
 interface ProductCountEntry {
@@ -724,14 +725,19 @@ export default function LaboratuvarSayimPage() {
           lot: item.lotNumarasi || '',
           miad: formatMiad(item.miad as any) || '',
           count: 0,
-          itemIds: [],
+          items: [],
         };
         lotMap.set(lotKey, lot);
         map[item.stokKodu].existingLots.push(lot);
       }
-      lot.count++;
-      if (item.id) lot.itemIds.push(item.id);
-      map[item.stokKodu].existingTotal++;
+      // A depoStok doc can represent more than one physical unit — order picking
+      // (siparişler → toplama) commonly ships a whole lot/qty pick as a single
+      // doc with `adet: N` instead of N per-unit docs, so counting docs here
+      // would under-report real stock and later delete/create the wrong amount.
+      const qty = getStockItemQuantity(item);
+      lot.count += qty;
+      if (item.id) lot.items.push({ id: item.id, qty });
+      map[item.stokKodu].existingTotal += qty;
     });
 
     // Sort lots within each product (closest miad first)
@@ -1259,23 +1265,32 @@ export default function LaboratuvarSayimPage() {
         if (diff === 0) continue;
 
         if (diff < 0) {
-          // Stock decreased: remove |diff| items, write consumption records
-          const toRemove = Math.abs(diff);
-          // Flatten lots into individual stock items, prefer earliest expiry first
-          const flat: { id: string; lot: string; miad: string }[] = [];
+          // Stock decreased: remove |diff| units, write consumption records.
+          // A doc's `adet` can be >1 (partial/full order-picking shipments carry
+          // the picked quantity on one doc), so removal must decrement `adet`
+          // instead of always deleting the whole doc — otherwise a small count
+          // correction could wipe out a multi-unit doc's entire remaining stock.
+          let toRemove = Math.abs(diff);
+          const flat: { id: string; qty: number; lot: string; miad: string }[] = [];
           entry.existingLots.forEach(lot => {
-            lot.itemIds.forEach(id => flat.push({ id, lot: lot.lot, miad: lot.miad }));
+            lot.items.forEach(it => flat.push({ id: it.id, qty: it.qty, lot: lot.lot, miad: lot.miad }));
           });
           flat.sort((a, b) => getMiadInfo(a.miad).days - getMiadInfo(b.miad).days);
 
-          const slice = flat.slice(0, toRemove);
-          for (const it of slice) {
+          for (const it of flat) {
+            if (toRemove <= 0) break;
             const stockRef = doc(db, 'depoStok', it.id);
-            batch.delete(stockRef);
-            itemsRemoved++;
+            const removeQty = Math.min(it.qty, toRemove);
+            if (removeQty >= it.qty) {
+              batch.delete(stockRef);
+            } else {
+              batch.update(stockRef, { adet: it.qty - removeQty });
+            }
+            itemsRemoved += removeQty;
+            toRemove -= removeQty;
 
             const consRef = doc(collection(db, 'tuketimKayitlari'));
-            const consumption: Omit<ConsumptionRecord, 'id'> = {
+            const consumption: Omit<ConsumptionRecord, 'id'> & { adet?: number } = {
               stokKodu: entry.stokKodu,
               stokAdi: entry.stokAdi,
               lotNumarasi: it.lot || '',
@@ -1287,6 +1302,7 @@ export default function LaboratuvarSayimPage() {
               consumptionType: 'sayimdan_dusum',
               userId: currentUserProfile.uid,
               userName: currentUserProfile.name || currentUserProfile.email || 'System',
+              adet: removeQty,
             };
             batch.set(consRef, consumption);
           }
