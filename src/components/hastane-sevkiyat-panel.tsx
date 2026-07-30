@@ -23,6 +23,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
+import { donemiYururlugeAl } from '@/lib/min-max-donem-guard';
 import { useDepots } from '@/hooks/useFirebaseQueries';
 import type { MinMaxRule, ProductCode } from '@/lib/types';
 import { Input } from '@/components/ui/input';
@@ -289,6 +290,9 @@ export default function HastaneSevkiyatPanel() {
     const load = async () => {
       setVeriLoading(true);
       try {
+        // Dönemsel min/max tanımları yürürlüğe alınmadan kurallar okunmamalı:
+        // ay değişmişse düz min/max alanları hâlâ önceki dönemi taşıyor olur.
+        await donemiYururlugeAl(currentCompanyId, isSuperAdmin);
         const stok = await import('@/actions/stokActions');
         const labPeriod = await import('@/actions/labPeriodActions');
         const periods = [5, 4, 3, 2, 1, 0].map(back => {

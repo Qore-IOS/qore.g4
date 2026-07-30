@@ -15,9 +15,15 @@ import { YonetimHeader, YonetimShell } from '@/components/yonetim-ui/YonetimHub'
 
 type LocationType = 'hospital' | 'depot';
 type Location = { id: string; name: string; code: string; type: LocationType };
-type RowValues = Record<string, { min: number | ''; max: number | '' }>;
+/** Bir dönemdeki hücre değerleri; boş string "henüz girilmedi" demektir. */
+type PeriodCell = { min: number | ''; max: number | '' };
+/** stokKodu -> donemId -> hücre. Önceden tek seviye tanımlıydı ve kod iki
+ *  seviye kullanıyordu; tip hatalarının kaynağı buydu. */
+type RowValues = Record<string, Record<string, PeriodCell>>;
 
 const MONTHS = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+/** Filtre listelerinde "hepsi" seçeneği. */
+const TUMU = '__tumu__';
 const inputClass = 'h-9 w-20 rounded-lg border border-border bg-background px-2 text-center text-sm tabular-nums outline-none focus:ring-2 focus:ring-primary';
 
 export default function DonemselMinMaxPanel() {
@@ -31,12 +37,14 @@ export default function DonemselMinMaxPanel() {
   const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
   const [values, setValues] = useState<Record<string, RowValues>>({});
   const [search, setSearch] = useState('');
+  const [markaFiltre, setMarkaFiltre] = useState(TUMU);
+  const [grupFiltre, setGrupFiltre] = useState(TUMU);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const locations = useMemo<Location[]>(() => [
-    ...hospitals.map(item => ({ id: item.id, name: item.name, code: item.kod || item.id, type: 'hospital' as const })),
-    ...depots.map(item => ({ id: item.id, name: item.name, code: item.ceomedDepoKodu || item.id, type: 'depot' as const })),
+    ...hospitals.map(item => ({ id: item.id, name: String(item.name ?? ''), code: String(item.kod ?? item.id), type: 'hospital' as const })),
+    ...depots.map(item => ({ id: item.id, name: String(item.name ?? ''), code: String(item.ceomedDepoKodu ?? item.id), type: 'depot' as const })),
   ].sort((a, b) => a.name.localeCompare(b.name, 'tr')), [hospitals, depots]);
   const locationMap = useMemo(() => new Map(locations.map(item => [`${item.type}:${item.id}`, item])), [locations]);
   const productMap = useMemo(() => new Map(products.map(item => [item.stokKodu, item])), [products]);
@@ -91,8 +99,11 @@ export default function DonemselMinMaxPanel() {
         const rule = ruleDoc.data() as MinMaxRule;
         loaded[rule.stokKodu || ruleDoc.id] = Object.fromEntries(config.periods.map(period => [period.id, rule.donemDegerleri?.[period.id] || { min: rule.min ?? 0, max: rule.max ?? 0 }]));
       });
+      // Kurumun mevcut tanımları forma yüklenir ama ürünler OTOMATİK
+      // SEÇİLMEZ: seçim kullanıcının iradesinde kalmalı. Önceden hepsi
+      // seçiliyordu ve marka/grup filtresi uygulansa bile kaydetme filtre
+      // dışındaki ürünlere de yazıyordu.
       setValues(prev => ({ ...prev, [key]: loaded }));
-      setSelectedProducts(prev => new Set([...prev, ...Object.keys(loaded)]));
     } finally { setBusy(false); }
   };
 
@@ -172,7 +183,40 @@ export default function DonemselMinMaxPanel() {
     } finally { setBusy(false); event.target.value = ''; }
   };
 
-  const filteredProducts = products.filter(product => `${product.stokKodu} ${product.stokAdi}`.toLocaleLowerCase('tr').includes(search.toLocaleLowerCase('tr')));
+  const markaSecenekleri = useMemo(
+    () => Array.from(new Set(products.map(p => String(p.marka ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr')),
+    [products],
+  );
+  const grupSecenekleri = useMemo(
+    () => Array.from(new Set(products.map(p => String(p.urunGrubu ?? '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr')),
+    [products],
+  );
+
+  /**
+   * Görünen ürünler: arama + marka + ürün grubu.
+   *
+   * Filtre yalnızca listeyi daraltır; SEÇİMİ değiştirmez. Kaydetme de
+   * yalnızca seçili ürünlere yazdığı için filtre dışında kalan ürünlerin
+   * tanımları hiçbir koşulda değişmez.
+   */
+  const filteredProducts = useMemo(() => {
+    const aranan = search.toLocaleLowerCase('tr');
+    return products.filter(product => {
+      if (markaFiltre !== TUMU && String(product.marka ?? '').trim() !== markaFiltre) return false;
+      if (grupFiltre !== TUMU && String(product.urunGrubu ?? '').trim() !== grupFiltre) return false;
+      if (!aranan) return true;
+      return `${product.stokKodu} ${product.stokAdi}`.toLocaleLowerCase('tr').includes(aranan);
+    });
+  }, [products, search, markaFiltre, grupFiltre]);
+
+  /** Görünen ürünlerin tamamını seçer/bırakır — filtreyle birlikte asıl işi bu yapar. */
+  const toggleGorunenler = () => {
+    const kodlar = filteredProducts.map(p => p.stokKodu!).filter(Boolean);
+    const hepsiSecili = kodlar.length > 0 && kodlar.every(k => selectedProducts.has(k));
+    const next = new Set(selectedProducts);
+    kodlar.forEach(k => (hepsiSecili ? next.delete(k) : next.add(k)));
+    setSelectedProducts(next);
+  };
   const loading = hospitalsLoading || depotsLoading || productsLoading;
 
   return <YonetimShell>
@@ -186,7 +230,15 @@ export default function DonemselMinMaxPanel() {
 
     <div className="grid gap-4 xl:grid-cols-[280px_300px_minmax(0,1fr)]">
       <Selection title="1. Kurumlar" subtitle={`${selectedLocations.size} seçili`} loading={loading}>{locations.map(location => { const key = `${location.type}:${location.id}`; return <Choice key={key} selected={selectedLocations.has(key)} onClick={() => toggleLocation(key)} title={location.name} subtitle={`${location.type === 'hospital' ? 'Lab' : 'Depo'} · ${location.code}`}/>; })}</Selection>
-      <Selection title="2. Ürünler" subtitle={`${selectedProducts.size} seçili`} loading={loading} header={<div className="flex h-10 items-center gap-2 rounded-xl border px-3"><Search className="h-4 w-4 text-muted-foreground"/><input aria-label="Ürün ara" value={search} onChange={e => setSearch(e.target.value)} placeholder="Stok kodu veya adı" className="min-w-0 flex-1 bg-transparent text-sm outline-none"/></div>}>{filteredProducts.map(product => <Choice key={product.stokKodu} selected={selectedProducts.has(product.stokKodu!)} onClick={() => { const next = new Set(selectedProducts); next.has(product.stokKodu!) ? next.delete(product.stokKodu!) : next.add(product.stokKodu!); setSelectedProducts(next); }} title={product.stokAdi || product.stokKodu!} subtitle={product.stokKodu!}/>)}</Selection>
+      <Selection title="2. Ürünler" subtitle={`${selectedProducts.size} seçili`} loading={loading} header={<div className="space-y-2">
+        <div className="flex h-10 items-center gap-2 rounded-xl border px-3"><Search className="h-4 w-4 text-muted-foreground"/><input aria-label="Ürün ara" value={search} onChange={e => setSearch(e.target.value)} placeholder="Stok kodu veya adı" className="min-w-0 flex-1 bg-transparent text-sm outline-none"/></div>
+        <div className="grid grid-cols-2 gap-2">
+          <select aria-label="Marka filtresi" value={markaFiltre} onChange={e => setMarkaFiltre(e.target.value)} className="h-9 w-full cursor-pointer rounded-lg border bg-card px-2 text-xs font-semibold"><option value={TUMU}>Tüm markalar</option>{markaSecenekleri.map(m => <option key={m} value={m}>{m}</option>)}</select>
+          <select aria-label="Ürün grubu filtresi" value={grupFiltre} onChange={e => setGrupFiltre(e.target.value)} className="h-9 w-full cursor-pointer rounded-lg border bg-card px-2 text-xs font-semibold"><option value={TUMU}>Tüm gruplar</option>{grupSecenekleri.map(g => <option key={g} value={g}>{g}</option>)}</select>
+        </div>
+        <button type="button" onClick={toggleGorunenler} disabled={filteredProducts.length === 0} className="w-full cursor-pointer rounded-lg border px-2 py-1.5 text-xs font-bold hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50">Görünen {filteredProducts.length} ürünü seç / bırak</button>
+        <p className="text-[11px] leading-4 text-muted-foreground">Filtre yalnızca listeyi daraltır. Kaydetme sadece <strong>seçili</strong> ürünlere yazar; filtre dışındaki ürünlerin tanımları değişmez.</p>
+      </div>}>{filteredProducts.map(product => <Choice key={product.stokKodu} selected={selectedProducts.has(product.stokKodu!)} onClick={() => { const next = new Set(selectedProducts); next.has(product.stokKodu!) ? next.delete(product.stokKodu!) : next.add(product.stokKodu!); setSelectedProducts(next); }} title={product.stokAdi || product.stokKodu!} subtitle={product.stokKodu!}/>)}</Selection>
       <section className="min-w-0 rounded-2xl border border-border bg-card shadow-sm"><div className="flex flex-wrap items-center justify-between gap-2 border-b p-4"><div><h2 className="font-bold">3. Dönem değerleri</h2><p className="text-xs text-muted-foreground">{selectedLocations.size * selectedProducts.size} tanım satırı</p></div><div className="flex gap-2"><button onClick={exportTemplate} className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 text-xs font-bold hover:bg-muted"><Download className="h-4 w-4"/> Şablon</button><button onClick={() => fileRef.current?.click()} className="inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-xl border px-3 text-xs font-bold hover:bg-muted"><Upload className="h-4 w-4"/> Toplu aktar</button><input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={importExcel} className="hidden"/></div></div>
         <div className="max-h-[680px] overflow-auto">{!selectedLocations.size || !selectedProducts.size ? <div className="flex min-h-64 flex-col items-center justify-center p-8 text-center text-muted-foreground"><FileSpreadsheet className="mb-3 h-10 w-10 opacity-40"/><p className="font-semibold">Kurum ve ürün seçerek başlayın.</p><p className="mt-1 text-sm">Tek bir kurum veya birden çok kurum birlikte seçilebilir.</p></div> : <table className="w-full min-w-[700px] text-sm"><thead className="sticky top-0 z-10 bg-card"><tr className="border-b"><th className="px-3 py-3 text-left">Kurum / Ürün</th>{config.periods.map(period => <th key={period.id} className="px-2 py-3 text-center">{period.name}<span className="block text-[10px] font-medium text-muted-foreground">Min / Max</span></th>)}</tr></thead><tbody>{[...selectedLocations].flatMap(key => [...selectedProducts].map(stockCode => <tr key={`${key}:${stockCode}`} className="border-b hover:bg-muted/30"><td className="px-3 py-3"><strong className="block">{locationMap.get(key)?.name}</strong><span className="text-xs text-muted-foreground">{stockCode} · {productMap.get(stockCode)?.stokAdi}</span></td>{config.periods.map(period => <td key={period.id} className="px-2 py-2"><div className="flex justify-center gap-1"><input aria-label={`${period.name} minimum`} type="number" min="0" value={values[key]?.[stockCode]?.[period.id]?.min ?? ''} onChange={e => setCell(key, stockCode, period.id, 'min', e.target.value)} className={inputClass}/><input aria-label={`${period.name} maksimum`} type="number" min="0" value={values[key]?.[stockCode]?.[period.id]?.max ?? ''} onChange={e => setCell(key, stockCode, period.id, 'max', e.target.value)} className={inputClass}/></div></td>)}</tr>))}</tbody></table>}</div>
       </section>
