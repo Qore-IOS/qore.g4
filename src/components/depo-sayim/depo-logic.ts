@@ -46,12 +46,12 @@ export interface LabGroup { labId: string; labName: string; products: ProductGro
 /* a depoStok doc can represent more than one physical unit (bulk mal kabul writes a
    single doc with adet=N instead of N per-unit docs) — mirrors the same fallback
    stok-yönetimi uses (getPaginatedDepotStock) so "mevcut" always matches reality. */
-function qtyOf(d: DepoStokItem): number {
+export function qtyOf(d: DepoStokItem): number {
   const adet = (d as any).adet;
   return (typeof adet === 'number' && adet > 0) ? adet : 1;
 }
 
-function docTimeMillis(d: DepoStokItem): number {
+export function docTimeMillis(d: DepoStokItem): number {
   const v: any = (d as any).eklenmeTarihi;
   if (!v) return 0;
   if (typeof v.toMillis === 'function') return v.toMillis();
@@ -98,6 +98,17 @@ function resolveLab(stokKodu: string, stokToHospitals: Map<string, string[]>, ho
   return { labId: hid, labName: hospitalsById.get(hid)?.name || 'Laboratuvar' };
 }
 
+/* a real (non-placeholder) serial number — excludes the FAZLA-/SAYIM- synthetic
+   ids the count itself creates for filler/surplus docs */
+export const isSyntheticSerial = (s: string) => /^(FAZLA|SAYIM)-/i.test(s);
+
+/* same "is this product serial-tracked" call the count/reconciliation makes:
+   the product's own tracking mode, or (fallback) any real serial already on its docs */
+export function isSerialClassified(docs: DepoStokItem[], product?: { trackingMode?: ProductCode['trackingMode']; marka?: string; manufacturer?: string; stokAdi?: string }): boolean {
+  if (product && resolveDefaultTrackingMode(product as any) === 'serial') return true;
+  return docs.some(d => { const s = (d.seriNumarasi || '').trim(); return !!s && !isSyntheticSerial(s); });
+}
+
 /* group a depot's stock into labs → products (matches the "x,y,z under lab A" requirement) */
 export function buildLabGroups(
   depotStock: DepoStokItem[],
@@ -118,14 +129,13 @@ export function buildLabGroups(
     docsByStok.set(d.stokKodu, arr);
   });
 
-  const isSynthetic = (s: string) => /^(FAZLA|SAYIM)-/i.test(s);
   const labMap = new Map<string, LabGroup>();
   docsByStok.forEach((docs, stokKodu) => {
     const p = productsByCode.get(stokKodu); // may be undefined if the catalog hasn't loaded — depoStok carries enough
     const { labId, labName } = resolveLab(stokKodu, stokToHospitals, hospitalsById, labPools);
     // real serials only (exclude synthetic FAZLA-/SAYIM- placeholders)
-    const serials = Array.from(new Set(docs.map(d => (d.seriNumarasi || '').trim()).filter(s => s && !isSynthetic(s))));
-    const serial = (!!p && resolveDefaultTrackingMode(p as any) === 'serial') || serials.length > 0;
+    const serials = Array.from(new Set(docs.map(d => (d.seriNumarasi || '').trim()).filter(s => s && !isSyntheticSerial(s))));
+    const serial = isSerialClassified(docs, p);
     const group: ProductGroup = {
       stokKodu,
       stokAdi: p?.stokAdi || docs[0]?.stokAdi || stokKodu,
