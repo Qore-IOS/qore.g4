@@ -10,8 +10,10 @@
  *    LOG yazılır (stockAdjustmentLogs).
  * Her iki durumda da bir stockAdjustmentLogs kaydı tutulur.
  *
- * depoStok'ta adet alanı yoktur: her doküman bir fiziksel birimdir, bu yüzden
- * adet = doküman sayısıdır.
+ * Bir depoStok dokümanı birden fazla fiziksel birimi temsil edebilir (toplu mal
+ * kabul tek dokümana adet=N yazar), bu yüzden azaltmada dokümanlar sırayla
+ * ağırlıklarınca (adet alanı) düşülür: yetmeyen kısım için doküman tamamen
+ * silinir, kalan kısım için `adet` alanı kısmi olarak azaltılır.
  */
 import { collection, doc, writeBatch, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
@@ -25,6 +27,7 @@ export interface AdjustableStockRow {
   anaBirim?: string;
   quantity: number;
   itemIds: string[];
+  itemAdets?: Record<string, number>;
   urunGrubu?: 'kit' | 'sarf';
   ambalajDegeri?: number;
   rafAdresi?: string;
@@ -56,7 +59,8 @@ export async function adjustGroupedStockQuantity(params: AdjustParams): Promise<
   const target = Math.max(0, Math.floor(Number(newQuantity)));
   const diff = target - current;
   if (diff === 0) throw new Error('Adet değişmedi.');
-  if (diff < 0 && Math.abs(diff) > row.itemIds.length) {
+  const qtyOf = (id: string) => row.itemAdets?.[id] ?? 1;
+  if (diff < 0 && Math.abs(diff) > row.itemIds.reduce((s, id) => s + qtyOf(id), 0)) {
     throw new Error('Silinecek stok kaydı sayısı yetersiz.');
   }
 
@@ -65,6 +69,7 @@ export async function adjustGroupedStockQuantity(params: AdjustParams): Promise<
   let created = 0;
   let deleted = 0;
   let transactionId: string | undefined;
+  const affectedItemIds: string[] = [];
 
   if (diff > 0) {
     // ARTIŞ → mal kabul kaydı + yeni depoStok dokümanları
@@ -102,11 +107,23 @@ export async function adjustGroupedStockQuantity(params: AdjustParams): Promise<
       created++;
     }
   } else {
-    // AZALIŞ → fazla dokümanları sil (log aşağıda yazılır)
-    row.itemIds.slice(0, Math.abs(diff)).forEach((id) => {
-      batch.delete(doc(db, 'depoStok', id));
-      deleted++;
-    });
+    // AZALIŞ → dokümanlar sırayla ağırlıklarınca düşülür: tam yetenler tamamen
+    // silinir, kısmen yeten son doküman için adet alanı kısmi olarak azaltılır.
+    let toRemove = Math.abs(diff);
+    for (const id of row.itemIds) {
+      if (toRemove <= 0) break;
+      const q = qtyOf(id);
+      if (q <= toRemove) {
+        batch.delete(doc(db, 'depoStok', id));
+        toRemove -= q;
+        deleted += q;
+      } else {
+        batch.update(doc(db, 'depoStok', id), { adet: q - toRemove });
+        deleted += toRemove;
+        toRemove = 0;
+      }
+      affectedItemIds.push(id);
+    }
   }
 
   // Her iki yönde de iz kaydı
@@ -118,7 +135,7 @@ export async function adjustGroupedStockQuantity(params: AdjustParams): Promise<
     previousQuantity: current, newQuantity: target, diff,
     reason,
     relatedTransactionId: transactionId || null,
-    deletedItemIds: diff < 0 ? row.itemIds.slice(0, Math.abs(diff)) : [],
+    deletedItemIds: diff < 0 ? affectedItemIds : [],
     userId: user.uid, userName: user.name,
     timestamp: now,
   }, companyId));
