@@ -104,6 +104,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   const isWideContentRoute = pathname?.startsWith("/total-verimlilik");
   const isMaliyetSayimRoute = pathname?.startsWith("/maliyet-sayim");
+  const isDepoSayimRoute = pathname?.startsWith("/depo-sayim");
   const isLaboratuvarSayimRoute = /^\/laboratuvar\/sayim\/[^/]+\/?$/.test(pathname || "");
   const isLaboratuvarYonetimiRoute = pathname === "/laboratuvar-yonetimi";
   const isEdgeToEdgeRoute =
@@ -342,7 +343,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <PersistentNotificationToast />
         <PageShell
           edgeToEdge={isEdgeToEdgeRoute}
-          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""} ${isLaboratuvarSayimRoute ? "!pb-0" : ""}`}
+          className={`w-full flex-1 ${isWideContentRoute ? "max-w-none md:px-3" : ""} ${pathname?.startsWith("/cari-odeme") ? "bg-transparent" : ""} ${isLaboratuvarSayimRoute || isDepoSayimRoute ? "!pb-0" : ""}`}
         >
           {children}
         </PageShell>
@@ -370,7 +371,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         )}
 
-        {!isTeknisyen && !isMaliyetSayimRoute && !isLaboratuvarSayimRoute && <MobileDock items={dockItems} />}
+        {!isTeknisyen && !isMaliyetSayimRoute && !isLaboratuvarSayimRoute && !isDepoSayimRoute && <MobileDock items={dockItems} />}
 
 
         <TaskPlannerPanel

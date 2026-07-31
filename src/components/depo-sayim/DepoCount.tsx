@@ -214,20 +214,21 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
     } catch (e) { console.error(e); fire({ title: 'Excel okunamadı' }); }
   };
 
-  /* bulk action: zero out every product across every lab (e.g. a full physical
-     recount) — each row is marked counted:0 so Kaydet reduces real stock to
-     match, exactly like typing 0 + Enter on every row one by one. */
+  /* bulk action: zero out every product in the ACTIVE lab only (e.g. a full
+     physical recount of that lab) — each row is marked counted:0 so Kaydet
+     reduces real stock to match, exactly like typing 0 + Enter on every row
+     one by one. Does not touch other labs' products. */
   const resetAll = () => {
-    if (allProducts.length === 0) return;
-    if (!window.confirm(`${depot.name} deposundaki TÜM ürünler için sayılan adet 0 yapılacak (${allProducts.length} ürün). Kaydet'e bastığınızda mal kabulle yeniden eklenmeyen stoklar depodan düşer. Devam edilsin mi?`)) return;
+    if (!lab || lab.products.length === 0) return;
+    if (!window.confirm(`${lab.labName} için TÜM ürünlerin sayılan adedi 0 yapılacak (${lab.products.length} ürün). Kaydet'e bastığınızda mal kabulle yeniden eklenmeyen stoklar düşer. Devam edilsin mi?`)) return;
     setStates(prev => {
       const next = { ...prev };
-      allProducts.forEach(p => {
+      lab.products.forEach(p => {
         next[p.stokKodu] = { countedAdet: '0', scannedSerials: new Set(), counted: true, touched: true };
       });
       return next;
     });
-    fire({ tone: 'ok', title: 'Tüm ürünler sıfırlandı', sub: `${allProducts.length} ürün · 0 sayıldı` });
+    fire({ tone: 'ok', title: `${lab.labName} sıfırlandı`, sub: `${lab.products.length} ürün · 0 sayıldı` });
   };
 
   const save = async () => {
