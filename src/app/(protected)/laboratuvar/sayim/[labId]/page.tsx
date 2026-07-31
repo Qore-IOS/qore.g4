@@ -17,6 +17,7 @@ import {
   FileText,
 } from 'lucide-react';
 import type { ProductCode, DepoStokItem, ConsumptionRecord, MinMaxRule } from '@/lib/types';
+import { getStockItemQuantity } from '@/lib/stock-quantity';
 import { saveLabCountSession } from '@/lib/labCount';
 import { downloadMaliyetSayimTemplate, parseMaliyetSayimExcel } from '@/lib/labCountExcel';
 import { buildCalculationPeriod, savePendingCalculationFiles, type PendingCalculationKind } from '@/lib/qore-hesaplama/pending-calculation-files';
@@ -55,11 +56,20 @@ import {
 
 type FilterMode = 'marka' | 'urunGrubu';
 
-interface ExistingLot {
+interface LotEntry {
+  key: string; // `${stokKodu}|${lot}|${miad}` — identifies one countable line item
   lot: string;
   miad: string;
-  count: number;
-  itemIds: string[]; // depoStok doc ids in this group
+  existingQty: number; // real unit quantity for this lot (sums each doc's `adet`, not doc count)
+  items: { id: string; qty: number }[]; // depoStok docs in this lot with their real quantity
+  /** Manual override quantity for this specific lot (string to allow empty input) */
+  enteredQty: string;
+  /** True once the user confirmed this lot's count (Enter, or the checkmark button) */
+  counted: boolean;
+  /** The lot targeted by whole-product entry methods (barcode scan, voice, Excel) —
+      the nearest-expiry lot, or the synthetic zero-stock placeholder when a product
+      has no existing stock. */
+  isPrimary: boolean;
 }
 
 interface ProductCountEntry {
@@ -69,18 +79,15 @@ interface ProductCountEntry {
   urunGrubu: string;
   laboratuvarGrubu: string;
   existingTotal: number;
-  existingLots: ExistingLot[];
-  /** Manual override quantity (string to allow empty input) */
-  enteredQty: string;
-  /** Device/open tests. Informational only; never changes physical stock. */
+  lots: LotEntry[]; // one row per existing lot (+ a synthetic empty row when out of stock)
+  /** Device/open tests. Informational only; never changes physical stock. Product-level, not per-lot. */
   openTestQty: string;
-  /** True if user confirmed the existing/entered count */
+  /** True once every lot row for this product has been confirmed */
   counted: boolean;
 }
 
-interface CountStateEntry {
+interface LotCountState {
   enteredQty: string;
-  openTestQty?: string;
   counted: boolean;
 }
 
@@ -125,11 +132,18 @@ function formatUrunGrubu(g?: string): string {
 const formatProductMoney = (amount: number, currency?: string) =>
   amount.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + currencySymbol(currency);
 
+/** Sum of all lot rows' entered quantity for a product (parsed, blank = 0). */
+const productEnteredTotal = (entry: ProductCountEntry): number =>
+  entry.lots.reduce((sum, lot) => {
+    const n = lot.enteredQty.trim() === '' ? 0 : parseInt(lot.enteredQty, 10);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+
 const toMetricEntry = (entry: ProductCountEntry) => ({
   stokKodu: entry.stokKodu,
   stokAdi: entry.stokAdi,
   marka: entry.marka,
-  stokAdedi: entry.enteredQty,
+  stokAdedi: String(productEnteredTotal(entry)),
   cihazUstuAdedi: entry.openTestQty,
   counted: entry.counted,
 });
@@ -314,48 +328,72 @@ function ClayGroupRail({
   );
 }
 
-interface ClayProductCardProps {
+interface ClayLotCardProps {
   product: ProductCode;
-  entry: ProductCountEntry;
-  isOutOfStock: boolean;
+  productEntry: ProductCountEntry;
+  lot: LotEntry;
   mobile: boolean;
   index: number;
+  completing: boolean;
+  focusActive: boolean;
   onEnteredChange: (value: string) => void;
+  /** Enter pressed with a non-empty value — triggers the slide-away completion animation */
+  onEnterComplete: () => void;
+  /** Checkmark button — toggles this lot's counted state instantly (no animation) */
+  onToggleCounted: () => void;
   onOpenTestChange: (value: string) => void;
   onConfirmExisting: () => void;
-  onToggleCounted: () => void;
   ac?: Accent;
 }
 
-function ClayProductCard({
+function ClayLotCard({
   product,
-  entry,
-  isOutOfStock,
+  productEntry,
+  lot,
   mobile,
   index,
+  completing,
+  focusActive,
   onEnteredChange,
+  onEnterComplete,
+  onToggleCounted,
   onOpenTestChange,
   onConfirmExisting,
-  onToggleCounted,
   ac = AC,
-}: ClayProductCardProps) {
-  const entered = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
-  const effective = entered != null && Number.isFinite(entered) ? entered : entry.existingTotal;
-  const delta = effective - entry.existingTotal;
-  const metric = toMetricEntry(entry);
+}: ClayLotCardProps) {
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const entered = lot.enteredQty.trim() === '' ? null : parseInt(lot.enteredQty, 10);
+  const effective = entered != null && Number.isFinite(entered) ? entered : lot.existingQty;
+  const delta = effective - lot.existingQty;
+  const isOutOfStock = lot.existingQty === 0;
+  const miadInfo = getMiadInfo(lot.miad);
+  const urgent = miadInfo.severity !== 'normal' && miadInfo.days !== Infinity;
+  const packageValue = product.ambalajDegeri || 1;
+
+  const metric = toMetricEntry(productEntry);
   const totalTests = productTotalTests(product, metric);
   const productCost = calcProductCost(product, metric);
-  const packageValue = product.ambalajDegeri || 1;
+
+  React.useEffect(() => {
+    if (focusActive) { inputRef.current?.focus({ preventScroll: true }); inputRef.current?.select(); }
+  }, [focusActive]);
 
   return (
     <article
       style={{
+        position: 'relative',
         borderRadius: 'var(--radius-lg)',
         overflow: 'hidden',
-        background: entry.counted
-          ? 'linear-gradient(180deg, rgba(111,181,133,0.09), rgba(111,181,133,0.03))'
-          : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)',
-        boxShadow: entry.counted ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)',
+        transform: completing ? 'translateX(115%) scale(0.98)' : 'translateX(0) scale(1)',
+        opacity: completing ? 0 : 1,
+        background: completing
+          ? 'linear-gradient(180deg, rgba(111,181,133,0.18), rgba(111,181,133,0.08))'
+          : lot.counted
+            ? 'linear-gradient(180deg, rgba(111,181,133,0.09), rgba(111,181,133,0.03))'
+            : 'linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%)',
+        boxShadow: lot.counted ? 'var(--clay), inset 0 0 0 1.5px rgba(111,181,133,0.35)' : 'var(--clay)',
+        transition: 'transform 280ms var(--ease-fluid), opacity 220ms ease, box-shadow 300ms var(--ease-fluid), background 300ms',
+        willChange: completing ? 'transform, opacity' : undefined,
         animation: `mlPopIn ${200 + Math.min(index, 10) * 45}ms var(--ease-fluid)`,
       }}
     >
@@ -367,6 +405,12 @@ function ClayProductCard({
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap', marginTop: 6 }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--ink-3)', fontFamily: 'ui-monospace, monospace' }}>{product.stokKodu}</span>
+              <MlPill style={{ padding: '3px 9px', fontSize: 10.5 }}>{lot.lot ? `Lot ${lot.lot}` : 'Lot —'} · {lot.miad || 'Miad —'}</MlPill>
+              {urgent && (
+                <MlPill style={{ padding: '3px 9px', fontSize: 10.5, color: miadInfo.days < 0 || miadInfo.days <= 3 ? 'var(--danger)' : '#9A6F1E' }}>
+                  {miadInfo.days < 0 ? 'Süresi geçmiş' : `${miadInfo.days} gün kaldı`}
+                </MlPill>
+              )}
               {product.urunGrubu && <MlPill style={{ padding: '3px 9px', fontSize: 10.5 }}>{formatUrunGrubu(product.urunGrubu)}</MlPill>}
               {product.marka && <MlPill tone="accent" style={{ padding: '3px 9px', fontSize: 10.5 }}>{product.marka}</MlPill>}
               <MlPill tone="blue" style={{ padding: '3px 9px', fontSize: 10.5 }}><MLIco.box s={12} /> Kutu ×{packageValue}</MlPill>
@@ -376,8 +420,8 @@ function ClayProductCard({
           <button
             type="button"
             onClick={onToggleCounted}
-            aria-label={entry.counted ? 'Sayım onayını kaldır' : 'Satırı tamamla'}
-            title={entry.counted ? 'Onayı kaldır' : 'Satırı tamamla'}
+            aria-label={lot.counted ? 'Sayım onayını kaldır' : 'Satırı tamamla'}
+            title={lot.counted ? 'Onayı kaldır' : 'Satırı tamamla'}
             style={{
               all: 'unset',
               cursor: 'pointer',
@@ -387,10 +431,10 @@ function ClayProductCard({
               borderRadius: '50%',
               display: 'grid',
               placeItems: 'center',
-              color: entry.counted ? '#fff' : 'var(--ink-3)',
-              background: entry.counted ? 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--water-solid))' : 'var(--surface-2)',
-              boxShadow: entry.counted ? '0 6px 13px -4px rgba(111,181,133,0.6)' : 'var(--clay-inset)',
-              border: entry.counted ? 'none' : '2px solid var(--ink-3)',
+              color: lot.counted ? '#fff' : 'var(--ink-3)',
+              background: lot.counted ? 'radial-gradient(circle at 32% 28%, #8FD3A6, var(--water-solid))' : 'var(--surface-2)',
+              boxShadow: lot.counted ? '0 6px 13px -4px rgba(111,181,133,0.6)' : 'var(--clay-inset)',
+              border: lot.counted ? 'none' : '2px solid var(--ink-3)',
               boxSizing: 'border-box',
             }}
           >
@@ -398,97 +442,64 @@ function ClayProductCard({
           </button>
         </div>
 
-        {entry.existingLots.length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 11 }}>
-            {entry.existingLots.map((lot, lotIndex) => {
-              const info = getMiadInfo(lot.miad);
-              const urgent = info.severity !== 'normal' && info.days !== Infinity;
-              return (
-                <span
-                  key={`${lot.lot}-${lot.miad}-${lotIndex}`}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '5px 9px',
-                    borderRadius: 'var(--radius-pill)',
-                    background: urgent ? 'var(--amber-soft)' : 'var(--surface-2)',
-                    boxShadow: urgent ? 'none' : 'var(--clay-inset)',
-                    color: urgent ? (info.days < 0 || info.days <= 3 ? 'var(--danger)' : '#9A6F1E') : 'var(--ink-2)',
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                  }}
-                >
-                  {lot.lot ? `Lot ${lot.lot}` : 'Lot —'} · {lot.miad || 'Miad —'} · {lot.count}
-                  {urgent && <strong>{info.days < 0 ? 'geçmiş' : `${info.days}g`}</strong>}
-                </span>
-              );
-            })}
-          </div>
-        )}
-
-        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr 1fr' : '1fr 1fr 1.3fr', gap: 10, marginTop: 13 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: mobile ? '1fr' : (lot.isPrimary ? '1fr 1fr 1fr' : '1fr 1fr'), gap: 10, marginTop: 13 }}>
           <div style={{ padding: '10px 13px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: 'var(--clay-inset)' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <label htmlFor={`count-${product.stokKodu}`} style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Kutu Adedi</label>
-              <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)' }}>Stok {entry.existingTotal}</span>
+              <label htmlFor={`count-${lot.key}`} style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Kutu Adedi</label>
+              <span style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)' }}>Stok {lot.existingQty}</span>
             </div>
             <input
-              id={`count-${product.stokKodu}`}
-              value={entry.enteredQty}
+              id={`count-${lot.key}`}
+              ref={inputRef}
+              value={lot.enteredQty}
               onChange={event => onEnteredChange(event.target.value.replace(/[^\d]/g, ''))}
+              onKeyDown={(e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); if (lot.enteredQty.trim() !== '') onEnterComplete(); }}
               inputMode="numeric"
-              placeholder={String(entry.existingTotal)}
+              placeholder={String(lot.existingQty)}
               style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', marginTop: 2, fontSize: mobile ? 24 : 27, fontWeight: 800, color: 'var(--ink-1)', fontFamily: 'inherit' }}
             />
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, minHeight: 24 }}>
-              {!isOutOfStock ? (
-                <button type="button" onClick={onConfirmExisting} style={{ all: 'unset', cursor: 'pointer', fontSize: 10.5, fontWeight: 800, color: 'var(--water-deep)' }}>
-                  Stoğu onayla
-                </button>
-              ) : <span />}
-              {entered != null && delta !== 0 && <span style={{ fontSize: 10.5, fontWeight: 800, color: delta > 0 ? 'var(--water-deep)' : 'var(--danger)' }}>{delta > 0 ? `+${delta}` : delta}</span>}
-            </div>
+            {!isOutOfStock && (
+              <button type="button" onClick={onConfirmExisting} style={{ all: 'unset', cursor: 'pointer', fontSize: 10.5, fontWeight: 800, color: 'var(--water-deep)' }}>
+                Stoğu onayla
+              </button>
+            )}
           </div>
 
-          <div style={{ padding: '10px 13px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: 'var(--clay-inset)' }}>
-            <label htmlFor={`open-${product.stokKodu}`} style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Açık / Ek Test</label>
-            <input
-              id={`open-${product.stokKodu}`}
-              value={entry.openTestQty}
-              onChange={event => onOpenTestChange(event.target.value.replace(/[^\d]/g, ''))}
-              inputMode="numeric"
-              placeholder="0"
-              style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', marginTop: 2, fontSize: mobile ? 24 : 27, fontWeight: 800, color: 'var(--ink-2)', fontFamily: 'inherit' }}
-            />
-            <div style={{ minHeight: 24, display: 'flex', alignItems: 'center', fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)' }}>Stok mutasyonuna dahil edilmez</div>
-          </div>
-
-          <div
-            style={{
-              gridColumn: mobile ? '1 / -1' : 'auto',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 12,
-              padding: '11px 16px',
-              borderRadius: 'var(--radius)',
-              background: entry.counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)',
-              boxShadow: entry.counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: entry.counted ? 'rgba(255,255,255,0.82)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Toplam Test</div>
-              <MlNum value={totalTests} size={mobile ? 25 : 32} color={entry.counted ? '#fff' : 'var(--ink-1)'} />
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <div style={{ fontSize: 10.5, fontWeight: 800, color: entry.counted ? 'rgba(255,255,255,0.82)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Maliyet</div>
-              <div style={{ marginTop: 3, fontSize: mobile ? 18 : 22, fontWeight: 800, color: entry.counted ? '#fff' : 'var(--accent)', whiteSpace: 'nowrap' }}>
-                {formatProductMoney(productCost.amount, productCost.currency)}
+          <div style={{ padding: '11px 16px', borderRadius: 'var(--radius)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: lot.counted ? `linear-gradient(135deg, ${ac.accent}, ${ac.primary})` : 'var(--surface-2)', boxShadow: lot.counted ? `inset 0 1px 0 rgba(255,255,255,0.35), 0 8px 18px -8px ${ac.glow}` : 'var(--clay-inset)' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: 10.5, fontWeight: 800, color: lot.counted ? 'rgba(255,255,255,0.85)' : 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Fark</div>
+              <div style={{ fontSize: mobile ? 22 : 26, fontWeight: 800, color: lot.counted ? '#fff' : (delta === 0 ? 'var(--ink-1)' : delta > 0 ? 'var(--water-deep)' : 'var(--danger)') }}>
+                {entered != null ? (delta > 0 ? `+${delta}` : delta) : '—'}
               </div>
             </div>
           </div>
+
+          {lot.isPrimary && (
+            <div style={{ padding: '10px 13px', borderRadius: 'var(--radius)', background: 'var(--surface-hi)', boxShadow: 'var(--clay-inset)' }}>
+              <label htmlFor={`open-${product.stokKodu}`} style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--ink-3)', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Açık / Ek Test</label>
+              <input
+                id={`open-${product.stokKodu}`}
+                value={productEntry.openTestQty}
+                onChange={event => onOpenTestChange(event.target.value.replace(/[^\d]/g, ''))}
+                inputMode="numeric"
+                placeholder="0"
+                style={{ width: '100%', border: 'none', background: 'transparent', outline: 'none', marginTop: 2, fontSize: mobile ? 24 : 27, fontWeight: 800, color: 'var(--ink-2)', fontFamily: 'inherit' }}
+              />
+              <div style={{ minHeight: 24, display: 'flex', alignItems: 'center', fontSize: 10.5, fontWeight: 700, color: 'var(--ink-3)' }}>Stok mutasyonuna dahil edilmez</div>
+            </div>
+          )}
         </div>
+
+        {lot.isPrimary && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginTop: 12, padding: '2px 4px' }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)' }}>
+              Toplam Test <strong style={{ color: 'var(--ink-1)', fontSize: 13 }}>{totalTests}</strong>
+            </div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--ink-3)' }}>
+              Maliyet <strong style={{ color: 'var(--accent)', fontSize: 13 }}>{formatProductMoney(productCost.amount, productCost.currency)}</strong>
+            </div>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -531,8 +542,12 @@ export default function LaboratuvarSayimPage() {
   const recognitionRef = useRef<any>(null);
   const { formats: barcodeFormats } = useSafeBarcodeFormats();
 
-  // Per-product count state
-  const [countData, setCountData] = useState<Record<string, CountStateEntry>>({});
+  // Per-lot count state (key: `${stokKodu}|${lot}|${miad}`) — each lot is counted independently.
+  const [lotCountData, setLotCountData] = useState<Record<string, LotCountState>>({});
+  // Açık/Ek Test is a product-level concept (device tests, not tied to a specific lot).
+  const [openTestData, setOpenTestData] = useState<Record<string, string>>({});
+  const [completingLots, setCompletingLots] = useState<Set<string>>(() => new Set());
+  const [focusTarget, setFocusTarget] = useState<string | null>(null);
   const [countMonth, setCountMonth] = useState(new Date().getMonth());
   const [countYear, setCountYear] = useState(new Date().getFullYear());
   const [uploadFlow, setUploadFlow] = useState<{ sessionId: string; step: PendingCalculationKind } | null>(null);
@@ -678,7 +693,9 @@ export default function LaboratuvarSayimPage() {
     return productCodes.filter(p => scopeStokKodus.has(p.stokKodu));
   }, [productCodes, scopeStokKodus]);
 
-  // Build per-product entries (existing lots + total)
+  const lotEntryKey = (stokKodu: string, lot: string, miad: string) => `${stokKodu}|${lot}|${miad}`;
+
+  // Build per-product entries, each holding one LotEntry (line item) per existing lot.
   const productEntries = useMemo<Record<string, ProductCountEntry>>(() => {
     const map: Record<string, ProductCountEntry> = {};
 
@@ -691,15 +708,14 @@ export default function LaboratuvarSayimPage() {
         urunGrubu: formatUrunGrubu(p.urunGrubu),
         laboratuvarGrubu: p.laboratuvarGrubu || '',
         existingTotal: 0,
-        existingLots: [],
-        enteredQty: countData[p.stokKodu]?.enteredQty ?? '',
-        openTestQty: countData[p.stokKodu]?.openTestQty ?? '',
-        counted: countData[p.stokKodu]?.counted ?? false,
+        lots: [],
+        openTestQty: openTestData[p.stokKodu] ?? '',
+        counted: false,
       };
     });
 
-    // Group raw stock by stokKodu / lot / miad
-    const lotMap = new Map<string, ExistingLot>();
+    // Group raw stock by stokKodu / lot / miad — one LotEntry (line item) per group
+    const lotMap = new Map<string, LotEntry>();
     rawStock.forEach(item => {
       if (!map[item.stokKodu]) {
         // Stock for an unknown product (no productCode + no min/max rule).
@@ -711,40 +727,66 @@ export default function LaboratuvarSayimPage() {
           urunGrubu: '',
           laboratuvarGrubu: '',
           existingTotal: 0,
-          existingLots: [],
-          enteredQty: countData[item.stokKodu]?.enteredQty ?? '',
-          openTestQty: countData[item.stokKodu]?.openTestQty ?? '',
-          counted: countData[item.stokKodu]?.counted ?? false,
+          lots: [],
+          openTestQty: openTestData[item.stokKodu] ?? '',
+          counted: false,
         };
       }
-      const lotKey = `${item.stokKodu}|${item.lotNumarasi || ''}|${formatMiad(item.miad as any) || ''}`;
-      let lot = lotMap.get(lotKey);
-      if (!lot) {
-        lot = {
+      const lotKey = lotEntryKey(item.stokKodu, item.lotNumarasi || '', formatMiad(item.miad as any) || '');
+      let lotEntry = lotMap.get(lotKey);
+      if (!lotEntry) {
+        lotEntry = {
+          key: lotKey,
           lot: item.lotNumarasi || '',
           miad: formatMiad(item.miad as any) || '',
-          count: 0,
-          itemIds: [],
+          existingQty: 0,
+          items: [],
+          enteredQty: lotCountData[lotKey]?.enteredQty ?? '',
+          counted: lotCountData[lotKey]?.counted ?? false,
+          isPrimary: false,
         };
-        lotMap.set(lotKey, lot);
-        map[item.stokKodu].existingLots.push(lot);
+        lotMap.set(lotKey, lotEntry);
+        map[item.stokKodu].lots.push(lotEntry);
       }
-      lot.count++;
-      if (item.id) lot.itemIds.push(item.id);
-      map[item.stokKodu].existingTotal++;
+      // A depoStok doc can represent more than one physical unit — order picking
+      // (siparişler → toplama) commonly ships a whole lot/qty pick as a single
+      // doc with `adet: N` instead of N per-unit docs, so counting docs here
+      // would under-report real stock and later delete/create the wrong amount.
+      const qty = getStockItemQuantity(item);
+      lotEntry.existingQty += qty;
+      if (item.id) lotEntry.items.push({ id: item.id, qty });
+      map[item.stokKodu].existingTotal += qty;
     });
 
-    // Sort lots within each product (closest miad first)
+    // Sort lots within each product (closest miad first), mark the first as
+    // primary (the row barcode/voice/Excel entry targets), and add a synthetic
+    // zero-stock row for products with no existing lots at all.
     Object.values(map).forEach(entry => {
-      entry.existingLots.sort((a, b) => {
+      entry.lots.sort((a, b) => {
         const ai = getMiadInfo(a.miad).days;
         const bi = getMiadInfo(b.miad).days;
         return ai - bi;
       });
+      if (entry.lots.length === 0) {
+        const key = lotEntryKey(entry.stokKodu, '', '');
+        entry.lots.push({
+          key,
+          lot: '',
+          miad: '',
+          existingQty: 0,
+          items: [],
+          enteredQty: lotCountData[key]?.enteredQty ?? '',
+          counted: lotCountData[key]?.counted ?? false,
+          isPrimary: true,
+        });
+      } else {
+        entry.lots[0].isPrimary = true;
+      }
+      entry.counted = entry.lots.every(l => l.counted);
     });
 
     return map;
-  }, [scopeProducts, rawStock, countData]);
+  }, [scopeProducts, rawStock, lotCountData, openTestData]);
 
   // Available filter values (markas or product groups)
   const filterValues = useMemo<string[]>(() => {
@@ -826,6 +868,20 @@ export default function LaboratuvarSayimPage() {
     });
   }, [activeGroup, scopeProducts, filterMode, searchQuery, showOnlyUncounted, productEntries]);
 
+  // Flatten active products into individual lot rows — each lot is its own line item.
+  const activeLotRows = useMemo<{ product: ProductCode; entry: ProductCountEntry; lot: LotEntry }[]>(() => {
+    const rows: { product: ProductCode; entry: ProductCountEntry; lot: LotEntry }[] = [];
+    activeProducts.forEach(product => {
+      const entry = productEntries[product.stokKodu];
+      if (!entry) return;
+      entry.lots.forEach(lot => {
+        if (showOnlyUncounted && lot.counted) return;
+        rows.push({ product, entry, lot });
+      });
+    });
+    return rows;
+  }, [activeProducts, productEntries, showOnlyUncounted]);
+
   // Overall progress
   const { totalProducts, totalCounted, overallPct } = useMemo(() => {
     const total = scopeProducts.length;
@@ -866,61 +922,62 @@ export default function LaboratuvarSayimPage() {
   // ------------------------------------------------------------------
   // Handlers
   // ------------------------------------------------------------------
-  const setEntry = useCallback((stokKodu: string, patch: Partial<CountStateEntry>) => {
-    setCountData(prev => {
-      const cur = prev[stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
-      return { ...prev, [stokKodu]: { ...cur, ...patch } };
+  const setLotEntry = useCallback((lotKey: string, patch: Partial<LotCountState>) => {
+    setLotCountData(prev => {
+      const cur = prev[lotKey] ?? { enteredQty: '', counted: false };
+      return { ...prev, [lotKey]: { ...cur, ...patch } };
     });
   }, []);
 
-  const handleEnteredChange = useCallback((stokKodu: string, val: string) => {
-    setEntry(stokKodu, { enteredQty: val, counted: true });
-  }, [setEntry]);
+  const handleLotEnteredChange = useCallback((lotKey: string, val: string) => {
+    setLotEntry(lotKey, { enteredQty: val });
+  }, [setLotEntry]);
 
   const handleOpenTestChange = useCallback((stokKodu: string, val: string) => {
-    setEntry(stokKodu, { openTestQty: val, counted: true });
-  }, [setEntry]);
+    setOpenTestData(prev => ({ ...prev, [stokKodu]: val }));
+  }, []);
 
-  const handleConfirmExisting = useCallback((stokKodu: string) => {
-    const existing = productEntries[stokKodu]?.existingTotal ?? 0;
-    setEntry(stokKodu, { enteredQty: String(existing), counted: true });
-  }, [productEntries, setEntry]);
+  /** Enter pressed on a lot's Sayılan input (non-empty value) — slides the row away,
+      then confirms it. Mirrors depo sayım / maliyet sayım: typing alone never
+      completes a row, only Enter (or the checkmark button) does. */
+  const handleLotEnterComplete = useCallback((lotKey: string, nextKey?: string) => {
+    setCompletingLots(prev => new Set(prev).add(lotKey));
+    window.setTimeout(() => {
+      setLotCountData(prev => {
+        const cur = prev[lotKey] ?? { enteredQty: '', counted: false };
+        return { ...prev, [lotKey]: { ...cur, counted: true } };
+      });
+      setCompletingLots(prev => { const n = new Set(prev); n.delete(lotKey); return n; });
+      if (nextKey) setFocusTarget(nextKey);
+    }, 280);
+  }, []);
 
-  const handleToggleCounted = useCallback((stokKodu: string) => {
-    setCountData(prev => {
-      const cur = prev[stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
+  const handleConfirmExisting = useCallback((lotKey: string, existingQty: number) => {
+    setLotEntry(lotKey, { enteredQty: String(existingQty), counted: true });
+  }, [setLotEntry]);
+
+  const handleToggleCounted = useCallback((lotKey: string, existingQty: number) => {
+    setLotCountData(prev => {
+      const cur = prev[lotKey] ?? { enteredQty: '', counted: false };
       const nextCounted = !cur.counted;
-      // If user is confirming an out-of-stock product, default the entered qty to 0
-      const existing = productEntries[stokKodu]?.existingTotal ?? 0;
-      const nextEntered =
-        nextCounted && cur.enteredQty.trim() === ''
-          ? String(existing)
-          : cur.enteredQty;
-      return {
-        ...prev,
-        [stokKodu]: {
-          ...cur,
-          enteredQty: nextEntered,
-          openTestQty: cur.openTestQty ?? '',
-          counted: nextCounted,
-        },
-      };
+      // If user is confirming an out-of-stock lot, default the entered qty to 0
+      const nextEntered = nextCounted && cur.enteredQty.trim() === '' ? String(existingQty) : cur.enteredQty;
+      return { ...prev, [lotKey]: { enteredQty: nextEntered, counted: nextCounted } };
     });
-  }, [productEntries]);
+  }, []);
 
   const handleCompleteGroup = useCallback(() => {
     if (!activeGroup) return;
-    setCountData(prev => {
+    setLotCountData(prev => {
       const next = { ...prev };
       activeProducts.forEach(p => {
-        const existing = productEntries[p.stokKodu]?.existingTotal ?? 0;
-        const cur = next[p.stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
-        next[p.stokKodu] = {
-          ...cur,
-          enteredQty: cur.enteredQty.trim() === '' ? String(existing) : cur.enteredQty,
-          openTestQty: cur.openTestQty ?? '',
-          counted: true,
-        };
+        productEntries[p.stokKodu]?.lots.forEach(lot => {
+          const cur = next[lot.key] ?? { enteredQty: '', counted: false };
+          next[lot.key] = {
+            enteredQty: cur.enteredQty.trim() === '' ? String(lot.existingQty) : cur.enteredQty,
+            counted: true,
+          };
+        });
       });
       return next;
     });
@@ -935,7 +992,7 @@ export default function LaboratuvarSayimPage() {
   // Excel-based count entry (template download + upload)
   // ------------------------------------------------------------------
   const handleDownloadExcelTemplate = useCallback(async () => {
-    const entries = Object.values(productEntries);
+    const entries: ProductCountEntry[] = Object.values(productEntries);
     if (entries.length === 0) {
       toast({ title: 'Ürün yok', description: 'Bu laboratuvarda sayıma dahil ürün bulunmuyor.' });
       return;
@@ -977,24 +1034,31 @@ export default function LaboratuvarSayimPage() {
 
       let applied = 0;
       let unknown = 0;
-      setCountData(prev => {
+      // Excel bulk entry stays product-level: each row targets the product's
+      // primary (nearest-expiry) lot row, or its zero-stock placeholder.
+      const openTestUpdates: Record<string, string> = {};
+      setLotCountData(prev => {
         const next = { ...prev };
         parsed.forEach(({ stokKodu, stokAdedi, cihazUstuAdedi }) => {
-          if (!productEntries[stokKodu]) {
+          const entry = productEntries[stokKodu];
+          const primaryLot = entry?.lots.find(l => l.isPrimary) ?? entry?.lots[0];
+          if (!entry || !primaryLot) {
             unknown++;
             return;
           }
-          const current = next[stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
-          next[stokKodu] = {
-            ...current,
-            enteredQty: stokAdedi !== null ? String(stokAdedi) : current.enteredQty,
-            openTestQty: cihazUstuAdedi !== null ? String(cihazUstuAdedi) : (current.openTestQty ?? ''),
+          const cur = next[primaryLot.key] ?? { enteredQty: '', counted: false };
+          next[primaryLot.key] = {
+            enteredQty: stokAdedi !== null ? String(stokAdedi) : cur.enteredQty,
             counted: true,
           };
+          if (cihazUstuAdedi !== null) openTestUpdates[stokKodu] = String(cihazUstuAdedi);
           applied++;
         });
         return next;
       });
+      if (Object.keys(openTestUpdates).length > 0) {
+        setOpenTestData(prev => ({ ...prev, ...openTestUpdates }));
+      }
 
       const parts: string[] = [`${applied} ürün için sayım girildi`];
       if (unknown > 0) parts.push(`${unknown} tanımsız satır atlandı`);
@@ -1054,23 +1118,25 @@ export default function LaboratuvarSayimPage() {
       setActiveGroup(targetGroup);
     }
 
-    // Increment the entered quantity by 1 and mark as counted.
-    setCountData(prev => {
-      const cur = prev[found!.stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
+    // Increment the primary (nearest-expiry) lot's entered quantity by 1 and mark it counted.
+    const scannedEntry = productEntries[found.stokKodu];
+    const primaryLot = scannedEntry?.lots.find(l => l.isPrimary) ?? scannedEntry?.lots[0];
+    if (!primaryLot) {
+      flashFeedback('error', `${found.stokAdi} için lot bulunamadı`);
+      return;
+    }
+    setLotCountData(prev => {
+      const cur = prev[primaryLot.key] ?? { enteredQty: '', counted: false };
       const baseStr = cur.enteredQty.trim();
       const baseNum = baseStr === '' ? 0 : (parseInt(baseStr, 10) || 0);
       return {
         ...prev,
-        [found!.stokKodu]: {
-          ...cur,
-          enteredQty: String(baseNum + 1),
-          counted: true,
-        },
+        [primaryLot.key]: { enteredQty: String(baseNum + 1), counted: true },
       };
     });
 
     flashFeedback('success', `${found.stokAdi} +1`);
-  }, [barcodeFormats, productCodes, scopeStokKodus, filterMode, activeGroup, flashFeedback]);
+  }, [barcodeFormats, productCodes, scopeStokKodus, filterMode, activeGroup, flashFeedback, productEntries]);
 
   useHidScanner({
     enabled: scannerActive,
@@ -1079,17 +1145,16 @@ export default function LaboratuvarSayimPage() {
   });
 
   const handleCompleteAll = useCallback(() => {
-    setCountData(prev => {
+    setLotCountData(prev => {
       const next = { ...prev };
       scopeProducts.forEach(product => {
-        const current = next[product.stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
-        const existing = productEntries[product.stokKodu]?.existingTotal ?? 0;
-        next[product.stokKodu] = {
-          ...current,
-          enteredQty: current.enteredQty.trim() === '' ? String(existing) : current.enteredQty,
-          openTestQty: current.openTestQty ?? '',
-          counted: true,
-        };
+        productEntries[product.stokKodu]?.lots.forEach(lot => {
+          const cur = next[lot.key] ?? { enteredQty: '', counted: false };
+          next[lot.key] = {
+            enteredQty: cur.enteredQty.trim() === '' ? String(lot.existingQty) : cur.enteredQty,
+            counted: true,
+          };
+        });
       });
       return next;
     });
@@ -1129,23 +1194,26 @@ export default function LaboratuvarSayimPage() {
           const targetGroup = filterMode === 'marka' ? firstProduct.marka : firstProduct.urunGrubu;
           if (targetGroup) setActiveGroup(targetGroup);
         }
-        setCountData(prev => {
+        const voiceOpenTestUpdates: Record<string, string> = {};
+        setLotCountData(prev => {
           const next = { ...prev };
           commands.forEach(command => {
             const product = scopeProducts.find(candidate => candidate.stokKodu === command?.stokKodu);
             if (!product) return;
-            const current = next[product.stokKodu] ?? { enteredQty: '', openTestQty: '', counted: false };
+            const entry = productEntries[product.stokKodu];
+            const primaryLot = entry?.lots.find(l => l.isPrimary) ?? entry?.lots[0];
+            if (!primaryLot) return;
+            const cur = next[primaryLot.key] ?? { enteredQty: '', counted: false };
             const enteredQty = safeQuantity(command.stokAdedi);
             const openTestQty = safeQuantity(command.cihazUstuAdedi);
-            next[product.stokKodu] = {
-              ...current,
-              enteredQty: enteredQty ?? current.enteredQty,
-              openTestQty: openTestQty ?? current.openTestQty ?? '',
-              counted: true,
-            };
+            next[primaryLot.key] = { enteredQty: enteredQty ?? cur.enteredQty, counted: true };
+            if (openTestQty !== null) voiceOpenTestUpdates[product.stokKodu] = openTestQty;
           });
           return next;
         });
+        if (Object.keys(voiceOpenTestUpdates).length > 0) {
+          setOpenTestData(prev => ({ ...prev, ...voiceOpenTestUpdates }));
+        }
       }
 
       actions.forEach(action => {
@@ -1174,6 +1242,7 @@ export default function LaboratuvarSayimPage() {
     handleCompleteGroup,
     handleNextGroup,
     flashFeedback,
+    productEntries,
   ]);
 
   const toggleVoice = useCallback(() => {
@@ -1239,8 +1308,10 @@ export default function LaboratuvarSayimPage() {
   const handleSave = useCallback(async () => {
     if (!labId || !currentUserProfile || isSaving) return;
 
-    const allCountedEntries = Object.values(productEntries).filter(e => e.counted);
-    if (allCountedEntries.length === 0) {
+    const allCountedLots = (Object.values(productEntries) as ProductCountEntry[]).flatMap(entry =>
+      entry.lots.filter(lot => lot.counted).map(lot => ({ entry, lot })),
+    );
+    if (allCountedLots.length === 0) {
       toast({ title: 'Sayım yok', description: 'Kaydedilecek onaylı ürün bulunamadı.' });
       return;
     }
@@ -1251,35 +1322,39 @@ export default function LaboratuvarSayimPage() {
       let itemsRemoved = 0;
       let itemsAdded = 0;
 
-      for (const entry of allCountedEntries) {
-        const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
-        const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
-        const diff = counted - entry.existingTotal;
+      for (const { entry, lot } of allCountedLots) {
+        const enteredNum = lot.enteredQty.trim() === '' ? null : parseInt(lot.enteredQty, 10);
+        const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : lot.existingQty;
+        const diff = counted - lot.existingQty;
 
         if (diff === 0) continue;
 
         if (diff < 0) {
-          // Stock decreased: remove |diff| items, write consumption records
-          const toRemove = Math.abs(diff);
-          // Flatten lots into individual stock items, prefer earliest expiry first
-          const flat: { id: string; lot: string; miad: string }[] = [];
-          entry.existingLots.forEach(lot => {
-            lot.itemIds.forEach(id => flat.push({ id, lot: lot.lot, miad: lot.miad }));
-          });
-          flat.sort((a, b) => getMiadInfo(a.miad).days - getMiadInfo(b.miad).days);
-
-          const slice = flat.slice(0, toRemove);
-          for (const it of slice) {
+          // Stock decreased: remove |diff| units from THIS lot's docs, write
+          // consumption records. A doc's `adet` can be >1 (partial/full
+          // order-picking shipments carry the picked quantity on one doc), so
+          // removal must decrement `adet` instead of always deleting the whole
+          // doc — otherwise a small count correction could wipe out a
+          // multi-unit doc's entire remaining stock.
+          let toRemove = Math.abs(diff);
+          for (const it of lot.items) {
+            if (toRemove <= 0) break;
             const stockRef = doc(db, 'depoStok', it.id);
-            batch.delete(stockRef);
-            itemsRemoved++;
+            const removeQty = Math.min(it.qty, toRemove);
+            if (removeQty >= it.qty) {
+              batch.delete(stockRef);
+            } else {
+              batch.update(stockRef, { adet: it.qty - removeQty });
+            }
+            itemsRemoved += removeQty;
+            toRemove -= removeQty;
 
             const consRef = doc(collection(db, 'tuketimKayitlari'));
-            const consumption: Omit<ConsumptionRecord, 'id'> = {
+            const consumption: Omit<ConsumptionRecord, 'id'> & { adet?: number } = {
               stokKodu: entry.stokKodu,
               stokAdi: entry.stokAdi,
-              lotNumarasi: it.lot || '',
-              miad: it.miad || '',
+              lotNumarasi: lot.lot || '',
+              miad: lot.miad || '',
               seriNumarasi: '',
               laboratoryId: labId,
               laboratoryName: labName,
@@ -1287,19 +1362,19 @@ export default function LaboratuvarSayimPage() {
               consumptionType: 'sayimdan_dusum',
               userId: currentUserProfile.uid,
               userName: currentUserProfile.name || currentUserProfile.email || 'System',
+              adet: removeQty,
             };
             batch.set(consRef, consumption);
           }
         } else {
-          // Stock increased: add |diff| items
-          const template = entry.existingLots[0] ?? { lot: '', miad: '' };
+          // Stock increased: add |diff| items to THIS specific lot/miad
           for (let i = 0; i < diff; i++) {
             const newRef = doc(collection(db, 'depoStok'));
             batch.set(newRef, withCompanyScope({
               stokKodu: entry.stokKodu,
               stokAdi: entry.stokAdi,
-              lotNumarasi: template.lot || '',
-              miad: template.miad || '',
+              lotNumarasi: lot.lot || '',
+              miad: lot.miad || '',
               seriNumarasi: '',
               isShipped: true,
               hedefKurumId: labId,
@@ -1332,10 +1407,14 @@ export default function LaboratuvarSayimPage() {
         kumulatifUploaded: false,
         companyId: currentCompanyId,
         batch,
-        items: allCountedEntries.map(entry => {
-          const enteredNum = entry.enteredQty.trim() === '' ? null : parseInt(entry.enteredQty, 10);
-          const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : entry.existingTotal;
-          const openTestQty = Math.max(0, parseInt(entry.openTestQty || '0', 10) || 0);
+        // One LabCountItem per counted lot — matches buildCountItemsFromStock's own
+        // stokKodu|lot|miad granularity. openTestQty/totalTests/costAmount (product-level
+        // concepts) are attributed only to the primary lot so a multi-lot product's totals
+        // aren't double-counted when summed across its lot items.
+        items: allCountedLots.map(({ entry, lot }) => {
+          const enteredNum = lot.enteredQty.trim() === '' ? null : parseInt(lot.enteredQty, 10);
+          const counted = enteredNum != null && !isNaN(enteredNum) ? enteredNum : lot.existingQty;
+          const openTestQty = lot.isPrimary ? Math.max(0, parseInt(entry.openTestQty || '0', 10) || 0) : 0;
           const product = productCodes.find(candidate => candidate.stokKodu === entry.stokKodu);
           const totalTests = counted * (product?.ambalajDegeri || 1) + openTestQty;
           const currency = product?.currency || 'TRY';
@@ -1345,10 +1424,10 @@ export default function LaboratuvarSayimPage() {
           return {
             stokKodu: entry.stokKodu,
             stokAdi: entry.stokAdi,
-            lotNumarasi: entry.existingLots[0]?.lot ?? '',
-            miad: entry.existingLots[0]?.miad ?? '',
+            lotNumarasi: lot.lot,
+            miad: lot.miad,
             marka: entry.marka || null,
-            expected: entry.existingTotal,
+            expected: lot.existingQty,
             counted,
             verifiedSerials: [],
             unscannedSerials: [],
@@ -1703,25 +1782,27 @@ export default function LaboratuvarSayimPage() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {activeProducts.map((product, index) => {
-                  const entry = productEntries[product.stokKodu];
-                  if (!entry) return null;
+                {activeLotRows.map(({ product, entry, lot }: { product: ProductCode; entry: ProductCountEntry; lot: LotEntry }, index: number) => {
+                  const nextRow = activeLotRows.slice(index + 1).find(r => !r.lot.counted);
                   return (
-                    <ClayProductCard
-                      key={product.stokKodu}
+                    <ClayLotCard
+                      key={lot.key}
                       product={product}
-                      entry={entry}
-                      isOutOfStock={entry.existingTotal === 0}
+                      productEntry={entry}
+                      lot={lot}
                       mobile={mobile || tablet}
                       index={index}
-                      onEnteredChange={value => handleEnteredChange(product.stokKodu, value)}
+                      completing={completingLots.has(lot.key)}
+                      focusActive={focusTarget === lot.key}
+                      onEnteredChange={value => handleLotEnteredChange(lot.key, value)}
+                      onEnterComplete={() => handleLotEnterComplete(lot.key, nextRow?.lot.key)}
+                      onToggleCounted={() => handleToggleCounted(lot.key, lot.existingQty)}
                       onOpenTestChange={value => handleOpenTestChange(product.stokKodu, value)}
-                      onConfirmExisting={() => handleConfirmExisting(product.stokKodu)}
-                      onToggleCounted={() => handleToggleCounted(product.stokKodu)}
+                      onConfirmExisting={() => handleConfirmExisting(lot.key, lot.existingQty)}
                     />
                   );
                 })}
-                {activeProducts.length === 0 && (
+                {activeLotRows.length === 0 && (
                   <div style={{ padding: 40, textAlign: 'center', color: 'var(--ink-3)', fontWeight: 700, borderRadius: 'var(--radius)', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)' }}>
                     {showOnlyUncounted ? 'Bu bölümde sayılmayan ürün kalmadı.' : searchQuery ? 'Aramayla eşleşen ürün bulunamadı.' : 'Bu bölümde ürün bulunamadı.'}
                   </div>
