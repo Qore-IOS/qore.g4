@@ -214,6 +214,22 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
     } catch (e) { console.error(e); fire({ title: 'Excel okunamadı' }); }
   };
 
+  /* bulk action: zero out every product across every lab (e.g. a full physical
+     recount) — each row is marked counted:0 so Kaydet reduces real stock to
+     match, exactly like typing 0 + Enter on every row one by one. */
+  const resetAll = () => {
+    if (allProducts.length === 0) return;
+    if (!window.confirm(`${depot.name} deposundaki TÜM ürünler için sayılan adet 0 yapılacak (${allProducts.length} ürün). Kaydet'e bastığınızda mal kabulle yeniden eklenmeyen stoklar depodan düşer. Devam edilsin mi?`)) return;
+    setStates(prev => {
+      const next = { ...prev };
+      allProducts.forEach(p => {
+        next[p.stokKodu] = { countedAdet: '0', scannedSerials: new Set(), counted: true, touched: true };
+      });
+      return next;
+    });
+    fire({ tone: 'ok', title: 'Tüm ürünler sıfırlandı', sub: `${allProducts.length} ürün · 0 sayıldı` });
+  };
+
   const save = async () => {
     if (saving) return;
     setSaving(true);
@@ -248,6 +264,7 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
               <ToolChip ico="mic" label={voiceActive ? 'Mikrofon Aktif' : 'Sesli'} live={voiceActive} tone="red" onClick={toggleVoice} />
               <ToolChip ico="download" label="Şablon" onClick={downloadTemplate} />
               <ToolChip ico="excel" label="Excel" onClick={() => fileRef.current?.click()} />
+              <ToolChip ico="reset" label="Sıfırla" tone="red" onClick={resetAll} />
             </div>
           )}
           <div style={{ display: 'flex', alignItems: 'center', gap: mobile ? 10 : 16, paddingLeft: mobile ? 6 : 14, marginLeft: mobile ? 0 : 4, borderLeft: mobile ? 'none' : '1px solid var(--line)' }}>
@@ -266,6 +283,7 @@ export default function DepoCount({ ac = AC, mode, depot, groups, productCodes, 
             <ToolChip ico="mic" label={voiceActive ? 'Aktif' : 'Sesli'} live={voiceActive} tone="red" onClick={toggleVoice} />
             <ToolChip ico="download" label="Şablon" onClick={downloadTemplate} />
             <ToolChip ico="excel" label="Excel" onClick={() => fileRef.current?.click()} />
+            <ToolChip ico="reset" label="Sıfırla" tone="red" onClick={resetAll} />
           </div>
         )}
       </div>

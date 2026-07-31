@@ -4,7 +4,7 @@ import React from 'react';
 import {
   Wallet, ClipboardCheck, History, BarChart3, Bell, Layers, ChevronRight, ChevronDown,
   ChevronLeft, X, Check, Calendar, User, Tag, Package, Trash2, Filter, Search,
-  FlaskConical, Building2, ScanBarcode, Mic, Download, FileSpreadsheet,
+  FlaskConical, Building2, ScanBarcode, Mic, Download, FileSpreadsheet, RotateCcw,
 } from 'lucide-react';
 
 /* ─────────────── accent + types ─────────────── */
@@ -25,7 +25,7 @@ export const MLIco: Record<string, (p: IcoProps) => JSX.Element> = {
   bell: mk(Bell), layers: mk(Layers), chevR: mk(ChevronRight), chevD: mk(ChevronDown), back: mk(ChevronLeft),
   close: mk(X), check: mk(Check), calendar: mk(Calendar), user: mk(User), tag: mk(Tag), box: mk(Package),
   trash: mk(Trash2), filter: mk(Filter), search: mk(Search), flask: mk(FlaskConical), building: mk(Building2),
-  barcode: mk(ScanBarcode), mic: mk(Mic), download: mk(Download), excel: mk(FileSpreadsheet),
+  barcode: mk(ScanBarcode), mic: mk(Mic), download: mk(Download), excel: mk(FileSpreadsheet), reset: mk(RotateCcw),
 };
 
 /* ─────────────── hooks ─────────────── */
