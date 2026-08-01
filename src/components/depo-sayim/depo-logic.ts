@@ -194,6 +194,25 @@ export async function saveDepoCount(params: {
   let deleted = 0, created = 0, touched = 0;
   let totalCurrent = 0, totalCounted = 0;
 
+  // A depoStok doc's serial disappearing from the depot (via count deletion) must be
+  // reflected in serialHistory — otherwise mal kabul's "has this serial ever been
+  // received" duplicate check has no way to know it left, and permanently refuses to
+  // let the same physical unit be received again later.
+  const logSerialDeparture = (b: ReturnType<typeof writeBatch>, item: DepoStokItem) => {
+    const serial = (item.seriNumarasi || '').trim();
+    if (!serial || isSyntheticSerial(serial)) return;
+    const histRef = doc(collection(db, `serialHistory/${serial}/events`));
+    b.set(histRef, {
+      type: 'sayimdan_dusum',
+      details: {
+        stokKodu: item.stokKodu, stokAdi: item.stokAdi,
+        depotId: depot.id, depotName: depot.name,
+        lotNumarasi: item.lotNumarasi || '', miad: item.miad || '',
+      },
+      timestamp: now,
+    });
+  };
+
   const allProducts = groups.flatMap(g => g.products);
   allProducts.forEach(g => {
     const st = states[g.stokKodu];
@@ -209,6 +228,7 @@ export async function saveDepoCount(params: {
       g.docs.forEach(item => {
         if (!st.scannedSerials.has((item.seriNumarasi || '').trim())) {
           ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
+          ops.push(b => logSerialDeparture(b, item));
           deleted++;
         }
       });
@@ -228,6 +248,7 @@ export async function saveDepoCount(params: {
         const q = qtyOf(item);
         if (q <= toRemove) {
           ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
+          ops.push(b => logSerialDeparture(b, item));
           toRemove -= q;
           deleted += q;
         } else {
