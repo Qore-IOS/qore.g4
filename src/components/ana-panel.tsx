@@ -1609,17 +1609,23 @@ export default function AnaPanel(props: AnaPanelProps) {
           await Promise.all(
             serialsToCheck.map(async ({ serial, stokKodu }) => {
               try {
+                // Only the MOST RECENT event decides whether this serial is still
+                // blocked. A depo sayım correction ('sayimdan_dusum') means the
+                // physical unit was confirmed gone from the depot, so the same
+                // serial is legitimately receivable again. Any other latest event —
+                // 'intake' (never left), 'transfer' (shipped to a lab), or
+                // 'consumption' (used up there) — keeps it blocked: those are real
+                // departures elsewhere, not a depot-side correction.
                 const historySnap = await getDocs(
                   query(
                     collection(db, `serialHistory/${serial}/events`),
+                    orderBy('timestamp', 'desc'),
                     limit(1)
                   )
                 );
-                if (!historySnap.empty) {
-                  const matchedEvent = historySnap.docs.some(doc => doc.data().details?.stokKodu === stokKodu);
-                  if (matchedEvent) {
-                    consumedSerials.add(`${stokKodu}||${serial}`);
-                  }
+                const latest = historySnap.docs[0]?.data();
+                if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
+                  consumedSerials.add(`${stokKodu}||${serial}`);
                 }
               } catch (e) {
                 console.error("Error checking history in commit", e);
@@ -1768,8 +1774,12 @@ export default function AnaPanel(props: AnaPanelProps) {
     if (serialChecks.length > 0) {
       await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
         try {
-          const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), limit(1)));
-          if (!snap.empty && snap.docs.some(d => d.data().details?.stokKodu === stokKodu)) {
+          // Same "only the latest event counts" rule as performGoodsReceipt below —
+          // only a depo sayım correction ('sayimdan_dusum') frees the serial up
+          // again; transfer/consumption/intake all keep it blocked.
+          const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), orderBy('timestamp', 'desc'), limit(1)));
+          const latest = snap.docs[0]?.data();
+          if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
             consumed.add(`${stokKodu}||${serial}`);
           }
         } catch { /* okuma hatasında yazım yine denenir */ }
