@@ -1610,13 +1610,12 @@ export default function AnaPanel(props: AnaPanelProps) {
             serialsToCheck.map(async ({ serial, stokKodu }) => {
               try {
                 // Only the MOST RECENT event decides whether this serial is still
-                // "out there" somewhere: an 'intake' with no later departure means
-                // it's presumed to already be in a depot. Any later event type
-                // (transfer/consumption/sayimdan_dusum/...) means it has since left
-                // wherever it was, so re-receiving it here is legitimate — a serial
-                // must not be permanently blocked just because it was ever received
-                // once before (e.g. a depo sayım correction removed it and the same
-                // physical unit is now being received again).
+                // blocked. A depo sayım correction ('sayimdan_dusum') means the
+                // physical unit was confirmed gone from the depot, so the same
+                // serial is legitimately receivable again. Any other latest event —
+                // 'intake' (never left), 'transfer' (shipped to a lab), or
+                // 'consumption' (used up there) — keeps it blocked: those are real
+                // departures elsewhere, not a depot-side correction.
                 const historySnap = await getDocs(
                   query(
                     collection(db, `serialHistory/${serial}/events`),
@@ -1625,7 +1624,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                   )
                 );
                 const latest = historySnap.docs[0]?.data();
-                if (latest?.details?.stokKodu === stokKodu && latest?.type === 'intake') {
+                if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
                   consumedSerials.add(`${stokKodu}||${serial}`);
                 }
               } catch (e) {
@@ -1776,11 +1775,11 @@ export default function AnaPanel(props: AnaPanelProps) {
       await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
         try {
           // Same "only the latest event counts" rule as performGoodsReceipt below —
-          // a serial that has since left (transfer/consumption/sayimdan_dusum) is
-          // legitimately receivable again, not permanently blocked.
+          // only a depo sayım correction ('sayimdan_dusum') frees the serial up
+          // again; transfer/consumption/intake all keep it blocked.
           const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), orderBy('timestamp', 'desc'), limit(1)));
           const latest = snap.docs[0]?.data();
-          if (latest?.details?.stokKodu === stokKodu && latest?.type === 'intake') {
+          if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
             consumed.add(`${stokKodu}||${serial}`);
           }
         } catch { /* okuma hatasında yazım yine denenir */ }
