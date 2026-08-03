@@ -91,6 +91,11 @@ const ExcelStokGirisModal = dynamic(() => import('@/components/mal-kabul/ExcelSt
   ssr: false,
 });
 
+// Geçmişte tüketilmiş veya başka bir işlem görmüş seri numaralarının yeniden
+// kabulünü engelleyen kontrol geçici olarak kapalıdır. Depoda halen bulunan ve
+// aynı kabul oturumunda tekrar okutulan seri kontrolleri çalışmaya devam eder.
+const BLOCK_PREVIOUSLY_PROCESSED_SERIALS = false;
+
 function AnaPanelSkeleton() {
   return (
     <div className="flex flex-col gap-6 p-6 animate-pulse">
@@ -1590,7 +1595,8 @@ export default function AnaPanel(props: AnaPanelProps) {
         // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
         // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
-        // Check history of all serials to process to avoid duplicates of consumed/processed serials
+        // Geçmiş seri kontrolü geçici olarak kapalıdır. Tekrar açıldığında geçmişte
+        // tüketilmiş/işlem görmüş seriler kabul edilmeden önce burada belirlenir.
         const serialsToCheck: { serial: string; stokKodu: string }[] = [];
         itemsToProcess.forEach(item => {
           if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
@@ -1605,7 +1611,7 @@ export default function AnaPanel(props: AnaPanelProps) {
         });
 
         const consumedSerials = new Set<string>();
-        if (serialsToCheck.length > 0) {
+        if (BLOCK_PREVIOUSLY_PROCESSED_SERIALS && serialsToCheck.length > 0) {
           await Promise.all(
             serialsToCheck.map(async ({ serial, stokKodu }) => {
               try {
@@ -1744,8 +1750,8 @@ export default function AnaPanel(props: AnaPanelProps) {
   // Tek bir mikro-partiyi (≤ AUTO_BATCH_SIZE pending satır) idempotent biçimde
   // stoğa yazar: depoStok + serialHistory + (oturum başına tek) malKabulTransactions
   // başlığı/satırları. Deterministik belge kimlikleri sayesinde yeniden denemeler
-  // çift kayıt oluşturmaz. Geçmişte işlem görmüş seriler manuel akışla birebir aynı
-  // şekilde elenir.
+  // çift kayıt oluşturmaz. Geçmiş seri engeli etkinleştirildiğinde manuel akışla
+  // birebir aynı şekilde uygulanır.
   const AUTO_BATCH_SIZE = 20;
 
   const commitAutoAcceptBatch = async (
@@ -1761,7 +1767,8 @@ export default function AnaPanel(props: AnaPanelProps) {
       createdByUid: currentUser?.uid || null,
     };
 
-    // 1) Geçmişte işlem görmüş serileri tespit et (arka planda, okutma dışı).
+    // 1) Geçmiş seri kontrolü geçici olarak kapalıdır. Bayrak tekrar açılırsa
+    // kontrol arka planda, okutma yolunun dışında gerçekleştirilir.
     const serialChecks: { serial: string; stokKodu: string }[] = [];
     picked.forEach(item => {
       if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
@@ -1771,7 +1778,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       }
     });
     const consumed = new Set<string>();
-    if (serialChecks.length > 0) {
+    if (BLOCK_PREVIOUSLY_PROCESSED_SERIALS && serialChecks.length > 0) {
       await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
         try {
           // Same "only the latest event counts" rule as performGoodsReceipt below —
@@ -1794,7 +1801,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
       if (!item.isGroup && item.seriNumarasi &&
           (depotProductSerials?.has(item.seriNumarasi) || consumed.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
-        failed.set(item.id, 'Bu seri depoda mevcut veya geçmişte işlem görmüş.');
+        failed.set(item.id, 'Bu seri depoda mevcut.');
         continue;
       }
 
