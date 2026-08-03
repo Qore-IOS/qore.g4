@@ -1220,6 +1220,142 @@ export interface DuplicateSerialCleanupResult {
 }
 
 /**
+ * Reconstructs lab stock rows overwritten by the old deterministic goods-receipt
+ * document ID. Transfer headers/items remain intact, so missing rows can be
+ * identified and persisted back into depoStok with idempotent recovery IDs.
+ */
+export async function getRecoverableTransferredLabStock(
+  labIds: string[],
+  idToken: string,
+): Promise<DepoStokItem[]> {
+  const ids = Array.from(new Set(labIds.filter(Boolean))).slice(0, 30);
+  if (ids.length === 0) return [];
+  const decoded = await adminAuth.verifyIdToken(idToken);
+  const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
+  const userData = userSnap.data() as Record<string, any> | undefined;
+  const role = String(decoded.role ?? userData?.role ?? '');
+  const isSuperAdmin = role === 'super_admin' || role === 'admin_developer';
+  const companyId = String(decoded.companyId ?? userData?.companyId ?? '').trim() || null;
+
+  const transferSnap = await adminDb.collection('transfers')
+    .where('targetHospitalId', 'in', ids)
+    .get();
+  const transferDocs = transferSnap.docs.filter(d =>
+    matchesScopedQueryCompany(d.data() as any, companyId, isSuperAdmin),
+  );
+
+  const candidates: Array<{
+    itemId: string;
+    transferId: string;
+    transferMillis: number;
+    targetHospitalId: string;
+    targetName: string;
+    companyId: string;
+    data: Record<string, any>;
+  }> = [];
+  const toMillis = (value: any): number => {
+    if (typeof value?.toMillis === 'function') return value.toMillis();
+    if (typeof value?.seconds === 'number') return value.seconds * 1000;
+    const parsed = new Date(value ?? 0).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  await Promise.all(transferDocs.map(async transferDoc => {
+    const transfer = transferDoc.data() as Record<string, any>;
+    const itemsSnap = await transferDoc.ref.collection('items').get();
+    for (const itemDoc of itemsSnap.docs) {
+      const data = itemDoc.data() as Record<string, any>;
+      const serial = String(data.seriNumarasi ?? '').trim();
+      if (!serial) continue;
+      candidates.push({
+        itemId: itemDoc.id,
+        transferId: transferDoc.id,
+        transferMillis: toMillis(transfer.timestamp),
+        targetHospitalId: String(transfer.targetHospitalId ?? ''),
+        targetName: String(transfer.targetName ?? ''),
+        companyId: String(transfer.companyId ?? normalizeCompanyId(companyId)),
+        data,
+      });
+    }
+  }));
+  if (candidates.length === 0) return [];
+
+  const liveDocs = await adminDb.getAll(...candidates.map(c => adminDb.collection('depoStok').doc(c.itemId)));
+  const serials = Array.from(new Set(candidates.map(c => String(c.data.seriNumarasi))));
+  const consumptions: Record<string, Array<{ millis: number; labId: string }>> = {};
+  for (let i = 0; i < serials.length; i += 30) {
+    const snap = await adminDb.collection('tuketimKayitlari')
+      .where('seriNumarasi', 'in', serials.slice(i, i + 30))
+      .get();
+    for (const docSnap of snap.docs) {
+      const data = docSnap.data() as Record<string, any>;
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) continue;
+      const serial = String(data.seriNumarasi ?? '');
+      (consumptions[serial] ||= []).push({
+        millis: toMillis(data.consumptionTimestamp),
+        labId: String(data.deductedFromLabId || data.laboratoryId || data.usageLabId || ''),
+      });
+    }
+  }
+
+  const recovered = new Map<string, DepoStokItem>();
+  candidates.forEach((candidate, index) => {
+    const current = liveDocs[index];
+    const currentData = current.exists ? current.data() as Record<string, any> : null;
+    const stillCorrectLabStock = currentData?.isShipped === true &&
+      ids.includes(String(currentData.hedefKurumId || ''));
+    if (stillCorrectLabStock) return;
+
+    const serial = String(candidate.data.seriNumarasi ?? '').trim();
+    const consumedLater = (consumptions[serial] || []).some(c =>
+      ids.includes(c.labId) && c.millis >= candidate.transferMillis,
+    );
+    if (consumedLater) return;
+
+    const stokKodu = String(candidate.data.stokKodu ?? '');
+    const key = `${stokKodu}\u0000${serial}\u0000${candidate.targetHospitalId}`;
+    const existing = recovered.get(key) as any;
+    if (existing && existing.__transferMillis >= candidate.transferMillis) return;
+    recovered.set(key, {
+      id: `recovered-transfer-${candidate.transferId}-${candidate.itemId}`,
+      stokKodu,
+      stokAdi: String(candidate.data.stokAdi ?? stokKodu),
+      seriNumarasi: serial,
+      lotNumarasi: String(candidate.data.lotNumarasi ?? ''),
+      miad: candidate.data.miad ?? '',
+      adet: Number(candidate.data.adet) || 1,
+      isShipped: true,
+      hedefKurumId: candidate.targetHospitalId,
+      hedefKurum: candidate.targetName,
+      companyId: candidate.companyId,
+      __transferMillis: candidate.transferMillis,
+    } as DepoStokItem);
+  });
+
+  const recoveredItems = Array.from(recovered.values()).map(item => {
+    delete (item as any).__transferMillis;
+    return item;
+  });
+  // Persist the reconstruction with deterministic IDs. This makes the repair
+  // visible not only in Ürün Kullanım but in every lab-stock/search panel, and
+  // repeated calls remain idempotent.
+  for (let i = 0; i < recoveredItems.length; i += 450) {
+    const batch = adminDb.batch();
+    for (const item of recoveredItems.slice(i, i + 450)) {
+      batch.set(adminDb.collection('depoStok').doc(item.id), item, { merge: false });
+    }
+    await batch.commit();
+  }
+  if (recoveredItems.length > 0) {
+    await adminDb.doc('metadata/stockLastUpdated').set({
+      lastUpdated: FieldValue.serverTimestamp(),
+      updatedAt: new Date().toISOString(),
+    }, { merge: true });
+  }
+  return recoveredItems;
+}
+
+/**
  * Removes duplicate serial-number documents from one depot.
  *
  * The oldest company-scoped document is retained for each serial and normalized
