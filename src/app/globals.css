@@ -8,34 +8,36 @@
 
 @layer base {
   :root {
-    /* --- LIGHT MODE: NEUMORPHIC --- */
-    --background: 48 11% 91%; /* #eae9e5 */
-    --foreground: 0 0% 20%;
-    
-    --card: 0 0% 88%;
-    --card-foreground: 0 0% 20%;
-    
-    --popover: 0 0% 88%;
-    --popover-foreground: 0 0% 20%;
-    
-    --primary: 35 90% 50%;
+    /* --- LIGHT MODE: CLAY (krem) ---
+       Tailwind renk sınıfları (bg-card, text-foreground, border-border …) bu
+       tokenlardan beslendiği için palet clay'e bağlanınca tüm uygulama clay olur. */
+    --background: 40 32% 91%;      /* --qc-bg0  #EFEAE0 */
+    --foreground: 39 13% 21%;      /* --qc-ink1 #3D382F */
+
+    --card: 43 54% 97%;            /* --qc-surface  #FCFAF5 */
+    --card-foreground: 39 13% 21%;
+
+    --popover: 43 54% 97%;
+    --popover-foreground: 39 13% 21%;
+
+    --primary: 27 51% 56%;         /* --qc-accent #C98A57 */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 80%;
-    --secondary-foreground: 0 0% 20%;
-    
-    --muted: 0 0% 80%;
-    --muted-foreground: 0 0% 40%;
-    
-    --accent: 0 0% 85%;
-    --accent-foreground: 0 0% 20%;
-    
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    
-    --border: 0 0% 80%;
-    --input: 0 0% 88%;
-    --ring: 35 90% 50%;
+    --secondary: 42 39% 94%;       /* --qc-surface2 #F5F1E8 */
+    --secondary-foreground: 39 13% 21%;
+
+    --muted: 42 39% 94%;
+    --muted-foreground: 44 12% 51%; /* --qc-ink2 */
+
+    --accent: 37 63% 67%;          /* --qc-accent2 #E0B776 */
+    --accent-foreground: 39 13% 21%;
+
+    --destructive: 10 41% 58%;     /* --qc-danger #C0796A */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 17% 82%;
+    --input: 0 0% 100%;            /* --qc-surface-hi */
+    --ring: 27 51% 56%;
     
     --radius: 1rem;
 
@@ -82,34 +84,34 @@
   }
 
   .dark {
-    /* --- DARK MODE: LIQUID GLASS --- */
-    --background: 0 0% 0%; /* Pure Black for bg */
-    --foreground: 0 0% 98%;
+    /* --- DARK MODE: CLAY (siyah/grafit + bronz) --- */
+    --background: 0 0% 5%;         /* --qc-bg0 #0C0C0C */
+    --foreground: 35 40% 91%;      /* --qc-ink1 #F1E9DE */
 
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 98%;
+    --card: 40 6% 10%;             /* --qc-surface #1A1917 */
+    --card-foreground: 35 40% 91%;
 
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 40 6% 10%;
+    --popover-foreground: 35 40% 91%;
 
-    --primary: 35 90% 50%;
+    --primary: 30 51% 54%;         /* --qc-accent #C68A4E */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 30 5% 7%;         /* --qc-surface2 #141312 */
+    --secondary-foreground: 35 40% 91%;
 
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 30 6% 13%;            /* --qc-surface-hi */
+    --muted-foreground: 33 23% 61%; /* --qc-ink2 */
 
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 34 67% 63%;          /* --qc-accent2 #E0A860 */
+    --accent-foreground: 0 0% 8%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 12 48% 65%;     /* --qc-danger #D08A79 */
+    --destructive-foreground: 0 0% 8%;
 
-    --border: 0 0% 20%;
-    --input: 0 0% 15%;
-    --ring: 35 90% 50%;
+    --border: 34 20% 22%;
+    --input: 30 6% 13%;
+    --ring: 30 51% 54%;
 
     /* Dashboard neumorphic tokens (dark mode) */
     --dashboard-bg: #000000;
@@ -6901,3 +6903,88 @@ html.dark body.mg-edge-body {
 [data-theme="dark"] input, [data-theme="dark"] textarea { color: var(--qc-ink1); }
 .dark input::placeholder, .dark textarea::placeholder,
 [data-theme="dark"] input::placeholder, [data-theme="dark"] textarea::placeholder { color: var(--qc-ink3); }
+
+/* ==========================================================================
+   Clay = GLOBAL varsayılan.
+   shadcn/Radix primitifleri (modal, seçici, açılır menü, popover, input, buton,
+   kart) panel panel değiştirilmeden clay görünüme çekilir. Renkler zaten
+   --qc-* → shadcn token eşlemesinden gelir; burada yalnızca clay formu
+   (yumuşak yükselti, iç gölge, yuvarlaklık) uygulanır.
+   ========================================================================== */
+
+/* Modal / popover / açılır menü / komut paleti yüzeyleri */
+[role="dialog"][data-state],
+[data-radix-popper-content-wrapper] > * {
+  border-radius: var(--qc-radius-lg, 26px) !important;
+  border: 1px solid var(--qc-line) !important;
+  background: linear-gradient(180deg, var(--qc-surface) 0%, var(--qc-surface2) 100%) !important;
+  box-shadow: var(--qc-clay) !important;
+  color: var(--qc-ink1);
+}
+/* Modal arka planı: clay'e uygun yumuşak karartma */
+[data-radix-dialog-overlay],
+[data-radix-alert-dialog-overlay] {
+  background: color-mix(in srgb, var(--qc-bg0) 62%, transparent) !important;
+  backdrop-filter: blur(6px);
+}
+
+/* Seçici / input / textarea — clay iç gölge */
+button[role="combobox"],
+[data-radix-select-trigger],
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.tv-cell-input):not(.qlogin input),
+textarea,
+[cmdk-input] {
+  border-radius: var(--qc-radius-sm, 14px);
+  background: var(--qc-surface-hi);
+  box-shadow: var(--qc-clay-inset);
+  border: 1px solid transparent;
+  color: var(--qc-ink1);
+}
+button[role="combobox"]:focus-visible,
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--qc-accent);
+  outline-offset: -1px;
+}
+
+/* Seçici seçenekleri */
+[data-radix-select-item],
+[role="option"],
+[role="menuitem"] {
+  border-radius: 10px;
+}
+[data-radix-select-item][data-highlighted],
+[role="option"][data-highlighted],
+[role="menuitem"][data-highlighted] {
+  background: color-mix(in srgb, var(--qc-accent) 14%, transparent) !important;
+  color: var(--qc-ink1) !important;
+  outline: none;
+}
+
+/* Butonlar — clay yükselti; birincil buton bronz gradyan */
+.dark button, button { -webkit-tap-highlight-color: transparent; }
+button:is(.bg-primary, [data-variant="default"]) {
+  background: linear-gradient(180deg, var(--qc-accent2), var(--qc-accent)) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 10px 20px -10px var(--qc-accent-glow) !important;
+  border: none !important;
+}
+button:is(.bg-secondary, .bg-muted, [data-variant="secondary"]),
+button:is([data-variant="outline"]) {
+  background: linear-gradient(180deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  box-shadow: var(--qc-clay-flat) !important;
+  border: 1px solid var(--qc-line) !important;
+  color: var(--qc-ink1) !important;
+}
+
+/* Kartlar / tablo yüzeyleri */
+.rounded-lg.border.bg-card,
+.bg-card {
+  background: linear-gradient(180deg, var(--qc-surface) 0%, var(--qc-surface2) 100%) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay);
+  border-radius: var(--qc-radius, 22px);
+}
+
+/* Clay ölçü tokenları */
+:root { --qc-radius: 22px; --qc-radius-sm: 14px; --qc-radius-lg: 26px; }
