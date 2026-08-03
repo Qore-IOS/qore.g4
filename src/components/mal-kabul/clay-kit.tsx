@@ -12,30 +12,44 @@ import { Camera, Plus, FileText, Search, RefreshCw, Check, Package, QrCode, Box,
 
 // ── Cream clay design tokens (matches Siparişler / Direkt Transfer) ──────────
 export const MK_C = {
-  bg0: '#EFEAE0',
-  surface: '#FCFAF5',
-  surface2: '#F5F1E8',
-  surfaceHi: '#FFFFFF',
-  ink1: '#3D382F',
-  ink2: '#908872',
-  ink3: '#BBB2A0',
-  line: 'rgba(90,72,40,0.07)',
-  accent: '#C98A57',
-  accent2: '#E0B776',
-  accentGlow: 'rgba(201,138,87,0.24)',
-  waterSolid: '#6FB585',
-  waterDeep: '#4E9E6B',
-  amber: '#E0A33E',
-  amberSoft: 'rgba(224,163,62,0.16)',
-  danger: '#C0796A',
+  // Renkler globals.css'teki --qc-* değişkenlerinden okunur; böylece açık/koyu
+  // tema değişince tüm clay panelleri tek noktadan yeniden renklenir.
+  bg0: 'var(--qc-bg0)',
+  surface: 'var(--qc-surface)',
+  surface2: 'var(--qc-surface2)',
+  surfaceHi: 'var(--qc-surface-hi)',
+  ink1: 'var(--qc-ink1)',
+  ink2: 'var(--qc-ink2)',
+  ink3: 'var(--qc-ink3)',
+  line: 'var(--qc-line)',
+  accent: 'var(--qc-accent)',
+  accent2: 'var(--qc-accent2)',
+  accentGlow: 'var(--qc-accent-glow)',
+  waterSolid: 'var(--qc-water-solid)',
+  waterDeep: 'var(--qc-water-deep)',
+  amber: 'var(--qc-amber)',
+  amberSoft: 'var(--qc-amber-soft)',
+  danger: 'var(--qc-danger)',
+  // accent'in şeffaf tonları — daha önce `${C.accentA09}` gibi hex+alfa
+  // birleştirmesiyle üretiliyordu, var() ile bu mümkün olmadığı için token'landı.
+  accentA08: 'color-mix(in srgb, var(--qc-accent) 8%, transparent)',
+  accentA09: 'color-mix(in srgb, var(--qc-accent) 9%, transparent)',
+  accentA25: 'color-mix(in srgb, var(--qc-accent) 25%, transparent)',
+  accentA27: 'color-mix(in srgb, var(--qc-accent) 27%, transparent)',
+  accentA33: 'color-mix(in srgb, var(--qc-accent) 33%, transparent)',
+  accentA40: 'color-mix(in srgb, var(--qc-accent) 40%, transparent)',
+  accentA67: 'color-mix(in srgb, var(--qc-accent) 67%, transparent)',
+  accentA80: 'color-mix(in srgb, var(--qc-accent) 80%, transparent)',
+  amberA27: 'color-mix(in srgb, var(--qc-amber) 27%, transparent)',
+  ink3A40: 'color-mix(in srgb, var(--qc-ink3) 40%, transparent)',
   radius: 24,
   radiusSm: 16,
   radiusLg: 32,
   radiusPill: 999,
-  clay: 'inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16)',
-  clayPress: 'inset 0 2px 5px rgba(178,160,128,0.32), inset 0 -1px 0 rgba(255,255,255,0.6), 0 2px 6px -4px rgba(150,128,96,0.2)',
-  clayInset: 'inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55)',
-  clayFlat: 'inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28)',
+  clay: 'var(--qc-clay)',
+  clayPress: 'var(--qc-clay-press)',
+  clayInset: 'var(--qc-clay-inset)',
+  clayFlat: 'var(--qc-clay-flat)',
 } as const;
 
 /** Keyframes + shell helpers injected once per page. */
@@ -66,7 +80,7 @@ export function MkClayStyles() {
       @media (prefers-reduced-motion: reduce) {
         .clay-shell *, .mk-shell * { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }
       }
-      .mk-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; -webkit-font-smoothing: antialiased; }
+      .mk-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: var(--qc-shell-bg); color: var(--qc-ink1); min-height: 100vh; -webkit-font-smoothing: antialiased; }
       .mk-grid-kpi { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1.15fr); gap: 14px; }
       @media (max-width: 1079px) { .mk-grid-kpi { grid-template-columns: 1fr; } }
     `}</style>
@@ -393,8 +407,8 @@ export function MkChipBtn({ icon, children, onClick, active, danger, disabled, t
     <button onClick={disabled ? undefined : onClick} disabled={disabled} title={title} style={{
       all: 'unset', cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, height: 40, padding: '0 14px',
       borderRadius: C.radiusSm,
-      background: active ? `${C.accent}16` : `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
-      boxShadow: active ? `inset 0 0 0 1.5px ${C.accent}66` : C.clay,
+      background: active ? `${C.accentA09}` : `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
+      boxShadow: active ? `inset 0 0 0 1.5px ${C.accentA40}` : C.clay,
       color: danger ? C.danger : active ? C.accent : C.ink1, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap', opacity: disabled ? 0.4 : 1,
     }}>
       {icon}{children}
@@ -480,7 +494,7 @@ export function MkWaybillCard({ title, subtitle, code, selected, onClick, childr
 }) {
   const [p, setP] = useState(false);
   return (
-    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: selected ? `${C.clayFlat}, 0 0 0 1.5px ${C.accent}66` : (p ? C.clayPress : C.clayFlat), transition: 'box-shadow 200ms ease' }}>
+    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: selected ? `${C.clayFlat}, 0 0 0 1.5px ${C.accentA40}` : (p ? C.clayPress : C.clayFlat), transition: 'box-shadow 200ms ease' }}>
       <button onClick={onClick} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
         style={{ all: 'unset', cursor: 'pointer', boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center', gap: 16, padding: '16px 20px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>

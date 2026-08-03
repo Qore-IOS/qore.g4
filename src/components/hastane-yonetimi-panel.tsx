@@ -1026,13 +1026,13 @@ export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: Lab
                 )}
               </div>
 
-              <div className="rounded-2xl bg-[#F5F1E8] px-4 py-3 text-xs leading-5 text-[#908872] shadow-inner">
+              <div className="rounded-2xl bg-[var(--qc-surface2)] px-4 py-3 text-xs leading-5 text-[#908872] shadow-inner">
                 Stok Kodu zorunludur. Lot, miad, seri numarası ve adet sütunları başlık adlarına göre güvenli biçimde eşleştirilir.
               </div>
 
               <ScrollArea className="h-[min(350px,45vh)] rounded-2xl bg-white shadow-inner">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-[#FCFAF5]/95 backdrop-blur-sm">
+                  <TableHeader className="sticky top-0 bg-[var(--qc-surface)]/95 backdrop-blur-sm">
                     <TableRow>
                       <TableHead className="w-8">#</TableHead>
                       <TableHead>Stok Kodu</TableHead>
@@ -1074,7 +1074,7 @@ export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: Lab
                 variant="outline"
                 onClick={() => setIsImportModalOpen(false)}
                 disabled={isImporting}
-                className="rounded-2xl border-0 bg-[#F5F1E8] text-[#3D382F] shadow-md"
+                className="rounded-2xl border-0 bg-[var(--qc-surface2)] text-[#3D382F] shadow-md"
               >
                 İptal
               </Button>

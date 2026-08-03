@@ -1154,6 +1154,16 @@ export function useLabStock(
         }
       });
 
+      // Historical compatibility: old deterministic mal-kabul IDs could
+      // overwrite a transferred lab-stock document when the same serial was
+      // received again. Transfer headers/items still preserve those units.
+      const { getRecoverableTransferredLabStock } = await import('@/actions/stokActions');
+      const idToken = await currentUser?.getIdToken();
+      const recovered = idToken ? await getRecoverableTransferredLabStock(ids, idToken) : [];
+      recovered.forEach(item => {
+        if (!resultMap.has(item.id)) resultMap.set(item.id, item);
+      });
+
       return filterByCompanyScope(Array.from(resultMap.values()), currentCompanyId, isSuperAdmin);
     },
     enabled: externalEnabled && labIds.length > 0,

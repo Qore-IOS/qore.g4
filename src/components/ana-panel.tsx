@@ -2315,7 +2315,7 @@ export default function AnaPanel(props: AnaPanelProps) {
   return (
     <>
       {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
     <div className="mk-shell px-3 py-4 sm:px-6 sm:py-5 space-y-4 min-h-screen" style={{ maxWidth: 1720, margin: '0 auto', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <ScanCommitProbe controller={scanPerformanceController} />
@@ -2501,7 +2501,7 @@ export default function AnaPanel(props: AnaPanelProps) {
                   display: 'inline-flex', alignItems: 'center', gap: 8, cursor: selectedDepotId ? 'pointer' : 'not-allowed',
                   padding: '6px 12px', borderRadius: MK_C.radiusPill,
                   background: otoKabul ? 'rgba(111,181,133,0.16)' : MK_C.surface2,
-                  boxShadow: otoKabul ? `0 0 0 1.5px ${MK_C.accent}55` : MK_C.clayInset,
+                  boxShadow: otoKabul ? `0 0 0 1.5px ${MK_C.accentA33}` : MK_C.clayInset,
                   opacity: selectedDepotId ? 1 : 0.55,
                 }}
               >
@@ -2637,7 +2637,7 @@ export default function AnaPanel(props: AnaPanelProps) {
 
                 return (
                   <div style={{ paddingBottom: 10, animation: 'mkPopIn 280ms ease' }}>
-                    <div style={{ borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: group.isSelected ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accent}66` : MK_C.clayFlat, overflow: 'hidden' }}>
+                    <div style={{ borderRadius: MK_C.radius, background: MK_C.surfaceHi, boxShadow: group.isSelected ? `${MK_C.clayFlat}, 0 0 0 1.5px ${MK_C.accentA40}` : MK_C.clayFlat, overflow: 'hidden' }}>
                       {/* Desktop row */}
                       <div className="hidden sm:grid grid-cols-[40px_46px_2fr_1fr_1fr_1fr_1fr_80px_90px_40px] gap-1 items-center" style={{ padding: '13px 18px' }}>
                         <div>{checkbox}</div>

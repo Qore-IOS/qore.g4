@@ -35,8 +35,8 @@ export const PAL = {
   app: '#4E9E6B',    // aplikasyon (water deep)
   admin: '#9B86D6',  // admin (violet)
   ready: '#6FB585',
-  amber: '#E0A33E',
-  danger: '#C0796A',
+  amber: 'var(--qc-amber)',
+  danger: 'var(--qc-danger)',
   sky: '#7CA8DE',
   violet: '#9B86D6',
 } as const;

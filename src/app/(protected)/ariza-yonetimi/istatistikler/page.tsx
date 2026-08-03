@@ -815,7 +815,7 @@ export default function ArizaIstatistikleriPage() {
                       <span style={{ fontSize: 15, fontWeight: 800, color: highlight ? '#9A6F1E' : C.ink1, fontVariantNumeric: 'tabular-nums' }}>{fmtInt(cnt)}</span>
                     </div>
                     <div style={{ height: 14, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
-                      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: highlight ? `linear-gradient(90deg, ${C.amber}cc, ${C.amber})` : `linear-gradient(90deg, ${C.ink3}aa, ${C.ink3})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35)' }} />
+                      <div style={{ height: '100%', width: `${pct}%`, borderRadius: 99, background: highlight ? `linear-gradient(90deg, ${C.amberA27}, ${C.amber})` : `linear-gradient(90deg, ${C.ink3A40}, ${C.ink3})`, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.35)' }} />
                     </div>
                   </button>
                 );

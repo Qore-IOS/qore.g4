@@ -204,11 +204,11 @@ export const MlRing = ({ pct, size = 48, thickness = 6, color }: any) => {
 /* ─────────────── scoped tokens + keyframes (.ml-root — same clay palette as planlama) ─────────────── */
 export const ML_CSS = `
 .ml-root {
-  --bg-0: #EFEAE0; --bg-1: #E9E3D6;
-  --surface: #FCFAF5; --surface-2: #F5F1E8; --surface-hi: #FFFFFF;
-  --ink-1: #3D382F; --ink-2: #908872; --ink-3: #BBB2A0;
+  --bg-0: var(--qc-bg0); --bg-1: var(--qc-surface2);
+  --surface: var(--qc-surface); --surface-2: var(--qc-surface2); --surface-hi: var(--qc-surface-hi);
+  --ink-1: var(--qc-ink1); --ink-2: var(--qc-ink2); --ink-3: var(--qc-ink3);
   --line: rgba(90,72,40,0.07);
-  --accent: #C98A57; --accent-2: #E0B776; --accent-glow: rgba(201,138,87,0.24);
+  --accent: var(--qc-accent); --accent-2: var(--qc-accent2); --accent-glow: rgba(201,138,87,0.24);
   --water: rgba(124,191,140,0.30); --water-edge: rgba(110,184,128,0.55); --water-solid: #6FB585; --water-deep: #4E9E6B;
   --amber: #E0A33E; --amber-soft: rgba(224,163,62,0.16); --amber-glow: rgba(224,163,62,0.45);
   --ready: #6FB585; --ready-glow: rgba(111,181,133,0.5); --danger: #C0796A; --violet: #9B86D6; --sky: #7CA8DE;
@@ -224,11 +224,11 @@ export const ML_CSS = `
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   background:
-    radial-gradient(120% 80% at 10% 0%, #F6F2EA 0%, transparent 55%),
-    radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+    radial-gradient(120% 80% at 10% 0%, var(--qc-glow-1) 0%, transparent 55%),
+    radial-gradient(120% 80% at 100% 100%, var(--qc-glow-2) 0%, transparent 55%),
     var(--bg-0);
 }
-body.mg-edge-body:has(.ml-root) { background: #EFEAE0 !important; }
+body.mg-edge-body:has(.ml-root) { background: var(--qc-bg0) !important; }
 .ml-root *, .ml-root *::before, .ml-root *::after { box-sizing: border-box; }
 .ml-root button:focus-visible, .ml-root input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .ml-root ::-webkit-scrollbar { width: 9px; height: 9px; }

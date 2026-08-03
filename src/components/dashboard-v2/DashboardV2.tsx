@@ -793,7 +793,7 @@ export default function DashboardV2({
   const hasStockCost = totalStockCost !== null && totalStockCost > 0;
 
   const faultStats = [
-    { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, tone: HOME_C.accent, bg: `${HOME_C.accent}14`, icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
+    { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, tone: HOME_C.accent, bg: `${HOME_C.accentA08}`, icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
     { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, tone: HOME_C.danger, bg: 'rgba(192,121,106,0.12)', icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
     { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, tone: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)', icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
   ];
@@ -1012,7 +1012,7 @@ export default function DashboardV2({
             {(costByDepot.length === 0 && costByLab.length === 0) ? (
               <p style={{ fontSize: 14, color: HOME_C.ink3, fontWeight: 600, textAlign: 'center', padding: '40px 0' }}>Detay verisi bulunamadı.</p>
             ) : ([
-              { key: 'depo', title: 'Depolar', icon: <Warehouse size={17} />, rows: costByDepot, tone: HOME_C.accent, bg: `${HOME_C.accent}16` },
+              { key: 'depo', title: 'Depolar', icon: <Warehouse size={17} />, rows: costByDepot, tone: HOME_C.accent, bg: `${HOME_C.accentA09}` },
               { key: 'lab', title: 'Laboratuvarlar', icon: <FlaskConical size={17} />, rows: costByLab, tone: HOME_C.skyDeep, bg: 'rgba(124,168,222,0.16)' },
             ] as const).map((section) => section.rows.length === 0 ? null : (
               <div key={section.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
