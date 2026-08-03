@@ -23,6 +23,7 @@ import {
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
+import { isAvailableDepotStock } from '@/lib/stock-quantity';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -1280,11 +1281,12 @@ export async function getPaginatedDepotStock(params: {
       } as unknown as DepoStokItem));
     }
   } else {
-    // Fetch stock + depot rules + product catalog in parallel using Admin SDK
+    // Query by depot only, then treat every document not explicitly shipped as
+    // available. Legacy stock can lack `isShipped`, and Firestore's
+    // `where('isShipped', '==', false)` silently omitted it from this panel.
     const [snapshot, rules, products] = await Promise.all([
       adminDb.collection('depoStok')
         .where('depotId', '==', depotId)
-        .where('isShipped', '==', false)
         .get(),
       adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
       adminDb.collection('productCodes').get(),
@@ -1295,7 +1297,7 @@ export async function getPaginatedDepotStock(params: {
       snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
       companyId,
       isSuperAdmin,
-    );
+    ).filter(isAvailableDepotStock);
   }
 
   // Build helper maps from the side-loaded master data

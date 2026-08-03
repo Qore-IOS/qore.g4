@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getStockItemQuantity, sumStockItemQuantities } from '../src/lib/stock-quantity';
+import {
+  getStockItemQuantity,
+  isAvailableDepotStock,
+  sumStockItemQuantities,
+} from '../src/lib/stock-quantity';
 
 test('getStockItemQuantity falls back to one for legacy or invalid stock docs', () => {
   assert.equal(getStockItemQuantity({}), 1);
@@ -23,4 +27,10 @@ test('sumStockItemQuantities sums units instead of stock document count', () => 
 
   assert.equal(docs.length, 3);
   assert.equal(sumStockItemQuantities(docs), 27);
+});
+
+test('isAvailableDepotStock includes legacy stock without isShipped and excludes shipped stock', () => {
+  assert.equal(isAvailableDepotStock({}), true);
+  assert.equal(isAvailableDepotStock({ isShipped: false }), true);
+  assert.equal(isAvailableDepotStock({ isShipped: true }), false);
 });
