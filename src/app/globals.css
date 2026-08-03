@@ -513,8 +513,8 @@
       color: var(--dashboard-text);
       font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
       background:
-        radial-gradient(120% 80% at 8% -5%, #F6F2EA 0%, transparent 55%),
-        radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+        radial-gradient(120% 80% at 8% -5%, var(--qc-glow-1) 0%, transparent 55%),
+        radial-gradient(120% 80% at 100% 100%, var(--qc-glow-2) 0%, transparent 55%),
         var(--dashboard-bg) !important;
       -webkit-font-smoothing: antialiased;
     }
@@ -6845,7 +6845,7 @@ html.dark body.mg-edge-body {
   --qc-clay-press: inset 0 2px 5px rgba(178,160,128,0.32), inset 0 -1px 0 rgba(255,255,255,0.6), 0 2px 6px -4px rgba(150,128,96,0.2);
   --qc-clay-inset: inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55);
   --qc-clay-flat: inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28);
-  --qc-shell-bg: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0;
+  --qc-shell-bg: linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), #EFEAE0;
 }
 
 .dark,
@@ -6989,8 +6989,11 @@ button:is([data-variant="outline"]) {
    şeffaftır ki zemin tek katmandan boyansın (aksi halde panel altlarında
    beyaz/siyah geçiş şeridi oluşuyordu).
    ========================================================================== */
-:root { --qc-app-bg: var(--qc-bg0); }
+:root { --qc-app-bg: var(--qc-bg0); --qc-glow-1: var(--qc-glow-1); --qc-glow-2: var(--qc-glow-2); }
 .dark, [data-theme="dark"] {
+  --qc-surface-alt: #201E1B;
+  --qc-glow-1: #2A1E11;
+  --qc-glow-2: #211A12;
   --qc-app-bg:
     radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%),
     radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%),

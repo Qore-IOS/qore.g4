@@ -241,8 +241,8 @@ export const PL_CSS = `
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
   background:
-    radial-gradient(120% 80% at 10% 0%, #F6F2EA 0%, transparent 55%),
-    radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+    radial-gradient(120% 80% at 10% 0%, var(--qc-glow-1) 0%, transparent 55%),
+    radial-gradient(120% 80% at 100% 100%, var(--qc-glow-2) 0%, transparent 55%),
     var(--bg-0);
 }
 /* satın-alma edge-to-edge: force the single cream backdrop everywhere */
