@@ -30,22 +30,22 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 
 // ─── Design tokens (exact match to demo) ─────────────────────────────────────
 const C = {
-  surface: '#FCFAF5',
-  surface2: '#F5F1E8',
-  surfaceHi: '#FFFFFF',
-  bg: '#EFEAE0',
-  ink1: '#3D382F',
-  ink2: '#908872',
-  ink3: '#BBB2A0',
+  surface: 'var(--qc-surface)',
+  surface2: 'var(--qc-surface2)',
+  surfaceHi: 'var(--qc-surface-hi)',
+  bg: 'var(--qc-bg0)',
+  ink1: 'var(--qc-ink1)',
+  ink2: 'var(--qc-ink2)',
+  ink3: 'var(--qc-ink3)',
   line: 'rgba(90,72,40,0.07)',
-  accent: '#C98A57',
+  accent: 'var(--qc-accent)',
   accentLight: '#E0B776',
   accentGlow: 'rgba(201,138,87,0.24)',
   water: 'rgba(124,191,140,0.30)',
-  waterSolid: '#6FB585',
-  waterDeep: '#4E9E6B',
-  amber: '#E0A33E',
-  danger: '#C0796A',
+  waterSolid: 'var(--qc-water-solid)',
+  waterDeep: 'var(--qc-water-deep)',
+  amber: 'var(--qc-amber)',
+  danger: 'var(--qc-danger)',
   violet: '#9B86D6',
   violetLight: '#C5B8EE',
   violetGlow: 'rgba(155,134,214,0.30)',
@@ -608,7 +608,7 @@ export default function SiparislerPanel() {
         @keyframes sipHeaderIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
 
       <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,

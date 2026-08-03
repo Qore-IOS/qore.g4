@@ -51,7 +51,7 @@ function SearchBar({ value, onChange, onSubmit, onClear, busy }: {
   value: string; onChange: (v: string) => void; onSubmit: () => void; onClear: () => void; busy: boolean;
 }) {
   return (
-    <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', justifyContent: 'center', padding: '18px 24px 12px', background: 'linear-gradient(180deg, #EFEAE0 62%, transparent)' }}>
+    <div style={{ position: 'sticky', top: 0, zIndex: 40, display: 'flex', justifyContent: 'center', padding: '18px 24px 12px', background: 'linear-gradient(180deg, var(--qc-bg0) 62%, transparent)' }}>
       <form onSubmit={e => { e.preventDefault(); onSubmit(); }} style={{ width: 'min(720px, 100%)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, height: 60, padding: '0 8px 0 20px', borderRadius: C.radiusPill, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: `${C.clay}, ${C.clayInset}` }}>
           <span style={{ color: busy ? C.accent : C.ink3, display: 'inline-flex', animation: busy ? 'mkSpin 1s linear infinite' : 'none' }}>
@@ -103,7 +103,7 @@ function PerPage({ value, onChange }: { value: number; onChange: (n: number) => 
           <div onClick={() => setO(false)} style={{ position: 'fixed', inset: 0, zIndex: 30 }} />
           <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, zIndex: 31, minWidth: 150, padding: 8, borderRadius: C.radiusSm, background: C.surfaceHi, boxShadow: `0 20px 44px -14px rgba(150,128,96,0.5), ${C.clay}`, animation: 'mkPopIn 200ms ease' }}>
             {[10, 20, 50, 100].map(n => (
-              <button key={n} onClick={() => { onChange(n); setO(false); }} style={{ all: 'unset', cursor: 'pointer', boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', borderRadius: 12, background: value === n ? `${C.accent}14` : 'transparent', color: C.ink1, fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
+              <button key={n} onClick={() => { onChange(n); setO(false); }} style={{ all: 'unset', cursor: 'pointer', boxSizing: 'border-box', width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '11px 13px', borderRadius: 12, background: value === n ? `${C.accentA08}` : 'transparent', color: C.ink1, fontSize: 14, fontWeight: 600, marginBottom: 2 }}>
                 <span style={{ flex: 1 }}>{n} / sayfa</span>{value === n && <span style={{ color: C.accent, display: 'inline-flex' }}><Check size={15} /></span>}
               </button>
             ))}
@@ -174,7 +174,7 @@ function TxnExpand({ tx }: { tx: LedgerRow }) {
 
 function TxnRow({ tx, open, onToggle }: { tx: LedgerRow; open: boolean; onToggle: () => void }) {
   return (
-    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: open ? `${C.clayFlat}, 0 0 0 1.5px ${C.accent}44` : C.clayFlat, transition: 'box-shadow 300ms ease', overflow: 'hidden' }}>
+    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: open ? `${C.clayFlat}, 0 0 0 1.5px ${C.accentA27}` : C.clayFlat, transition: 'box-shadow 300ms ease', overflow: 'hidden' }}>
       <div onClick={onToggle} style={{ display: 'grid', gridTemplateColumns: TXN_COLS, gap: 12, alignItems: 'center', padding: '13px 22px', cursor: 'pointer' }}>
         <span style={{ width: 26, height: 26, borderRadius: '50%', display: 'grid', placeItems: 'center', color: C.accent, background: C.surface2, boxShadow: C.clayInset, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 260ms ease' }}><ChevronRight size={14} /></span>
         <Cell mono strong>{tx.lotNumarasi || '-'}</Cell>
@@ -192,7 +192,7 @@ function TxnRow({ tx, open, onToggle }: { tx: LedgerRow; open: boolean; onToggle
 
 function TxnCard({ tx, open, onToggle }: { tx: LedgerRow; open: boolean; onToggle: () => void }) {
   return (
-    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: open ? `${C.clayFlat}, 0 0 0 1.5px ${C.accent}44` : C.clayFlat, overflow: 'hidden' }}>
+    <div style={{ borderRadius: C.radius, background: C.surfaceHi, boxShadow: open ? `${C.clayFlat}, 0 0 0 1.5px ${C.accentA27}` : C.clayFlat, overflow: 'hidden' }}>
       <div onClick={onToggle} style={{ display: 'flex', alignItems: 'center', gap: 13, padding: '14px 16px', cursor: 'pointer' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -503,7 +503,7 @@ export default function AramaPanel() {
 
   return (
     <>
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
       <div className="mk-shell" style={{ minHeight: '100vh', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <SearchBar value={draft} onChange={setDraft} onSubmit={handleSearch} onClear={clearAll} busy={isSearching} />

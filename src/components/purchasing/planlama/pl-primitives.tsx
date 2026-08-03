@@ -218,11 +218,11 @@ export const PlToast = ({ toast, ac }: any) => {
 /* scoped design tokens + keyframes (namespaced, does not leak outside .pl-root) */
 export const PL_CSS = `
 .pl-root {
-  --bg-0: #EFEAE0; --bg-1: #E9E3D6;
-  --surface: #FCFAF5; --surface-2: #F5F1E8; --surface-hi: #FFFFFF;
-  --ink-1: #3D382F; --ink-2: #908872; --ink-3: #BBB2A0;
+  --bg-0: var(--qc-bg0); --bg-1: var(--qc-surface2);
+  --surface: var(--qc-surface); --surface-2: var(--qc-surface2); --surface-hi: var(--qc-surface-hi);
+  --ink-1: var(--qc-ink1); --ink-2: var(--qc-ink2); --ink-3: var(--qc-ink3);
   --line: rgba(90,72,40,0.07);
-  --accent: #C98A57; --accent-2: #E0B776; --accent-glow: rgba(201,138,87,0.24);
+  --accent: var(--qc-accent); --accent-2: var(--qc-accent2); --accent-glow: rgba(201,138,87,0.24);
   --serif: 'Playfair Display', Georgia, 'Times New Roman', serif;
   --water: rgba(124,191,140,0.30); --water-edge: rgba(110,184,128,0.55); --water-solid: #6FB585; --water-deep: #4E9E6B;
   --amber: #E0A33E; --amber-soft: rgba(224,163,62,0.16); --amber-glow: rgba(224,163,62,0.45);
@@ -246,7 +246,7 @@ export const PL_CSS = `
     var(--bg-0);
 }
 /* satın-alma edge-to-edge: force the single cream backdrop everywhere */
-body.mg-edge-body:has(.pl-root) { background: #EFEAE0 !important; }
+body.mg-edge-body:has(.pl-root) { background: var(--qc-bg0) !important; }
 .pl-root *, .pl-root *::before, .pl-root *::after { box-sizing: border-box; }
 .pl-root button:focus-visible, .pl-root input:focus-visible, .pl-root textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pl-root ::-webkit-scrollbar { width: 9px; height: 9px; }
