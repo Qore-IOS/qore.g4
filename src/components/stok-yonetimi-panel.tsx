@@ -285,7 +285,7 @@ function ColumnFilterPopover({
               "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
               isActive
                 ? "bg-orange-500/15 border-orange-500/40 text-orange-600 hover:bg-orange-500/25"
-                : "bg-[#F5F1E8] border-[rgba(90,72,40,0.10)] text-[#BBB2A0] hover:text-[#3D382F] hover:bg-[#FCFAF5]",
+                : "bg-[var(--qc-surface2)] border-[rgba(90,72,40,0.10)] text-[#BBB2A0] hover:text-[#3D382F] hover:bg-[var(--qc-surface)]",
             )}
           >
             <Filter className="h-3 w-3" />
@@ -316,7 +316,7 @@ function ColumnFilterPopover({
         )}
       </PopoverTrigger>
       <PopoverContent
-        className="w-64 p-0 bg-[#FCFAF5] border border-[rgba(90,72,40,0.10)] text-[#3D382F] shadow-[0_16px_38px_-10px_rgba(90,72,40,0.28)] rounded-2xl overflow-hidden"
+        className="w-64 p-0 bg-[var(--qc-surface)] border border-[rgba(90,72,40,0.10)] text-[#3D382F] shadow-[0_16px_38px_-10px_rgba(90,72,40,0.28)] rounded-2xl overflow-hidden"
         align="start"
         onWheel={(e) => e.stopPropagation()}
       >
@@ -326,8 +326,8 @@ function ColumnFilterPopover({
             <button
               type="button"
               className={cn(
-                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[#F5F1E8]",
-                isSorted && sortDirection === 'asc' && "bg-[#F5F1E8] font-semibold text-orange-600",
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors hover:bg-[var(--qc-surface2)]",
+                isSorted && sortDirection === 'asc' && "bg-[var(--qc-surface2)] font-semibold text-orange-600",
               )}
               onClick={() => { onSort(column); setOpen(false); }}
             >
@@ -336,8 +336,8 @@ function ColumnFilterPopover({
             <button
               type="button"
               className={cn(
-                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[rgba(90,72,40,0.10)] hover:bg-[#F5F1E8]",
-                isSorted && sortDirection === 'desc' && "bg-[#F5F1E8] font-semibold text-orange-600",
+                "flex-1 flex items-center justify-center gap-1 px-3 py-2 text-xs transition-colors border-l border-[rgba(90,72,40,0.10)] hover:bg-[var(--qc-surface2)]",
+                isSorted && sortDirection === 'desc' && "bg-[var(--qc-surface2)] font-semibold text-orange-600",
               )}
               onClick={() => { onSort(column); setOpen(false); }}
             >
@@ -351,7 +351,7 @@ function ColumnFilterPopover({
             placeholder={searchPlaceholder ?? 'Filtrele...'}
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
-            className="h-7 text-xs bg-[#F5F1E8] border-[rgba(90,72,40,0.10)]"
+            className="h-7 text-xs bg-[var(--qc-surface2)] border-[rgba(90,72,40,0.10)]"
           />
         </div>
         {/* Select all / Clear (applies to the filtered subset) */}
@@ -406,7 +406,7 @@ function ColumnFilterPopover({
               filteredOptions.map((opt) => (
                 <label
                   key={opt.value}
-                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg hover:bg-[#F5F1E8] cursor-pointer"
+                  className="flex items-center gap-2 px-2 py-1.5 text-xs rounded-lg hover:bg-[var(--qc-surface2)] cursor-pointer"
                 >
                   <Checkbox
                     checked={localSelected.includes(opt.value)}
@@ -540,7 +540,7 @@ const clayPillBtn: React.CSSProperties = {
 };
 
 const clayMenuClass =
-  'rounded-2xl border border-[rgba(90,72,40,0.10)] bg-[#FCFAF5] p-1.5 shadow-[0_26px_54px_-18px_rgba(90,72,40,0.45),inset_0_1px_1px_rgba(255,255,255,0.9)]';
+  'rounded-2xl border border-[rgba(90,72,40,0.10)] bg-[var(--qc-surface)] p-1.5 shadow-[0_26px_54px_-18px_rgba(90,72,40,0.45),inset_0_1px_1px_rgba(255,255,255,0.9)]';
 const clayMenuLabelClass = 'px-2.5 pt-2 pb-1 text-[10.5px] font-bold uppercase tracking-wider text-[#BBB2A0]';
 const clayMenuItemClass =
   'gap-2.5 rounded-xl px-2.5 py-2.5 text-[13.5px] font-semibold text-[#3D382F] focus:bg-[#C98A57]/[0.12] focus:text-[#3D382F] cursor-pointer [&_svg]:text-[#C98A57]';
@@ -1950,7 +1950,7 @@ export default function StokYonetimiPanel() {
               const cov = covClay(coverageInfo.severity);
               const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
               return (
-                <div key={row.key} style={{ position: 'relative', padding: '14px 16px 14px 18px', borderRadius: C.radius, background: i % 2 === 1 ? '#F6F1E7' : C.surfaceHi, boxShadow: C.clayFlat, animation: `cyPopIn ${240 + Math.min(i, 12) * 30}ms ${EASE} both` }}>
+                <div key={row.key} style={{ position: 'relative', padding: '14px 16px 14px 18px', borderRadius: C.radius, background: i % 2 === 1 ? 'var(--qc-surface-alt)' : C.surfaceHi, boxShadow: C.clayFlat, animation: `cyPopIn ${240 + Math.min(i, 12) * 30}ms ${EASE} both` }}>
                   <span style={{ position: 'absolute', left: 0, top: 8, bottom: 8, width: 4, borderRadius: 99, background: sev.bar === 'transparent' ? C.ink3 : sev.bar }} />
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
@@ -2049,7 +2049,7 @@ export default function StokYonetimiPanel() {
                   const sev = sevClay(miadInfo.severity);
                   const cov = covClay(coverageInfo.severity);
                   const riskyBoxes = getRiskyBoxes(miadInfo, coverageInfo);
-                  const rowBg = i % 2 === 1 ? '#F6F1E7' : C.surface;
+                  const rowBg = i % 2 === 1 ? 'var(--qc-surface-alt)' : C.surface;
                   return (
                     <tr
                       key={row.key}
@@ -2369,7 +2369,7 @@ export default function StokYonetimiPanel() {
                       "flex items-center justify-between px-3 py-2",
                       s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)]",
                       s.status === 'possible' && "bg-[rgba(224,163,62,0.10)]",
-                      s.status === 'not_suitable' && "bg-[#F5F1E8]",
+                      s.status === 'not_suitable' && "bg-[var(--qc-surface2)]",
                     )}>
                       <div className="flex items-center gap-2">
                         {s.status === 'recommended' && <CheckCircle2 className="h-3.5 w-3.5 text-[#4E9E6B]" />}
@@ -2464,7 +2464,7 @@ export default function StokYonetimiPanel() {
                         "text-[10px] px-2 py-1 rounded-lg",
                         s.status === 'recommended' && "bg-[rgba(78,158,107,0.10)] text-[#2D6B4A]",
                         s.status === 'possible' && "bg-[rgba(224,163,62,0.10)] text-[#9A6F1E]",
-                        s.status === 'not_suitable' && "bg-[#F5F1E8] text-[#BBB2A0]",
+                        s.status === 'not_suitable' && "bg-[var(--qc-surface2)] text-[#BBB2A0]",
                       )}>
                         {s.statusReason}
                       </div>
@@ -2580,7 +2580,7 @@ export default function StokYonetimiPanel() {
                 {/* Per-product plans */}
                 {bulkRescuePlans.map((plan) => (
                   <div key={plan.stokKodu} className="rounded-xl border border-[rgba(90,72,40,0.10)] overflow-hidden">
-                    <div className="flex items-center justify-between px-3 py-2 bg-[#F5F1E8]">
+                    <div className="flex items-center justify-between px-3 py-2 bg-[var(--qc-surface2)]">
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-semibold text-[#3D382F] truncate">{plan.stokAdi}</div>
                         <div className="text-[10px] text-[#BBB2A0] font-mono">({plan.stokKodu}) — Miad: {plan.miad} ({plan.miadDays} gün)</div>

@@ -608,7 +608,7 @@ export default function SiparislerPanel() {
         @keyframes sipHeaderIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
       `}</style>
 
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
 
       <div className="sp-shell" style={{
         position: 'relative', zIndex: 1,
@@ -649,7 +649,7 @@ export default function SiparislerPanel() {
               ].map(item => (
                 <button key={item.href}
                   onClick={() => { router.push(item.href); setMoreMenuOpen(false); }}
-                  className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[#F5F1E8] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm rounded-lg hover:bg-[var(--qc-surface2)] disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   {item.icon} {item.label}
                 </button>
