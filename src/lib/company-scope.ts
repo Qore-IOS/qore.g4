@@ -38,6 +38,24 @@ export function matchesCompanyScope(
   return recordCompany === normalizeCompanyId(currentCompanyId);
 }
 
+/**
+ * Mirrors `scopedQuery()` exactly for tenant-owned collections.
+ *
+ * Unlike the legacy-compatible `matchesCompanyScope`, this does not expose
+ * `__legacy__` or untagged records to a user who has an explicit company. Use
+ * it when an Admin SDK/unscoped query must return the same rows as a panel that
+ * reads through `scopedQuery()`.
+ */
+export function matchesScopedQueryCompany(
+  record: ScopedRecord | null | undefined,
+  currentCompanyId?: string | null,
+  isSuperAdmin?: boolean,
+): boolean {
+  const target = normalizeCompanyId(currentCompanyId);
+  if (isSuperAdmin || target === LEGACY_COMPANY_ID) return true;
+  return String(record?.companyId ?? '').trim() === target;
+}
+
 export function filterByCompanyScope<T>(
   records: T[],
   currentCompanyId?: string | null,

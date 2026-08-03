@@ -48,7 +48,7 @@ import { LedStripGlow } from '@/components/ui/led-strip-glow';
 import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeFormatSelect';
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesScopedQueryCompany, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -657,7 +657,7 @@ const checkFefoOptimized = async (
     const snap = await getDocs(q);
     snap.docs.forEach(d => {
       const data = d.data();
-      if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+      if (!matchesScopedQueryCompany(data as any, currentCompanyId, isSuperAdmin)) return;
       if (!isAvailableDepotStock(data)) return;
       allProductStock.push({ id: d.id, ...data } as DepoStokItem);
     });
@@ -1178,7 +1178,7 @@ export default function DirektTransferPanel() {
       const snap = await getDocs(q);
       snap.docs.forEach(d => {
         const data = d.data();
-        if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+        if (!matchesScopedQueryCompany(data as any, currentCompanyId, isSuperAdmin)) return;
         if (!isAvailableDepotStock(data)) return;
         allStock.push({ id: d.id, ...data } as DepoStokItem);
       });
