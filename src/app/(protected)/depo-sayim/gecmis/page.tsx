@@ -1,10 +1,10 @@
 
 'use client';
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, query, onSnapshot } from 'firebase/firestore';
+import { orderBy, onSnapshot } from 'firebase/firestore';
 import type { DepotStockCountSession } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
@@ -43,7 +43,7 @@ export default function DepoSayimGecmisPage() {
     });
 
     return () => unsubscribe();
-  }, [toast]);
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -67,7 +67,7 @@ export default function DepoSayimGecmisPage() {
                 <TableHeader>
                   <TableRow>
                     <TableHead>İşlem ID</TableHead>
-                    <TableHead>Sayım Yapılan Marka</TableHead>
+                    <TableHead>Depo</TableHead>
                     <TableHead>Sayım Yapan</TableHead>
                     <TableHead>Tarih/Saat</TableHead>
                     <TableHead>Detaylar</TableHead>
@@ -77,7 +77,7 @@ export default function DepoSayimGecmisPage() {
                   {sessions.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={5} className="h-24 text-center">
-                        Geçmiş marka veya lot sayımı bulunamadı.
+                        Geçmiş depo sayımı bulunamadı.
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -88,13 +88,13 @@ export default function DepoSayimGecmisPage() {
                         onClick={() => router.push(`/depo-sayim/gecmis/${session.id}`)}
                       >
                         <TableCell data-label="İşlem ID" className="font-mono text-xs">{session.id}</TableCell>
-                        <TableCell data-label="Marka">{session.brand}</TableCell>
+                        <TableCell data-label="Depo">{session.depotName || session.brand || '-'}</TableCell>
                         <TableCell data-label="Kullanıcı">{session.createdByName}</TableCell>
                         <TableCell data-label="Tarih/Saat">
                           {session.closedAt ? format(session.closedAt as Date, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'}
                         </TableCell>
                         <TableCell data-label="Detaylar">
-                          {session.itemCount} ürün, {session.scannedCount} okutuldu, {session.missingCount} eksik.
+                          {session.itemCount || 0} mevcut, {session.scannedCount || 0} sayıldı, {session.missingCount || 0} eksik.
                         </TableCell>
                       </TableRow>
                     ))

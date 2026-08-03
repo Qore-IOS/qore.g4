@@ -199,7 +199,11 @@ service cloud.firestore {
     match /overtimeRequests/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /kumulatifRaporlar/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /bekleyenIrsaliyeler/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
-    match /depotBrandCountSessions/{id}       { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /depotBrandCountSessions/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /items/{itemId}                   { allow read: if inCompany(); allow write: if writingInCompany(); }
+    }
     match /depotBrandCountValidationLogs/{id} { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /malKabulTransactions/{id} {
       allow read: if inCompany();
