@@ -76,7 +76,7 @@ import { emitFefoOverride } from '@/lib/notifications';
 import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatUnitMultiplier, normalizeUnitLabel, formatQuantityWithUnit } from '@/lib/product-unit';
-import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
+import { getStockItemQuantity, isAvailableDepotStock, sumStockItemQuantities } from '@/lib/stock-quantity';
 
 
 const CameraScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
@@ -652,13 +652,13 @@ const checkFefoOptimized = async (
     const q = query(
       collection(db, 'depoStok'),
       where('depotId', '==', depotId),
-      where('stokKodu', 'in', batchCodes),
-      where('isShipped', '==', false)
+      where('stokKodu', 'in', batchCodes)
     );
     const snap = await getDocs(q);
     snap.docs.forEach(d => {
       const data = d.data();
       if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+      if (!isAvailableDepotStock(data)) return;
       allProductStock.push({ id: d.id, ...data } as DepoStokItem);
     });
   }
@@ -763,7 +763,7 @@ export default function DirektTransferPanel() {
     const byLot = new Map<string, DepoStokItem[]>();    // key: stokKodu__lot
     const byCode = new Map<string, DepoStokItem[]>();   // key: stokKodu
 
-    const unshipped = depotStockData.filter(item => !item.isShipped);
+    const unshipped = depotStockData.filter(isAvailableDepotStock);
 
     for (const item of unshipped) {
       const code = item.stokKodu || '';
@@ -1173,13 +1173,13 @@ export default function DirektTransferPanel() {
       const q = query(
         collection(db, 'depoStok'),
         where('depotId', '==', selectedDepotId),
-        where('stokKodu', 'in', batchCodes),
-        where('isShipped', '==', false)
+        where('stokKodu', 'in', batchCodes)
       );
       const snap = await getDocs(q);
       snap.docs.forEach(d => {
         const data = d.data();
         if (!matchesCompanyScope(data as any, currentCompanyId, isSuperAdmin)) return;
+        if (!isAvailableDepotStock(data)) return;
         allStock.push({ id: d.id, ...data } as DepoStokItem);
       });
     }
@@ -1593,7 +1593,7 @@ export default function DirektTransferPanel() {
   
   const handleAddAllStock = async () => {
     if (!selectedDepotId) return;
-    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId), where('isShipped', '==', false));
+    const q = scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepotId));
     const snap = await getDocs(q);
     // Lot/adet takipli ürünler `adet: N` taşıyan tek bir doküman; seri takipli
     // ürünler doküman başına `adet: 1`. Her ikisinde de dokümandaki gerçek
@@ -1612,7 +1612,7 @@ export default function DirektTransferPanel() {
         }),
         currentCompanyId,
         isSuperAdmin,
-    );
+    ).filter(isAvailableDepotStock);
 
     setDirectTransferItems(items);
     const totalAdet = sumStockItemQuantities(items);
@@ -2160,4 +2160,3 @@ export default function DirektTransferPanel() {
     </>
   );
 }
-
