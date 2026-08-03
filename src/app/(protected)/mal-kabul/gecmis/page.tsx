@@ -3,12 +3,24 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import { db } from '@/lib/firebase';
+import { collection, doc, getDocs, orderBy, query } from 'firebase/firestore';
 import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
+import { exportDataToExcel } from '@/lib/utils';
 import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 import BackButton from '@/components/BackButton';
 import { formatTimestamp } from '@/lib/time';
-import { ChevronLeft, ChevronRight, Eye, History, Loader2, Tag } from 'lucide-react';
+import { CheckSquare, ChevronLeft, ChevronRight, Download, Eye, FileSpreadsheet, History, Loader2, Tag } from 'lucide-react';
+import { Checkbox } from '@/components/ui/checkbox';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -32,6 +44,14 @@ type MalKabulRow = {
   brands?: string[];
 };
 
+type MalKabulLine = {
+  stokKodu?: string;
+  lotNumarasi?: string;
+  miad?: string;
+  adet?: number;
+  serials?: string[];
+};
+
 function tsMillis(ts: any): number {
   if (!ts) return 0;
   if (typeof ts.toMillis === 'function') return ts.toMillis();
@@ -49,6 +69,9 @@ export default function MalKabulGecmisPage() {
   const [loading, setLoading] = useState(true);
   const [allRows, setAllRows] = useState<MalKabulRow[]>([]);
   const [selectedBrand, setSelectedBrand] = useState<string>('all');
+  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
+  const [selectedTransactions, setSelectedTransactions] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
 
   // Fetch ALL records via getScopedDocs which handles three cases:
   //   1) companyId == normalized  (current records)
@@ -102,6 +125,72 @@ export default function MalKabulGecmisPage() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const cols = 'minmax(0,2.3fr) 130px minmax(0,1.1fr) 150px 70px minmax(0,1fr) 96px';
 
+  const toggleTransaction = (id: string) => {
+    setSelectedTransactions(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkExport = async () => {
+    const selected = allRows.filter(row => selectedTransactions.has(row.id));
+    if (selected.length === 0) {
+      toast({ title: 'İşlem seçilmedi', description: 'Excel indirmek için en az bir işlem seçin.' });
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const transactionsWithLines = await Promise.all(selected.map(async transaction => {
+        const transactionRef = doc(db, COLLECTION_NAME, transaction.id);
+        const linesSnapshot = await getDocs(query(collection(transactionRef, 'lines'), orderBy('stokKodu')));
+        return {
+          transaction,
+          lines: linesSnapshot.docs.map(line => line.data() as MalKabulLine),
+        };
+      }));
+
+      const excelRows = transactionsWithLines.flatMap(({ transaction, lines }) =>
+        lines.flatMap(line => {
+          const serials = (line.serials || []).filter(Boolean);
+          const common = {
+            'İşlem No': transaction.transactionId || transaction.id,
+            'İşlem Tarihi': formatTimestamp(transaction.timestamp, 'dd.MM.yyyy HH:mm'),
+            'Markalar': (transaction.brands || []).join(', ') || '-',
+            'Stok Kodu': line.stokKodu || '-',
+            'Lot': line.lotNumarasi || '-',
+            'Miad': line.miad || '-',
+          };
+
+          if (serials.length === 0) {
+            return [{ ...common, 'Adet': line.adet ?? 0, 'Seri No': '' }];
+          }
+
+          const serialRows = serials.map(serial => ({ ...common, 'Adet': 1, 'Seri No': serial }));
+          const unserializedQuantity = Math.max(0, (line.adet ?? serials.length) - serials.length);
+          return unserializedQuantity > 0
+            ? [...serialRows, { ...common, 'Adet': unserializedQuantity, 'Seri No': '' }]
+            : serialRows;
+        })
+      );
+
+      if (excelRows.length === 0) {
+        toast({ title: 'Veri Yok', description: 'Seçilen işlemlerde dışa aktarılacak ürün bulunamadı.' });
+        return;
+      }
+
+      exportDataToExcel(excelRows, `Mal_Kabul_Toplu_${new Date().toISOString().slice(0, 10)}`, 'Mal Kabul', toast);
+      setBulkDialogOpen(false);
+      setSelectedTransactions(new Set());
+    } catch (error: any) {
+      toast({ title: 'Excel oluşturulamadı', description: error?.message || 'İşlem detayları alınırken bir hata oluştu.', variant: 'destructive' });
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="mk-shell" style={{ padding: '20px 28px 40px' }}>
       <MkClayStyles />
@@ -125,6 +214,15 @@ export default function MalKabulGecmisPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={loading || allRows.length === 0}
+                onClick={() => setBulkDialogOpen(true)}
+                className="cursor-pointer transition-opacity duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ height: 46, padding: '0 18px', display: 'inline-flex', alignItems: 'center', gap: 8, border: 0, borderRadius: MK_C.radiusSm, background: `linear-gradient(180deg, ${MK_C.surfaceHi}, ${MK_C.surface2})`, boxShadow: MK_C.clay, color: MK_C.waterDeep, fontSize: 14, fontWeight: 700 }}
+              >
+                <FileSpreadsheet className="h-[18px] w-[18px]" /> Toplu İndir
+              </button>
               {brands.length > 0 && (
                 <Select value={selectedBrand} onValueChange={setSelectedBrand}>
                   <SelectTrigger className="border-0" style={{ width: 180, height: 46, background: MK_C.surface2, boxShadow: MK_C.clayInset, borderRadius: MK_C.radiusSm }}>
@@ -212,6 +310,54 @@ export default function MalKabulGecmisPage() {
 
         </div>
       </div>
+
+      <Dialog open={bulkDialogOpen} onOpenChange={open => !exporting && setBulkDialogOpen(open)}>
+        <DialogContent className="max-w-3xl border-0 p-0" style={{ borderRadius: MK_C.radiusLg, background: MK_C.surface, boxShadow: MK_C.clay }}>
+          <DialogHeader style={{ padding: '24px 28px 16px', borderBottom: `1px solid ${MK_C.line}` }}>
+            <DialogTitle className="flex items-center gap-3" style={{ color: MK_C.ink1 }}>
+              <CheckSquare className="h-5 w-5" style={{ color: MK_C.accent }} /> İşlemleri Seçin
+            </DialogTitle>
+            <DialogDescription style={{ color: MK_C.ink2 }}>
+              İndirmek istediğiniz mal kabul işlemlerini marka ve işlem tarihine göre seçin.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex items-center justify-between gap-3 px-7">
+            <span className="text-sm font-semibold" style={{ color: MK_C.ink2 }}>{selectedTransactions.size} işlem seçildi</span>
+            <button
+              type="button"
+              className="min-h-11 cursor-pointer rounded-lg px-3 text-sm font-bold focus-visible:outline-none focus-visible:ring-2"
+              style={{ color: MK_C.accent }}
+              onClick={() => setSelectedTransactions(current => current.size === allRows.length ? new Set() : new Set(allRows.map(row => row.id)))}
+            >
+              {selectedTransactions.size === allRows.length && allRows.length > 0 ? 'Seçimi Temizle' : 'Tümünü Seç'}
+            </button>
+          </div>
+
+          <div className="mx-7 max-h-[48vh] space-y-2 overflow-y-auto pr-1" role="group" aria-label="Mal kabul işlemleri">
+            {allRows.map(row => {
+              const checked = selectedTransactions.has(row.id);
+              return (
+                <label key={row.id} className="flex min-h-[60px] cursor-pointer items-center gap-4 rounded-xl px-4 py-3 transition-colors duration-200" style={{ background: checked ? `${MK_C.accent}12` : MK_C.surface2, boxShadow: checked ? `inset 0 0 0 2px ${MK_C.accent}55` : MK_C.clayFlat }}>
+                  <Checkbox checked={checked} onCheckedChange={() => toggleTransaction(row.id)} aria-label={`${row.transactionId || row.id} işlemini seç`} className="h-5 w-5" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-bold" style={{ color: MK_C.ink1 }}>{(row.brands || []).join(', ') || 'Marka belirtilmemiş'}</span>
+                    <span className="mt-1 block text-xs font-semibold" style={{ color: MK_C.ink3 }}>{row.transactionId || row.id}</span>
+                  </span>
+                  <span className="shrink-0 text-right text-sm font-semibold" style={{ color: MK_C.ink2 }}>{formatTimestamp(row.timestamp, 'dd.MM.yyyy HH:mm')}</span>
+                </label>
+              );
+            })}
+          </div>
+
+          <DialogFooter className="gap-2 px-7 pb-6 pt-2" style={{ borderTop: `1px solid ${MK_C.line}` }}>
+            <button type="button" disabled={exporting} onClick={() => setBulkDialogOpen(false)} className="min-h-11 cursor-pointer rounded-xl px-5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-50" style={{ color: MK_C.ink2, background: MK_C.surface2, boxShadow: MK_C.clayFlat }}>Vazgeç</button>
+            <button type="button" disabled={exporting || selectedTransactions.size === 0} onClick={handleBulkExport} className="min-h-11 cursor-pointer rounded-xl px-5 text-sm font-bold text-white transition-opacity duration-200 disabled:cursor-not-allowed disabled:opacity-50" style={{ background: MK_C.waterDeep, boxShadow: MK_C.clay }}>
+              {exporting ? <><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Hazırlanıyor…</> : <><Download className="mr-2 inline h-4 w-4" />Seçilenleri Excel'e İndir</>}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
