@@ -7024,3 +7024,42 @@ body > main,
 }
 /* Clay backdrop'u da global zemine bağla */
 .clay-shell-backdrop { background: var(--qc-app-bg) !important; }
+
+/* ==========================================================================
+   GLOBAL: açık moda sabitlenmiş Tailwind yardımcı sınıflarını temaya bağla.
+   Panellerin çoğunda `bg-white`, `bg-zinc-100`, `text-zinc-900` gibi sınıflar
+   `dark:` karşılığı olmadan kullanılmış; koyu modda bunlar açık kalıyordu.
+   `:not([class*="dark:"])` koşulu sayesinde, panelde zaten bilinçli bir
+   dark: varyantı varsa ona dokunulmaz — yalnızca karşılığı olmayanlar temaya
+   çekilir.
+   ========================================================================== */
+.dark .bg-white:not([class*="dark:bg-"]),
+[data-theme="dark"] .bg-white:not([class*="dark:bg-"]) {
+  background-color: var(--qc-surface-hi) !important;
+}
+.dark :is(.bg-zinc-50,.bg-zinc-100,.bg-gray-50,.bg-gray-100,.bg-slate-50,.bg-slate-100,.bg-neutral-50,.bg-neutral-100):not([class*="dark:bg-"]),
+[data-theme="dark"] :is(.bg-zinc-50,.bg-zinc-100,.bg-gray-50,.bg-gray-100,.bg-slate-50,.bg-slate-100,.bg-neutral-50,.bg-neutral-100):not([class*="dark:bg-"]) {
+  background-color: var(--qc-surface2) !important;
+}
+.dark :is(.bg-zinc-200,.bg-gray-200,.bg-slate-200,.bg-neutral-200):not([class*="dark:bg-"]),
+[data-theme="dark"] :is(.bg-zinc-200,.bg-gray-200,.bg-slate-200,.bg-neutral-200):not([class*="dark:bg-"]) {
+  background-color: var(--qc-surface-alt) !important;
+}
+.dark :is(.text-zinc-900,.text-zinc-800,.text-zinc-700,.text-gray-900,.text-gray-800,.text-slate-900,.text-slate-800,.text-neutral-900,.text-black):not([class*="dark:text-"]),
+[data-theme="dark"] :is(.text-zinc-900,.text-zinc-800,.text-zinc-700,.text-gray-900,.text-gray-800,.text-slate-900,.text-slate-800,.text-neutral-900,.text-black):not([class*="dark:text-"]) {
+  color: var(--qc-ink1) !important;
+}
+.dark :is(.text-zinc-600,.text-zinc-500,.text-gray-600,.text-gray-500,.text-slate-600,.text-slate-500):not([class*="dark:text-"]),
+[data-theme="dark"] :is(.text-zinc-600,.text-zinc-500,.text-gray-600,.text-gray-500,.text-slate-600,.text-slate-500):not([class*="dark:text-"]) {
+  color: var(--qc-ink2) !important;
+}
+.dark :is(.border-zinc-200,.border-zinc-300,.border-gray-200,.border-gray-300,.border-slate-200,.border-neutral-200):not([class*="dark:border-"]),
+[data-theme="dark"] :is(.border-zinc-200,.border-zinc-300,.border-gray-200,.border-gray-300,.border-slate-200,.border-neutral-200):not([class*="dark:border-"]) {
+  border-color: var(--qc-line) !important;
+}
+/* Beyaz üzerine tasarlanmış gradyan/karo yüzeyler */
+.dark :is(.from-white,.to-white,.via-white):not([class*="dark:"]),
+[data-theme="dark"] :is(.from-white,.to-white,.via-white):not([class*="dark:"]) {
+  --tw-gradient-from: var(--qc-surface-hi) !important;
+  --tw-gradient-to: var(--qc-surface2) !important;
+}
