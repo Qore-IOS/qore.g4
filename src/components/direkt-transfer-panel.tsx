@@ -96,21 +96,21 @@ const ManualInlineAdder = dynamic(() => import('@/components/direkt-transfer/Man
 
 // ── Cream clay design tokens (matches Siparişler panel) ──────────────────────
 const C = {
-  surface: '#FCFAF5',
-  surface2: '#F5F1E8',
-  surfaceHi: '#FFFFFF',
-  ink1: '#3D382F',
-  ink2: '#908872',
-  ink3: '#BBB2A0',
+  surface: 'var(--qc-surface)',
+  surface2: 'var(--qc-surface2)',
+  surfaceHi: 'var(--qc-surface-hi)',
+  ink1: 'var(--qc-ink1)',
+  ink2: 'var(--qc-ink2)',
+  ink3: 'var(--qc-ink3)',
   line: 'rgba(90,72,40,0.07)',
-  accent: '#C98A57',
-  accent2: '#E0B776',
+  accent: 'var(--qc-accent)',
+  accent2: 'var(--qc-accent2)',
   accentGlow: 'rgba(201,138,87,0.24)',
-  waterSolid: '#6FB585',
-  waterDeep: '#4E9E6B',
-  amber: '#E0A33E',
+  waterSolid: 'var(--qc-water-solid)',
+  waterDeep: 'var(--qc-water-deep)',
+  amber: 'var(--qc-amber)',
   amberSoft: 'rgba(224,163,62,0.16)',
-  danger: '#C0796A',
+  danger: 'var(--qc-danger)',
   radius: 24,
   radiusSm: 16,
   radiusLg: 32,
@@ -1772,7 +1772,7 @@ export default function DirektTransferPanel() {
         @keyframes dtSpin { to { transform: rotate(360deg); } }
         @keyframes dtPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         @keyframes dtRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
-        .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0; color: #3D382F; min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
+        .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: var(--qc-shell-bg); color: var(--qc-ink1); min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
         .dt-grid { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
         @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
         .dt-prod-row:hover { transform: translateY(-1px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 8px 22px -8px rgba(150,128,96,0.28), 0 2px 6px -2px rgba(150,128,96,0.14); }
@@ -1783,7 +1783,7 @@ export default function DirektTransferPanel() {
       `}</style>
 
       {/* Full-bleed cream backdrop — paneli çevreleyen gri tema zeminini örter */}
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
 
       <div className="dt-shell" style={{ maxWidth: 1680, margin: '0 auto', position: 'relative', zIndex: 1 }}>
 
@@ -1964,7 +1964,7 @@ export default function DirektTransferPanel() {
                 <DTAddTile icon={<DatabaseZap size={17} />} label="Tüm Stok" onClick={() => setShowAllStockConfirm(true)} disabled={!selectedDepotId || !transferDataReady} />
               </div>
               {isBulkScanMode && (
-                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: C.radiusSm, background: `${C.accent}14`, border: `1px solid ${C.accent}40`, fontSize: 12, fontWeight: 600, color: C.accent }}>
+                <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: C.radiusSm, background: `${C.accentA08}`, border: `1px solid ${C.accentA25}`, fontSize: 12, fontWeight: 600, color: C.accent }}>
                   Toplu barkod modu aktif — QR barkodu okutun.
                 </div>
               )}

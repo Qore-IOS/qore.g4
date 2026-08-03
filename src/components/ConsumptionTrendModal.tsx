@@ -230,7 +230,7 @@ export default function ConsumptionTrendModal({
         <DialogHeader className="space-y-0" style={{ padding: '20px 24px 16px', borderBottom: `1px solid ${HOME_C.line}` }}>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3" style={{ flexWrap: 'wrap' }}>
             <DialogTitle className="flex items-center gap-3" style={{ fontSize: 21, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1, margin: 0 }}>
-              <span style={{ width: 42, height: 42, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.accent, background: `${HOME_C.accent}16`, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><TrendingUp size={21} /></span>
+              <span style={{ width: 42, height: 42, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.accent, background: `${HOME_C.accentA09}`, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><TrendingUp size={21} /></span>
               Tüketim Analizi
             </DialogTitle>
             <div className="flex items-center gap-2 sm:ml-auto" style={{ flexWrap: 'wrap' }}>

@@ -8,34 +8,36 @@
 
 @layer base {
   :root {
-    /* --- LIGHT MODE: NEUMORPHIC --- */
-    --background: 48 11% 91%; /* #eae9e5 */
-    --foreground: 0 0% 20%;
-    
-    --card: 0 0% 88%;
-    --card-foreground: 0 0% 20%;
-    
-    --popover: 0 0% 88%;
-    --popover-foreground: 0 0% 20%;
-    
-    --primary: 35 90% 50%;
+    /* --- LIGHT MODE: CLAY (krem) ---
+       Tailwind renk sınıfları (bg-card, text-foreground, border-border …) bu
+       tokenlardan beslendiği için palet clay'e bağlanınca tüm uygulama clay olur. */
+    --background: 40 32% 91%;      /* --qc-bg0  #EFEAE0 */
+    --foreground: 39 13% 21%;      /* --qc-ink1 #3D382F */
+
+    --card: 43 54% 97%;            /* --qc-surface  #FCFAF5 */
+    --card-foreground: 39 13% 21%;
+
+    --popover: 43 54% 97%;
+    --popover-foreground: 39 13% 21%;
+
+    --primary: 27 51% 56%;         /* --qc-accent #C98A57 */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 80%;
-    --secondary-foreground: 0 0% 20%;
-    
-    --muted: 0 0% 80%;
-    --muted-foreground: 0 0% 40%;
-    
-    --accent: 0 0% 85%;
-    --accent-foreground: 0 0% 20%;
-    
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    
-    --border: 0 0% 80%;
-    --input: 0 0% 88%;
-    --ring: 35 90% 50%;
+    --secondary: 42 39% 94%;       /* --qc-surface2 #F5F1E8 */
+    --secondary-foreground: 39 13% 21%;
+
+    --muted: 42 39% 94%;
+    --muted-foreground: 44 12% 51%; /* --qc-ink2 */
+
+    --accent: 37 63% 67%;          /* --qc-accent2 #E0B776 */
+    --accent-foreground: 39 13% 21%;
+
+    --destructive: 10 41% 58%;     /* --qc-danger #C0796A */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 40 17% 82%;
+    --input: 0 0% 100%;            /* --qc-surface-hi */
+    --ring: 27 51% 56%;
     
     --radius: 1rem;
 
@@ -82,34 +84,34 @@
   }
 
   .dark {
-    /* --- DARK MODE: LIQUID GLASS --- */
-    --background: 0 0% 0%; /* Pure Black for bg */
-    --foreground: 0 0% 98%;
+    /* --- DARK MODE: CLAY (siyah/grafit + bronz) --- */
+    --background: 0 0% 5%;         /* --qc-bg0 #0C0C0C */
+    --foreground: 35 40% 91%;      /* --qc-ink1 #F1E9DE */
 
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 98%;
+    --card: 40 6% 10%;             /* --qc-surface #1A1917 */
+    --card-foreground: 35 40% 91%;
 
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 98%;
+    --popover: 40 6% 10%;
+    --popover-foreground: 35 40% 91%;
 
-    --primary: 35 90% 50%;
+    --primary: 30 51% 54%;         /* --qc-accent #C68A4E */
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 98%;
+    --secondary: 30 5% 7%;         /* --qc-surface2 #141312 */
+    --secondary-foreground: 35 40% 91%;
 
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 65%;
+    --muted: 30 6% 13%;            /* --qc-surface-hi */
+    --muted-foreground: 33 23% 61%; /* --qc-ink2 */
 
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 98%;
+    --accent: 34 67% 63%;          /* --qc-accent2 #E0A860 */
+    --accent-foreground: 0 0% 8%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
+    --destructive: 12 48% 65%;     /* --qc-danger #D08A79 */
+    --destructive-foreground: 0 0% 8%;
 
-    --border: 0 0% 20%;
-    --input: 0 0% 15%;
-    --ring: 35 90% 50%;
+    --border: 34 20% 22%;
+    --input: 30 6% 13%;
+    --ring: 30 51% 54%;
 
     /* Dashboard neumorphic tokens (dark mode) */
     --dashboard-bg: #000000;
@@ -153,9 +155,7 @@
 
     /* Shell / page background */
     .cihaz-shell {
-      background:
-        radial-gradient(1200px 600px at 20% 0%, rgba(255,255,255,.50), transparent 60%),
-        linear-gradient(var(--dashboard-bg), #E4E2DE);
+      background: transparent;
       color: var(--dashboard-text);
       min-height: 100dvh;
     }
@@ -513,8 +513,8 @@
       color: var(--dashboard-text);
       font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
       background:
-        radial-gradient(120% 80% at 8% -5%, #F6F2EA 0%, transparent 55%),
-        radial-gradient(120% 80% at 100% 100%, #E8E1D2 0%, transparent 55%),
+        radial-gradient(120% 80% at 8% -5%, var(--qc-glow-1) 0%, transparent 55%),
+        radial-gradient(120% 80% at 100% 100%, var(--qc-glow-2) 0%, transparent 55%),
         var(--dashboard-bg) !important;
       -webkit-font-smoothing: antialiased;
     }
@@ -5667,11 +5667,8 @@ body:has(.fault-clay-page) .page-shell {
   z-index: 1;
   min-height: 100vh;
   font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
-  color: #3D382F;
-  background:
-    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
-    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
-    #EFEAE0;
+  color: var(--qc-ink1);
+  background: transparent;   /* zemin global html katmanından gelir */
   -webkit-font-smoothing: antialiased;
 }
 
@@ -5682,10 +5679,7 @@ body:has(.fault-clay-page) .page-shell {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background:
-    linear-gradient(120deg, #F6F2EA 0%, transparent 55%),
-    linear-gradient(225deg, #E8E1D2 0%, transparent 55%),
-    #EFEAE0;
+  background: var(--qc-shell-bg);
 }
 
 /* page-shell'in yan boşluğunu (md:px-3) ve genişlik sınırını kaldırarak panel
@@ -5710,7 +5704,7 @@ body:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
   html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell),
   html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) main,
   html:not(.dark) body.qore-global-window-chrome:has(.clay-shell, .mk-shell, .dt-shell, .sp-shell) .page-shell {
-    background: #EFEAE0 !important;
+    background: transparent !important;
   }
 }
 
@@ -6816,3 +6810,217 @@ html.dark body.mg-edge-body {
     transform: translate(-50%, -50%) scale(1);
   }
 }
+
+/* ==========================================================================
+   QORE Clay tema tokenları (global) — açık mod + koyu mod
+   --------------------------------------------------------------------------
+   Clay panellerinin paleti (MK_C / HOME_C ve panel kopyaları) artık bu
+   değişkenleri okur; tema değişince tüm paneller tek noktadan yeniden renklenir.
+   Koyu mod: siyah/koyu gri zemin + bronz detaylar.
+   next-themes attribute="class" kullandığı için .dark; demo koduyla uyum için
+   [data-theme="dark"] de desteklenir.
+   ========================================================================== */
+:root {
+  --qc-bg0: #EFEAE0;
+  --qc-surface: #FCFAF5;
+  --qc-surface2: #F5F1E8;
+  --qc-surface-hi: #FFFFFF;
+  --qc-ink1: #3D382F;
+  --qc-ink2: #908872;
+  --qc-ink3: #BBB2A0;
+  --qc-line: rgba(90, 72, 40, 0.07);
+  --qc-accent: #C98A57;
+  --qc-accent2: #E0B776;
+  --qc-accent-glow: rgba(201, 138, 87, 0.24);
+  --qc-water-solid: #6FB585;
+  --qc-water-deep: #4E9E6B;
+  --qc-amber: #E0A33E;
+  --qc-amber-soft: rgba(224, 163, 62, 0.16);
+  --qc-danger: #C0796A;
+  --qc-sky: #7CA8DE;
+  --qc-sky-deep: #5582C0;
+  --qc-violet: #9B86D6;
+  --qc-violet-deep: #7A66C0;
+  --qc-clay: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16);
+  --qc-clay-press: inset 0 2px 5px rgba(178,160,128,0.32), inset 0 -1px 0 rgba(255,255,255,0.6), 0 2px 6px -4px rgba(150,128,96,0.2);
+  --qc-clay-inset: inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55);
+  --qc-clay-flat: inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28);
+  --qc-shell-bg: linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), #EFEAE0;
+}
+
+.dark,
+[data-theme="dark"] {
+  --qc-bg0: #0C0C0C;
+  --qc-surface: #1A1917;
+  --qc-surface2: #141312;
+  --qc-surface-hi: #242220;
+  --qc-ink1: #F1E9DE;
+  --qc-ink2: #B39F86;
+  --qc-ink3: #6E6355;
+  --qc-line: rgba(197, 150, 90, 0.12);
+  --qc-accent: #C68A4E;
+  --qc-accent2: #E0A860;
+  --qc-accent-glow: rgba(198, 138, 78, 0.34);
+  --qc-water-solid: #78A684;
+  --qc-water-deep: #8FBF9C;
+  --qc-amber: #E0A860;
+  --qc-amber-soft: rgba(224, 168, 96, 0.20);
+  --qc-danger: #D08A79;
+  --qc-sky: #7FA3CC;
+  --qc-sky-deep: #9CBBE0;
+  --qc-violet: #9E8FD0;
+  --qc-violet-deep: #B3A6E0;
+  --qc-clay: inset 0 1px 1px rgba(212,170,110,0.08), inset 0 -3px 8px rgba(0,0,0,0.5), 0 12px 26px -12px rgba(0,0,0,0.78), 0 2px 6px -2px rgba(0,0,0,0.6);
+  --qc-clay-press: inset 0 2px 7px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(212,170,110,0.06), 0 2px 6px -4px rgba(0,0,0,0.5);
+  --qc-clay-inset: inset 0 2px 7px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(212,170,110,0.07);
+  --qc-clay-flat: inset 0 1px 1px rgba(212,170,110,0.07), 0 5px 14px -8px rgba(0,0,0,0.65);
+  --qc-shell-bg: radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%), radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%), #0C0C0C;
+}
+
+/* Koyu modda sayfa zemini: siyah taban + sıcak bronz ışıma */
+.dark body,
+[data-theme="dark"] body {
+  background:
+    radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%),
+    radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%),
+    var(--qc-bg0);
+}
+.dark .clay-shell,
+[data-theme="dark"] .clay-shell {
+  background: transparent;
+}
+.dark *::-webkit-scrollbar-thumb,
+[data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
+.dark input, .dark textarea,
+[data-theme="dark"] input, [data-theme="dark"] textarea { color: var(--qc-ink1); }
+.dark input::placeholder, .dark textarea::placeholder,
+[data-theme="dark"] input::placeholder, [data-theme="dark"] textarea::placeholder { color: var(--qc-ink3); }
+
+/* ==========================================================================
+   Clay = GLOBAL varsayılan.
+   shadcn/Radix primitifleri (modal, seçici, açılır menü, popover, input, buton,
+   kart) panel panel değiştirilmeden clay görünüme çekilir. Renkler zaten
+   --qc-* → shadcn token eşlemesinden gelir; burada yalnızca clay formu
+   (yumuşak yükselti, iç gölge, yuvarlaklık) uygulanır.
+   ========================================================================== */
+
+/* Modal / popover / açılır menü / komut paleti yüzeyleri */
+[role="dialog"][data-state],
+[data-radix-popper-content-wrapper] > * {
+  border-radius: var(--qc-radius-lg, 26px) !important;
+  border: 1px solid var(--qc-line) !important;
+  background: linear-gradient(180deg, var(--qc-surface) 0%, var(--qc-surface2) 100%) !important;
+  box-shadow: var(--qc-clay) !important;
+  color: var(--qc-ink1);
+}
+/* Modal arka planı: clay'e uygun yumuşak karartma */
+[data-radix-dialog-overlay],
+[data-radix-alert-dialog-overlay] {
+  background: color-mix(in srgb, var(--qc-bg0) 62%, transparent) !important;
+  backdrop-filter: blur(6px);
+}
+
+/* Seçici / input / textarea — clay iç gölge */
+button[role="combobox"],
+[data-radix-select-trigger],
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.tv-cell-input):not(.qlogin input),
+textarea,
+[cmdk-input] {
+  border-radius: var(--qc-radius-sm, 14px);
+  background: var(--qc-surface-hi);
+  box-shadow: var(--qc-clay-inset);
+  border: 1px solid transparent;
+  color: var(--qc-ink1);
+}
+button[role="combobox"]:focus-visible,
+input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--qc-accent);
+  outline-offset: -1px;
+}
+
+/* Seçici seçenekleri */
+[data-radix-select-item],
+[role="option"],
+[role="menuitem"] {
+  border-radius: 10px;
+}
+[data-radix-select-item][data-highlighted],
+[role="option"][data-highlighted],
+[role="menuitem"][data-highlighted] {
+  background: color-mix(in srgb, var(--qc-accent) 14%, transparent) !important;
+  color: var(--qc-ink1) !important;
+  outline: none;
+}
+
+/* Butonlar — clay yükselti; birincil buton bronz gradyan */
+.dark button, button { -webkit-tap-highlight-color: transparent; }
+button:is(.bg-primary, [data-variant="default"]) {
+  background: linear-gradient(180deg, var(--qc-accent2), var(--qc-accent)) !important;
+  color: #fff !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 10px 20px -10px var(--qc-accent-glow) !important;
+  border: none !important;
+}
+button:is(.bg-secondary, .bg-muted, [data-variant="secondary"]),
+button:is([data-variant="outline"]) {
+  background: linear-gradient(180deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  box-shadow: var(--qc-clay-flat) !important;
+  border: 1px solid var(--qc-line) !important;
+  color: var(--qc-ink1) !important;
+}
+
+/* Kartlar / tablo yüzeyleri */
+.rounded-lg.border.bg-card,
+.bg-card {
+  background: linear-gradient(180deg, var(--qc-surface) 0%, var(--qc-surface2) 100%) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay);
+  border-radius: var(--qc-radius, 22px);
+}
+
+/* Clay ölçü tokenları */
+:root { --qc-radius: 22px; --qc-radius-sm: 14px; --qc-radius-lg: 26px; }
+
+/* ==========================================================================
+   GLOBAL ZEMİN — tek kaynak.
+   Zemin <html> üzerinde ve `background-attachment: fixed` ile durur; böylece
+   sayfa ne kadar uzun olursa olsun ekranı baştan sona sarar ve en alta
+   inildiğinde farklı bir renk/gradyan görünmez. body ve ara sarmalayıcılar
+   şeffaftır ki zemin tek katmandan boyansın (aksi halde panel altlarında
+   beyaz/siyah geçiş şeridi oluşuyordu).
+   ========================================================================== */
+:root { --qc-app-bg: var(--qc-bg0); --qc-glow-1: var(--qc-glow-1); --qc-glow-2: var(--qc-glow-2); }
+.dark, [data-theme="dark"] {
+  --qc-surface-alt: #201E1B;
+  --qc-glow-1: #2A1E11;
+  --qc-glow-2: #211A12;
+  --qc-app-bg:
+    radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%),
+    radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%),
+    var(--qc-bg0);
+}
+
+html {
+  min-height: 100%;
+  background: var(--qc-app-bg);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  background-size: cover;
+}
+body {
+  background: transparent !important;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+/* Sayfa sarmalayıcıları zemini tekrar boyamasın (dip seams / gradyan şeridi) */
+body > main,
+.page-shell,
+.clay-shell,
+.mk-shell,
+.dt-shell,
+.sp-shell,
+.cihaz-shell {
+  background: transparent !important;
+}
+/* Clay backdrop'u da global zemine bağla */
+.clay-shell-backdrop { background: var(--qc-app-bg) !important; }

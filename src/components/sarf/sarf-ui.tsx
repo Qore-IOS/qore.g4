@@ -173,7 +173,7 @@ export const QrBox = ({ value, size = 92, dim }: { value: string; size?: number;
   return (
     <div style={{
       width: size + 18, height: size + 18, flexShrink: 0,
-      borderRadius: 14, background: '#FFFFFF',
+      borderRadius: 14, background: 'var(--qc-surface-hi)',
       boxShadow: 'var(--sarf-clay-soft)',
       display: 'grid', placeItems: 'center',
       opacity: dim ? 0.5 : 1, filter: dim ? 'grayscale(0.4)' : 'none',

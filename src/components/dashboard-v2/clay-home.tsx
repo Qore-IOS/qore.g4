@@ -13,10 +13,10 @@ import { MK_C } from '@/components/mal-kabul/clay-kit';
 const C = MK_C;
 export const HOME_C = {
   ...C,
-  sky: '#7CA8DE',
-  skyDeep: '#5582C0',
-  violet: '#9B86D6',
-  violetDeep: '#7A66C0',
+  sky: 'var(--qc-sky)',
+  skyDeep: 'var(--qc-sky-deep)',
+  violet: 'var(--qc-violet)',
+  violetDeep: 'var(--qc-violet-deep)',
   ease: 'cubic-bezier(.22, 1, .36, 1)',
 };
 
@@ -336,7 +336,7 @@ export function CardHead({ ico, title, tone, right, flush, onLight }: {
   ico: React.ReactNode; title: string; tone?: 'accent' | 'amber' | 'ok' | 'sky' | 'violet'; right?: React.ReactNode; flush?: boolean; onLight?: boolean;
 }) {
   const map: Record<string, { c: string; bg: string }> = {
-    accent: { c: C.accent, bg: `${C.accent}16` },
+    accent: { c: C.accent, bg: `${C.accentA09}` },
     amber: { c: C.amber, bg: C.amberSoft },
     ok: { c: C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
     sky: { c: HOME_C.skyDeep, bg: 'rgba(124,168,222,0.16)' },

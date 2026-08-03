@@ -146,7 +146,7 @@ export default function TransferGecmisPanel() {
 
   return (
     <>
-      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0', zIndex: 0 }} />
+      <div aria-hidden style={{ position: 'fixed', inset: 0, background: 'linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), var(--qc-bg0)', zIndex: 0 }} />
       <div className="mk-shell" style={{ padding: '20px 28px 40px', position: 'relative', zIndex: 1 }}>
       <MkClayStyles />
       <div style={{ maxWidth: 1680, margin: '0 auto' }}>
