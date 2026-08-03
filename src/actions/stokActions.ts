@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminDb } from '@/lib/firebase-admin';
+import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '@/lib/firebase';
 import type { DepoStokItem } from '@/lib/types';
@@ -22,7 +22,8 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
-import { filterByCompanyScope, matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
+import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -167,9 +168,9 @@ export async function getDepotSerialIndex(
         seriNumarasi?: string;
         companyId?: string | null;
       };
-      // Defense-in-depth company scoping (mirrors filterByCompanyScope, but
-      // per-item so we never materialize an intermediate array).
-      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      // Match the strict company-scoped query used by Depo Sayım so legacy or
+      // other-company rows cannot inflate the serial index.
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
       const stokKodu = data.stokKodu;
       const serial = data.seriNumarasi;
       if (!stokKodu || !serial) return;
@@ -198,7 +199,7 @@ export async function getDepotSerialIndex(
  * that was downloading full documents through IndexedDB, causing 10–15s load times.
  *
  * Only the 9 fields needed for scan lookup + transfer creation are fetched.
- * `isShipped == true` items are filtered server-side to further cut payload.
+ * Rows are then filtered to the exact Depo Sayım company scope and availability rule.
  */
 export async function getDepotStockForTransfer(
   depotId: string,
@@ -216,7 +217,7 @@ export async function getDepotStockForTransfer(
     const items: DepoStokItem[] = [];
     snap.forEach((docSnap) => {
       const data = docSnap.data() as Record<string, any>;
-      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
       if (data.isShipped === true) return;
       let miad = data.miad;
       if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
@@ -1205,6 +1206,136 @@ export interface PaginatedStockResult {
   };
 }
 
+export interface DuplicateSerialCleanupResult {
+  duplicateSerialCount: number;
+  deletedDocumentCount: number;
+  removedUnitCount: number;
+  removedProducts: Array<{
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi: string;
+    removedUnitCount: number;
+    serials: string[];
+  }>;
+}
+
+/**
+ * Removes duplicate serial-number documents from one depot.
+ *
+ * The oldest company-scoped document is retained for each serial and normalized
+ * to one unit; every additional document carrying that serial is deleted. Empty
+ * serials and explicitly shipped rows are ignored.
+ */
+export async function cleanupDuplicateDepotSerials(params: {
+  depotId: string;
+  idToken: string;
+}): Promise<DuplicateSerialCleanupResult> {
+  const { depotId, idToken } = params;
+  const empty: DuplicateSerialCleanupResult = {
+    duplicateSerialCount: 0,
+    deletedDocumentCount: 0,
+    removedUnitCount: 0,
+    removedProducts: [],
+  };
+  if (!depotId) return empty;
+
+  const decoded = await adminAuth.verifyIdToken(idToken);
+  const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
+  const userData = userSnap.data() as Record<string, any> | undefined;
+  const role = String(decoded.role ?? userData?.role ?? '');
+  const allowedRoles = new Set(['admin', 'super_admin', 'admin_developer']);
+  if (!allowedRoles.has(role)) throw new Error('Bu işlem için yönetici yetkisi gereklidir.');
+  const isSuperAdmin = role === 'super_admin' || role === 'admin_developer';
+  const companyId = String(decoded.companyId ?? userData?.companyId ?? '').trim() || null;
+
+  const snapshot = await adminDb.collection('depoStok')
+    .where('depotId', '==', depotId)
+    .select('seriNumarasi', 'stokKodu', 'stokAdi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'eklenmeTarihi')
+    .get();
+
+  const bySerial = new Map<string, AdminDocSnap[]>();
+  for (const docSnap of snapshot.docs as AdminDocSnap[]) {
+    const data = docSnap.data() as Record<string, any>;
+    if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) continue;
+    if (!isAvailableDepotStock(data)) continue;
+    const serial = String(data.seriNumarasi ?? '').trim();
+    if (!serial) continue;
+    const docs = bySerial.get(serial) ?? [];
+    docs.push(docSnap);
+    bySerial.set(serial, docs);
+  }
+
+  const timestampMillis = (value: any): number => {
+    if (typeof value?.toMillis === 'function') return value.toMillis();
+    if (typeof value?.seconds === 'number') return value.seconds * 1000;
+    const parsed = new Date(value ?? 0).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const operations: Array<{ type: 'delete' | 'normalize'; ref: FirebaseFirestore.DocumentReference }> = [];
+  let duplicateSerialCount = 0;
+  let deletedDocumentCount = 0;
+  let removedUnitCount = 0;
+  const removedByProduct = new Map<string, DuplicateSerialCleanupResult['removedProducts'][number]>();
+  const recordRemoval = (docSnap: AdminDocSnap, units: number) => {
+    if (units <= 0) return;
+    const data = docSnap.data() as Record<string, any>;
+    const stokKodu = String(data.stokKodu ?? '').trim() || 'Tanımsız';
+    const stokAdi = String(data.stokAdi ?? '').trim() || stokKodu;
+    const lotNumarasi = String(data.lotNumarasi ?? '').trim();
+    const serial = String(data.seriNumarasi ?? '').trim();
+    const key = `${stokKodu}\u0000${stokAdi}\u0000${lotNumarasi}`;
+    const detail = removedByProduct.get(key) ?? {
+      stokKodu, stokAdi, lotNumarasi, removedUnitCount: 0, serials: [],
+    };
+    detail.removedUnitCount += units;
+    if (serial && !detail.serials.includes(serial)) detail.serials.push(serial);
+    removedByProduct.set(key, detail);
+  };
+
+  for (const docs of bySerial.values()) {
+    const representedUnits = docs.reduce((sum, docSnap) => sum + getStockItemQuantity(docSnap.data()), 0);
+    if (representedUnits <= 1) continue;
+    duplicateSerialCount += 1;
+    docs.sort((a, b) => {
+      const timeDiff = timestampMillis(a.data().eklenmeTarihi) - timestampMillis(b.data().eklenmeTarihi);
+      return timeDiff || a.id.localeCompare(b.id);
+    });
+    const [keeper, ...duplicates] = docs;
+    const keeperQty = getStockItemQuantity(keeper.data());
+    if (keeperQty !== 1) {
+      operations.push({ type: 'normalize', ref: keeper.ref });
+      removedUnitCount += keeperQty - 1;
+      recordRemoval(keeper, keeperQty - 1);
+    }
+    for (const duplicate of duplicates) {
+      operations.push({ type: 'delete', ref: duplicate.ref });
+      deletedDocumentCount += 1;
+      const duplicateQty = getStockItemQuantity(duplicate.data());
+      removedUnitCount += duplicateQty;
+      recordRemoval(duplicate, duplicateQty);
+    }
+  }
+
+  for (let i = 0; i < operations.length; i += 450) {
+    const batch = adminDb.batch();
+    for (const operation of operations.slice(i, i + 450)) {
+      if (operation.type === 'delete') batch.delete(operation.ref);
+      else batch.update(operation.ref, { adet: 1 });
+    }
+    await batch.commit();
+  }
+
+  return {
+    duplicateSerialCount,
+    deletedDocumentCount,
+    removedUnitCount,
+    removedProducts: Array.from(removedByProduct.values()).sort((a, b) =>
+      a.stokAdi.localeCompare(b.stokAdi, 'tr') || a.lotNumarasi.localeCompare(b.lotNumarasi, 'tr'),
+    ),
+  };
+}
+
 /**
  * Server-side paginated + grouped depot stock.
  * Groups individual DepoStokItem docs by (stokKodu, lotNumarasi, miad).
@@ -1280,22 +1411,21 @@ export async function getPaginatedDepotStock(params: {
       } as unknown as DepoStokItem));
     }
   } else {
-    // Fetch stock + depot rules + product catalog in parallel using Admin SDK
+    // Query by depot, then apply the exact company scope used by Depo Sayım and
+    // treat every company-owned document not explicitly shipped as available.
     const [snapshot, rules, products] = await Promise.all([
       adminDb.collection('depoStok')
         .where('depotId', '==', depotId)
-        .where('isShipped', '==', false)
         .get(),
       adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
       adminDb.collection('productCodes').get(),
     ]);
     rulesSnap = rules;
     productsSnap = products;
-    allItems = filterByCompanyScope(
-      snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-      companyId,
-      isSuperAdmin,
-    );
+    allItems = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+      .filter(item => matchesScopedQueryCompany(item, companyId, isSuperAdmin))
+      .filter(isAvailableDepotStock);
   }
 
   // Build helper maps from the side-loaded master data

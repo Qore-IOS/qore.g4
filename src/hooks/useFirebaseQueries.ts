@@ -52,6 +52,7 @@ import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { isAvailableDepotStock } from '@/lib/stock-quantity';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -1026,7 +1027,9 @@ export function usePaginatedDepotStock(params: {
 }
 
 /**
- * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
+ * Available depot stock filtered by depotId, then by `isShipped !== true`.
+ * The client-side status filter intentionally includes company-owned documents
+ * where `isShipped` is missing; Firestore's equality filter would omit them.
  * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
  * Returns ALL un-shipped items for the depot (no client-side cap).
  */
@@ -1036,18 +1039,11 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      // Legacy-aware fetch — see useDepoStokByDepot. Keeps __legacy__/untagged
-      // depot stock visible to company users instead of being dropped by the
-      // server-side companyId filter.
-      const docs = await getScopedDocs(
-        'depoStok',
-        currentCompanyId,
-        isSuperAdmin,
-        where('depotId', '==', depotId),
-        where('isShipped', '==', false),
-      );
-      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
-      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+      const snap = await getDocs(scopedQuery(
+        'depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return items.filter(isAvailableDepotStock);
     },
     enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
