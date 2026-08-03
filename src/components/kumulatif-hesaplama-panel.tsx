@@ -16,6 +16,7 @@ import {
   X,
   XCircle,
   FileSpreadsheet,
+  Filter,
 } from 'lucide-react';
 import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch, getDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
@@ -84,6 +85,11 @@ export default function KumulatifHesaplamaPanel() {
   const [anchor, setAnchor] = useState<string | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const combineMode = anchor !== null;
+
+  // "Sadece boş olanları göster": kayıtlı dönemde tüm değerleri 0 olan (boş kalan)
+  // testleri süzer. Bu mod açıkken doldurma işlemleri yalnızca boş testlere yazar,
+  // önceden doldurulmuş verilere dokunmaz.
+  const [showOnlyEmpty, setShowOnlyEmpty] = useState(false);
 
   const hospitalName = useMemo(
     () => hospitals.find((h) => h.id === hospitalId)?.name || '',
@@ -671,7 +677,12 @@ export default function KumulatifHesaplamaPanel() {
         if (!isCounter && !isCounterPlus) {
           return row;
         }
-        
+
+        // "Sadece boş" modunda önceden doldurulmuş satırlara dokunma.
+        if (showOnlyEmpty && !isAllZero(row)) {
+          return row;
+        }
+
         const sutKodu = productToSutCodeMap.get(row.stokKodu);
         let counterVal = 0;
         let matched = false;
@@ -759,6 +770,11 @@ export default function KumulatifHesaplamaPanel() {
       }
     })();
   }, [currentCompanyId, isSuperAdmin]);
+
+  // Lab/dönem/filtre değişince "sadece boş" modunu sıfırla.
+  useEffect(() => {
+    setShowOnlyEmpty(false);
+  }, [hospitalId, month, year, brandFilter, productGroupFilter]);
 
   useEffect(() => {
     if (!hospitalId || !currentCompanyId) {
@@ -867,7 +883,8 @@ export default function KumulatifHesaplamaPanel() {
     }
     setError(null);
     setIsParsing(true);
-    setRows([]);
+    // "Sadece boş" modunda mevcut kayıtlı satırlar korunur (üzerine boş liste yazılmaz).
+    if (!showOnlyEmpty) setRows([]);
     setUnmatchedTests([]);
     cancelCombine();
     try {
@@ -906,7 +923,26 @@ export default function KumulatifHesaplamaPanel() {
           matchedTests: matches.map((match) => match.test),
         };
       });
-      setRows(matched);
+      if (showOnlyEmpty && rows.length > 0) {
+        // Sadece boş testleri dosyadan doldur; önceden dolu satırlara dokunma.
+        const fileByStok = new Map(matched.map((m) => [m.stokKodu, m]));
+        setRows(rows.map((base) => {
+          if (!isAllZero(base)) return base;              // dolu satır korunur
+          const fileRow = fileByStok.get(base.stokKodu);
+          if (!fileRow || isAllZero(fileRow)) return base; // dosyada veri yoksa boş kalır
+          return {
+            ...base,
+            routine: fileRow.routine,
+            rerun: fileRow.rerun,
+            calib: fileRow.calib,
+            control: fileRow.control,
+            total: fileRow.total,
+            matchedTests: fileRow.matchedTests,
+          };
+        }));
+      } else {
+        setRows(matched);
+      }
       setUnmatchedTests(aggregated.filter((row) => !usedTestKeys.has(normalizeTestName(row.test))));
       if (aggregated.length === 0) {
         setError('Geçerli veri satırı çıkarılamadı. Dosya içeriğini ve biçimini kontrol edin.');
@@ -978,6 +1014,10 @@ export default function KumulatifHesaplamaPanel() {
   const isAllZero = (r: CumulativeRow) =>
     !r.routine && !r.rerun && !r.calib && !r.control && !r.total;
   const hasZeroRows = useMemo(() => rows.some(isAllZero), [rows]);
+
+  // Tablodaki boş (tüm değerleri 0) satırlar ve "sadece boş" modunda gösterilecek liste.
+  const emptyRows = visibleRows.filter(isAllZero);
+  const displayRows = showOnlyEmpty && emptyRows.length > 0 ? emptyRows : visibleRows;
   function removeZeroRows() {
     setRows((prev) => prev.filter((r) => !isAllZero(r)));
     cancelCombine();
@@ -1394,6 +1434,20 @@ export default function KumulatifHesaplamaPanel() {
             </SoftBtn>
             {hasComputed && (
               <>
+                {hasZeroRows && (
+                  <SoftBtn
+                    onClick={() => setShowOnlyEmpty((v) => !v)}
+                    disabled={combineMode}
+                    style={{
+                      borderColor: showOnlyEmpty ? AC.primary : undefined,
+                      background: showOnlyEmpty ? 'rgba(224,163,62,0.10)' : undefined,
+                      color: showOnlyEmpty ? AC.primary : undefined,
+                    }}
+                  >
+                    {showOnlyEmpty ? <CheckCircle size={17} /> : <Filter size={17} />}
+                    Sadece Boş Olanları Göster{emptyRows.length ? ` (${emptyRows.length})` : ''}
+                  </SoftBtn>
+                )}
                 <SoftBtn onClick={removeZeroRows} disabled={!hasZeroRows || combineMode}>
                   <Trash2 size={17} /> 0 Olanları Kaldır
                 </SoftBtn>
@@ -1459,7 +1513,7 @@ export default function KumulatifHesaplamaPanel() {
           {visibleRows.length > 0 ? (
             <div style={{ marginTop: 22 }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
-                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.ink1 }}>Ürün Bazlı Kümülatif Eşleşmeler ({visibleRows.length} ürün)</h3>
+                <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.ink1 }}>Ürün Bazlı Kümülatif Eşleşmeler ({displayRows.length}{showOnlyEmpty && emptyRows.length > 0 ? ' boş' : ''} ürün)</h3>
                 <span style={{ fontSize: 13, fontWeight: 600, color: C.ink2 }}>
                   {hospitalName ? `${hospitalName} – ${MONTHS[month].label} ${year}` : `${MONTHS[month].label} ${year}`}
                   {combineMode && ' • Birleştirme modu: ana teste eklenecek testleri seçin.'}
@@ -1485,7 +1539,7 @@ export default function KumulatifHesaplamaPanel() {
                       </tr>
                     </thead>
                     <tbody>
-                      {visibleRows.map((r) => {
+                      {displayRows.map((r) => {
                         const isAnchor = combineMode && anchor === r.test;
                         const isPickable = combineMode && !isAnchor;
                         const isPicked = picked.has(r.test);
