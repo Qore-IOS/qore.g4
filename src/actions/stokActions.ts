@@ -1210,6 +1210,13 @@ export interface DuplicateSerialCleanupResult {
   duplicateSerialCount: number;
   deletedDocumentCount: number;
   removedUnitCount: number;
+  removedProducts: Array<{
+    stokKodu: string;
+    stokAdi: string;
+    lotNumarasi: string;
+    removedUnitCount: number;
+    serials: string[];
+  }>;
 }
 
 /**
@@ -1224,7 +1231,12 @@ export async function cleanupDuplicateDepotSerials(params: {
   idToken: string;
 }): Promise<DuplicateSerialCleanupResult> {
   const { depotId, idToken } = params;
-  const empty = { duplicateSerialCount: 0, deletedDocumentCount: 0, removedUnitCount: 0 };
+  const empty: DuplicateSerialCleanupResult = {
+    duplicateSerialCount: 0,
+    deletedDocumentCount: 0,
+    removedUnitCount: 0,
+    removedProducts: [],
+  };
   if (!depotId) return empty;
 
   const decoded = await adminAuth.verifyIdToken(idToken);
@@ -1238,7 +1250,7 @@ export async function cleanupDuplicateDepotSerials(params: {
 
   const snapshot = await adminDb.collection('depoStok')
     .where('depotId', '==', depotId)
-    .select('seriNumarasi', 'adet', 'isShipped', 'companyId', 'eklenmeTarihi')
+    .select('seriNumarasi', 'stokKodu', 'stokAdi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'eklenmeTarihi')
     .get();
 
   const bySerial = new Map<string, AdminDocSnap[]>();
@@ -1264,6 +1276,22 @@ export async function cleanupDuplicateDepotSerials(params: {
   let duplicateSerialCount = 0;
   let deletedDocumentCount = 0;
   let removedUnitCount = 0;
+  const removedByProduct = new Map<string, DuplicateSerialCleanupResult['removedProducts'][number]>();
+  const recordRemoval = (docSnap: AdminDocSnap, units: number) => {
+    if (units <= 0) return;
+    const data = docSnap.data() as Record<string, any>;
+    const stokKodu = String(data.stokKodu ?? '').trim() || 'Tanımsız';
+    const stokAdi = String(data.stokAdi ?? '').trim() || stokKodu;
+    const lotNumarasi = String(data.lotNumarasi ?? '').trim();
+    const serial = String(data.seriNumarasi ?? '').trim();
+    const key = `${stokKodu}\u0000${stokAdi}\u0000${lotNumarasi}`;
+    const detail = removedByProduct.get(key) ?? {
+      stokKodu, stokAdi, lotNumarasi, removedUnitCount: 0, serials: [],
+    };
+    detail.removedUnitCount += units;
+    if (serial && !detail.serials.includes(serial)) detail.serials.push(serial);
+    removedByProduct.set(key, detail);
+  };
 
   for (const docs of bySerial.values()) {
     const representedUnits = docs.reduce((sum, docSnap) => sum + getStockItemQuantity(docSnap.data()), 0);
@@ -1278,11 +1306,14 @@ export async function cleanupDuplicateDepotSerials(params: {
     if (keeperQty !== 1) {
       operations.push({ type: 'normalize', ref: keeper.ref });
       removedUnitCount += keeperQty - 1;
+      recordRemoval(keeper, keeperQty - 1);
     }
     for (const duplicate of duplicates) {
       operations.push({ type: 'delete', ref: duplicate.ref });
       deletedDocumentCount += 1;
-      removedUnitCount += getStockItemQuantity(duplicate.data());
+      const duplicateQty = getStockItemQuantity(duplicate.data());
+      removedUnitCount += duplicateQty;
+      recordRemoval(duplicate, duplicateQty);
     }
   }
 
@@ -1295,7 +1326,14 @@ export async function cleanupDuplicateDepotSerials(params: {
     await batch.commit();
   }
 
-  return { duplicateSerialCount, deletedDocumentCount, removedUnitCount };
+  return {
+    duplicateSerialCount,
+    deletedDocumentCount,
+    removedUnitCount,
+    removedProducts: Array.from(removedByProduct.values()).sort((a, b) =>
+      a.stokAdi.localeCompare(b.stokAdi, 'tr') || a.lotNumarasi.localeCompare(b.lotNumarasi, 'tr'),
+    ),
+  };
 }
 
 /**

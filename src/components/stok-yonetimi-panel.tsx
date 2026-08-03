@@ -46,6 +46,7 @@ import { ScrollArea } from './ui/scroll-area';
 import NfcStockQueryModal from './NfcStockQueryModal';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { type GroupedStockRow, type PaginatedStockResult } from '@/actions/stokActions';
+import type { DuplicateSerialCleanupResult } from '@/actions/stokActions';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import { calculateTransferSuggestions, distributeRiskyBoxes, type TransferSuggestion, type LabStockInfo } from '@/lib/rescue-transfer';
@@ -640,6 +641,7 @@ export default function StokYonetimiPanel() {
   const [isLabCountModalOpen, setIsLabCountModalOpen] = useState(false);
   const [isDuplicateCleanupOpen, setIsDuplicateCleanupOpen] = useState(false);
   const [duplicateCleanupBusy, setDuplicateCleanupBusy] = useState(false);
+  const [duplicateCleanupResult, setDuplicateCleanupResult] = useState<DuplicateSerialCleanupResult | null>(null);
   const [selectedLabsForReport, setSelectedLabsForReport] = useState<string[]>([]);
   const [activeFilters, setActiveFilters] = useState<FilterSpec[]>([]);
   const [showOnlyRiskyStock, setShowOnlyRiskyStock] = useState(false);
@@ -682,7 +684,7 @@ export default function StokYonetimiPanel() {
       });
       await touchStockMetadata();
       await paginatedQuery.refetch();
-      setIsDuplicateCleanupOpen(false);
+      setDuplicateCleanupResult(result);
       toast({
         title: result.duplicateSerialCount > 0 ? 'Mükerrer seri numaraları temizlendi' : 'Mükerrer seri numarası bulunamadı',
         description: result.duplicateSerialCount > 0
@@ -1863,7 +1865,7 @@ export default function StokYonetimiPanel() {
               {canAdjustStock && (
                 <DropdownMenuItem
                   className={cn(clayMenuItemClass, 'text-[#9A2E22] focus:text-[#9A2E22]')}
-                  onSelect={() => setIsDuplicateCleanupOpen(true)}
+                  onSelect={() => { setDuplicateCleanupResult(null); setIsDuplicateCleanupOpen(true); }}
                   disabled={!selectedDepotId || !!(depots.find(d => d.id === selectedDepotId) as any)?.ceomedEnabled}
                 >
                   <XCircle className="h-[18px] w-[18px]" /> Mükerrer Seri No Temizle
@@ -2190,29 +2192,69 @@ export default function StokYonetimiPanel() {
         deviceGroups={[]}
         allStock={rawDepotStock}
       />
-      <Dialog open={isDuplicateCleanupOpen} onOpenChange={(open) => !duplicateCleanupBusy && setIsDuplicateCleanupOpen(open)}>
+      <Dialog open={isDuplicateCleanupOpen} onOpenChange={(open) => {
+        if (duplicateCleanupBusy) return;
+        setIsDuplicateCleanupOpen(open);
+        if (!open) setDuplicateCleanupResult(null);
+      }}>
         <DialogContent className={cn('max-w-md', clayDialogClass)}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[#9A2E22]">
-              <XCircle className="h-5 w-5" /> Mükerrer seri numaralarını temizle
-            </DialogTitle>
-            <DialogDescription className="leading-6">
-              Seçili depodaki aynı seri numarasına sahip sevk edilmemiş kayıtlardan en eski olan korunur.
-              Diğer kayıtlar kalıcı olarak silinir ve ilgili stok kodu/lot adetleri otomatik güncellenir.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="rounded-2xl border border-[rgba(154,46,34,0.18)] bg-[rgba(154,46,34,0.07)] p-4 text-sm leading-6 text-[#6F3029]">
-            Bu işlem geri alınamaz. Her mükerrer seri numarasından depoda yalnızca <strong>1 adet</strong> kalır.
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDuplicateCleanupOpen(false)} disabled={duplicateCleanupBusy}>
-              İptal
-            </Button>
-            <Button variant="destructive" onClick={handleDuplicateSerialCleanup} disabled={duplicateCleanupBusy || !selectedDepotId}>
-              {duplicateCleanupBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {duplicateCleanupBusy ? 'Temizleniyor…' : 'Temizlemeyi Onayla'}
-            </Button>
-          </DialogFooter>
+          {duplicateCleanupResult ? (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-[#3F7F58]">
+                  <CheckCircle2 className="h-5 w-5" /> İşlem detayları
+                </DialogTitle>
+                <DialogDescription>
+                  {duplicateCleanupResult.duplicateSerialCount} mükerrer seri numarası işlendi ve toplam {duplicateCleanupResult.removedUnitCount} adet stoktan düşüldü.
+                </DialogDescription>
+              </DialogHeader>
+              {duplicateCleanupResult.removedProducts.length > 0 ? (
+                <ScrollArea className="max-h-[52vh] pr-3">
+                  <div className="space-y-2">
+                    {duplicateCleanupResult.removedProducts.map((item) => (
+                      <div key={`${item.stokKodu}-${item.lotNumarasi}`} className="rounded-2xl border border-[rgba(90,72,40,0.10)] bg-white/60 p-3.5">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-bold text-[#3D382F]">{item.stokAdi}</div>
+                            <div className="mt-1 text-xs text-[#8B826F]">{item.stokKodu}{item.lotNumarasi ? ` · Lot ${item.lotNumarasi}` : ''}</div>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-[rgba(154,46,34,0.10)] px-2.5 py-1 text-xs font-bold text-[#9A2E22]">-{item.removedUnitCount} adet</span>
+                        </div>
+                        <div className="mt-2 break-all text-[11px] leading-5 text-[#8B826F]">Seri No: {item.serials.join(', ')}</div>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              ) : (
+                <div className="rounded-2xl bg-[rgba(63,127,88,0.08)] p-4 text-sm text-[#3F7F58]">Seçili depoda mükerrer seri numarası bulunamadı.</div>
+              )}
+              <DialogFooter>
+                <Button onClick={() => setIsDuplicateCleanupOpen(false)}>Kapat</Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-[#9A2E22]">
+                  <XCircle className="h-5 w-5" /> Mükerrer seri numaralarını temizle
+                </DialogTitle>
+                <DialogDescription className="leading-6">
+                  Seçili depodaki aynı seri numarasına sahip sevk edilmemiş kayıtlardan en eski olan korunur.
+                  Diğer kayıtlar kalıcı olarak silinir ve ilgili stok kodu/lot adetleri otomatik güncellenir.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="rounded-2xl border border-[rgba(154,46,34,0.18)] bg-[rgba(154,46,34,0.07)] p-4 text-sm leading-6 text-[#6F3029]">
+                Bu işlem geri alınamaz. Her mükerrer seri numarasından depoda yalnızca <strong>1 adet</strong> kalır.
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setIsDuplicateCleanupOpen(false)} disabled={duplicateCleanupBusy}>İptal</Button>
+                <Button variant="destructive" onClick={handleDuplicateSerialCleanup} disabled={duplicateCleanupBusy || !selectedDepotId}>
+                  {duplicateCleanupBusy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {duplicateCleanupBusy ? 'Temizleniyor…' : 'Temizlemeyi Onayla'}
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
       <Dialog open={isLabCountModalOpen} onOpenChange={setIsLabCountModalOpen}>
