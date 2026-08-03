@@ -6816,3 +6816,88 @@ html.dark body.mg-edge-body {
     transform: translate(-50%, -50%) scale(1);
   }
 }
+
+/* ==========================================================================
+   QORE Clay tema tokenları (global) — açık mod + koyu mod
+   --------------------------------------------------------------------------
+   Clay panellerinin paleti (MK_C / HOME_C ve panel kopyaları) artık bu
+   değişkenleri okur; tema değişince tüm paneller tek noktadan yeniden renklenir.
+   Koyu mod: siyah/koyu gri zemin + bronz detaylar.
+   next-themes attribute="class" kullandığı için .dark; demo koduyla uyum için
+   [data-theme="dark"] de desteklenir.
+   ========================================================================== */
+:root {
+  --qc-bg0: #EFEAE0;
+  --qc-surface: #FCFAF5;
+  --qc-surface2: #F5F1E8;
+  --qc-surface-hi: #FFFFFF;
+  --qc-ink1: #3D382F;
+  --qc-ink2: #908872;
+  --qc-ink3: #BBB2A0;
+  --qc-line: rgba(90, 72, 40, 0.07);
+  --qc-accent: #C98A57;
+  --qc-accent2: #E0B776;
+  --qc-accent-glow: rgba(201, 138, 87, 0.24);
+  --qc-water-solid: #6FB585;
+  --qc-water-deep: #4E9E6B;
+  --qc-amber: #E0A33E;
+  --qc-amber-soft: rgba(224, 163, 62, 0.16);
+  --qc-danger: #C0796A;
+  --qc-sky: #7CA8DE;
+  --qc-sky-deep: #5582C0;
+  --qc-violet: #9B86D6;
+  --qc-violet-deep: #7A66C0;
+  --qc-clay: inset 0 1px 1px rgba(255,255,255,0.9), inset 0 -3px 7px rgba(178,160,128,0.14), 0 10px 24px -12px rgba(150,128,96,0.34), 0 2px 6px -2px rgba(150,128,96,0.16);
+  --qc-clay-press: inset 0 2px 5px rgba(178,160,128,0.32), inset 0 -1px 0 rgba(255,255,255,0.6), 0 2px 6px -4px rgba(150,128,96,0.2);
+  --qc-clay-inset: inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55);
+  --qc-clay-flat: inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28);
+  --qc-shell-bg: linear-gradient(120deg, #F6F2EA 0%, transparent 55%), linear-gradient(225deg, #E8E1D2 0%, transparent 55%), #EFEAE0;
+}
+
+.dark,
+[data-theme="dark"] {
+  --qc-bg0: #0C0C0C;
+  --qc-surface: #1A1917;
+  --qc-surface2: #141312;
+  --qc-surface-hi: #242220;
+  --qc-ink1: #F1E9DE;
+  --qc-ink2: #B39F86;
+  --qc-ink3: #6E6355;
+  --qc-line: rgba(197, 150, 90, 0.12);
+  --qc-accent: #C68A4E;
+  --qc-accent2: #E0A860;
+  --qc-accent-glow: rgba(198, 138, 78, 0.34);
+  --qc-water-solid: #78A684;
+  --qc-water-deep: #8FBF9C;
+  --qc-amber: #E0A860;
+  --qc-amber-soft: rgba(224, 168, 96, 0.20);
+  --qc-danger: #D08A79;
+  --qc-sky: #7FA3CC;
+  --qc-sky-deep: #9CBBE0;
+  --qc-violet: #9E8FD0;
+  --qc-violet-deep: #B3A6E0;
+  --qc-clay: inset 0 1px 1px rgba(212,170,110,0.08), inset 0 -3px 8px rgba(0,0,0,0.5), 0 12px 26px -12px rgba(0,0,0,0.78), 0 2px 6px -2px rgba(0,0,0,0.6);
+  --qc-clay-press: inset 0 2px 7px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(212,170,110,0.06), 0 2px 6px -4px rgba(0,0,0,0.5);
+  --qc-clay-inset: inset 0 2px 7px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(212,170,110,0.07);
+  --qc-clay-flat: inset 0 1px 1px rgba(212,170,110,0.07), 0 5px 14px -8px rgba(0,0,0,0.65);
+  --qc-shell-bg: radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%), radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%), #0C0C0C;
+}
+
+/* Koyu modda sayfa zemini: siyah taban + sıcak bronz ışıma */
+.dark body,
+[data-theme="dark"] body {
+  background:
+    radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%),
+    radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%),
+    var(--qc-bg0);
+}
+.dark .clay-shell,
+[data-theme="dark"] .clay-shell {
+  background: transparent;
+}
+.dark *::-webkit-scrollbar-thumb,
+[data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
+.dark input, .dark textarea,
+[data-theme="dark"] input, [data-theme="dark"] textarea { color: var(--qc-ink1); }
+.dark input::placeholder, .dark textarea::placeholder,
+[data-theme="dark"] input::placeholder, [data-theme="dark"] textarea::placeholder { color: var(--qc-ink3); }

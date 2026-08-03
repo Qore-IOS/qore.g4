@@ -278,7 +278,7 @@ export default function MalKabulGecmisPage() {
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {(r.brands || []).map((b, i) => (
-                        <span key={`${b}-${i}`} style={{ padding: '4px 10px', borderRadius: MK_C.radiusPill, background: `${MK_C.accent}14`, color: MK_C.accent, fontSize: 12, fontWeight: 700 }}>{b}</span>
+                        <span key={`${b}-${i}`} style={{ padding: '4px 10px', borderRadius: MK_C.radiusPill, background: `${MK_C.accentA08}`, color: MK_C.accent, fontSize: 12, fontWeight: 700 }}>{b}</span>
                       ))}
                     </div>
                     <button onClick={() => router.push(`/mal-kabul/gecmis/${r.id}`)}
