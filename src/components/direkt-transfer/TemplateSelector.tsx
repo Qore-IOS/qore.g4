@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input';
 import type { TransferTemplate, TransferTemplateItem, DepoStokItem } from '@/lib/types';
 import { Loader2, ChevronDown, ChevronUp, Plus, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { isAvailableDepotStock, sumStockItemQuantities } from '@/lib/stock-quantity';
 
 type LotPayload = { code: string; name: string; lot: string; miad: string; qty: number };
 type QtyPayload = { code: string; name: string; qty: number };
@@ -60,12 +61,14 @@ export default function TemplateSelector({
 
     selectedTemplate.items.forEach(item => {
       if (item.tracking === 'lot_barcode' || item.tracking === 'lot_manual') {
-        const lotsInStock = stockPool.filter(s => s.stokKodu === item.stokKodu && !s.isShipped);
+        const lotsInStock = stockPool.filter(s => s.stokKodu === item.stokKodu && isAvailableDepotStock(s));
         const uniqueLots = Array.from(new Set(lotsInStock.map(s => `${s.lotNumarasi || 'N/A'}|${s.miad || 'N/A'}`)));
 
         map[item.stokKodu] = uniqueLots.map(key => {
           const [lotNum, miadVal] = key.split('|');
-          const count = lotsInStock.filter(s => (s.lotNumarasi || 'N/A') === lotNum && (s.miad || 'N/A') === miadVal).length;
+          const count = sumStockItemQuantities(
+            lotsInStock.filter(s => (s.lotNumarasi || 'N/A') === lotNum && (s.miad || 'N/A') === miadVal),
+          );
           const allocated = transferRows.filter(r => r.stokKodu === item.stokKodu && r.lotNumarasi === lotNum && r.miad === miadVal).reduce((sum, r) => sum + (r.adet ?? 1), 0);
           return { key, label: `${lotNum} - ${miadVal}`, remaining: count - allocated };
         });
@@ -83,8 +86,8 @@ export default function TemplateSelector({
 
     selectedTemplate.items.forEach(item => {
       if (item.tracking === 'qty_barcode' || item.tracking === 'qty_manual') {
-        const itemsInStock = stockPool.filter(s => s.stokKodu === item.stokKodu && !s.isShipped);
-        const totalCount = itemsInStock.length;
+        const itemsInStock = stockPool.filter(s => s.stokKodu === item.stokKodu && isAvailableDepotStock(s));
+        const totalCount = sumStockItemQuantities(itemsInStock);
         const allocated = transferRows.filter(r => r.stokKodu === item.stokKodu).reduce((sum, r) => sum + (r.adet ?? 1), 0);
         map[item.stokKodu] = totalCount - allocated;
       }

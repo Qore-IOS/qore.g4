@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { DepoStokItem } from '@/lib/types';
 import { direktTransferLogger } from '@/lib/logger';
-import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
+import { getStockItemQuantity, isAvailableDepotStock, sumStockItemQuantities } from '@/lib/stock-quantity';
 
 type LotPayload = { code: string; name: string; lot: string; miad: string; qty: number };
 type QtyPayload = { code: string; name: string; qty: number };
@@ -95,7 +95,7 @@ export default function ManualInlineAdder({
   // Calculate total stock for qty-tracked products
   const totalStockForQtyProduct = useMemo(() => {
     if (!chosenProduct || !isQtyTracked) return 0;
-    const itemsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && !item.isShipped);
+    const itemsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && isAvailableDepotStock(item));
     const totalCount = sumStockItemQuantities(itemsInStock);
     const allocated = transferRows
       .filter(r => r.stokKodu === chosenProduct.code)
@@ -105,7 +105,7 @@ export default function ManualInlineAdder({
 
   const availableLotsForProduct = useMemo(() => {
     if (!chosenProduct || !isLotTracked) return [];
-    const lotsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && !item.isShipped);
+    const lotsInStock = stockPool.filter(item => item.stokKodu === chosenProduct.code && isAvailableDepotStock(item));
     const uniqueLots = Array.from(new Set(lotsInStock.map(item => `${item.lotNumarasi || 'N/A'}|${item.miad || 'N/A'}`)));
     return uniqueLots.map(key => {
         const [lotNum, miadVal] = key.split('|');
