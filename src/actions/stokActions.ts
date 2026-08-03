@@ -1,7 +1,7 @@
 
 'use server';
 
-import { adminDb } from '@/lib/firebase-admin';
+import { adminAuth, adminDb } from '@/lib/firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { db } from '@/lib/firebase';
 import type { DepoStokItem } from '@/lib/types';
@@ -23,7 +23,7 @@ import {
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
-import { isAvailableDepotStock } from '@/lib/stock-quantity';
+import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -1204,6 +1204,98 @@ export interface PaginatedStockResult {
     /** Distinct brands present in the depot, used by the marka filter. */
     marka: string[];
   };
+}
+
+export interface DuplicateSerialCleanupResult {
+  duplicateSerialCount: number;
+  deletedDocumentCount: number;
+  removedUnitCount: number;
+}
+
+/**
+ * Removes duplicate serial-number documents from one depot.
+ *
+ * The oldest company-scoped document is retained for each serial and normalized
+ * to one unit; every additional document carrying that serial is deleted. Empty
+ * serials and explicitly shipped rows are ignored.
+ */
+export async function cleanupDuplicateDepotSerials(params: {
+  depotId: string;
+  idToken: string;
+}): Promise<DuplicateSerialCleanupResult> {
+  const { depotId, idToken } = params;
+  const empty = { duplicateSerialCount: 0, deletedDocumentCount: 0, removedUnitCount: 0 };
+  if (!depotId) return empty;
+
+  const decoded = await adminAuth.verifyIdToken(idToken);
+  const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
+  const userData = userSnap.data() as Record<string, any> | undefined;
+  const role = String(decoded.role ?? userData?.role ?? '');
+  const allowedRoles = new Set(['admin', 'super_admin', 'admin_developer']);
+  if (!allowedRoles.has(role)) throw new Error('Bu işlem için yönetici yetkisi gereklidir.');
+  const isSuperAdmin = role === 'super_admin' || role === 'admin_developer';
+  const companyId = String(decoded.companyId ?? userData?.companyId ?? '').trim() || null;
+
+  const snapshot = await adminDb.collection('depoStok')
+    .where('depotId', '==', depotId)
+    .select('seriNumarasi', 'adet', 'isShipped', 'companyId', 'eklenmeTarihi')
+    .get();
+
+  const bySerial = new Map<string, AdminDocSnap[]>();
+  for (const docSnap of snapshot.docs as AdminDocSnap[]) {
+    const data = docSnap.data() as Record<string, any>;
+    if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) continue;
+    if (!isAvailableDepotStock(data)) continue;
+    const serial = String(data.seriNumarasi ?? '').trim();
+    if (!serial) continue;
+    const docs = bySerial.get(serial) ?? [];
+    docs.push(docSnap);
+    bySerial.set(serial, docs);
+  }
+
+  const timestampMillis = (value: any): number => {
+    if (typeof value?.toMillis === 'function') return value.toMillis();
+    if (typeof value?.seconds === 'number') return value.seconds * 1000;
+    const parsed = new Date(value ?? 0).getTime();
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const operations: Array<{ type: 'delete' | 'normalize'; ref: FirebaseFirestore.DocumentReference }> = [];
+  let duplicateSerialCount = 0;
+  let deletedDocumentCount = 0;
+  let removedUnitCount = 0;
+
+  for (const docs of bySerial.values()) {
+    const representedUnits = docs.reduce((sum, docSnap) => sum + getStockItemQuantity(docSnap.data()), 0);
+    if (representedUnits <= 1) continue;
+    duplicateSerialCount += 1;
+    docs.sort((a, b) => {
+      const timeDiff = timestampMillis(a.data().eklenmeTarihi) - timestampMillis(b.data().eklenmeTarihi);
+      return timeDiff || a.id.localeCompare(b.id);
+    });
+    const [keeper, ...duplicates] = docs;
+    const keeperQty = getStockItemQuantity(keeper.data());
+    if (keeperQty !== 1) {
+      operations.push({ type: 'normalize', ref: keeper.ref });
+      removedUnitCount += keeperQty - 1;
+    }
+    for (const duplicate of duplicates) {
+      operations.push({ type: 'delete', ref: duplicate.ref });
+      deletedDocumentCount += 1;
+      removedUnitCount += getStockItemQuantity(duplicate.data());
+    }
+  }
+
+  for (let i = 0; i < operations.length; i += 450) {
+    const batch = adminDb.batch();
+    for (const operation of operations.slice(i, i + 450)) {
+      if (operation.type === 'delete') batch.delete(operation.ref);
+      else batch.update(operation.ref, { adet: 1 });
+    }
+    await batch.commit();
+  }
+
+  return { duplicateSerialCount, deletedDocumentCount, removedUnitCount };
 }
 
 /**
