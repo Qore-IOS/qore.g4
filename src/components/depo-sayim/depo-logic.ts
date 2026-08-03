@@ -174,6 +174,18 @@ export function isCountedRow(g: ProductGroup, s?: CountState): boolean {
 
 export interface SaveSummary { deleted: number; created: number; sessions: number; touched: number; }
 
+export interface DepoCountHistoryItem {
+  stokKodu: string;
+  stokAdi: string;
+  labName: string;
+  serialTracked: boolean;
+  currentQty: number;
+  countedQty: number;
+  expectedSerials: string[];
+  countedSerials: string[];
+  deletedSerials: string[];
+}
+
 /* Reconcile the depot's depoStok docs so the count matches the counted amount, then write a session.
    - serial with scans: delete docs whose serial was NOT scanned (identity-based)
    - everything else (non-serial, or serial counted manually without scanning): reduce/increase
@@ -193,6 +205,7 @@ export async function saveDepoCount(params: {
   const ops: ((batch: ReturnType<typeof writeBatch>) => void)[] = [];
   let deleted = 0, created = 0, touched = 0;
   let totalCurrent = 0, totalCounted = 0;
+  const historyItems: DepoCountHistoryItem[] = [];
 
   // A depoStok doc's serial disappearing from the depot (via count deletion) must be
   // reflected in serialHistory — otherwise mal kabul's "has this serial ever been
@@ -222,6 +235,38 @@ export async function saveDepoCount(params: {
     const counted = countedOf(g, st);
     totalCurrent += current;
     totalCounted += counted;
+
+    let deletedSerials: string[] = [];
+    let countedSerials: string[] = [];
+    if (g.serial && st?.scannedSerials.size) {
+      countedSerials = Array.from(st.scannedSerials);
+      deletedSerials = g.serials.filter(serial => !st.scannedSerials.has(serial));
+    } else if (g.serial) {
+      // Manual serial counts are reconciled oldest-first below. Mirror that exact
+      // choice here so history reports the identities that will really be deleted.
+      let remainingToDelete = Math.max(0, current - counted);
+      [...g.docs].sort((a, b) => docTimeMillis(a) - docTimeMillis(b)).forEach(item => {
+        if (remainingToDelete <= 0) return;
+        const quantity = qtyOf(item);
+        if (quantity <= remainingToDelete) {
+          const serial = (item.seriNumarasi || '').trim();
+          if (serial && !isSyntheticSerial(serial)) deletedSerials.push(serial);
+          remainingToDelete -= quantity;
+        }
+      });
+      countedSerials = g.serials.filter(serial => !deletedSerials.includes(serial));
+    }
+    historyItems.push({
+      stokKodu: g.stokKodu,
+      stokAdi: g.stokAdi,
+      labName: g.labName,
+      serialTracked: g.serial,
+      currentQty: current,
+      countedQty: counted,
+      expectedSerials: g.serials,
+      countedSerials,
+      deletedSerials,
+    });
 
     if (g.serial && st && st.scannedSerials.size > 0) {
       // scan-based: remove docs whose serial was not scanned
@@ -282,12 +327,25 @@ export async function saveDepoCount(params: {
   }
 
   // session record (history)
-  await setDoc(doc(collection(db, 'depotBrandCountSessions')), withCompanyScope({
+  const sessionRef = doc(collection(db, 'depotBrandCountSessions'));
+  await setDoc(sessionRef, withCompanyScope({
     depotId: depot.id, depotName: depot.name, brand: null, mode: 'depo-sayim-v2',
     startedAt: now, closedAt: now, createdBy: user.uid, createdByName: user.name,
     status: 'completed', itemCount: totalCurrent, scannedCount: totalCounted,
     missingCount: Math.max(0, totalCurrent - totalCounted), extraCount: Math.max(0, totalCounted - totalCurrent),
+    detailCount: historyItems.length,
   }, companyId));
+
+  // Details live in a subcollection so large serial-tracked counts cannot exceed
+  // Firestore's per-document size limit. Each row preserves serials removed by
+  // this exact count, making the audit trail independent from current stock.
+  for (let i = 0; i < historyItems.length; i += 450) {
+    const batch = writeBatch(db);
+    historyItems.slice(i, i + 450).forEach(item => {
+      batch.set(doc(collection(sessionRef, 'items')), withCompanyScope(item, companyId));
+    });
+    await batch.commit();
+  }
 
   return { deleted, created, sessions: 1, touched };
 }

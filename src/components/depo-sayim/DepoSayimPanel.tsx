@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { useRouter } from 'next/navigation';
 import { getDocs, where } from 'firebase/firestore';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -16,6 +17,7 @@ import DepoCount from './DepoCount';
 const nameOf = (x: any) => x?.name || x?.ad || '—';
 
 export default function DepoSayimPanel() {
+  const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth() as any;
   const rootRef = React.useRef<HTMLDivElement>(null);
   const mode: Mode = useContainerMode(rootRef);
@@ -98,6 +100,13 @@ export default function DepoSayimPanel() {
       ) : (
         <div style={{ padding: pad, maxWidth: 900, margin: '0 auto' }}>
           <MlPageHead ico="building" title="Depo Sayım" sub="Sayım yapılacak depoyu seçin" ac={AC} mobile={mode === 'mobile'} />
+          <button
+            type="button"
+            onClick={() => router.push('/depo-sayim/gecmis')}
+            style={{ all: 'unset', cursor: 'pointer', boxSizing: 'border-box', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 9, width: '100%', minHeight: 46, marginBottom: 14, borderRadius: 'var(--radius-pill)', background: `${AC.primary}16`, color: AC.primary, fontSize: 14, fontWeight: 800 }}
+          >
+            <MLIco.history s={18} /> Sayım Geçmişini Görüntüle
+          </button>
           <div style={{ position: 'relative', marginBottom: 14 }}>
             <span style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: 'var(--ink-3)', display: 'inline-flex' }}><MLIco.search s={18} /></span>
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Depo ara…" style={{ width: '100%', boxSizing: 'border-box', height: 52, padding: '0 16px 0 46px', borderRadius: 'var(--radius-pill)', border: 'none', background: 'var(--surface-2)', boxShadow: 'var(--clay-inset)', color: 'var(--ink-1)', fontSize: 15, fontWeight: 500, fontFamily: 'inherit', outline: 'none' }} />
