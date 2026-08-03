@@ -52,6 +52,7 @@ import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { isAvailableDepotStock } from '@/lib/stock-quantity';
 
 // Helper to convert Firestore timestamps
 const processTimestamp = (docData: any) => {
@@ -1026,7 +1027,9 @@ export function usePaginatedDepotStock(params: {
 }
 
 /**
- * Unshipped depot stock - server-side filtered by (depotId, isShipped=false).
+ * Available depot stock filtered by depotId, then by `isShipped !== true`.
+ * The client-side status filter intentionally includes company-owned documents
+ * where `isShipped` is missing; Firestore's equality filter would omit them.
  * Used by panels that only operate on un-shipped inventory (e.g., StokYonetimi).
  * Returns ALL un-shipped items for the depot (no client-side cap).
  */
@@ -1036,18 +1039,11 @@ export function useUnshippedDepoStokByDepot(depotId: string | null) {
     queryKey: ['depoStok', 'unshipped', depotId, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (!depotId) return [];
-      // Legacy-aware fetch — see useDepoStokByDepot. Keeps __legacy__/untagged
-      // depot stock visible to company users instead of being dropped by the
-      // server-side companyId filter.
-      const docs = await getScopedDocs(
-        'depoStok',
-        currentCompanyId,
-        isSuperAdmin,
-        where('depotId', '==', depotId),
-        where('isShipped', '==', false),
-      );
-      const items = docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
-      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+      const snap = await getDocs(scopedQuery(
+        'depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', depotId),
+      ));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
+      return items.filter(isAvailableDepotStock);
     },
     enabled: !!depotId && (!!currentCompanyId || isSuperAdmin),
     staleTime: 5 * 60 * 1000,
@@ -1110,10 +1106,12 @@ export function useLabStock(
   options: { enabled?: boolean } = {}
 ) {
   const { enabled: externalEnabled = true } = options;
-  const { currentCompanyId, isSuperAdmin } = useAuth();
+  const { currentCompanyId, isSuperAdmin, currentUser } = useAuth();
+  const labIdKey = [...labIds].sort().join(',');
+  const labNameKey = [...labNames].sort().join(',');
 
-  return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), currentCompanyId, isSuperAdmin],
+  const stockQuery = useQuery({
+    queryKey: ['depoStok', 'shipped', labIdKey, labNameKey, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
@@ -1169,6 +1167,34 @@ export function useLabStock(
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
+
+  // Historical repair is intentionally independent from the live stock read.
+  // Pools can have many transfers and item subcollections; awaiting the repair
+  // here previously left Product Usage stuck at "Havuz stoğu yükleniyor".
+  const recoveryQuery = useQuery({
+    queryKey: ['depoStokRecovery', labIdKey, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const idToken = await currentUser?.getIdToken();
+      if (!idToken) return [] as DepoStokItem[];
+      const { getRecoverableTransferredLabStock } = await import('@/actions/stokActions');
+      return getRecoverableTransferredLabStock(labIds.slice(0, 30), idToken);
+    },
+    enabled: externalEnabled && labIds.length > 0 && !!currentUser,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+    retry: 1,
+  });
+
+  const mergedData = new Map<string, DepoStokItem>();
+  stockQuery.data?.forEach(item => mergedData.set(item.id, item));
+  recoveryQuery.data?.forEach(item => mergedData.set(item.id, item));
+
+  return {
+    ...stockQuery,
+    data: stockQuery.data || recoveryQuery.data
+      ? Array.from(mergedData.values())
+      : stockQuery.data,
+  };
 }
 
 /**
