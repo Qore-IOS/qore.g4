@@ -1281,6 +1281,9 @@ export async function getRecoverableTransferredLabStock(
   if (candidates.length === 0) return [];
 
   const liveDocs = await adminDb.getAll(...candidates.map(c => adminDb.collection('depoStok').doc(c.itemId)));
+  const existingRecoveryDocs = await adminDb.getAll(...candidates.map(c =>
+    adminDb.collection('depoStok').doc(`recovered-transfer-${c.transferId}-${c.itemId}`),
+  ));
   const serials = Array.from(new Set(candidates.map(c => String(c.data.seriNumarasi))));
   const consumptions: Record<string, Array<{ millis: number; labId: string }>> = {};
   for (let i = 0; i < serials.length; i += 30) {
@@ -1300,6 +1303,8 @@ export async function getRecoverableTransferredLabStock(
 
   const recovered = new Map<string, DepoStokItem>();
   candidates.forEach((candidate, index) => {
+    const existingRecovery = existingRecoveryDocs[index];
+    if (existingRecovery.exists && existingRecovery.data()?.isShipped === true) return;
     const current = liveDocs[index];
     const currentData = current.exists ? current.data() as Record<string, any> : null;
     const stillCorrectLabStock = currentData?.isShipped === true &&

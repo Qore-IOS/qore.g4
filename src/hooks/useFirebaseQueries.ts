@@ -1107,9 +1107,11 @@ export function useLabStock(
 ) {
   const { enabled: externalEnabled = true } = options;
   const { currentCompanyId, isSuperAdmin, currentUser } = useAuth();
+  const labIdKey = [...labIds].sort().join(',');
+  const labNameKey = [...labNames].sort().join(',');
 
-  return useQuery({
-    queryKey: ['depoStok', 'shipped', labIds.sort().join(','), labNames.sort().join(','), currentCompanyId, isSuperAdmin],
+  const stockQuery = useQuery({
+    queryKey: ['depoStok', 'shipped', labIdKey, labNameKey, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (labIds.length === 0) return [];
       // We can only use 'in' with up to 30 values
@@ -1175,6 +1177,34 @@ export function useLabStock(
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
+
+  // Historical repair is intentionally independent from the live stock read.
+  // Pools can have many transfers and item subcollections; awaiting the repair
+  // here previously left Product Usage stuck at "Havuz stoğu yükleniyor".
+  const recoveryQuery = useQuery({
+    queryKey: ['depoStokRecovery', labIdKey, currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const idToken = await currentUser?.getIdToken();
+      if (!idToken) return [] as DepoStokItem[];
+      const { getRecoverableTransferredLabStock } = await import('@/actions/stokActions');
+      return getRecoverableTransferredLabStock(labIds.slice(0, 30), idToken);
+    },
+    enabled: externalEnabled && labIds.length > 0 && !!currentUser,
+    staleTime: 60 * 60 * 1000,
+    gcTime: 2 * 60 * 60 * 1000,
+    retry: 1,
+  });
+
+  const mergedData = new Map<string, DepoStokItem>();
+  stockQuery.data?.forEach(item => mergedData.set(item.id, item));
+  recoveryQuery.data?.forEach(item => mergedData.set(item.id, item));
+
+  return {
+    ...stockQuery,
+    data: stockQuery.data || recoveryQuery.data
+      ? Array.from(mergedData.values())
+      : stockQuery.data,
+  };
 }
 
 /**
