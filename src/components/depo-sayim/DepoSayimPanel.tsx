@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { getDocs, where } from 'firebase/firestore';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { isAvailableDepotStock } from '@/lib/stock-quantity';
 import { useAuth } from '@/contexts/auth-context';
 import { useDepots, useProductCodes, useHospitals, useLabPools, useDeviceLabPools, useAllMinMaxRules } from '@/hooks/useFirebaseQueries';
 import type { DepoStokItem, Depot } from '@/lib/types';
@@ -54,7 +55,7 @@ export default function DepoSayimPanel() {
     getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('depotId', '==', selectedDepot.id)) as any)
       .then((snap) => {
         const docs = filterByCompanyScope(snap.docs.map((d: any) => ({ id: d.id, ...d.data() })), currentCompanyId, isSuperAdmin) as DepoStokItem[];
-        if (alive) setDepotStock(docs.filter((d) => !d.isShipped));
+        if (alive) setDepotStock(docs.filter(isAvailableDepotStock));
       })
       .catch((e) => { console.error('depoStok load', e); fire({ title: 'Stok yüklenemedi' }); })
       .finally(() => { if (alive) setLoadingStock(false); });

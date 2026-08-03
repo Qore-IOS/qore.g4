@@ -22,7 +22,8 @@ import {
 } from 'firebase/firestore';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
-import { filterByCompanyScope, matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
+import { isAvailableDepotStock } from '@/lib/stock-quantity';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -167,9 +168,9 @@ export async function getDepotSerialIndex(
         seriNumarasi?: string;
         companyId?: string | null;
       };
-      // Defense-in-depth company scoping (mirrors filterByCompanyScope, but
-      // per-item so we never materialize an intermediate array).
-      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      // Match the strict company-scoped query used by Depo Sayım so legacy or
+      // other-company rows cannot inflate the serial index.
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
       const stokKodu = data.stokKodu;
       const serial = data.seriNumarasi;
       if (!stokKodu || !serial) return;
@@ -198,7 +199,7 @@ export async function getDepotSerialIndex(
  * that was downloading full documents through IndexedDB, causing 10–15s load times.
  *
  * Only the 9 fields needed for scan lookup + transfer creation are fetched.
- * `isShipped == true` items are filtered server-side to further cut payload.
+ * Rows are then filtered to the exact Depo Sayım company scope and availability rule.
  */
 export async function getDepotStockForTransfer(
   depotId: string,
@@ -216,7 +217,7 @@ export async function getDepotStockForTransfer(
     const items: DepoStokItem[] = [];
     snap.forEach((docSnap) => {
       const data = docSnap.data() as Record<string, any>;
-      if (!matchesCompanyScope(data, companyId, isSuperAdmin)) return;
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
       if (data.isShipped === true) return;
       let miad = data.miad;
       if (miad && typeof miad.toDate === 'function') miad = miad.toDate();
@@ -1280,22 +1281,21 @@ export async function getPaginatedDepotStock(params: {
       } as unknown as DepoStokItem));
     }
   } else {
-    // Fetch stock + depot rules + product catalog in parallel using Admin SDK
+    // Query by depot, then apply the exact company scope used by Depo Sayım and
+    // treat every company-owned document not explicitly shipped as available.
     const [snapshot, rules, products] = await Promise.all([
       adminDb.collection('depoStok')
         .where('depotId', '==', depotId)
-        .where('isShipped', '==', false)
         .get(),
       adminDb.collection('depots').doc(depotId).collection('minMaxRules').get(),
       adminDb.collection('productCodes').get(),
     ]);
     rulesSnap = rules;
     productsSnap = products;
-    allItems = filterByCompanyScope(
-      snapshot.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-      companyId,
-      isSuperAdmin,
-    );
+    allItems = snapshot.docs
+      .map(d => ({ id: d.id, ...d.data() } as DepoStokItem))
+      .filter(item => matchesScopedQueryCompany(item, companyId, isSuperAdmin))
+      .filter(isAvailableDepotStock);
   }
 
   // Build helper maps from the side-loaded master data
