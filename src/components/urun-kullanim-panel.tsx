@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, addDoc, updateDoc, orderBy, limit, setDoc, getDoc, deleteDoc } from 'firebase/firestore';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -49,6 +49,7 @@ import { useBarcodeFormatsQuery, useLabStock, useRecentConsumption, useSubPoints
 import type { DutyShift } from '@/lib/types';
 import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
 import { urunKullanimLogger } from '@/lib/logger';
+import { findRecoverableLabTransfer } from '@/lib/urun-kullanim/transfer-recovery';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -724,13 +725,17 @@ export default function UrunKullanimPanel() {
     const batch = writeBatch(db);
     batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
 
-    const currentAdet = itemToConsume.adet ?? 1;
-    if (currentAdet > 1) {
-      // OPTIMIZED: If bulk document, just decrement quantity
-      batch.update(depoStokDocRef, { adet: currentAdet - 1 });
-    } else {
-      // Single item or last unit, delete doc
-      batch.delete(depoStokDocRef);
+    // Eski otomatik mal-kabul akışı aynı seri yeniden kabul edildiğinde transfer
+    // edilmiş laboratuvar stok belgesini ezebiliyordu. Transfer geçmişinden
+    // kurtarılan sanal satırda silinecek depoStok belgesi bulunmaz; yalnızca
+    // tüketim kaydı yazılır. Normal stok satırlarında mevcut davranış korunur.
+    if (!(itemToConsume as any).__recoveredTransferredStock) {
+      const currentAdet = itemToConsume.adet ?? 1;
+      if (currentAdet > 1) {
+        batch.update(depoStokDocRef, { adet: currentAdet - 1 });
+      } else {
+        batch.delete(depoStokDocRef);
+      }
     }
 
     // --- OPTIMISTIC UI START ---
@@ -921,6 +926,38 @@ export default function UrunKullanimPanel() {
         const legacySnap = await getDocs(legacyQuery);
 
         if (legacySnap.empty) {
+          // Compatibility repair: a former auto-intake deterministic document ID
+          // could overwrite the same serial's transferred lab-stock document.
+          // The transfer event still proves which lab owns that physical unit.
+          if (seri) {
+            const historySnap = await getDocs(query(
+              collection(db, `serialHistory/${seri}/events`),
+              orderBy('timestamp', 'desc'),
+              limit(50),
+            ));
+            const historyEvents = historySnap.docs.map(eventDoc => ({
+              id: eventDoc.id,
+              ...(eventDoc.data() as any),
+            }));
+            const recoveredEvent = findRecoverableLabTransfer(historyEvents, stokKodu, poolMemberIds);
+            if (recoveredEvent) {
+                const details = recoveredEvent.details || {};
+                return {
+                  id: `recovered-transfer-${recoveredEvent.id}`,
+                  stokKodu,
+                  stokAdi: details.stokAdi || products.find(p => p.stokKodu === stokKodu)?.stokAdi || stokKodu,
+                  seriNumarasi: seri,
+                  lotNumarasi: details.lotNumarasi || '',
+                  miad: details.miad || '',
+                  adet: 1,
+                  isShipped: true,
+                  hedefKurumId: details.targetHospitalId,
+                  hedefKurum: details.targetName || '',
+                  companyId: currentCompanyId || undefined,
+                  __recoveredTransferredStock: true,
+                } as DepoStokItem;
+            }
+          }
           return null;
         }
 
@@ -944,7 +981,7 @@ export default function UrunKullanimPanel() {
       urunKullanimLogger.error('Firestore stok doğrulama hatası', error, { stokKodu, seri, lot });
       return null;
     }
-  }, [poolMemberIds, poolMemberNames, currentCompanyId, isSuperAdmin]);
+  }, [poolMemberIds, poolMemberNames, currentCompanyId, isSuperAdmin, products]);
 
   /**
    * Firestore'dan direkt duplicate kontrolü - cache'e güvenilmez durumlar için

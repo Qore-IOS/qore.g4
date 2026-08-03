@@ -1822,8 +1822,10 @@ export default function AnaPanel(props: AnaPanelProps) {
         }
         let firstId = '';
         for (const serial of filteredSerials) {
-          // Deterministik id (companyId+depot+stok+seri) → tekrar denemeler tek belge.
-          const ref = doc(db, 'depoStok', `mk-${sanitizeFsId(currentCompanyId || 'nc')}-${sanitizeFsId(selectedDepotId)}-${sanitizeFsId(item.stokKodu || '')}-${sanitizeFsId(serial)}`);
+          // Satır kimliğini de belge kimliğine kat: geçmişte laboratuvara transfer
+          // edilmiş aynı seri yeniden kabul edildiğinde eski laboratuvar stok belgesi
+          // ezilmemeli. Aynı satırın yeniden denenmesi yine idempotent kalır.
+          const ref = doc(db, 'depoStok', `mk-${sanitizeFsId(currentCompanyId || 'nc')}-${sanitizeFsId(selectedDepotId)}-${sanitizeFsId(item.stokKodu || '')}-${sanitizeFsId(serial)}-${sanitizeFsId(item.id)}`);
           batch.set(ref, withCompanyScope({ ...buildDepoStokDocData(item, serial, ctx), adet: 1 }, currentCompanyId));
           const histRef = doc(collection(db, `serialHistory/${serial}/events`));
           batch.set(histRef, {
