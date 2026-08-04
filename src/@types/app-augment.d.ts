@@ -1042,7 +1042,11 @@ declare module "@/lib/types" {
     productCodeId: string;
     stokKodu: string;
     stokAdi: string;
+    anaBirim?: string;
     serialNumber: string;
+    serialNumbers?: string[];
+    lotNumber?: string;
+    hucreNumarasi?: string;
     quantity: number;
     cihazGrubu?: string;
     targetUid: string;

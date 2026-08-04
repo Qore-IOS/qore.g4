@@ -14,6 +14,9 @@ import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { createNotification } from '@/lib/notifications';
 import { YonetimShell, YonetimHeader, YonetimTile, YonetimTileGrid, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
+import AdminBackfillHedefKurumId from '@/components/AdminBackfillHedefKurumId';
+import AdminBackfillDepoSayimSeriStok from '@/components/AdminBackfillDepoSayimSeriStok';
+import AdminBackfillSerialLedger from '@/components/AdminBackfillSerialLedger';
 
 export default function YonetimPanel() {
   const router = useRouter();
@@ -144,6 +147,24 @@ export default function YonetimPanel() {
           <YonetimTile key={m.label} {...m} />
         ))}
       </YonetimTileGrid>
+
+      {/*
+        Tek seferlik bakım araçları.
+
+        Bu kartlar daha önce `yonetim/yonetim-panel.tsx` içindeydi. O dosya bu
+        rotanın `page.tsx`'i DEĞİL ve hiçbir yerden import edilmiyordu — App
+        Router yalnızca `page.tsx`'i render eder. Sonuç: araçlar aylarca
+        ekranda hiç görünmedi. Dosya bu değişiklikle silindi; kartların tek
+        mount noktası burasıdır.
+      */}
+      <YonetimCard
+        title="Bakım Araçları"
+        description="Tek seferlik veri düzeltme ve geriye dönük doldurma işlemleri. Her biri idempotenttir; önce önizleme yapın."
+      >
+        <AdminBackfillHedefKurumId />
+        <AdminBackfillDepoSayimSeriStok />
+        <AdminBackfillSerialLedger />
+      </YonetimCard>
     </YonetimShell>
   );
 }
