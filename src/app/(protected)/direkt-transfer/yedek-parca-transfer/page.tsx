@@ -59,6 +59,7 @@ import {
   SlidersHorizontal,
   ShoppingCart,
   ArrowUpDown,
+  ScanBarcode,
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { format } from 'date-fns';
@@ -72,6 +73,9 @@ import TeknikServisTutanakPDFButton from '@/components/exports/TeknikServisTutan
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { emitSparePartTransfer, emitExternalStockUsage } from '@/lib/notifications';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
+import useHidScanner from '@/hooks/useHidScanner';
+import { parseAndResolveBarcode } from '@/lib/barcode';
 
 // Menu selection types
 type MenuSection = 'transfer' | 'depo-stok' | 'toplam-stok' | 'personnel' | 'pool-stok';
@@ -202,6 +206,11 @@ export default function YedekParcaTransferPage() {
   // Transfer form state
   const [transferRows, setTransferRows] = useState<SparePartTransferRow[]>([]);
   const [isTransferring, setIsTransferring] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
+  const [transferTab, setTransferTab] = useState<'transfer' | 'borrowed' | 'pending' | 'history'>('transfer');
 
   // New row state - product selector now uses depo stock products
   const [depoStokProducts, setDepoStokProducts] = useState<GroupedDepoStokItem[]>([]);
@@ -1192,6 +1201,99 @@ export default function YedekParcaTransferPage() {
     });
   }, [selectedProduct, serialNumber, hucreNumber, transferQuantity, selectedTransferTarget, transferRows, toast]);
 
+  const flashScanFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+  }, []);
+
+  const handleBarcodeScan = useCallback(({ raw }: { raw: string }) => {
+    if (!selectedTransferTarget) {
+      flashScanFeedback('error', 'Önce transfer hedefini seçin');
+      return;
+    }
+
+    const value = raw.trim();
+    const result = parseAndResolveBarcode(value, barcodeFormats, productCodes);
+    const product = result?.product ?? productCodes.find(p => p.barcodeNumber === value || p.stokKodu === value);
+    if (!product) {
+      flashScanFeedback('error', 'Barkoda ait yedek parça bulunamadı');
+      return;
+    }
+
+    const depotProduct = depoStokProducts.find(p => p.productCodeId === product.id || p.stokKodu === product.stokKodu);
+    if (!depotProduct) {
+      flashScanFeedback('error', `${product.stokKodu} yedek parça deposunda bulunamadı`);
+      return;
+    }
+
+    const serial = result?.parsed?.seriNumarasi?.trim() || '';
+    const lot = result?.parsed?.lotNumarasi?.trim() || '';
+    if (serial && !depotProduct.entries.some(entry => entry.serialNumber === serial)) {
+      flashScanFeedback('error', `Seri no depoda bulunamadı: ${serial}`);
+      return;
+    }
+    if (serial && transferRows.some(row => row.serialNumber === serial || row.serialNumbers?.includes(serial))) {
+      flashScanFeedback('error', `Mükerrer seri no: ${serial}`);
+      return;
+    }
+
+    const targetUid = selectedTransferTarget.type === 'user' ? selectedTransferTarget.uid : `pool_${selectedTransferTarget.id}`;
+    const trackingMode = product.trackingMode || 'qty_barcode';
+    const groupingLot = lot || '';
+
+    setTransferRows(previous => {
+      const index = previous.findIndex(row =>
+        row.stokKodu === depotProduct.stokKodu &&
+        row.targetUid === targetUid &&
+        (row.lotNumber || '') === groupingLot
+      );
+      const alreadySelected = previous
+        .filter(row => row.stokKodu === depotProduct.stokKodu)
+        .reduce((sum, row) => sum + row.quantity, 0);
+      if (alreadySelected + 1 > depotProduct.totalQuantity) {
+        flashScanFeedback('error', `${depotProduct.stokKodu} için yeterli depo stoku yok`);
+        return previous;
+      }
+
+      if (index >= 0) {
+        const current = previous[index];
+        const next = [...previous];
+        next[index] = {
+          ...current,
+          quantity: current.quantity + 1,
+          serialNumber: current.serialNumber || serial,
+          serialNumbers: serial ? [...(current.serialNumbers || (current.serialNumber ? [current.serialNumber] : [])), serial] : current.serialNumbers,
+        };
+        return next;
+      }
+
+      return [...previous, {
+        id: `scan_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        productCodeId: depotProduct.productCodeId,
+        stokKodu: depotProduct.stokKodu,
+        stokAdi: depotProduct.stokAdi,
+        anaBirim: depotProduct.anaBirim || 'Adet',
+        serialNumber: serial,
+        ...(serial ? { serialNumbers: [serial] } : {}),
+        ...(lot ? { lotNumber: lot } : {}),
+        quantity: 1,
+        cihazGrubu: depotProduct.cihazGrubu,
+        targetUid,
+        targetName: selectedTransferTarget.name,
+      }];
+    });
+
+    const detail = serial ? `SN: ${serial}` : lot ? `Lot: ${lot}` : trackingMode === 'serial' ? 'Seri no alınamadı, adet eklendi' : '+1';
+    flashScanFeedback('success', `${depotProduct.stokKodu} · ${detail}`);
+  }, [selectedTransferTarget, barcodeFormats, productCodes, depoStokProducts, transferRows, flashScanFeedback]);
+
+  useHidScanner({
+    enabled: scannerActive && menuSelection.section === 'transfer' && transferTab === 'transfer',
+    allowDuringInputs: false,
+    onScan: handleBarcodeScan,
+  });
+
   // Remove row from transfer list
   const removeTransferRow = (rowId: string) => {
     setTransferRows(prev => prev.filter(r => r.id !== rowId));
@@ -1208,6 +1310,19 @@ export default function YedekParcaTransferPage() {
 
     try {
       const now = new Date();
+      // Barkodla aynı satırda gruplanan seri numaralarını mevcut tekil transfer
+      // akışına aç. Böylece her seri, hedef stok ve log koleksiyonlarına ayrı ayrı yazılır.
+      const rowsToTransfer = transferRows.flatMap(row => {
+        const serials = row.serialNumbers?.filter(Boolean) || [];
+        if (serials.length === 0) return [row];
+        return serials.map((serial, index) => ({
+          ...row,
+          id: `${row.id}_${index}`,
+          serialNumber: serial,
+          serialNumbers: undefined,
+          quantity: 1,
+        }));
+      });
 
       // Read fresh depot stock from Firestore to avoid stale state issues
       const freshStokSnap = await getDocs(scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin));
@@ -1217,7 +1332,7 @@ export default function YedekParcaTransferPage() {
       }), currentCompanyId, isSuperAdmin);
 
       // Verify all transfer items still exist in depot before proceeding
-      for (const row of transferRows) {
+      for (const row of rowsToTransfer) {
         if (row.serialNumber || row.hucreNumarasi) {
           const exists = freshDepoStok.some(d => d.stokKodu === row.stokKodu && (
             (row.serialNumber && d.serialNumber === row.serialNumber) ||
@@ -1240,7 +1355,7 @@ export default function YedekParcaTransferPage() {
       type BatchOp = { type: 'set'; ref: ReturnType<typeof doc>; data: any } | { type: 'delete'; ref: ReturnType<typeof doc> } | { type: 'update'; ref: ReturnType<typeof doc>; data: any };
       const ops: BatchOp[] = [];
 
-      for (const row of transferRows) {
+      for (const row of rowsToTransfer) {
         const isPoolTarget = row.targetUid.startsWith('pool_');
         const poolWarehouseId = isPoolTarget ? row.targetUid.replace('pool_', '') : '';
 
@@ -1283,6 +1398,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              lotNumber: row.lotNumber || '',
               ...hucreData,
               source: 'depot',
               status: 'in_stock',
@@ -1303,6 +1419,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              lotNumber: row.lotNumber || '',
               ...hucreData,
               toName: row.targetName,
               quantity: 1,
@@ -1322,6 +1439,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              lotNumber: row.lotNumber || '',
               ...hucreData,
               source: 'depot',
               status: 'pending_approval',
@@ -1339,6 +1457,7 @@ export default function YedekParcaTransferPage() {
               stokAdi: row.stokAdi,
               anaBirim: row.anaBirim || 'Adet',
               serialNumber: row.serialNumber,
+              lotNumber: row.lotNumber || '',
               ...hucreData,
               toUid: row.targetUid,
               toName: row.targetName,
@@ -1359,6 +1478,7 @@ export default function YedekParcaTransferPage() {
             anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: row.serialNumber,
+              lotNumber: row.lotNumber || '',
             ...hucreData,
             quantity: 1,
             relatedPersonnelUid: isPoolTarget ? undefined : row.targetUid,
@@ -1407,6 +1527,7 @@ export default function YedekParcaTransferPage() {
                 stokAdi: row.stokAdi,
                 anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
+                lotNumber: row.lotNumber || '',
                 source: 'depot',
                 status: 'in_stock',
                 cihazGrubu: row.cihazGrubu || '',
@@ -1426,6 +1547,7 @@ export default function YedekParcaTransferPage() {
                 stokAdi: row.stokAdi,
                 anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
+                lotNumber: row.lotNumber || '',
                 toName: row.targetName,
                 quantity: 1,
                 notes: `Transfer (${i + 1}/${row.quantity}) -> Havuz: ${row.targetName}`,
@@ -1446,6 +1568,7 @@ export default function YedekParcaTransferPage() {
                 stokAdi: row.stokAdi,
                 anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
+                lotNumber: row.lotNumber || '',
                 source: 'depot',
                 status: 'pending_approval',
                 createdAt: Timestamp.fromDate(now),
@@ -1462,6 +1585,7 @@ export default function YedekParcaTransferPage() {
                 stokAdi: row.stokAdi,
                 anaBirim: row.anaBirim || 'Adet',
                 serialNumber: '',
+                lotNumber: row.lotNumber || '',
                 toUid: row.targetUid,
                 toName: row.targetName,
                 quantity: 1,
@@ -1482,6 +1606,7 @@ export default function YedekParcaTransferPage() {
             anaBirim: row.anaBirim || 'Adet',
             cihazGrubu: row.cihazGrubu || '',
             serialNumber: '',
+                lotNumber: row.lotNumber || '',
             quantity: row.quantity,
             relatedPersonnelUid: isPoolTarget ? undefined : row.targetUid,
             relatedPersonnelName: row.targetName,
@@ -2951,14 +3076,14 @@ export default function YedekParcaTransferPage() {
   }, [filteredHistoryLogs, historyPage, historyPageSize, totalHistoryPages]);
 
   // Transfer panel tab state
-  const [transferTab, setTransferTab] = useState<'transfer' | 'borrowed' | 'pending' | 'history'>('transfer');
 
   // ========== RENDER: Transfer Panel (Right Side Default) ==========
   const renderTransferPanel = () => (
     <div className="space-y-4">
       {/* Header */}
       <div className="cihaz-card-strong p-4">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
             <Send className="w-4 h-4" style={{ color: 'var(--dashboard-accent)' }} />
           </div>
@@ -2966,7 +3091,26 @@ export default function YedekParcaTransferPage() {
             <h2 className="text-sm font-bold" style={{ color: 'var(--dashboard-text)' }}>Transfer Paneli</h2>
             <p className="text-[11px]" style={{ color: 'var(--dashboard-muted)' }}>Depodaki ürünleri personele transfer edin.</p>
           </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScannerActive(active => !active)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all',
+              scannerActive
+                ? 'bg-emerald-500 text-white shadow-md animate-pulse'
+                : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+            )}
+          >
+            <ScanBarcode className="w-4 h-4" />
+            {scannerActive ? 'Okuyucu Aktif' : 'Barkod'}
+          </button>
         </div>
+        {scanFeedback && (
+          <p className={cn('mt-2 text-xs font-medium', scanFeedback.type === 'success' ? 'text-emerald-600' : 'text-red-600')}>
+            {scanFeedback.message}
+          </p>
+        )}
       </div>
 
       {/* Tab switcher */}
@@ -3155,7 +3299,13 @@ export default function YedekParcaTransferPage() {
                   <div key={row.id} className="flex items-center gap-3 px-3 py-2.5">
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold truncate" style={{ color: 'var(--dashboard-text)' }}>{row.stokAdi}</p>
-                      <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>{row.stokKodu} {row.serialNumber ? `· SN: ${row.serialNumber}` : ''}</p>
+                      <p className="text-[10px] font-mono" style={{ color: 'var(--dashboard-muted)' }}>
+                        {row.stokKodu}
+                        {row.lotNumber ? ` · Lot: ${row.lotNumber}` : ''}
+                        {row.serialNumbers?.length
+                          ? ` · ${row.serialNumbers.length} seri no: ${row.serialNumbers.join(', ')}`
+                          : row.serialNumber ? ` · SN: ${row.serialNumber}` : ''}
+                      </p>
                     </div>
                     <span className="text-xs font-bold" style={{ color: 'var(--dashboard-text)' }}>x{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</span>
                     <span className="text-[10px]" style={{ color: 'var(--dashboard-muted)' }}>→ {row.targetName}</span>

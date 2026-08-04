@@ -892,6 +892,7 @@ export interface PersonalStockItem {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;        // Seri numarası
+  lotNumber?: string;          // Barkoddan çözümlenen lot numarası
   hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam) - tekil takip
   source: PersonalStockSource; // depot = yeni, device = cihazdan çıkan
   sourceDeviceId?: string;     // Cihazdan çıktıysa device ID
@@ -929,6 +930,7 @@ export interface PoolWarehouseStockItem {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;        // Seri numarası
+  lotNumber?: string;          // Barkoddan çözümlenen lot numarası
   hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   status: PoolStockStatus;
   createdAt: Date;
@@ -957,6 +959,7 @@ export interface SparePartTransferLog {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  lotNumber?: string;
   hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   removedHucreNumarasi?: string; // Hücre değişiminde cihazdan çıkan hücre
   fromUid?: string;            // Kimden
@@ -1012,6 +1015,8 @@ export interface SparePartTransferRow {
   stokAdi: string;
   anaBirim?: string;
   serialNumber: string;
+  serialNumbers?: string[];     // Barkodla eklenen tekil kayıtlar aynı satırda gruplanır
+  lotNumber?: string;           // Barkod formatından çözümlenen lot numarası
   hucreNumarasi?: string;      // Hücre numarası (1 harf + 4 rakam)
   quantity: number;            // Seri numarasız transferlerde adet (seri numaralıysa 1)
   cihazGrubu?: string;        // Cihaz ana grubu (kutu, adet, şişe vs.)
@@ -1028,6 +1033,7 @@ export interface YedekParcaDepoStokItem {
   anaBirim?: string;
   address?: string;              // Depo adresleme bilgisi (raf, göz vb.)
   serialNumber?: string;         // Opsiyonel seri numarası
+  lotNumber?: string;            // Barkod formatından gelen lot numarası
   hucreNumarasi?: string;        // Hücre numarası (1 harf + 4 rakam) - tekil takip
   quantity: number;              // Seri numarasız ürünler için adet
   partCondition?: 'iyi' | 'arizali' | 'miadi_gecmis' | 'diger';
@@ -1056,6 +1062,7 @@ export interface YedekParcaDepoLog {
   address?: string;
   cihazGrubu?: string;
   serialNumber?: string;
+  lotNumber?: string;
   quantity: number;              // İşlemdeki adet
   relatedTransferId?: string;   // İlişkili transfer ID (varsa)
   relatedPersonnelUid?: string; // İlişkili personel (transfer için)
