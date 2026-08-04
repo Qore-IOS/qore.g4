@@ -41,11 +41,32 @@ service cloud.firestore {
         docCompany() == userCompany()
       );
     }
+    // Mevcut (yazımdan ÖNCEKİ) belge bu kullanıcının şirketine mi ait?
+    // Belge yoksa `resource` null olur; bu durumda engellenecek bir sahiplik
+    // yoktur (var olmayan belgeyi silmek zararsızdır).
+    function existingInCompany() {
+      return resource == null ||
+        !('companyId' in resource.data) ||
+        docCompany() == userCompany();
+    }
+    // DİKKAT — `allow write` create, update VE delete'i kapsar.
+    //
+    // Silme işleminde Firestore `request.resource` değerini NULL yapar. Bu
+    // yardımcı doğrudan `request.resource.data` okursa null dereference olur,
+    // kural değerlendirmesi "Null value error" ile düşer ve silme REDDEDİLİR.
+    //
+    // Bu üretimde gerçek bir arızaya yol açtı: seri no takipli ürün tüketilince
+    // `adet <= 1` olduğu için `depoStok` belgesi güncellenmez, SİLİNİR. Silme
+    // reddedilince tüketim batch'i komple düştü ve ürün kullanım panelinde
+    // barkodlu ve manuel düşümün ikisi de "hata oluştu" verdi.
+    //
+    // Bu yüzden silme, yazılacak veriye değil MEVCUT belgenin şirketine bakar.
     function writingInCompany() {
       return isSignedIn() && (
         isSuperAdmin() ||
-        !('companyId' in request.resource.data) ||
-        newDocCompany() == userCompany()
+        (request.resource == null
+          ? existingInCompany()
+          : (!('companyId' in request.resource.data) || newDocCompany() == userCompany()))
       );
     }
 

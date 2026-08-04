@@ -26,7 +26,7 @@ import {
   assertFails,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { setDoc, doc, getDoc } from 'firebase/firestore';
+import { setDoc, doc, getDoc, deleteDoc, writeBatch } from 'firebase/firestore';
 
 const PROJECT_ID = 'qore-multitenancy-test';
 
@@ -456,4 +456,82 @@ test('companyId claim eksik kullanıcı etiketli belgeye erişemez (claim senkro
   const noClaim = testEnv.authenticatedContext('userNoClaim', {}).firestore();
   await assertFails(getDoc(doc(noClaim, 'devices', 'devA9')));
   await assertFails(setDoc(doc(noClaim, 'devices', 'devA10'), { companyId: 'companyA' }));
+});
+
+// ============================================================================
+// SİLME (delete)
+//
+// Bu blok bir üretim hatasından doğdu: ürün kullanım panelinde barkodlu ve
+// manuel düşüm "hata oluştu" veriyordu. Sebep, `allow write` kuralının silmeyi
+// de kapsaması ama `writingInCompany()` yardımcısının `request.resource.data`
+// okumasıydı — Firestore'da silme işleminde `request.resource` NULL'dur, null
+// dereference kural değerlendirmesini hataya düşürür ve işlem reddedilir.
+//
+// Seri no takipli ürün tüketildiğinde `adet <= 1` olduğu için `depoStok`
+// belgesi GÜNCELLENMEZ, SİLİNİR. Yani her seri no tüketimi reddediliyordu.
+//
+// Önceki 82 testin hiçbiri `deleteDoc` çağırmıyordu; bu yüzden hata testlerden
+// kaçtı. Aşağıdakiler o boşluğu kapatır.
+// ============================================================================
+
+test('kendi şirketinin belgesini silebilir (seri no tüketimi bunu yapar)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokA1'), {
+      companyId: 'companyA', stokKodu: 'K1', seriNumarasi: 'S1', adet: 1,
+    });
+  });
+  await assertSucceeds(deleteDoc(doc(authedAsCompanyA(), 'depoStok', 'stokA1')));
+});
+
+test('başka şirketin belgesini silemez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokB1'), {
+      companyId: 'companyB', stokKodu: 'K1', seriNumarasi: 'S2', adet: 1,
+    });
+  });
+  await assertFails(deleteDoc(doc(authedAsCompanyA(), 'depoStok', 'stokB1')));
+});
+
+test('companyId etiketi olmayan eski belge silinebilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokLegacy'), { stokKodu: 'K1', adet: 1 });
+  });
+  await assertSucceeds(deleteDoc(doc(authedAsCompanyA(), 'depoStok', 'stokLegacy')));
+});
+
+test('süper admin başka şirketin belgesini silebilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokB2'), { companyId: 'companyB', adet: 1 });
+  });
+  await assertSucceeds(deleteDoc(doc(authedAsSuperAdmin(), 'depoStok', 'stokB2')));
+});
+
+test('oturum açmamış kullanıcı silemez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokA2'), { companyId: 'companyA', adet: 1 });
+  });
+  await assertFails(deleteDoc(doc(unauthed(), 'depoStok', 'stokA2')));
+});
+
+test('tüketim yolu: tuketimKayitlari yazımı + depoStok silimi birlikte geçer', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokA3'), {
+      companyId: 'companyA', stokKodu: 'K1', seriNumarasi: 'S3', adet: 1,
+    });
+  });
+  const db = authedAsCompanyA();
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'tuketimKayitlari', 't1'), { companyId: 'companyA', stokKodu: 'K1' });
+  batch.set(doc(db, 'serialLedger', 'slK1S3'), { companyId: 'companyA', stokKodu: 'K1' }, { merge: true });
+  batch.set(doc(db, 'serialLedger', 'slK1S3', 'events', 'ev1'), { companyId: 'companyA', type: 'tuketim' });
+  batch.delete(doc(db, 'depoStok', 'stokA3'));
+  await assertSucceeds(batch.commit());
+});
+
+test('serialLedger satırı silinemez (süper admin dışında)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'serialLedger', 'slDel'), { companyId: 'companyA' });
+  });
+  await assertFails(deleteDoc(doc(authedAsCompanyA(), 'serialLedger', 'slDel')));
+  await assertSucceeds(deleteDoc(doc(authedAsSuperAdmin(), 'serialLedger', 'slDel')));
 });
