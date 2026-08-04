@@ -1,16 +1,26 @@
 name: Firestore Rules Tests
 
-# Manuel tetikleme + opt-in PR label.
-# Otomatik PR trigger'ı kapalı çünkü:
-#   - pnpm-lock.yaml içinde @firebase/rules-unit-testing güncellenmemiş
-#     olabilir; lockfile güncellenince trigger'a "pull_request" eklenebilir.
-#   - Firestore emulator için Java + firebase-tools gerekiyor; runner'da
-#     ek setup adımları lazım.
+# PR trigger'ı ARTIK AÇIK.
 #
-# Kurulum hazır olduktan sonra `on.pull_request` bloğunu açıp `paths`
-# filter ile geri etkin et.
+# Kapalı olma gerekçeleri ("lockfile'da @firebase/rules-unit-testing
+# güncellenmemiş olabilir", "Java + firebase-tools setup'ı lazım") artık
+# geçerli değil: paket `package.json` ve `pnpm-lock.yaml` içinde mevcut,
+# job da zaten `setup-java` + `npm i -g firebase-tools` adımlarını içeriyor.
+#
+# Kapalı kalması gerçek bir maliyet üretiyordu: kural dosyasını değiştiren
+# PR'larda hiçbir kontrol koşmuyordu. Kuralı unutulan bir koleksiyon
+# üretimde sessizce reddedilir ve ancak kullanıcı şikâyetiyle fark edilir
+# (bkz. docs/firestore-rules-rollout.md).
+#
+# Job `continue-on-error: true` olduğu için kırmızı sonuç merge'i BLOKLAMAZ;
+# yalnızca görünürlük sağlar.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'tests/firestore-rules.test.ts'
+      - '.github/workflows/firestore-rules-tests.yml'
   push:
     branches: [main]
     paths:
