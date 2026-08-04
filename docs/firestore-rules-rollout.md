@@ -100,8 +100,18 @@ pnpm rules:preflight
 > Yukarıdaki yol bir ÖRNEKTİR; olduğu gibi kopyalamayın. Var olmayan bir yol
 > verilirse script `ENOENT` ile durur (artık ne yapılacağını da söyler).
 
+Script hangi projeye bağlandığını başlıkta yazar — **çalıştırmadan önce doğru
+projeyi gösterdiğini teyit edin.**
+
 Hangi kullanıcıların `companyId` claim'i eksik/uyuşmaz olduğunu listeler. Sorun
 varsa çıkış kodu 1 döner.
+
+> **Bu adımı atlamayın.** Bir kez atlandı ve üretimde tüm kullanıcılar stok
+> göremez hâle geldi: `sync-claims.js` proje kimliğini çözemediği için 112
+> kullanıcının hepsinde hata verdi, hiçbir claim yazılmadı, ama kurallar yine
+> de yayınlandı. Firestore kısmı çalıştığı (kullanıcı dokümanları okunabildiği)
+> için hata "script çalışıyor" gibi görünüyordu — yalnızca `admin.auth()`
+> düşüyordu. Script artık böyle bir durumda **tek ve net bir hatayla durur**.
 
 ### Adım 2 — claim'leri düzelt
 
@@ -124,7 +134,11 @@ firebase deploy --only functions:onUserClaimSync
 pnpm test:rules:emulated
 ```
 
-(Java 17 + `firebase-tools` gerekir.)
+**JDK 21+ gerekir** — güncel `firebase-tools` daha eski Java sürümlerini
+desteklemiyor ("firebase-tools no longer supports Java version before 21").
+Komut, `firebase.rules-test.json` adlı minimal bir emülatör yapılandırması
+kullanır; kök `firebase.json` bir `hosting` bloğu içerdiği için doğrudan
+çalıştırıldığında web framework emülasyonuna takılıyordu.
 
 ### Adım 4 — yayınla
 

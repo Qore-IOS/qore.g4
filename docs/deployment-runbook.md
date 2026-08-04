@@ -40,6 +40,23 @@ pnpm rules:preflight
 
 Hiçbir şey yazmaz, yalnızca raporlar. Sorun varsa çıkış kodu 1 döner.
 
+Proje kimliği `.firebaserc`'den otomatik çözülür (`FIREBASE_PROJECT_ID` ile
+ezebilirsiniz). Script bağlandığı projeyi başlıkta yazar — **doğru projeyi
+gösterdiğini teyit edin.**
+
+> **Bu adım atlanırsa ne olur:** bir kez atlandı ve üretimde tüm kullanıcılar
+> stok göremez hâle geldi. `sync-claims.js` proje kimliğini çözemediği için 112
+> kullanıcının hepsinde hata verdi, hiçbir claim yazılmadı, ama kurallar yine de
+> yayınlandı. **Firestore kısmı çalıştığı için hata "script çalışıyor" gibi
+> görünüyordu** — yalnızca `admin.auth()` düşüyordu. Token'ında `companyId`
+> olmayan kullanıcı için `inCompany()` daima false döner.
+
+> **Bu adım atlanırsa ne olur:** bir kez atlandı ve tüm kullanıcılar stok
+> göremez hâle geldi. `sync-claims.js` proje kimliğini çözemediği için hiçbir
+> claim yazamamıştı; Firestore kısmı çalıştığından hata fark edilmedi ve
+> kurallar yine de yayınlandı. Token'ında `companyId` olmayan kullanıcı için
+> `inCompany()` daima false döner.
+
 ## Adım 1 — Claim senkronunu kur ve çalıştır
 
 Önce fonksiyonu yayınlayın (bundan sonraki her `users/{uid}` yazımında claim
@@ -63,7 +80,7 @@ ekranından firma atayın.
 ## Adım 2 — İndeksleri ve kuralları yayınla
 
 ```bash
-pnpm test:rules:emulated          # 82 kural testi (Java 21 + firebase-tools 14 gerekir)
+pnpm test:rules:emulated          # 82 kural testi (JDK 21+ gerekir)
 firebase deploy --only firestore:indexes
 firebase deploy --only firestore:rules
 ```
