@@ -23,7 +23,7 @@ import {
   type QueryDocumentSnapshot,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
+import { normalizeCompanyId } from '@/lib/company-scope';
 
 export const GLOBAL_DEFINITION_COLLECTIONS = new Set([
   'def_brands',
@@ -100,19 +100,19 @@ export async function getScopedDocs(
     if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
   });
 
-  // Backward compatibility for very old, untagged records. In multi-tenant
-  // projects this unscoped read may be rejected by security rules; in that case
-  // the explicit company/legacy query result above remains the source of truth.
-  try {
-    const unscopedSnap = await getDocs(query(base, ...extraConstraints));
-    unscopedSnap.docs
-      .filter((docSnap) => matchesCompanyScope(docSnap.data(), normalized, isSuperAdmin))
-      .forEach((docSnap) => {
-        if (!docsById.has(docSnap.id)) docsById.set(docSnap.id, docSnap);
-      });
-  } catch {
-    // Ignore permission/index failures from the compatibility path.
-  }
-
+  // NOT: burada bir zamanlar, `companyId` alanı hiç olmayan çok eski kayıtları
+  // da toplamak için filtresiz bir okuma vardı (`getDocs(query(base))`) ve
+  // sonucu `matchesCompanyScope` ile istemcide elenirdi.
+  //
+  // Kaldırıldı, çünkü tam da işe yaramasının sebebi bir güvenlik açığıydı:
+  // kurallardaki etiketsiz-belge dalı `list` için de açık olduğundan filtresiz
+  // sorgu kabul ediliyor ve BÜTÜN şirketlerin belgelerini istemciye
+  // gönderiyordu; ayıklama yalnızca tarayıcıda yapılıyordu. Kural artık
+  // etiketsiz dalı `get` ile sınırlıyor, dolayısıyla bu okuma her çağrıda
+  // permission-denied alır — sessizce yutulsa bile kuralların üretim
+  // izlemesini ("denied" olmamalı) kalıcı olarak kirletirdi.
+  //
+  // Etiketsiz eski kayıtlar listelerde görünsün isteniyorsa companyId
+  // backfill'i gerekir; sorgu ya hepsini döndürür ya hiçbirini.
   return Array.from(docsById.values());
 }
