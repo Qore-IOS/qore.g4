@@ -24,11 +24,19 @@ Claim'i olmayan kullanıcı, kurallar yayınlandığı anda **hiçbir veriyi oku
 ve yazamaz**.
 
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS=/yol/service-account.json
-export FIREBASE_PROJECT_ID=invpilot
+# Firebase Studio / Cloud Shell gibi ortamlarda kimlik bilgisi ZATEN hazırdır —
+# hiçbir şey ayarlamayın (GOOGLE_APPLICATION_CREDENTIALS TANIMSIZ olmalı).
+# Proje kimliği .firebaserc'den otomatik çözülür.
+#
+# Yalnızca kendi makinenizde çalışıyorsanız bir anahtar gerekir:
+#   Firebase Console → Project settings → Service accounts → Generate new private key
+#   export GOOGLE_APPLICATION_CREDENTIALS=/indirdiginiz/gercek/dosya.json
 
 pnpm rules:preflight
 ```
+
+> Yukarıdaki yol bir ÖRNEKTİR; olduğu gibi kopyalamayın. Var olmayan bir yol
+> verilirse script `ENOENT` ile durur (artık ne yapılacağını da söyler).
 
 Hiçbir şey yazmaz, yalnızca raporlar. Sorun varsa çıkış kodu 1 döner.
 
