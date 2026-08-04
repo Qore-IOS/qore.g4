@@ -20,12 +20,14 @@ on:
     paths:
       - 'firestore.rules'
       - 'tests/firestore-rules.test.ts'
+      - 'firebase.rules-test.json'
       - '.github/workflows/firestore-rules-tests.yml'
   push:
     branches: [main]
     paths:
       - 'firestore.rules'
       - 'tests/firestore-rules.test.ts'
+      - 'firebase.rules-test.json'
       - '.github/workflows/firestore-rules-tests.yml'
 
 jobs:

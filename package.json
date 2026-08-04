@@ -15,7 +15,7 @@
     "test:coverage": "rimraf .coverage && NODE_V8_COVERAGE=.coverage node scripts/run-tests.js",
     "test:rules": "node scripts/run-tests.js --only firestore-rules.test.js",
     "rules:preflight": "node scripts/rules-preflight.js",
-    "test:rules:emulated": "firebase emulators:exec --only firestore \"pnpm test:rules\"",
+    "test:rules:emulated": "firebase emulators:exec --only firestore --project qore-multitenancy-test --config firebase.rules-test.json \"pnpm test:rules\"",
     "push": "git add . && git commit -m \"update\" && git push origin HEAD",
     "sync": "git checkout main && git pull origin main",
     "check:scan-performance": "node scripts/check-scan-performance-source.js"
