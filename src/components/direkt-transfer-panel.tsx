@@ -108,6 +108,12 @@ const C = {
   accent: 'var(--qc-accent)',
   accent2: 'var(--qc-accent2)',
   accentGlow: 'rgba(201,138,87,0.24)',
+  // accent'in şeffaf tonları — clay-kit'teki MK_C ile aynı değerler.
+  // Bu iki jeton eksikti ama aşağıda kullanılıyordu: `C.accentA08` undefined
+  // dönüyor, `background: "undefined"` geçersiz CSS olduğu için tarayıcı
+  // atıyordu ve FEFO uyarı kutusu arka plansız/kenarlıksız çiziliyordu.
+  accentA08: 'color-mix(in srgb, var(--qc-accent) 8%, transparent)',
+  accentA25: 'color-mix(in srgb, var(--qc-accent) 25%, transparent)',
   waterSolid: 'var(--qc-water-solid)',
   waterDeep: 'var(--qc-water-deep)',
   amber: 'var(--qc-amber)',
