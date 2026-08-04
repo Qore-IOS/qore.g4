@@ -383,6 +383,96 @@ service cloud.firestore {
     match /calendarConnections/{uid}/{document=**} { allow read, write: if false; }
     match /calendarOAuthStates/{id}            { allow read, write: if false; }
 
+    // -----------------------------
+    // Kuralı eksik kalmış koleksiyonlar (Faz 7)
+    //
+    // Aşağıdaki koleksiyonlar uygulama kodunda TARAYICIDAN okunup yazılıyordu
+    // fakat bu dosyada hiçbir `match` blokları yoktu. Firestore tanımsız
+    // koleksiyonları varsayılan olarak REDDEDER; yani bu kural dosyası
+    // yayınlandığında ilgili ekranlar (kısayollar, rota planlayıcı, NFC lot
+    // etiketleri, ceomed entegrasyonu, kullanım paneli seri anlık görüntüleri…)
+    // sessizce çalışmaz hâle geliyordu.
+    //
+    // `inCompany()` / `writingInCompany()` geriye dönük uyumludur: `companyId`
+    // alanı TAŞIMAYAN eski belgeler okunmaya ve yazılmaya devam eder
+    // (helper'lardaki `!('companyId' in ...)` koşulu). Yalnızca başka bir
+    // şirkete ait olduğu AÇIKÇA etiketlenmiş belgeler engellenir.
+    // -----------------------------
+    match /shortcuts/{id}                     { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /shortcutRuns/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /shortcutRunRequests/{id}           { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /shortcutRunLogs/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /routeRequests/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /routeSequences/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /lotNfcDefinitions/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /lot_tags/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /labTransferDates/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /labManualSerialSnapshots/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /depoSayimBackfillLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /yedekParcaDepoMinMax/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /ceomedDepoStok/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /ceomedSevkiyatRequests/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /ceomedSevkiyatResults/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /isAnaliziVerileri/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /analysis_results/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /actionFormNumberCounters/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /qoreCalculationPeriodCounters/{id} { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /notificationLogs/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /ordersArchive/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
+    // Şirketten bağımsız uygulama ayarları / referans verileri.
+    match /appSettings/{id}                   { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /settings/{id}                      { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /config_hospitals/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+
+    // -----------------------------
+    // GEÇİCİ GÜVENLİK AĞI — Faz 7 kademeli geçiş
+    //
+    // AMAÇ: yukarıdaki envanterde gözden kaçmış bir koleksiyon yüzünden
+    // kullanıcıların "veri okuyamaz/yazamaz" hâle gelmesini önlemek. Firestore
+    // tanımsız koleksiyonu sessizce reddeder ve bu, kullanıcıya hiçbir ipucu
+    // vermeyen bir kilitlenme olarak görünür.
+    //
+    // ÇOK KİRACILIĞI ZAYIFLATMAZ: koşul yine `inCompany()` /
+    // `writingInCompany()`. Başka şirketin etiketli belgesi yine engellenir.
+    // Düz bir `match /{document=**} { allow read, write: if isSignedIn(); }`
+    // catch-all'ı BİLEREK kullanılmadı — Firestore'da `allow` kuralları OR'lanır,
+    // böyle bir blok yukarıdaki TÜM sıkı kuralları ezip kiracı izolasyonunu
+    // tamamen iptal ederdi.
+    //
+    // `notNarrowed` listesi, kendi bloğu `inCompany()`den DAHA SIKI olan
+    // koleksiyonları ağın dışında tutar (yalnızca-süper-admin, salt-oluşturma,
+    // tamamen kapalı ve belge-kimliği ile kapsanan koleksiyonlar). Bu liste
+    // olmasaydı ağ, OR semantiği yüzünden o kuralları da gevşetirdi.
+    //
+    // KALDIRMA KOŞULU: Faz 2 deploy'unda, üretimde birkaç gün boyunca
+    // "denied" kaydı gelmediği doğrulandıktan sonra bu iki blok silinir.
+    // Silinince tanımsız koleksiyonlar yeniden varsayılan-reddet olur.
+    // -----------------------------
+    function notNarrowed(col) {
+      return !(col in [
+        'AuditLogs',
+        'calendarConnections',
+        'calendarOAuthStates',
+        'cariAuditEvents',
+        'cariPayments',
+        'companies',
+        'companyStats',
+        'costSnapshots',
+        'labPeriodSnapshots',
+        'serialLedger',
+        'stockAdjustmentLogs',
+        'users'
+      ]);
+    }
+    match /{col}/{docId} {
+      allow read: if notNarrowed(col) && inCompany();
+      allow write: if notNarrowed(col) && writingInCompany();
+    }
+    match /{col}/{docId}/{rest=**} {
+      allow read: if notNarrowed(col) && inCompany();
+      allow write: if notNarrowed(col) && writingInCompany();
+    }
+
     // Faz 1 placeholder — koleksiyonlar oluşturulunca aktifleştirilecek:
     // match /cariInvoices/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
     // match /cariReceipts/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }

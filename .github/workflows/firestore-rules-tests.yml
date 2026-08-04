@@ -1,16 +1,26 @@
 name: Firestore Rules Tests
 
-# Manuel tetikleme + opt-in PR label.
-# Otomatik PR trigger'ı kapalı çünkü:
-#   - pnpm-lock.yaml içinde @firebase/rules-unit-testing güncellenmemiş
-#     olabilir; lockfile güncellenince trigger'a "pull_request" eklenebilir.
-#   - Firestore emulator için Java + firebase-tools gerekiyor; runner'da
-#     ek setup adımları lazım.
+# PR trigger'ı ARTIK AÇIK.
 #
-# Kurulum hazır olduktan sonra `on.pull_request` bloğunu açıp `paths`
-# filter ile geri etkin et.
+# Kapalı olma gerekçeleri ("lockfile'da @firebase/rules-unit-testing
+# güncellenmemiş olabilir", "Java + firebase-tools setup'ı lazım") artık
+# geçerli değil: paket `package.json` ve `pnpm-lock.yaml` içinde mevcut,
+# job da zaten `setup-java` + `npm i -g firebase-tools` adımlarını içeriyor.
+#
+# Kapalı kalması gerçek bir maliyet üretiyordu: kural dosyasını değiştiren
+# PR'larda hiçbir kontrol koşmuyordu. Kuralı unutulan bir koleksiyon
+# üretimde sessizce reddedilir ve ancak kullanıcı şikâyetiyle fark edilir
+# (bkz. docs/firestore-rules-rollout.md).
+#
+# Job `continue-on-error: true` olduğu için kırmızı sonuç merge'i BLOKLAMAZ;
+# yalnızca görünürlük sağlar.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'firestore.rules'
+      - 'tests/firestore-rules.test.ts'
+      - '.github/workflows/firestore-rules-tests.yml'
   push:
     branches: [main]
     paths:
@@ -33,10 +43,15 @@ jobs:
         with:
           node-version: '22'
 
+      # Firestore emülatörü JVM üzerinde koşar ve firebase-tools JDK 21+ ister
+      # ("firebase-tools no longer supports Java version before 21"). Bu adım
+      # 17'ye sabitken emülatör hiç başlamıyor, testler koşmadan job düşüyordu.
+      # firebase-tools aşağıda sabitlenmiş sürümle kurulur; ikisi birlikte
+      # değiştirilmelidir.
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - uses: pnpm/action-setup@v3
         with:
@@ -48,7 +63,11 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Install Firebase CLI
-        run: npm install -g firebase-tools
+        # Sürüm SABİTLENDİ: `firebase-tools` (unpinned "latest") bir ara JDK 21
+        # zorunluluğu getirdi ve bu job'ı hiçbir kod değişmeden kırdı. Sabit
+        # sürüm, aynı sessiz kaymanın tekrarını önler. Yükseltirken yukarıdaki
+        # `java-version` değerini de gözden geçirin.
+        run: npm install -g firebase-tools@14
 
       - name: Run rules tests (with emulator)
         env:
