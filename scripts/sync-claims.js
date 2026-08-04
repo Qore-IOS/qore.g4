@@ -37,14 +37,17 @@ function parseArgs() {
   return out;
 }
 
+const { initAdmin, assertAuthUsable } = require('./lib/firebase-project');
+
 function init() {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
-  }
-  return admin.firestore();
+  // Proje kimliği FIREBASE_PROJECT_ID → GOOGLE_CLOUD_PROJECT → GCLOUD_PROJECT
+  // → .firebaserc sırasıyla çözülür. Eskiden yalnızca ilk env okunuyordu; env
+  // tanımsızsa `projectId: undefined` geçiliyor ve admin.auth() her kullanıcıda
+  // "Failed to determine project ID for Auth" hatası veriyordu. Firestore
+  // çalıştığı için hata fark edilmeden 112 kullanıcının claim'i yazılmamış
+  // sayılıyordu.
+  const { db } = initAdmin(admin);
+  return db;
 }
 
 function buildClaim(data) {
@@ -95,9 +98,13 @@ async function main() {
   const mode = opts.apply ? 'APPLY' : 'DRY-RUN';
 
   console.log(`Custom claim sync — ${new Date().toISOString()}`);
-  console.log(`Project : ${process.env.FIREBASE_PROJECT_ID || '(applicationDefault)'}`);
   console.log(`Mode    : ${mode}`);
   console.log(`Scope   : ${opts.uid ? `single uid=${opts.uid}` : 'all users'}\n`);
+
+  // Auth erişimini İŞLEME BAŞLAMADAN doğrula. Aksi hâlde yetkilendirme hatası
+  // kullanıcı başına tekrarlanıyor (112 kullanıcı = 112 satır aynı hata) ve
+  // özet "Error: 112" diyerek asıl sebebi gürültüde boğuyordu.
+  await assertAuthUsable(admin);
 
   if (opts.apply) {
     console.log('⚠️  APPLY modu — 3 saniye içinde Ctrl+C ile iptal et.\n');

@@ -27,14 +27,11 @@
  */
 const admin = require('firebase-admin');
 
+const { initAdmin, assertAuthUsable } = require('./lib/firebase-project');
+
 function init() {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
-  }
-  return admin.firestore();
+  const { db } = initAdmin(admin);
+  return db;
 }
 
 /** `users/{uid}` dokümanından beklenen claim — userClaimSync.ts ile birebir aynı. */
@@ -46,6 +43,9 @@ function expectedClaim(data) {
 
 async function main() {
   const db = init();
+  // Auth erişimini kullanıcıları taramadan ÖNCE doğrula: aksi hâlde aynı
+  // yetkilendirme hatası her kullanıcı için tekrarlanır ve asıl sebep kaybolur.
+  await assertAuthUsable(admin);
   const usersSnap = await db.collection('users').get();
 
   const sorunlar = {
