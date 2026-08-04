@@ -137,3 +137,7 @@ function main() {
 if (require.main === module) {
   main();
 }
+
+// `watch.js` (tek süreçte üç izleyici) bu işleyiciyi yeniden kullanır; böylece
+// sevkiyat isteği mantığı iki yerde kopyalanmaz.
+module.exports = { processRequest, monthRange, initFirestore };

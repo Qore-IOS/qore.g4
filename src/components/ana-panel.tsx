@@ -233,9 +233,28 @@ type PendingCeomedIrsaliye = {
   tarih: string;
   cariKodu: string;
   cariUnvan: string;
+  sevkAdresi?: string;
   durumAciklama: string;
   status: 'pending' | 'approved' | 'rejected' | 'deleted';
   items: CeomedItem[];
+  /**
+   * Ceomed watcher'ının otomatik laboratuvar aktarımı sonucu.
+   *
+   * `unmatched` → irsaliyenin kurumu Qore'daki bir laboratuvarla eşleşmedi;
+   * kayıt onay kuyruğunda BEKLER ve elle aktarılması gerekir. Gerekçe
+   * gösterilmezse kullanıcı, irsaliyenin neden hâlâ listede durduğunu
+   * anlayamaz.
+   */
+  autoTransfer?: {
+    status: 'done' | 'unmatched' | 'empty';
+    reason?: string;
+    detail?: string;
+    labId?: string;
+    labName?: string;
+    transferId?: string;
+    unitCount?: number;
+    skipped?: Array<{ stokKodu: string; reason: string }>;
+  };
 };
 type PendingCeomedLine = {
   key: string;
@@ -2088,6 +2107,17 @@ export default function AnaPanel(props: AnaPanelProps) {
 
   const handleApproveCeomedToDepot = async (irs: PendingCeomedIrsaliye) => {
     if (!selectedDepotId || !selectedDepot) return;
+    // Ceomed watcher bu irsaliyeyi zaten laboratuvar stoğuna aktardıysa elle
+    // aktarım MÜKERRER stok üretir (manuel akış rastgele belge kimliği yazar,
+    // watcher'ın deterministik kimlikleriyle çakışmaz). Aktarım bir kez yapılır.
+    if (irs.autoTransfer?.status === 'done') {
+      toast({
+        title: 'Zaten aktarılmış',
+        description: `${irs.irsaliyeNo} Ceomed otomatik aktarımıyla ${irs.autoTransfer.labName || 'laboratuvara'} eklenmiş (${irs.autoTransfer.unitCount ?? 0} birim). Tekrar aktarım mükerrer stok oluşturur.`,
+        variant: 'destructive',
+      });
+      return;
+    }
     setCeomedApprovingId(irs.id);
     try {
       const batch = writeBatch(db);
@@ -2965,10 +2995,33 @@ export default function AnaPanel(props: AnaPanelProps) {
                             </AccordionItem>
                           </Accordion>
                         ))}
+                        {irs.autoTransfer?.status === 'unmatched' && (
+                          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(224,163,62,0.12)', border: '1px solid rgba(224,163,62,0.35)', fontSize: 12.5, color: MK_C.ink1 }}>
+                            <strong>Otomatik aktarılamadı — laboratuvar eşleşmedi.</strong>
+                            <div style={{ marginTop: 4, color: MK_C.ink2 }}>{irs.autoTransfer.detail}</div>
+                            <div style={{ marginTop: 4, color: MK_C.ink3 }}>
+                              Laboratuvar yönetiminden ilgili laboratuvara Ceomed cari kodunu tanımlayın; sonraki turda otomatik aktarılır. Ya da aşağıdan elle aktarın.
+                            </div>
+                          </div>
+                        )}
+                        {(irs.autoTransfer?.skipped?.length ?? 0) > 0 && (
+                          <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(192,121,106,0.10)', border: '1px solid rgba(192,121,106,0.30)', fontSize: 12.5, color: MK_C.ink1 }}>
+                            <strong>Bazı kalemler aktarılamadı:</strong>
+                            <div style={{ marginTop: 4, color: MK_C.ink2, fontFamily: 'ui-monospace, monospace' }}>
+                              {irs.autoTransfer!.skipped!.map((s) => `${s.stokKodu} (${s.reason})`).join(', ')}
+                            </div>
+                          </div>
+                        )}
                         <div className="flex justify-end gap-2 pt-1">
                           <Button variant="outline" onClick={() => handleStartVerifiedCeomedReceipt(irs)}>Doğrulamalı Stoğa Aktar</Button>
-                          <Button onClick={() => handleApproveCeomedToDepot(irs)} disabled={ceomedApprovingId === irs.id} style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})`, color: '#fff' }}>
-                            {ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
+                          <Button
+                            onClick={() => handleApproveCeomedToDepot(irs)}
+                            disabled={ceomedApprovingId === irs.id || irs.autoTransfer?.status === 'done'}
+                            style={{ background: `linear-gradient(180deg, ${MK_C.accent2}, ${MK_C.accent})`, color: '#fff' }}
+                          >
+                            {irs.autoTransfer?.status === 'done'
+                              ? 'Otomatik aktarıldı'
+                              : ceomedApprovingId === irs.id ? 'Aktarılıyor...' : 'Stoğa Aktar'}
                           </Button>
                         </div>
                       </div>
