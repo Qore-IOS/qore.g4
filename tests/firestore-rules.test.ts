@@ -252,13 +252,33 @@ test('Loose-tier collection denies unauthenticated', async () => {
 });
 
 // ============================================================================
-// Unknown collection (default deny)
+// Tanımsız koleksiyon — Faz 7 geçici güvenlik ağı devredeyken
+//
+// DAVRANIŞ DEĞİŞİKLİĞİ (bilinçli): eskiden tanımsız bir koleksiyon her erişime
+// kapalıydı. Bu, kuralı unutulan her koleksiyonun kullanıcıya hiçbir ipucu
+// vermeden kilitlenmesi demekti — `serialHistory` tam olarak böyle sessizce
+// reddediliyordu. Güvenlik ağı bu kilitlenmeyi kaldırır, KİRACI İZOLASYONUNU
+// KORUYARAK: erişim yine oturum + `inCompany()` şartına bağlıdır.
+//
+// Güvenlik ağı Faz 2'de silinince bu test tekrar "reddedilir"e döner.
 // ============================================================================
 
-test('Unknown collection denies all access (default-deny)', async () => {
+test('Tanımsız koleksiyon: kendi şirketinde erişilebilir (kilitlenme yok)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'someUnknownCollection', 'x'), { companyId: 'companyA' });
+  });
   const db = authedAsCompanyA();
-  await assertFails(getDoc(doc(db, 'someUnknownCollection', 'x')));
-  await assertFails(setDoc(doc(db, 'someUnknownCollection', 'x'), { foo: 'bar' }));
+  await assertSucceeds(getDoc(doc(db, 'someUnknownCollection', 'x')));
+  await assertSucceeds(setDoc(doc(db, 'someUnknownCollection', 'y'), { companyId: 'companyA' }));
+});
+
+test('Tanımsız koleksiyon: başka şirkete ve anonime kapalı', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'someUnknownCollection', 'b'), { companyId: 'companyB' });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'someUnknownCollection', 'b')));
+  await assertFails(getDoc(doc(unauthed(), 'someUnknownCollection', 'b')));
+  await assertFails(setDoc(doc(unauthed(), 'someUnknownCollection', 'z'), { companyId: 'companyA' }));
 });
 
 // ============================================================================
@@ -348,4 +368,146 @@ test('serialHistory: oturum açmamış kullanıcı yazamaz', async () => {
   await assertFails(
     setDoc(doc(unauthed(), 'serialHistory', 'SN1', 'events', 'e1'), { type: 'intake' }),
   );
+});
+
+// ============================================================================
+// Faz 7 — kuralı eksik kalmış koleksiyonlar ve geçici güvenlik ağı
+//
+// Bu blok, kural dosyası yayınlandığında kullanıcıların "veri okuyamaz/
+// yazamaz" hâle gelmesini önleyen davranışı sabitler. İki gereksinim var:
+//   1. Kodun tarayıcıdan kullandığı HER koleksiyon erişilebilir olmalı
+//      (Firestore tanımsız koleksiyonu sessizce reddeder).
+//   2. Güvenlik ağı, kendi bloğu daha sıkı olan koleksiyonları GEVŞETMEMELİ
+//      (Firestore'da `allow` kuralları OR'lanır).
+// ============================================================================
+
+const FAZ7_COLLECTIONS = [
+  'shortcuts', 'shortcutRuns', 'shortcutRunRequests', 'shortcutRunLogs',
+  'routeRequests', 'routeSequences', 'lotNfcDefinitions', 'lot_tags',
+  'labTransferDates', 'labManualSerialSnapshots', 'depoSayimBackfillLogs',
+  'yedekParcaDepoMinMax', 'ceomedDepoStok', 'ceomedSevkiyatRequests',
+  'ceomedSevkiyatResults', 'isAnaliziVerileri', 'analysis_results',
+  'actionFormNumberCounters', 'qoreCalculationPeriodCounters',
+  'notificationLogs', 'ordersArchive', 'appSettings', 'settings',
+  'config_hospitals',
+];
+
+for (const col of FAZ7_COLLECTIONS) {
+  test(`${col}: kendi şirketinde okunup yazılabilir (kilitlenme yok)`, async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), col, 'd1'), { companyId: 'companyA', v: 1 });
+    });
+    const db = authedAsCompanyA();
+    await assertSucceeds(getDoc(doc(db, col, 'd1')));
+    await assertSucceeds(setDoc(doc(db, col, 'd2'), { companyId: 'companyA', v: 2 }));
+  });
+
+  test(`${col}: başka şirketin belgesi engellenir`, async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), col, 'dB'), { companyId: 'companyB', v: 1 });
+    });
+    await assertFails(getDoc(doc(authedAsCompanyA(), col, 'dB')));
+  });
+}
+
+test('etiketsiz (legacy) belgeler okunmaya ve yazılmaya devam eder', async () => {
+  // `companyId` alanı hiç taşımayan eski kayıtlar bu geçişte kaybolmamalı.
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'shortcuts', 'legacy'), { name: 'eski kayıt' });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDoc(doc(db, 'shortcuts', 'legacy')));
+  await assertSucceeds(setDoc(doc(db, 'shortcuts', 'legacy2'), { name: 'etiketsiz' }));
+});
+
+test('güvenlik ağı: envanterde HİÇ olmayan bir koleksiyon da kilitlenmez', async () => {
+  // Statik envanterde gözden kaçan bir koleksiyon, kullanıcıya hiçbir ipucu
+  // vermeyen bir kilitlenmeye yol açmamalı.
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'gozdenKacmisKoleksiyon', 'x'), { companyId: 'companyA' });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDoc(doc(db, 'gozdenKacmisKoleksiyon', 'x')));
+  await assertSucceeds(setDoc(doc(db, 'gozdenKacmisKoleksiyon', 'y'), { companyId: 'companyA' }));
+});
+
+test('güvenlik ağı kiracı izolasyonunu ZAYIFLATMAZ', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'gozdenKacmisKoleksiyon', 'b'), { companyId: 'companyB' });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'gozdenKacmisKoleksiyon', 'b')));
+  await assertFails(
+    setDoc(doc(authedAsCompanyA(), 'gozdenKacmisKoleksiyon', 'c'), { companyId: 'companyB' }),
+  );
+});
+
+test('güvenlik ağı oturum açmamış kullanıcıya açılmaz', async () => {
+  await assertFails(getDoc(doc(unauthed(), 'gozdenKacmisKoleksiyon', 'x')));
+  await assertFails(setDoc(doc(unauthed(), 'gozdenKacmisKoleksiyon', 'z'), { companyId: 'companyA' }));
+});
+
+// ── Güvenlik ağının EZMEMESİ gereken kurallar ───────────────────────────────
+
+test('güvenlik ağı AuditLogs süper-admin kısıtını ezmez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'AuditLogs', 'a1'), { companyId: 'companyA' });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'AuditLogs', 'a1')));
+  await assertSucceeds(getDoc(doc(authedAsSuperAdmin(), 'AuditLogs', 'a1')));
+});
+
+test('güvenlik ağı takvim OAuth belgelerini açmaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'calendarOAuthStates', 's1'), { companyId: 'companyA' });
+    await setDoc(doc(ctx.firestore(), 'calendarConnections', 'userA', 'tokens', 't1'), { companyId: 'companyA' });
+  });
+  const db = authedAsCompanyA();
+  await assertFails(getDoc(doc(db, 'calendarOAuthStates', 's1')));
+  await assertFails(getDoc(doc(db, 'calendarConnections', 'userA', 'tokens', 't1')));
+});
+
+test('güvenlik ağı stockAdjustmentLogs değiştirilemezliğini bozmaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'stockAdjustmentLogs', 'l1'), { companyId: 'companyA', diff: -1 });
+  });
+  await assertFails(
+    setDoc(doc(authedAsCompanyA(), 'stockAdjustmentLogs', 'l1'), { companyId: 'companyA', diff: 99 }),
+  );
+});
+
+test('güvenlik ağı serialLedger olaylarının değiştirilemezliğini bozmaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'serialLedger', 'slA', 'events', 'e9'), {
+      companyId: 'companyA', type: 'tuketim',
+    });
+  });
+  await assertFails(
+    setDoc(doc(authedAsCompanyA(), 'serialLedger', 'slA', 'events', 'e9'), {
+      companyId: 'companyA', type: 'mal_kabul',
+    }),
+  );
+});
+
+test('güvenlik ağı kullanıcıların birbirinin profilini yazmasına izin vermez', async () => {
+  await assertFails(
+    setDoc(doc(authedAsCompanyA(), 'users', 'userA2'), { name: 'ele geçirildi', companyId: 'companyA' }),
+  );
+});
+
+test('güvenlik ağı companyStats salt-okunurluğunu bozmaz', async () => {
+  await assertFails(
+    setDoc(doc(authedAsCompanyA(), 'companyStats', 'companyA'), { companyId: 'companyA', total: 1 }),
+  );
+});
+
+test('companyId claim eksik kullanıcı etiketli belgeye erişemez (claim senkronu şart)', async () => {
+  // Bu, "kurallar güncellenince kullanıcılar yazamaz oldu" şikâyetinin ikinci
+  // kök nedeni: `onUserClaimSync` çalışmamış / `sync-claims.js` koşulmamışsa
+  // token'da companyId olmaz ve `inCompany()` her etiketli belgeyi reddeder.
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'devices', 'devA9'), { companyId: 'companyA' });
+  });
+  const noClaim = testEnv.authenticatedContext('userNoClaim', {}).firestore();
+  await assertFails(getDoc(doc(noClaim, 'devices', 'devA9')));
+  await assertFails(setDoc(doc(noClaim, 'devices', 'devA10'), { companyId: 'companyA' }));
 });
