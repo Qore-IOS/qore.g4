@@ -32,11 +32,16 @@ import {
   CheckCircle,
   ChevronLeft,
   AlertTriangle,
+  ScanBarcode,
 } from 'lucide-react';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
+import useHidScanner from '@/hooks/useHidScanner';
+import { parseAndResolveBarcode } from '@/lib/barcode';
+import { cn } from '@/lib/utils';
 
 interface StokGirisRow {
   id: string;
@@ -46,6 +51,8 @@ interface StokGirisRow {
   anaBirim?: string;
   cihazGrubu: string;
   serialNumber: string;
+  serialNumbers?: string[];
+  lotNumber?: string;
   hucreNumarasi: string; // Hücre numarası (1 harf + 4 rakam) - opsiyonel tekil takip
   quantity: number; // seri numarası veya hücre numarası varsa 1, yoksa kullanıcının girdiği adet
   address: string;
@@ -83,6 +90,11 @@ export default function YedekParcaStokGirisPage() {
   const [brandOptions, setBrandOptions] = useState<string[]>([]);
   const [rows, setRows] = useState<StokGirisRow[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [scannerActive, setScannerActive] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const scanFeedbackTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { formats: barcodeFormats } = useSafeBarcodeFormats();
+  const [activeTab, setActiveTab] = useState<'manual' | 'excel'>('manual');
   const [savedOrders, setSavedOrders] = useState<SavedSparePartOrder[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState<string>('none');
 
@@ -304,6 +316,78 @@ export default function YedekParcaStokGirisPage() {
       description: `${rowStokAdi} (${label}) listeye eklendi.`,
     });
   }, [selectedProduct, serialNumber, hucreNumarasi, quantity, rows, toast, address]);
+
+  const flashScanFeedback = useCallback((type: 'success' | 'error', message: string) => {
+    if (scanFeedbackTimer.current) clearTimeout(scanFeedbackTimer.current);
+    setScanFeedback({ type, message });
+    scanFeedbackTimer.current = setTimeout(() => setScanFeedback(null), 2500);
+  }, []);
+
+  const handleBarcodeScan = useCallback(({ raw }: { raw: string }) => {
+    const value = raw.trim();
+    if (!value) return;
+
+    const result = parseAndResolveBarcode(value, barcodeFormats, spareParts);
+    const product = result?.product ?? spareParts.find(p => p.barcodeNumber === value || p.stokKodu === value);
+    if (!product) {
+      flashScanFeedback('error', 'Barkoda ait yedek parça bulunamadı');
+      return;
+    }
+
+    const serial = result?.parsed?.seriNumarasi?.trim() || '';
+    const lot = result?.parsed?.lotNumarasi?.trim() || '';
+    if (serial && rows.some(row => row.serialNumber === serial || row.serialNumbers?.includes(serial))) {
+      flashScanFeedback('error', `Mükerrer seri no: ${serial}`);
+      return;
+    }
+
+    setRows(previous => {
+      const index = previous.findIndex(row =>
+        row.productCodeId === product.id &&
+        (row.lotNumber || '') === lot &&
+        row.address === address.trim() &&
+        !row.hucreNumarasi
+      );
+      if (index >= 0) {
+        const current = previous[index];
+        const next = [...previous];
+        next[index] = {
+          ...current,
+          quantity: current.quantity + 1,
+          serialNumber: current.serialNumber || serial,
+          serialNumbers: serial
+            ? [...(current.serialNumbers || (current.serialNumber ? [current.serialNumber] : [])), serial]
+            : current.serialNumbers,
+        };
+        return next;
+      }
+
+      return [...previous, {
+        id: `scan_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        productCodeId: product.id,
+        stokKodu: product.stokKodu,
+        stokAdi: product.stokAdi,
+        anaBirim: product.anaBirim || 'Adet',
+        cihazGrubu: product.cihazGrubu || '',
+        serialNumber: serial,
+        ...(serial ? { serialNumbers: [serial] } : {}),
+        ...(lot ? { lotNumber: lot } : {}),
+        hucreNumarasi: '',
+        quantity: 1,
+        address: address.trim(),
+        entrySource: 'manual',
+      }];
+    });
+
+    const detail = serial ? `SN: ${serial}` : lot ? `Lot: ${lot}` : '+1';
+    flashScanFeedback('success', `${product.stokKodu} · ${detail}`);
+  }, [barcodeFormats, spareParts, rows, address, flashScanFeedback]);
+
+  useHidScanner({
+    enabled: scannerActive && activeTab === 'manual',
+    allowDuringInputs: false,
+    onScan: handleBarcodeScan,
+  });
 
   const findMissingCardsFromRows = useCallback((targetRows: StokGirisRow[]) => {
     const existingCodes = new Set(allProductCodes.map(p => (p.stokKodu || '').trim().toUpperCase()).filter(Boolean));
@@ -585,8 +669,21 @@ export default function YedekParcaStokGirisPage() {
       const batch = writeBatch(db);
       const now = new Date();
       const stockRefIds: string[] = [];
+      // Sepette bir arada gösterilen seri numaralarını Firestore'a tekil stok
+      // belgeleri olarak yaz; lotsuz/serisiz ürün grubu ise tek adetli satır kalır.
+      const rowsToSave = rows.flatMap(row => {
+        const serials = row.serialNumbers?.filter(Boolean) || [];
+        if (serials.length === 0) return [row];
+        return serials.map((serial, index) => ({
+          ...row,
+          id: `${row.id}_${index}`,
+          serialNumber: serial,
+          serialNumbers: undefined,
+          quantity: 1,
+        }));
+      });
 
-      for (const row of rows) {
+      for (const row of rowsToSave) {
         const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
         const stockRef = doc(collection(db, 'yedekParcaDepoStok'));
         stockRefIds.push(stockRef.id);
@@ -597,6 +694,7 @@ export default function YedekParcaStokGirisPage() {
           anaBirim: row.anaBirim || 'Adet',
           cihazGrubu: row.cihazGrubu || '',
           serialNumber: row.serialNumber || '',
+          lotNumber: row.lotNumber || '',
           ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
           quantity: isTracked ? 1 : row.quantity,
           address: row.address || '',
@@ -610,8 +708,8 @@ export default function YedekParcaStokGirisPage() {
       await batch.commit();
 
       // Log each entry with full audit trail
-      for (let idx = 0; idx < rows.length; idx++) {
-        const row = rows[idx];
+      for (let idx = 0; idx < rowsToSave.length; idx++) {
+        const row = rowsToSave[idx];
         const isTracked = !!row.serialNumber || !!row.hucreNumarasi;
         const sourceLabel = row.entrySource === 'excel' ? 'Excel' : 'Manuel';
         let notes = '';
@@ -636,6 +734,7 @@ export default function YedekParcaStokGirisPage() {
           anaBirim: row.anaBirim || 'Adet',
           cihazGrubu: row.cihazGrubu || '',
           serialNumber: row.serialNumber || '',
+          lotNumber: row.lotNumber || '',
           ...(row.hucreNumarasi ? { hucreNumarasi: row.hucreNumarasi } : {}),
           quantity: isTracked ? 1 : row.quantity,
           address: row.address || '',
@@ -750,7 +849,6 @@ export default function YedekParcaStokGirisPage() {
   };
 
   // Tab state for manual vs excel
-  const [activeTab, setActiveTab] = useState<'manual' | 'excel'>('manual');
 
   if (loading) {
     return (
@@ -800,7 +898,8 @@ export default function YedekParcaStokGirisPage() {
 
       {/* Header */}
       <header className="cihaz-card-strong p-4 sm:p-5">
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
           <div className="w-9 h-9 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(245,158,11,.12)' }}>
             <Package className="w-4.5 h-4.5" style={{ color: 'var(--dashboard-accent)' }} />
           </div>
@@ -808,7 +907,26 @@ export default function YedekParcaStokGirisPage() {
             <h1 className="text-lg font-bold" style={{ color: 'var(--dashboard-text)' }}>Yedek Parça Stok Girişi</h1>
             <p className="text-xs" style={{ color: 'var(--dashboard-muted)' }}>Depoya yeni ürünler ekleyin — manuel veya Excel ile.</p>
           </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setScannerActive(active => !active)}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium transition-all',
+              scannerActive
+                ? 'bg-emerald-500 text-white shadow-md animate-pulse'
+                : 'bg-[var(--dashboard-surface-2)] text-[var(--dashboard-muted)] hover:text-[var(--dashboard-text)]'
+            )}
+          >
+            <ScanBarcode className="w-4 h-4" />
+            {scannerActive ? 'Okuyucu Aktif' : 'Barkod'}
+          </button>
         </div>
+        {scanFeedback && (
+          <p className={cn('mt-2 text-xs font-medium', scanFeedback.type === 'success' ? 'text-emerald-600' : 'text-red-600')}>
+            {scanFeedback.message}
+          </p>
+        )}
       </header>
 
       <section className="cihaz-card p-4 space-y-3">
@@ -1201,6 +1319,7 @@ export default function YedekParcaStokGirisPage() {
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Ürün Adı</th>
                   <th className="px-3 py-2.5 text-left font-semibold hidden sm:table-cell" style={{ color: 'var(--dashboard-muted)' }}>Grup</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Seri No</th>
+                  <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Lot</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Hücre No</th>
                   <th className="px-3 py-2.5 text-left font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adres</th>
                   <th className="px-3 py-2.5 text-right font-semibold" style={{ color: 'var(--dashboard-muted)' }}>Adet</th>
@@ -1217,7 +1336,10 @@ export default function YedekParcaStokGirisPage() {
                         <span className="inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium" style={{ background: 'rgba(245,158,11,.10)', color: '#B45309' }}>{row.cihazGrubu}</span>
                       ) : <span style={{ color: 'var(--dashboard-muted)' }}>—</span>}
                     </td>
-                    <td className="px-3 py-2.5 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.serialNumber || '—'}</td>
+                    <td className="px-3 py-2.5 font-mono" style={{ color: row.serialNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>
+                      {row.serialNumbers?.length ? `${row.serialNumbers.length} seri: ${row.serialNumbers.join(', ')}` : row.serialNumber || '—'}
+                    </td>
+                    <td className="px-3 py-2.5 font-mono" style={{ color: row.lotNumber ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.lotNumber || '—'}</td>
                     <td className="px-3 py-2.5 font-mono" style={{ color: row.hucreNumarasi ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.hucreNumarasi || '—'}</td>
                     <td className="px-3 py-2.5" style={{ color: row.address ? 'var(--dashboard-text)' : 'var(--dashboard-muted)' }}>{row.address || '—'}</td>
                     <td className="px-3 py-2.5 text-right font-mono font-semibold" style={{ color: 'var(--dashboard-text)' }}>{row.quantity} {row.anaBirim ? row.anaBirim.toLocaleLowerCase('tr-TR') : 'adet'}</td>
@@ -1235,7 +1357,7 @@ export default function YedekParcaStokGirisPage() {
           {/* Sticky save bar */}
           <div className="flex items-center justify-between p-4" style={{ borderTop: '1px solid var(--dashboard-stroke)', background: 'var(--dashboard-surface)' }}>
             <div className="text-[11px] space-y-0.5" style={{ color: 'var(--dashboard-muted)' }}>
-              <p>{rows.filter(r => r.serialNumber).length} seri numaralı · {rows.filter(r => !r.serialNumber).length} seri numarasız</p>
+              <p>{rows.reduce((sum, row) => sum + (row.serialNumbers?.length || (row.serialNumber ? 1 : 0)), 0)} seri numaralı · {rows.filter(r => !r.serialNumber).reduce((sum, row) => sum + row.quantity, 0)} seri numarasız</p>
             </div>
             <button
               onClick={saveStock}
