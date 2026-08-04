@@ -18,6 +18,7 @@
 import { collection, doc, writeBatch, Timestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
+import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 
 export interface AdjustableStockRow {
   stokKodu: string;
@@ -28,6 +29,12 @@ export interface AdjustableStockRow {
   quantity: number;
   itemIds: string[];
   itemAdets?: Record<string, number>;
+  /**
+   * itemId → seriNumarasi. Silinen bir birimin Seri No Defteri satırını
+   * `serbest` yapmak için gereklidir; aksi hâlde seri kalıcı olarak "depoda"
+   * görünür ve aynı fiziksel ürün bir daha mal kabul edilemez.
+   */
+  itemSerials?: Record<string, string>;
   urunGrubu?: 'kit' | 'sarf';
   ambalajDegeri?: number;
   rafAdresi?: string;
@@ -117,6 +124,28 @@ export async function adjustGroupedStockQuantity(params: AdjustParams): Promise<
         batch.delete(doc(db, 'depoStok', id));
         toRemove -= q;
         deleted += q;
+        // Belge tamamen silindi → birim depodan çıktı. Defterde `serbest`
+        // işaretlenir; depo sayımıyla düşülen bir birimle aynı davranış:
+        // aynı seri yeniden mal kabul edilebilir, transfer edilebilir ve
+        // tüketilebilir.
+        const serial = row.itemSerials?.[id];
+        if (serial) {
+          appendSerialEventToBatch(batch, {
+            type: 'duzeltme',
+            status: 'serbest',
+            stokKodu: row.stokKodu,
+            stokAdi: row.stokAdi,
+            seriNumarasi: serial,
+            lotNumarasi: row.lotNumarasi || '',
+            miad: row.miad || '',
+            source: { locationType: 'depot', locationId: depotId, locationName: depotName },
+            location: { locationType: 'none', locationId: '', locationName: '' },
+            refs: { depoStokId: id, depotId },
+            actorUid: user.uid,
+            actorName: user.name,
+            details: { reason, adjustment: 'decrease' },
+          }, companyId);
+        }
       } else {
         batch.update(doc(db, 'depoStok', id), { adet: q - toRemove });
         deleted += toRemove;

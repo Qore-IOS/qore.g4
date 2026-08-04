@@ -5,6 +5,7 @@ import { nanoid } from 'nanoid';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
+import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 import type { DepoStokItem, ProductCode, Hospital, LabPool, Depot, DeviceLabPool } from '@/lib/types';
 
 /* labs actually linked to the depot in depot management (linkedLaboratoryIds +
@@ -202,15 +203,27 @@ export async function saveDepoCount(params: {
 }): Promise<SaveSummary> {
   const { groups, states, depot, companyId, user } = params;
   const now = Timestamp.now();
-  const ops: ((batch: ReturnType<typeof writeBatch>) => void)[] = [];
+  // Her `op` birden çok Firestore yazımı üretebilir (bir seri düşümü: eski
+  // geçmiş kaydı + defter satırı + defter olayı = 3 yazım). Parti bölme bu
+  // yüzden op SAYISINA değil, ürettikleri YAZIM SAYISINA göre yapılır; aksi
+  // hâlde 450 op kolayca 500 yazım sınırını aşar ve sayım kaydedilemez.
+  const ops: Array<{ run: (batch: ReturnType<typeof writeBatch>) => void; cost: number }> = [];
+  const pushOp = (run: (batch: ReturnType<typeof writeBatch>) => void, cost = 1) => ops.push({ run, cost });
+  /* eski geçmiş kaydı + defter satırı (merge) + defter olayı */
+  const SERIAL_DEPARTURE_COST = 3;
   let deleted = 0, created = 0, touched = 0;
   let totalCurrent = 0, totalCounted = 0;
   const historyItems: DepoCountHistoryItem[] = [];
 
-  // A depoStok doc's serial disappearing from the depot (via count deletion) must be
-  // reflected in serialHistory — otherwise mal kabul's "has this serial ever been
-  // received" duplicate check has no way to know it left, and permanently refuses to
-  // let the same physical unit be received again later.
+  // Sayımla depodan düşen bir seri numarası HEM eski `serialHistory` HEM de Seri
+  // No Defteri'ne işlenir. Defterdeki satır `serbest` durumuna geçer; kullanıcı
+  // akışının gereği budur: fiziksel birim depodan çıkmıştır, aynı seri numarası
+  // yeniden mal kabul edilebilir, transfer edilebilir ve tüketilebilir.
+  //
+  // Bu olay daha önce hiç kaydedilemiyordu: `serialHistory` için Firestore
+  // güvenlik kuralı tanımlı değildi, yazma reddediliyordu. Sonuçta sayımdan
+  // düşülen seriler sistemde kalıcı olarak "işlem görmüş" kalıyor, mal kabul
+  // onları kabul etmiyordu.
   const logSerialDeparture = (b: ReturnType<typeof writeBatch>, item: DepoStokItem) => {
     const serial = (item.seriNumarasi || '').trim();
     if (!serial || isSyntheticSerial(serial)) return;
@@ -224,6 +237,20 @@ export async function saveDepoCount(params: {
       },
       timestamp: now,
     });
+    appendSerialEventToBatch(b, {
+      type: 'sayim_dusum',
+      stokKodu: item.stokKodu,
+      stokAdi: item.stokAdi,
+      seriNumarasi: serial,
+      lotNumarasi: item.lotNumarasi || '',
+      miad: typeof item.miad === 'string' ? item.miad : '',
+      source: { locationType: 'depot', locationId: depot.id, locationName: depot.name },
+      location: { locationType: 'none', locationId: '', locationName: '' },
+      refs: { depotId: depot.id, depoStokId: item.id },
+      actorUid: user.uid,
+      actorName: user.name,
+      details: { reason: 'depo_sayimi', depotName: depot.name },
+    }, companyId);
   };
 
   const allProducts = groups.flatMap(g => g.products);
@@ -272,8 +299,8 @@ export async function saveDepoCount(params: {
       // scan-based: remove docs whose serial was not scanned
       g.docs.forEach(item => {
         if (!st.scannedSerials.has((item.seriNumarasi || '').trim())) {
-          ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
-          ops.push(b => logSerialDeparture(b, item));
+          pushOp(b => b.delete(doc(db, 'depoStok', item.id!)));
+          pushOp(b => logSerialDeparture(b, item), SERIAL_DEPARTURE_COST);
           deleted++;
         }
       });
@@ -292,12 +319,12 @@ export async function saveDepoCount(params: {
         if (toRemove <= 0) break;
         const q = qtyOf(item);
         if (q <= toRemove) {
-          ops.push(b => b.delete(doc(db, 'depoStok', item.id!)));
-          ops.push(b => logSerialDeparture(b, item));
+          pushOp(b => b.delete(doc(db, 'depoStok', item.id!)));
+          pushOp(b => logSerialDeparture(b, item), SERIAL_DEPARTURE_COST);
           toRemove -= q;
           deleted += q;
         } else {
-          ops.push(b => b.update(doc(db, 'depoStok', item.id!), { adet: q - toRemove }));
+          pushOp(b => b.update(doc(db, 'depoStok', item.id!), { adet: q - toRemove }));
           deleted += toRemove;
           toRemove = 0;
         }
@@ -313,18 +340,26 @@ export async function saveDepoCount(params: {
           urunGrubu: g.urunGrubu, ambalajDegeri: g.ambalajDegeri,
           eklenmeTarihi: now, createdByName: user.name,
         }, companyId);
-        ops.push(b => b.set(doc(collection(db, 'depoStok')), entry));
+        pushOp(b => b.set(doc(collection(db, 'depoStok')), entry));
         created++;
       }
     }
   });
 
-  // commit in chunks of 450
-  for (let i = 0; i < ops.length; i += 450) {
-    const batch = writeBatch(db);
-    ops.slice(i, i + 450).forEach(op => op(batch));
-    await batch.commit();
+  // Yazım maliyetine göre parti bölme (Firestore sınırı: 500 yazım/batch).
+  const MAX_WRITES_PER_BATCH = 450;
+  let batch = writeBatch(db);
+  let pending = 0;
+  for (const op of ops) {
+    if (pending > 0 && pending + op.cost > MAX_WRITES_PER_BATCH) {
+      await batch.commit();
+      batch = writeBatch(db);
+      pending = 0;
+    }
+    op.run(batch);
+    pending += op.cost;
   }
+  if (pending > 0) await batch.commit();
 
   // session record (history)
   const sessionRef = doc(collection(db, 'depotBrandCountSessions'));

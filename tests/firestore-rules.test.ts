@@ -29,7 +29,28 @@ import {
 import { setDoc, doc, getDoc } from 'firebase/firestore';
 
 const PROJECT_ID = 'qore-multitenancy-test';
-const RULES_PATH = path.resolve(__dirname, '..', 'firestore.rules');
+
+/**
+ * Kural dosyasının yolu.
+ *
+ * Testler `.test-dist/tests/` altına derlenip oradan koşuyor; bu yüzden
+ * `__dirname/../firestore.rules` `.test-dist/firestore.rules`'a çıkıyor ve
+ * dosya bulunamıyordu — kural testlerinin TAMAMI `before` kancasında ENOENT
+ * ile düşüyordu (yani hiç çalışmıyordu). Depo kökünden çözmek her iki
+ * çalıştırma biçiminde de doğru sonucu verir.
+ */
+function resolveRulesPath(): string {
+  const candidates = [
+    path.resolve(process.cwd(), 'firestore.rules'),
+    path.resolve(__dirname, '..', 'firestore.rules'),
+    path.resolve(__dirname, '..', '..', 'firestore.rules'),
+  ];
+  const found = candidates.find(candidate => fs.existsSync(candidate));
+  if (!found) throw new Error(`firestore.rules bulunamadı. Denenen yollar: ${candidates.join(', ')}`);
+  return found;
+}
+
+const RULES_PATH = resolveRulesPath();
 
 let testEnv: RulesTestEnvironment;
 
@@ -238,4 +259,93 @@ test('Unknown collection denies all access (default-deny)', async () => {
   const db = authedAsCompanyA();
   await assertFails(getDoc(doc(db, 'someUnknownCollection', 'x')));
   await assertFails(setDoc(doc(db, 'someUnknownCollection', 'x'), { foo: 'bar' }));
+});
+
+// ============================================================================
+// Seri No Defteri (serialLedger)
+//
+// Bu koleksiyonun kuralı YOKTU: `serialHistory` yazımları sessizce
+// reddediliyordu, depo sayımının "sayımdan düşüldü" olayı hiç kaydedilemiyordu
+// ve sayımla düşülen seriler kalıcı olarak yeniden mal kabul edilemez hâle
+// geliyordu. Aşağıdaki testler kuralın hem var olduğunu hem de kiracı
+// izolasyonunu koruduğunu doğrular.
+// ============================================================================
+
+test('serialLedger: kullanıcı kendi şirketinin defter satırını yazabilir', async () => {
+  const db = authedAsCompanyA();
+  await assertSucceeds(
+    setDoc(doc(db, 'serialLedger', 'sl_companyA__KOD__SN1'), {
+      companyId: 'companyA', stokKodu: 'KOD', seriNumarasi: 'SN1', status: 'depoda',
+    }),
+  );
+});
+
+test('serialLedger: başka şirketin defter satırı yazılamaz', async () => {
+  const db = authedAsCompanyA();
+  await assertFails(
+    setDoc(doc(db, 'serialLedger', 'sl_companyB__KOD__SN1'), {
+      companyId: 'companyB', stokKodu: 'KOD', seriNumarasi: 'SN1', status: 'depoda',
+    }),
+  );
+});
+
+test('serialLedger: başka şirketin defter satırı okunamaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'serialLedger', 'slB'), {
+      companyId: 'companyB', stokKodu: 'KOD', seriNumarasi: 'SN1',
+    });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'serialLedger', 'slB')));
+});
+
+test('serialLedger: oturum açmamış kullanıcı erişemez', async () => {
+  await assertFails(getDoc(doc(unauthed(), 'serialLedger', 'sl_companyA__KOD__SN1')));
+  await assertFails(
+    setDoc(doc(unauthed(), 'serialLedger', 'sl_anon'), { companyId: 'companyA' }),
+  );
+});
+
+test('serialLedger: sayımdan düşüm olayı yazılabilir (eski akışta reddediliyordu)', async () => {
+  const db = authedAsCompanyA();
+  await assertSucceeds(
+    setDoc(doc(db, 'serialLedger', 'sl_companyA__KOD__SN1', 'events', 'e1'), {
+      companyId: 'companyA', type: 'sayim_dusum', stokKodu: 'KOD', seriNumarasi: 'SN1',
+    }),
+  );
+});
+
+test('serialLedger: olaylar değiştirilemez (append-only denetim izi)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'serialLedger', 'slA', 'events', 'e1'), {
+      companyId: 'companyA', type: 'tuketim',
+    });
+  });
+  const db = authedAsCompanyA();
+  await assertFails(
+    setDoc(doc(db, 'serialLedger', 'slA', 'events', 'e1'), { companyId: 'companyA', type: 'mal_kabul' }),
+  );
+});
+
+test('serialLedger: başka şirketin olayı yazılamaz', async () => {
+  const db = authedAsCompanyA();
+  await assertFails(
+    setDoc(doc(db, 'serialLedger', 'slB', 'events', 'e2'), {
+      companyId: 'companyB', type: 'tuketim',
+    }),
+  );
+});
+
+test('serialHistory: eski geçmiş yazımı artık reddedilmiyor', async () => {
+  const db = authedAsCompanyA();
+  await assertSucceeds(
+    setDoc(doc(db, 'serialHistory', 'SN1', 'events', 'e1'), {
+      type: 'sayimdan_dusum', details: { stokKodu: 'KOD' },
+    }),
+  );
+});
+
+test('serialHistory: oturum açmamış kullanıcı yazamaz', async () => {
+  await assertFails(
+    setDoc(doc(unauthed(), 'serialHistory', 'SN1', 'events', 'e1'), { type: 'intake' }),
+  );
 });

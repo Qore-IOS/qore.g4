@@ -1169,6 +1169,14 @@ export interface GroupedStockRow {
       stock; defaults to 1 when the doc has no numeric adet). Lets quantity corrections
       reduce/keep-in-sync at the same granularity `quantity` was summed at. */
   itemAdets: Record<string, number>;
+  /**
+   * itemId → seriNumarasi (yalnızca seri numarası taşıyan belgeler için).
+   *
+   * Yönetici adet düzeltmesi bir belgeyi sildiğinde, o birimin Seri No
+   * Defteri satırı da `serbest` yapılmalıdır; aksi hâlde seri sonsuza dek
+   * "depoda" görünür ve aynı fiziksel ürün bir daha mal kabul edilemez.
+   */
+  itemSerials: Record<string, string>;
   /** Brand from productCodes — used by the marka column filter. */
   marka?: string;
   // Server-computed risk metadata (populated when minMaxRules are available).
@@ -1228,7 +1236,10 @@ export async function getRecoverableTransferredLabStock(
   labIds: string[],
   idToken: string,
 ): Promise<DepoStokItem[]> {
-  const ids = Array.from(new Set(labIds.filter(Boolean))).slice(0, 30);
+  // Havuz üyeleri 30'u aşabilir. Eskiden liste `slice(0, 30)` ile kırpılıyordu
+  // ve kalan laboratuvarların transferleri hiç taranmıyordu; sorgu 30'luk
+  // partilere bölünerek tüm üyeler kapsanır.
+  const ids = Array.from(new Set(labIds.filter(Boolean)));
   if (ids.length === 0) return [];
   const decoded = await adminAuth.verifyIdToken(idToken);
   const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
@@ -1237,12 +1248,14 @@ export async function getRecoverableTransferredLabStock(
   const isSuperAdmin = role === 'super_admin' || role === 'admin_developer';
   const companyId = String(decoded.companyId ?? userData?.companyId ?? '').trim() || null;
 
-  const transferSnap = await adminDb.collection('transfers')
-    .where('targetHospitalId', 'in', ids)
-    .get();
-  const transferDocs = transferSnap.docs.filter(d =>
-    matchesScopedQueryCompany(d.data() as any, companyId, isSuperAdmin),
+  const idChunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 30) idChunks.push(ids.slice(i, i + 30));
+  const transferSnaps = await Promise.all(
+    idChunks.map(chunk => adminDb.collection('transfers').where('targetHospitalId', 'in', chunk).get()),
   );
+  const transferDocs = transferSnaps
+    .flatMap(snap => snap.docs)
+    .filter(d => matchesScopedQueryCompany(d.data() as any, companyId, isSuperAdmin));
 
   const candidates: Array<{
     itemId: string;
@@ -1617,6 +1630,7 @@ export async function getPaginatedDepotStock(params: {
         quantity: 0,
         itemIds: [],
         itemAdets: {},
+        itemSerials: {},
         marka: product?.marka || '',
       };
     }
@@ -1625,6 +1639,8 @@ export async function getPaginatedDepotStock(params: {
     if (item.id) {
       grouped[key].itemIds.push(item.id);
       grouped[key].itemAdets[item.id] = qty;
+      const serial = String(item.seriNumarasi ?? '').trim();
+      if (serial) grouped[key].itemSerials[item.id] = serial;
     }
   }
 

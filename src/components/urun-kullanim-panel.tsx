@@ -50,6 +50,9 @@ import type { DutyShift } from '@/lib/types';
 import { incrementTodayStats } from '@/lib/dailyConsumptionStats';
 import { urunKullanimLogger } from '@/lib/logger';
 import { findRecoverableLabTransfer } from '@/lib/urun-kullanim/transfer-recovery';
+import { fetchLabStock } from '@/lib/stock-source';
+import { appendSerialEventToBatch, appendSerialEvents, getSerialLedgerEntry } from '@/lib/serial-ledger/client';
+import { canConsumeSerial, describeSerialBlock, type SerialEventInput } from '@/lib/serial-ledger/core';
 
 const DynamicCameraBarcodeScanner = dynamic(() => import('@/components/camera-barcode-scanner'), {
   ssr: false,
@@ -659,9 +662,27 @@ export default function UrunKullanimPanel() {
   // Use TanStack Query for lab stock - much more efficient than full depoStok
   // Now also passes lab names to support legacy records without hedefKurumId
   // Wait for labPools to load before querying to ensure pool members are included
-  const { data: labStock = [], isLoading: labStockLoading } = useLabStock(poolMemberIds, poolMemberNames, {
+  const {
+    data: labStock = [],
+    isLoading: labStockLoading,
+    isError: labStockFailed,
+    error: labStockError,
+  } = useLabStock(poolMemberIds, poolMemberNames, {
     enabled: !labPoolsLoading && poolMemberIds.length > 0
   });
+
+  useEffect(() => {
+    if (!labStockFailed) return;
+    urunKullanimLogger.error('Laboratuvar/havuz stoğu yüklenemedi', labStockError, {
+      poolMemberIds,
+      poolMemberCount: poolMemberIds.length,
+    });
+    toast({
+      title: 'Stok yüklenemedi',
+      description: 'Laboratuvar/havuz stoğu okunamadı. Bağlantınızı kontrol edip sayfayı yenileyin.',
+      variant: 'destructive',
+    });
+  }, [labStockFailed, labStockError, poolMemberIds, toast]);
 
   // Use TanStack Query for recent consumption (for duplicate check)
   const { data: tuketimKayitlari = [] } = useRecentConsumption(200);
@@ -724,6 +745,33 @@ export default function UrunKullanimPanel() {
 
     const batch = writeBatch(db);
     batch.set(newTuketimDocRef, withCompanyScope(newRec, currentCompanyId));
+
+    // Seri No Defteri: tüketim olayı stok yazımıyla AYNI batch'te işlenir.
+    // Böylece "stoktan düştü ama defterde tüketilmiş görünmüyor" durumu
+    // oluşamaz; barkod tekrar okutulduğunda defter doğru cevabı verir.
+    appendSerialEventToBatch(batch, {
+      type: 'tuketim',
+      stokKodu: itemToConsume.stokKodu,
+      stokAdi: itemToConsume.stokAdi,
+      seriNumarasi: itemToConsume.seriNumarasi || '',
+      lotNumarasi: itemToConsume.lotNumarasi || '',
+      miad: typeof itemToConsume.miad === 'string' ? itemToConsume.miad : '',
+      source: { locationType: 'lab', locationId: ownerId, locationName: ownerName },
+      refs: {
+        consumptionId: newTuketimDocRef.id,
+        depoStokId: (itemToConsume as any).__recoveredTransferredStock ? undefined : itemToConsume.id,
+        usageLabId: selectedLab.id,
+        subPointId: selectedSubPoint?.id,
+      },
+      actorUid: currentUserProfile?.uid || null,
+      actorName: currentUserProfile?.name || currentUserProfile?.email || null,
+      details: {
+        usageLabName: selectedLab.name || '',
+        deductedFromLabName: ownerName,
+        subPointName: selectedSubPoint?.name || '',
+        consumptionType: 'normal_kullanim',
+      },
+    }, currentCompanyId);
 
     // Eski otomatik mal-kabul akışı aynı seri yeniden kabul edildiğinde transfer
     // edilmiş laboratuvar stok belgesini ezebiliyordu. Transfer geçmişinden
@@ -883,100 +931,68 @@ export default function UrunKullanimPanel() {
     try {
       urunKullanimLogger.debug('Firestore\'dan stok doğrulaması yapılıyor', { stokKodu, seri, lot });
 
-      // Build query based on tracking mode
-      let q;
-      if (seri) {
-        // Serial tracking - exact match
-        q = query(
-          collection(db, 'depoStok'),
-          where('hedefKurumId', 'in', poolMemberIds),
-          where('isShipped', '==', true),
-          where('stokKodu', '==', stokKodu),
-          where('seriNumarasi', '==', seri)
-        );
-      } else if (lot) {
-        // Lot tracking - find earliest expiry
-        q = query(
-          collection(db, 'depoStok'),
-          where('hedefKurumId', 'in', poolMemberIds),
-          where('isShipped', '==', true),
-          where('stokKodu', '==', stokKodu),
-          where('lotNumarasi', '==', lot)
-        );
-      } else {
-        // Ref-only tracking - find earliest expiry
-        q = query(
-          collection(db, 'depoStok'),
-          where('hedefKurumId', 'in', poolMemberIds),
-          where('isShipped', '==', true),
-          where('stokKodu', '==', stokKodu)
-        );
-      }
+      if (poolMemberIds.length === 0 && poolMemberNames.length === 0) return null;
 
-      const snap = await getDocs(q);
-
-      if (snap.empty) {
-        // Also check legacy records without hedefKurumId
-        const legacyQuery = query(
-          collection(db, 'depoStok'),
-          where('hedefKurum', 'in', poolMemberNames),
-          where('isShipped', '==', true),
-          where('stokKodu', '==', stokKodu)
-        );
-        const legacySnap = await getDocs(legacyQuery);
-
-        if (legacySnap.empty) {
-          // Compatibility repair: a former auto-intake deterministic document ID
-          // could overwrite the same serial's transferred lab-stock document.
-          // The transfer event still proves which lab owns that physical unit.
-          if (seri) {
-            const historySnap = await getDocs(query(
-              collection(db, `serialHistory/${seri}/events`),
-              orderBy('timestamp', 'desc'),
-              limit(50),
-            ));
-            const historyEvents = historySnap.docs.map(eventDoc => ({
-              id: eventDoc.id,
-              ...(eventDoc.data() as any),
-            }));
-            const recoveredEvent = findRecoverableLabTransfer(historyEvents, stokKodu, poolMemberIds);
-            if (recoveredEvent) {
-                const details = recoveredEvent.details || {};
-                return {
-                  id: `recovered-transfer-${recoveredEvent.id}`,
-                  stokKodu,
-                  stokAdi: details.stokAdi || products.find(p => p.stokKodu === stokKodu)?.stokAdi || stokKodu,
-                  seriNumarasi: seri,
-                  lotNumarasi: details.lotNumarasi || '',
-                  miad: details.miad || '',
-                  adet: 1,
-                  isShipped: true,
-                  hedefKurumId: details.targetHospitalId,
-                  hedefKurum: details.targetName || '',
-                  companyId: currentCompanyId || undefined,
-                  __recoveredTransferredStock: true,
-                } as DepoStokItem;
-            }
-          }
-          return null;
-        }
-
-        const items = filterByCompanyScope(
-          legacySnap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-          currentCompanyId,
-          isSuperAdmin,
-        );
-        return seri
-          ? items.find(i => i.seriNumarasi === seri) || null
-          : pickEarliest(items);
-      }
-
-      const items = filterByCompanyScope(
-        snap.docs.map(d => ({ id: d.id, ...d.data() } as DepoStokItem)),
-        currentCompanyId,
+      // Listeleme (useLabStock) ile doğrulama AYNI sorguyu paylaşır. Eskiden bu
+      // fonksiyon `collection(db,'depoStok')` üzerinde ham sorgu kuruyordu:
+      // şirket kapsamı yoktu, 30'dan çok üyeli havuzda `in` sınırını aşıp
+      // patlıyordu ve boş `poolMemberIds` ile çağrıldığında hata fırlatıyordu.
+      // Bu yüzden panel "stokta yok" derken listede ürün görünebiliyordu.
+      const rows = await fetchLabStock({
+        labIds: poolMemberIds,
+        labNames: poolMemberNames,
+        stokKodu,
+        companyId: currentCompanyId,
         isSuperAdmin,
-      );
-      return seri ? items[0] : pickEarliest(items);
+      });
+
+      if (rows.length > 0) {
+        if (seri) {
+          const match = rows.find(i => (i.seriNumarasi || '') === seri);
+          if (match) return match;
+        } else if (lot) {
+          const lotRows = rows.filter(i => (i.lotNumarasi || '') === lot);
+          if (lotRows.length > 0) return pickEarliest(lotRows) ?? null;
+        } else {
+          return pickEarliest(rows) ?? null;
+        }
+      }
+
+      // Uyumluluk onarımı: eski deterministik mal-kabul belge kimliği, aynı
+      // serinin transfer edilmiş laboratuvar stok belgesinin üzerine yazmış
+      // olabilir. Transfer olayı o fiziksel birimin hangi laboratuvara ait
+      // olduğunu hâlâ kanıtlar.
+      if (seri) {
+        const historySnap = await getDocs(query(
+          collection(db, `serialHistory/${seri}/events`),
+          orderBy('timestamp', 'desc'),
+          limit(50),
+        ));
+        const historyEvents = historySnap.docs.map(eventDoc => ({
+          id: eventDoc.id,
+          ...(eventDoc.data() as any),
+        }));
+        const recoveredEvent = findRecoverableLabTransfer(historyEvents, stokKodu, poolMemberIds);
+        if (recoveredEvent) {
+          const details = recoveredEvent.details || {};
+          return {
+            id: `recovered-transfer-${recoveredEvent.id}`,
+            stokKodu,
+            stokAdi: details.stokAdi || products.find(p => p.stokKodu === stokKodu)?.stokAdi || stokKodu,
+            seriNumarasi: seri,
+            lotNumarasi: details.lotNumarasi || '',
+            miad: details.miad || '',
+            adet: 1,
+            isShipped: true,
+            hedefKurumId: details.targetHospitalId,
+            hedefKurum: details.targetName || '',
+            companyId: currentCompanyId || undefined,
+            __recoveredTransferredStock: true,
+          } as DepoStokItem;
+        }
+      }
+
+      return null;
     } catch (error) {
       urunKullanimLogger.error('Firestore stok doğrulama hatası', error, { stokKodu, seri, lot });
       return null;
@@ -1121,34 +1137,58 @@ export default function UrunKullanimPanel() {
         }
     }
 
-    // STEP 2: Duplicate check - use Firestore for recent consumption (more reliable than cache)
+    // STEP 2: Mükerrer tüketim kontrolü — birincil kaynak Seri No Defteri.
+    //
+    // Eskiden bu kontrol `tuketimKayitlari` üzerinden yapılıyordu. O koleksiyon
+    // tüketimi SONSUZA DEK saklar; depo sayımıyla düşülüp yeniden mal kabul
+    // edilen bir seri, eski tüketim kaydı yüzünden kalıcı olarak "zaten
+    // tüketilmiş" sayılıyor ve bir daha hiç düşülemiyordu. Defter ise birimin
+    // GÜNCEL durumunu tutar: sayımdan düşülen birim `serbest` olur, yeniden mal
+    // kabul edilince `depoda`, transfer edilince `laboratuvarda` olur ve normal
+    // şekilde tüketilebilir.
     if (item.irsaliyeNumarasi !== 'İSTİSNA GİRİŞİ' && item.seriNumarasi) {
-        // First check cache (fast). NOT: Aynı seri farklı ürünlere tanımlı
-        // olabildiği için stokKodu da karşılaştırılıyor. Bu kontrol yanlış
-        // pozitif veriyorsa `matched` log'unda mismatch görünecek.
-        const matched = tuketimKayitlari.find(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
-        const cachedDuplicate = !!matched;
+        const ledgerEntry = await getSerialLedgerEntry(stokKodu, item.seriNumarasi, currentCompanyId)
+          .catch(error => {
+            urunKullanimLogger.warn('Seri defteri okunamadı, eski kontrole düşülüyor', error, { stokKodu, seri: item!.seriNumarasi });
+            return null;
+          });
 
-        if (cachedDuplicate) {
-            urunKullanimLogger.warn('Cache mükerrer tüketim tespit edildi', {
-              stokKodu,
-              seriNumarasi: item.seriNumarasi,
-              matchedRecord: matched ? {
-                id: (matched as any).id,
-                stokKodu: matched.stokKodu,
-                seriNumarasi: matched.seriNumarasi,
-                consumptionTimestamp: (matched as any).consumptionTimestamp?.toString?.() || (matched as any).consumptionTimestamp,
-              } : null,
-            });
-            toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
+        if (ledgerEntry) {
+          if (!canConsumeSerial(ledgerEntry)) {
+            urunKullanimLogger.warn('Defterde engelli birim', { stokKodu, seriNumarasi: item.seriNumarasi, status: ledgerEntry.status });
+            toast({ title: 'İşlem Görmüş Ürün', description: `${stokKodu} - Seri No ${item.seriNumarasi}: ${describeSerialBlock(ledgerEntry)}`, variant: 'destructive' });
             playFeedback(true);
             setScanStatus('error');
             setTimeout(() => setScanStatus('idle'), 3000);
             return;
+          }
+        } else {
+          // Defterde kaydı olmayan ESKİ birimler için önceki davranış korunur:
+          // önbellek (hızlı) + son 5 dakika Firestore kontrolü (yarış koşulu).
+          const matched = tuketimKayitlari.find(c => c.stokKodu === stokKodu && c.seriNumarasi === item!.seriNumarasi);
+          if (matched) {
+              urunKullanimLogger.warn('Cache mükerrer tüketim tespit edildi (defter kaydı yok)', {
+                stokKodu,
+                seriNumarasi: item.seriNumarasi,
+                matchedRecord: {
+                  id: (matched as any).id,
+                  stokKodu: matched.stokKodu,
+                  seriNumarasi: matched.seriNumarasi,
+                  consumptionTimestamp: (matched as any).consumptionTimestamp?.toString?.() || (matched as any).consumptionTimestamp,
+                },
+              });
+              toast({ title: 'Zaten Tüketilmiş', description: `${stokKodu} - Seri No ${item.seriNumarasi} daha önce stoktan düşülmüş.`, variant: 'destructive' });
+              playFeedback(true);
+              setScanStatus('error');
+              setTimeout(() => setScanStatus('idle'), 3000);
+              return;
+          }
         }
 
-        // DEFENSIVE: Also check Firestore for recent consumption (last 5 min) to catch race conditions
-        urunKullanimLogger.debug('Firestore\'dan duplicate kontrolü yapılıyor', { stokKodu, seri: item.seriNumarasi });
+        // Yarış koşulu koruması: aynı seriyi iki kullanıcı aynı anda okutursa
+        // defter henüz güncellenmemiş olabilir. Son 5 dakikalık tüketim
+        // kontrolü her iki yolda da uygulanır.
+        urunKullanimLogger.debug('Son 5 dk tüketim kontrolü yapılıyor', { stokKodu, seri: item.seriNumarasi });
         const recentlyConsumed = await checkRecentConsumption(stokKodu, item.seriNumarasi);
 
         if (recentlyConsumed) {
@@ -1216,7 +1256,7 @@ export default function UrunKullanimPanel() {
     playFeedback(true);
     setTimeout(() => setScanStatus('idle'), 3000);
 
-  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption]);
+  }, [selectedLabId, barcodeFormats, products, productTracking, labStock, toast, findBySerial, findByLot, findByRefOnly, recordConsumption, tuketimKayitlari, verifyStockInFirestore, checkRecentConsumption, invalidateDepoStok, invalidateConsumption, currentCompanyId]);
   
   const onProcess = useCallback((barcode: string) => {
     if (isExpiryWarningModalOpen && lotReplaceTarget) {
@@ -1261,7 +1301,12 @@ export default function UrunKullanimPanel() {
   const labSelected = Boolean(selectedLabId);
   const stepFmtOk   = !formatsLoading && barcodeFormats.length > 0;
   const stepProdOk  = !isLoading;
-  const stepStockOk = labSelected && !labPoolsLoading && !labStockLoading;
+  // Stok adımı YALNIZCA canlı okumaya bakar. Geçmiş onarımı (transferlerden
+  // kurtarma) arka planda sürerken panel bloke edilmez — havuza dâhil bir
+  // laboratuvar seçildiğinde "Havuz stoğu yükleniyor" adımının hiç bitmemesinin
+  // sebebi buydu. Okuma kalıcı olarak başarısızsa da adım "yükleniyor"da
+  // asılı kalmaz; hata durumu tamamlanmış sayılır ve stok boş listelenir.
+  const stepStockOk = labSelected && !labPoolsLoading && (!labStockLoading || labStockFailed);
   const systemReady = stepFmtOk && stepProdOk && stepStockOk;
 
   const safeName = useCallback(
@@ -1629,6 +1674,8 @@ export default function UrunKullanimPanel() {
 
     try {
       const batch = writeBatch(db);
+      /** Seri No Defteri olayları — stok yazımından sonra parçalı yazılır. */
+      const ledgerEvents: SerialEventInput[] = [];
       for (let i = 0; i < quantityToDeduct; i++) {
         const newTuketimDocRef = doc(collection(db, 'tuketimKayitlari'));
         const newRec = {
@@ -1667,6 +1714,29 @@ export default function UrunKullanimPanel() {
         } else {
           batch.update(stokRef, { adet: plan.docAdet - plan.take });
         }
+        // Seri numarası taşıyan bir satır listeli/manuel düşümle tamamen
+        // tükendiyse defter de kapatılır. Aksi hâlde birim stoktan silinmiş
+        // olmasına rağmen defterde "laboratuvarda" görünür ve barkodu tekrar
+        // okutulduğunda yanlış cevap alınır.
+        //
+        // Bu düşüm yüzlerce birim kapsayabildiği için defter olayları ana
+        // batch'e EKLENMEZ (500 işlem sınırı); stok yazımı başarılı olduktan
+        // sonra parçalı olarak yazılır.
+        if (plan.take >= plan.docAdet && plan.ref.seriNumarasi) {
+          ledgerEvents.push({
+            type: 'tuketim',
+            stokKodu: plan.ref.stokKodu,
+            stokAdi: plan.ref.stokAdi,
+            seriNumarasi: plan.ref.seriNumarasi,
+            lotNumarasi: plan.ref.lotNumarasi || '',
+            miad: typeof plan.ref.miad === 'string' ? plan.ref.miad : '',
+            source: { locationType: 'lab', locationId: ownerId, locationName: ownerName },
+            refs: { depoStokId: plan.id, usageLabId: selectedLab.id },
+            actorUid: currentUserProfile?.uid || null,
+            actorName: currentUserProfile?.name || currentUserProfile?.email || null,
+            details: { consumptionType: 'manual_visual', adet: plan.take },
+          });
+        }
       });
 
       // Seri takipli ürünlerde seri numaralarını arka planda sakla (stoktan sayılmasın)
@@ -1697,6 +1767,18 @@ export default function UrunKullanimPanel() {
       }
 
       await batch.commit();
+
+      // Defter yazımı stok yazımından sonra gelir; hata hâlinde düşüm geri
+      // alınmaz. Defter türetilmiş bir dizindir ve yönetim panelindeki
+      // "Seri No Defteri Doldurma" aracıyla yeniden kurulabilir.
+      try {
+        await appendSerialEvents(ledgerEvents, currentCompanyId);
+      } catch (ledgerError) {
+        urunKullanimLogger.error('Seri No Defteri güncellenemedi (listeli düşüm)', ledgerError, {
+          stokKodu,
+          eventCount: ledgerEvents.length,
+        });
+      }
 
       // "Son Okutulan Ürün" ve "Son 10 Tüketim" kartlarını manuel/listeli düşümde de güncelle
       const remainingInSameLot = Math.max(0, currentlyAvailable - quantityToDeduct);

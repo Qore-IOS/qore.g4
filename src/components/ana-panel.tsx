@@ -52,6 +52,8 @@ import { db } from '@/lib/firebase';
 import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit, increment, arrayUnion } from 'firebase/firestore';
 import { flushSync } from 'react-dom';
 import { scheduleIdle, cancelIdle, sanitizeFsId, type IdleHandle } from '@/lib/sync/idle-scheduler';
+import { appendSerialEventToBatch, buildSerialLedgerWrites, getSerialLedgerEntries } from '@/lib/serial-ledger/client';
+import { canReceiveSerial, describeSerialBlock, type SerialEventInput } from '@/lib/serial-ledger/core';
 
 // Utilities
 import { cn, generateId, playFeedback } from '@/lib/utils';
@@ -91,10 +93,19 @@ const ExcelStokGirisModal = dynamic(() => import('@/components/mal-kabul/ExcelSt
   ssr: false,
 });
 
-// Geçmişte tüketilmiş veya başka bir işlem görmüş seri numaralarının yeniden
-// kabulünü engelleyen kontrol geçici olarak kapalıdır. Depoda halen bulunan ve
-// aynı kabul oturumunda tekrar okutulan seri kontrolleri çalışmaya devam eder.
-const BLOCK_PREVIOUSLY_PROCESSED_SERIALS = false;
+// Geçmişte işlem görmüş seri numaralarının yeniden kabulünü engelleyen kontrol.
+//
+// Bu kontrol daha önce KAPATILMAK ZORUNDA kalmıştı: eski `serialHistory`
+// koleksiyonunun Firestore güvenlik kuralı hiç tanımlanmamıştı, dolayısıyla
+// depo sayımının yazmaya çalıştığı "sayımdan düşüldü" olayı hiçbir zaman
+// kaydedilemiyordu. Sonuç olarak sayımla depodan silinen bir seri, sistemde
+// kalıcı olarak "işlem görmüş" sayılıyor ve bir daha ASLA mal kabul
+// edilemiyordu; kontrolü kapatmak da depoda mükerrer seriye yol açıyordu.
+//
+// Kontrol artık `serialLedger` üzerinden çalışır: sayımdan düşülen birim
+// `serbest` durumuna geçer ve tüm işlemleri (mal kabul → transfer → tüketim)
+// yeniden görebilir. Kuralı `firestore.rules` içinde tanımlıdır.
+const BLOCK_PREVIOUSLY_PROCESSED_SERIALS = true;
 
 function AnaPanelSkeleton() {
   return (
@@ -521,8 +532,9 @@ class BatchQueue {
   }
   get opCount() { return this._opCount; }
   get commits() { return this._commits; }
-  async set(ref: ReturnType<typeof doc>, data: any) {
-    this._batch.set(ref, data);
+  async set(ref: ReturnType<typeof doc>, data: any, options?: { merge?: boolean }) {
+    if (options?.merge) this._batch.set(ref, data, { merge: true });
+    else this._batch.set(ref, data);
     this._opCount += 1;
     if (this._opCount >= this.chunkSize) {
       await this.commit();
@@ -561,6 +573,38 @@ const enqueueSerialHistory = (
     details,
     timestamp: Timestamp.now(),
   });
+};
+
+/**
+ * Seri No Defteri yazımlarını mal kabul kuyruğuna ekler.
+ *
+ * `BatchQueue` 500 işlemlik Firestore sınırını kendi yönettiği için doğrudan
+ * `WriteBatch` alan yardımcı kullanılamaz; yazımlar burada kuyruğa devredilir.
+ */
+const enqueueSerialLedger = async (
+  q: BatchQueue,
+  input: SerialEventInput,
+  companyId: string | null | undefined,
+) => {
+  for (const write of buildSerialLedgerWrites(input, companyId)) {
+    await q.set(write.ref, write.data, { merge: write.merge });
+  }
+};
+
+/** Bir kabul listesindeki tüm `ürün kodu + seri no` çiftlerini toplar. */
+const collectSerialPairs = (rows: ScanRow[]): Array<{ serial: string; stokKodu: string }> => {
+  const pairs: Array<{ serial: string; stokKodu: string }> = [];
+  rows.forEach(item => {
+    if (!item.stokKodu) return;
+    if (!item.isGroup && item.seriNumarasi) {
+      pairs.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
+    } else if (item.isGroup && item.scannedSerials) {
+      item.scannedSerials.forEach(s => {
+        if (s) pairs.push({ serial: s, stokKodu: item.stokKodu! });
+      });
+    }
+  });
+  return pairs;
 };
 
 // Tek bir depoStok belgesinin gövdesini üretir. Hem manuel "Mal Kabul" akışı hem
@@ -1595,67 +1639,61 @@ export default function AnaPanel(props: AnaPanelProps) {
         // filtresiz bir Firestore sorgusu vardı; sonucu hiçbir yerde
         // okunmuyordu (ölü kod) ve çağrı başına gereksiz okuma üretiyordu.
 
-        // Geçmiş seri kontrolü geçici olarak kapalıdır. Tekrar açıldığında geçmişte
-        // tüketilmiş/işlem görmüş seriler kabul edilmeden önce burada belirlenir.
-        const serialsToCheck: { serial: string; stokKodu: string }[] = [];
-        itemsToProcess.forEach(item => {
-          if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
-            serialsToCheck.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
-          } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
-            item.scannedSerials.forEach(s => {
-              if (s) {
-                serialsToCheck.push({ serial: s, stokKodu: item.stokKodu! });
-              }
-            });
-          }
-        });
+        // Geçmişte işlem görmüş seri kontrolü — Seri No Defteri üzerinden.
+        // Her seri için ayrı sorgu yerine tüm çiftler tek turda (30'luk
+        // `documentId() in [...]` partileri) okunur, bu yüzden yüzlerce satırlık
+        // bir kabul bile birkaç okumaya iner.
+        const serialsToCheck = collectSerialPairs(itemsToProcess);
 
-        const consumedSerials = new Set<string>();
+        const blockedSerials = new Map<string, string>();
         if (BLOCK_PREVIOUSLY_PROCESSED_SERIALS && serialsToCheck.length > 0) {
-          await Promise.all(
-            serialsToCheck.map(async ({ serial, stokKodu }) => {
-              try {
-                // Only the MOST RECENT event decides whether this serial is still
-                // blocked. A depo sayım correction ('sayimdan_dusum') means the
-                // physical unit was confirmed gone from the depot, so the same
-                // serial is legitimately receivable again. Any other latest event —
-                // 'intake' (never left), 'transfer' (shipped to a lab), or
-                // 'consumption' (used up there) — keeps it blocked: those are real
-                // departures elsewhere, not a depot-side correction.
-                const historySnap = await getDocs(
-                  query(
-                    collection(db, `serialHistory/${serial}/events`),
-                    orderBy('timestamp', 'desc'),
-                    limit(1)
-                  )
-                );
-                const latest = historySnap.docs[0]?.data();
-                if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
-                  consumedSerials.add(`${stokKodu}||${serial}`);
-                }
-              } catch (e) {
-                console.error("Error checking history in commit", e);
-              }
-            })
-          );
+          try {
+            const ledger = await getSerialLedgerEntries(
+              serialsToCheck.map(({ serial, stokKodu }) => ({ stokKodu, seriNumarasi: serial })),
+              currentCompanyId,
+            );
+            ledger.forEach((entry, key) => {
+              // Yalnızca `serbest` (depo sayımıyla düşülmüş) birimler yeniden
+              // kabul edilebilir; diğer tüm durumlar mükerrer kabuldür.
+              if (!canReceiveSerial(entry)) blockedSerials.set(key, describeSerialBlock(entry));
+            });
+          } catch (e) {
+            // Defter okunamazsa kabul engellenmez; mükerrer kontrolü depo
+            // indeksi ve oturum içi kontrolle sürer.
+            malKabulLogger.warn('Seri defteri okunamadı, geçmiş kontrolü atlandı', e);
+          }
         }
 
         const docsToCreate: Array<{ ref: ReturnType<typeof doc>; data: any; serial?: string; item: ScanRow }> = [];
-        // Okutma anındaki Firestore sorgusu kaldırıldığı için, geçmişte tüketilmiş
-        // serileri burada (commit) eleyip kullanıcıya kaç tanesinin atlandığını bildiriyoruz.
+        // Okutma anındaki Firestore sorgusu kaldırıldığı için, geçmişte işlem
+        // görmüş serileri burada (commit) eleyip kullanıcıya kaç tanesinin
+        // atlandığını bildiriyoruz.
         let skippedConsumed = 0;
+        const skipReasons = new Set<string>();
+        const consumedSerials = {
+          has: (key: string) => blockedSerials.has(key),
+          reason: (key: string) => blockedSerials.get(key) || '',
+        };
 
         for (const item of itemsToProcess) {
           const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
           if (item.seriNumarasi && (depotProductSerials?.has(item.seriNumarasi) || consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
-            if (consumedSerials.has(`${item.stokKodu}||${item.seriNumarasi}`)) skippedConsumed++;
+            const key = `${item.stokKodu}||${item.seriNumarasi}`;
+            if (consumedSerials.has(key)) {
+              skippedConsumed++;
+              skipReasons.add(consumedSerials.reason(key));
+            }
             continue;
           }
 
           const serialsToProcess = item.isGroup ? (item.scannedSerials || []) : [item.seriNumarasi];
           const filteredSerials = (serialsToProcess.filter(Boolean) as string[]).filter(serial => {
-            const isConsumed = consumedSerials.has(`${item.stokKodu}||${serial}`);
-            if (isConsumed) skippedConsumed++;
+            const key = `${item.stokKodu}||${serial}`;
+            const isConsumed = consumedSerials.has(key);
+            if (isConsumed) {
+              skippedConsumed++;
+              skipReasons.add(consumedSerials.reason(key));
+            }
             return !isConsumed;
           });
 
@@ -1703,6 +1741,22 @@ export default function AnaPanel(props: AnaPanelProps) {
               rafAdresi: docInfo.item.rafAdresi || '',
               irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
             });
+            await enqueueSerialLedger(queue, {
+              type: 'mal_kabul',
+              stokKodu: docInfo.item.stokKodu || '',
+              stokAdi: docInfo.item.stokAdi || '',
+              seriNumarasi: docInfo.serial,
+              lotNumarasi: docInfo.item.lotNumarasi || '',
+              miad: docInfo.item.miad || '',
+              location: { locationType: 'depot', locationId: selectedDepotId, locationName: depotName },
+              refs: { depoStokId: docInfo.ref.id, irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi },
+              actorUid: currentUser?.uid || null,
+              actorName: currentUserProfile?.name || currentUser?.email || null,
+              details: {
+                rafAdresi: docInfo.item.rafAdresi || '',
+                irsaliyeNumarasi: docInfo.item.irsaliyeNumarasi || '',
+              },
+            }, currentCompanyId);
           }
         }
 
@@ -1713,7 +1767,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         const txId = await recordMalKabulTransaction(itemsToProcess, 'unverified');
         toast({
           title: 'Kabul Tamamlandı',
-          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.${skippedConsumed > 0 ? ` ${skippedConsumed} seri geçmişte işlem görmüş/tüketilmiş olduğu için atlandı.` : ''}`,
+          description: `${itemsToProcess.length} kalem işlem başarıyla kaydedildi.${
+            skippedConsumed > 0
+              ? ` ${skippedConsumed} seri atlandı: ${Array.from(skipReasons).filter(Boolean).join(' ') || 'geçmişte işlem görmüş.'}`
+              : ''
+          }`,
           action: (
             <Button variant="default" onClick={() => router.push(`/mal-kabul/gecmis?depotId=${encodeURIComponent(selectedDepotId)}&open=${encodeURIComponent(txId)}`)}>
               Geçmişte Aç
@@ -1728,7 +1786,11 @@ export default function AnaPanel(props: AnaPanelProps) {
         scannedSerialsRef.current.clear();
         previousScannedItems.forEach(item => {
           if (item.seriNumarasi && item.stokKodu) {
-            const serialKey = serialLotKey(item.stokKodu, item.lotNumarasi || '');
+            // Oturum içi mükerrer takibi ürün bazındadır (lot dâhil değil).
+            // Burada artık var olmayan `serialLotKey` çağrılıyordu; kabul
+            // sırasında bir hata olduğunda geri alma ReferenceError ile
+            // patlıyor ve liste hiç geri yüklenmiyordu.
+            const serialKey = serialProductKey(item.stokKodu);
             if (!scannedSerialsRef.current.has(serialKey)) {
               scannedSerialsRef.current.set(serialKey, new Set());
             }
@@ -1767,33 +1829,24 @@ export default function AnaPanel(props: AnaPanelProps) {
       createdByUid: currentUser?.uid || null,
     };
 
-    // 1) Geçmiş seri kontrolü geçici olarak kapalıdır. Bayrak tekrar açılırsa
-    // kontrol arka planda, okutma yolunun dışında gerçekleştirilir.
-    const serialChecks: { serial: string; stokKodu: string }[] = [];
-    picked.forEach(item => {
-      if (!item.isGroup && item.seriNumarasi && item.stokKodu) {
-        serialChecks.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
-      } else if (item.isGroup && item.scannedSerials && item.stokKodu) {
-        item.scannedSerials.forEach(s => { if (s) serialChecks.push({ serial: s, stokKodu: item.stokKodu! }); });
-      }
-    });
-    const consumed = new Set<string>();
+    // 1) Geçmiş seri kontrolü — manuel akışla birebir aynı kaynak (Seri No
+    // Defteri). Sayımdan düşülüp `serbest` olan seriler engellenmez.
+    const serialChecks = collectSerialPairs(picked);
+    const consumed = new Map<string, string>();
     if (BLOCK_PREVIOUSLY_PROCESSED_SERIALS && serialChecks.length > 0) {
-      await Promise.all(serialChecks.map(async ({ serial, stokKodu }) => {
-        try {
-          // Same "only the latest event counts" rule as performGoodsReceipt below —
-          // only a depo sayım correction ('sayimdan_dusum') frees the serial up
-          // again; transfer/consumption/intake all keep it blocked.
-          const snap = await getDocs(query(collection(db, `serialHistory/${serial}/events`), orderBy('timestamp', 'desc'), limit(1)));
-          const latest = snap.docs[0]?.data();
-          if (latest && latest.details?.stokKodu === stokKodu && latest.type !== 'sayimdan_dusum') {
-            consumed.add(`${stokKodu}||${serial}`);
-          }
-        } catch { /* okuma hatasında yazım yine denenir */ }
-      }));
+      try {
+        const ledger = await getSerialLedgerEntries(
+          serialChecks.map(({ serial, stokKodu }) => ({ stokKodu, seriNumarasi: serial })),
+          currentCompanyId,
+        );
+        ledger.forEach((entry, key) => {
+          if (!canReceiveSerial(entry)) consumed.set(key, describeSerialBlock(entry));
+        });
+      } catch { /* okuma hatasında yazım yine denenir */ }
     }
 
-    // 2) depoStok + serialHistory tek writeBatch (parti küçük; 500 op limiti uzak).
+    // 2) depoStok + serialHistory + serialLedger tek writeBatch (parti küçük;
+    // 500 op limiti uzak).
     const batch = writeBatch(db);
     const writtenRows: ScanRow[] = [];
 
@@ -1801,7 +1854,7 @@ export default function AnaPanel(props: AnaPanelProps) {
       const depotProductSerials = item.stokKodu ? existingDepotSerials.get(serialProductKey(item.stokKodu)) : undefined;
       if (!item.isGroup && item.seriNumarasi &&
           (depotProductSerials?.has(item.seriNumarasi) || consumed.has(`${item.stokKodu}||${item.seriNumarasi}`))) {
-        failed.set(item.id, 'Bu seri depoda mevcut.');
+        failed.set(item.id, consumed.get(`${item.stokKodu}||${item.seriNumarasi}`) || 'Bu seri depoda mevcut.');
         continue;
       }
 
@@ -1833,6 +1886,19 @@ export default function AnaPanel(props: AnaPanelProps) {
             details: { stokKodu: item.stokKodu || '', stokAdi: item.stokAdi || '', depotId: selectedDepotId, depotName, rafAdresi: item.rafAdresi || '', irsaliyeNumarasi: item.irsaliyeNumarasi || '' },
             timestamp: Timestamp.now(),
           });
+          appendSerialEventToBatch(batch, {
+            type: 'mal_kabul',
+            stokKodu: item.stokKodu || '',
+            stokAdi: item.stokAdi || '',
+            seriNumarasi: serial,
+            lotNumarasi: item.lotNumarasi || '',
+            miad: item.miad || '',
+            location: { locationType: 'depot', locationId: selectedDepotId, locationName: depotName },
+            refs: { depoStokId: ref.id, irsaliyeNumarasi: item.irsaliyeNumarasi },
+            actorUid: currentUser?.uid || null,
+            actorName: currentUserProfile?.name || currentUser?.email || null,
+            details: { rafAdresi: item.rafAdresi || '', irsaliyeNumarasi: item.irsaliyeNumarasi || '', mode: 'oto_kabul' },
+          }, currentCompanyId);
           if (!firstId) firstId = ref.id;
         }
         confirmed.set(item.id, firstId);

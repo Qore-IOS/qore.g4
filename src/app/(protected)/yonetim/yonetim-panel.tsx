@@ -7,6 +7,7 @@ import { Warehouse, Building, Pill, MapPin, Users, Barcode, LogOut, Beaker, QrCo
 import { useAuth } from '@/contexts/auth-context';
 import AdminBackfillHedefKurumId from '@/components/AdminBackfillHedefKurumId';
 import AdminBackfillDepoSayimSeriStok from '@/components/AdminBackfillDepoSayimSeriStok';
+import AdminBackfillSerialLedger from '@/components/AdminBackfillSerialLedger';
 
 export default function YonetimPanel() {
   const router = useRouter();
@@ -77,6 +78,7 @@ export default function YonetimPanel() {
       </div>
       <AdminBackfillHedefKurumId />
       <AdminBackfillDepoSayimSeriStok />
+      <AdminBackfillSerialLedger />
     </div>
   );
 }

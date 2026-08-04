@@ -9,7 +9,7 @@ import {
   Search, RefreshCw, X, Box, ArrowRight, ChevronRight, ChevronDown, Check,
   FileSpreadsheet, Warehouse, Building2, Hash, HandCoins,
 } from 'lucide-react';
-import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult, type ProductMatch } from '@/actions/searchActions';
+import { searchProductLedger, type LedgerRow, type StockSummary, type SearchResult, type ProductMatch, type SerialLedgerSummary } from '@/actions/searchActions';
 import { useAuth } from '@/contexts/auth-context';
 import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 
@@ -17,6 +17,36 @@ import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 const C = MK_C;
 const SKY = '#7CA8DE', SKY_DEEP = '#5582C0';
 const VIOLET = '#9B86D6', VIOLET_DEEP = '#7A66C0';
+
+// ── Seri No Defteri durum/olay etiketleri ────────────────────────────────────
+const SERIAL_STATUS_LABEL_TR: Record<string, string> = {
+  depoda: 'Depoda',
+  laboratuvarda: 'Laboratuvarda',
+  borcta: 'Borçta',
+  tuketildi: 'Tüketildi',
+  imha_edildi: 'İmha Edildi',
+  serbest: 'Serbest (sayımdan düşüldü)',
+};
+const SERIAL_STATUS_COLOR: Record<string, string> = {
+  depoda: SKY_DEEP,
+  laboratuvarda: C.waterDeep,
+  borcta: '#C0796A',
+  tuketildi: C.ink2,
+  imha_edildi: '#C0796A',
+  serbest: VIOLET_DEEP,
+};
+const SERIAL_EVENT_LABEL_TR: Record<string, string> = {
+  mal_kabul: 'Mal Kabul',
+  transfer: 'Transfer',
+  siparis_karsilama: 'Sipariş Karşılama',
+  lab_transfer: 'Laboratuvar Transferi',
+  tuketim: 'Tüketim',
+  imha: 'İmha',
+  borc: 'Borç Çıkışı',
+  iade: 'İade',
+  sayim_dusum: 'Depo Sayımından Düşüm',
+  duzeltme: 'Düzeltme',
+};
 
 type BadgeKind = 'amber' | 'sky' | 'neutral' | 'danger' | 'violet';
 const BADGE_TONE: Record<string, BadgeKind> = {
@@ -210,8 +240,9 @@ function TxnCard({ tx, open, onToggle }: { tx: LedgerRow; open: boolean; onToggl
 }
 
 // ── Detail view ───────────────────────────────────────────────────────────────
-function DetailView({ prod, stock, txns, onBack, wide }: {
-  prod: { name: string; code: string; unit: string }; stock: StockSummary[]; txns: LedgerRow[]; onBack: (() => void) | null; wide: boolean;
+function DetailView({ prod, stock, txns, serialLedger, onBack, wide }: {
+  prod: { name: string; code: string; unit: string }; stock: StockSummary[]; txns: LedgerRow[];
+  serialLedger: SerialLedgerSummary[]; onBack: (() => void) | null; wide: boolean;
 }) {
   const [page, setPage] = useState(1);
   const [perPage, setPerPage] = useState(20);
@@ -237,6 +268,36 @@ function DetailView({ prod, stock, txns, onBack, wide }: {
           </button>
         )}
       </div>
+
+      {/* Seri No Defteri — birimin güncel durumu.
+          `ürün kodu + seri no` başına tek satır; barkod okutulduğunda ürünün
+          geçmişte işlem görüp görmediği ve şu an nerede olduğu buradan okunur. */}
+      {serialLedger.length > 0 && (
+        <div style={{ padding: '18px 22px', borderRadius: C.radius, background: `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`, boxShadow: C.clay, marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+            <span style={{ color: C.accent, display: 'inline-flex' }}><Box size={19} /></span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Seri No Defteri</span>
+          </div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {serialLedger.map((row) => {
+              const col = SERIAL_STATUS_COLOR[row.status] ?? C.ink2;
+              return (
+                <div key={row.id} style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, padding: '13px 20px', borderRadius: C.radius, background: C.surfaceHi, boxShadow: C.clayFlat, minWidth: 220 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{row.stokKodu}</div>
+                  <div style={{ fontSize: 14.5, fontWeight: 800, color: col }}>{SERIAL_STATUS_LABEL_TR[row.status] ?? row.status}</div>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: C.ink2 }}>
+                    {row.locationName || '—'}
+                    {row.lastEventAt ? ` · ${new Date(row.lastEventAt).toLocaleDateString('tr-TR')}` : ''}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: C.ink3 }}>
+                    Son işlem: {SERIAL_EVENT_LABEL_TR[row.lastEventType] ?? (row.lastEventType || '—')} · {row.eventCount} kayıt
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* stock distribution */}
       {stock.length > 0 && (
@@ -373,6 +434,7 @@ export default function AramaPanel() {
 
   const [results, setResults] = useState<LedgerRow[]>([]);
   const [stockSummary, setStockSummary] = useState<StockSummary[]>([]);
+  const [serialLedger, setSerialLedger] = useState<SerialLedgerSummary[]>([]);
   const [productMatches, setProductMatches] = useState<ProductMatch[]>([]);
   const [selectedStokKodu, setSelectedStokKodu] = useState<string | null>(null);
 
@@ -398,6 +460,7 @@ export default function AramaPanel() {
         setProductMatches(result.productMatches);
         setResults([]);
         setStockSummary([]);
+        setSerialLedger([]);
         setSearchType(result.searchType);
         setSelectedStokKodu(null);
         toast({ title: 'Ürün Seçin', description: `${result.productMatches.length} eşleşen ürün bulundu. Listeden birini seçin.` });
@@ -411,6 +474,7 @@ export default function AramaPanel() {
       setProductMatches([]);
       setResults(ledgerRows);
       setStockSummary(result.stockSummary);
+      setSerialLedger(result.serialLedger ?? []);
       setSearchType(result.searchType);
 
       if (ledgerRows.length === 0) {
@@ -538,7 +602,7 @@ export default function AramaPanel() {
             {!isSearching && showNoResult && <EmptyState noResult query={query} />}
             {showMatching && <MatchList items={productMatches} onPick={handleSelectProduct} />}
             {showDetail && prod && (
-              <DetailView prod={prod} stock={stockSummary} txns={results} wide={wide} onBack={selectedStokKodu ? handleBackToList : null} />
+              <DetailView prod={prod} stock={stockSummary} txns={results} serialLedger={serialLedger} wide={wide} onBack={selectedStokKodu ? handleBackToList : null} />
             )}
           </div>
 

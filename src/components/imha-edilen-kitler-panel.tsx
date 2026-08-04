@@ -21,6 +21,8 @@ import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
+import { appendSerialEvents } from '@/lib/serial-ledger/client';
+import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
@@ -523,6 +525,8 @@ export default function ImhaEdilenKitlerPanel() {
             const batches: any[] = [writeBatch(db)];
             let currentBatchIndex = 0;
             let operationCount = 0;
+            /** Seri No Defteri olayları — stok yazımından sonra parçalı yazılır. */
+            const ledgerEvents: SerialEventInput[] = [];
 
             for (const { items, stockItems, sourceType, collectionName } of stockResults) {
                 for (const item of items) {
@@ -576,10 +580,41 @@ export default function ImhaEdilenKitlerPanel() {
                         sourceType: item.sourceType,
                     }, currentCompanyId));
                     operationCount++;
+
+                    // Seri No Defteri: imha, birimin son işlemidir. Aynı seri
+                    // numarası sayımla serbest bırakılmadıkça yeniden mal kabul
+                    // edilemez. Olaylar stok yazımından sonra parçalı yazılır ki
+                    // toplu imhada 500 işlem sınırı aşılmasın.
+                    if (item.seriNumarasi) {
+                        ledgerEvents.push({
+                            type: 'imha',
+                            stokKodu: item.stokKodu,
+                            stokAdi: item.stokAdi,
+                            seriNumarasi: item.seriNumarasi,
+                            lotNumarasi: item.lotNumarasi || '',
+                            miad: typeof item.miad === 'string' ? item.miad : '',
+                            source: sourceType === 'depot'
+                                ? { locationType: 'depot', locationId: item.depotId || '', locationName: item.depotName || '' }
+                                : { locationType: 'lab', locationId: item.laboratoryId || '', locationName: item.laboratoryName || '' },
+                            refs: { destroyedKitReportId: destroyedKitRef.id },
+                            actorUid: currentUser?.uid || null,
+                            actorName: currentUserProfile?.name || null,
+                            details: { remainingTests: item.remainingTests, sourceType: item.sourceType },
+                        });
+                    }
                 }
             }
 
             await Promise.all(batches.map(b => b.commit()));
+
+            // Defter yazımı imha yazımından sonra gelir; hata hâlinde imha geri
+            // alınmaz. Defter türetilmiş bir dizindir ve yönetim panelindeki
+            // doldurma aracıyla yeniden kurulabilir.
+            try {
+                await appendSerialEvents(ledgerEvents, currentCompanyId);
+            } catch (ledgerError) {
+                console.error('[İmha] Seri No Defteri güncellenemedi:', ledgerError);
+            }
 
             toast({
                 title: 'İmha Tamamlandı',

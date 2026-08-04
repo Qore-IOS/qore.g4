@@ -50,6 +50,8 @@ import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesScopedQueryCompany, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { appendSerialEvents } from '@/lib/serial-ledger/client';
+import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { compareAsc, parse as parseDate } from 'date-fns';
@@ -1335,6 +1337,13 @@ export default function DirektTransferPanel() {
         const batch = writeBatch(db);
         const trackingDisabled = !isBorcMode && targetLab?.consumptionTrackingEnabled === false;
 
+        // Seri No Defteri olayları AYRI, parçalı bir yazımda işlenir.
+        // Sebebi: bir transfer yüzlerce kalem içerebilir ve tek `writeBatch`
+        // Firestore'un 500 işlem sınırına takılır. Stok yazımının atomikliği
+        // (mevcut davranış) korunur; defter, stok yazımı başarılı olduktan
+        // hemen sonra 150'lik partiler hâlinde yazılır.
+        const ledgerEvents: SerialEventInput[] = [];
+
         const targetHospitalId = isBorcMode ? null : selectedLabId;
 
         itemsToShip.forEach((item: DepoStokItem & { transferAdet?: number }) => {
@@ -1432,6 +1441,38 @@ export default function DirektTransferPanel() {
           if (item.seriNumarasi) {
             const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
             batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad, adet: transferQty }, timestamp: Timestamp.now() });
+            ledgerEvents.push({
+              type: isBorcMode ? 'borc' : 'transfer',
+              stokKodu: item.stokKodu,
+              stokAdi: item.stokAdi,
+              seriNumarasi: item.seriNumarasi,
+              lotNumarasi: item.lotNumarasi || '',
+              miad: typeof item.miad === 'string' ? item.miad : '',
+              source: { locationType: 'depot', locationId: selectedDepotId, locationName: depotName },
+              location: isBorcMode
+                ? { locationType: 'borc', locationId: selectedBorcDepotId || '', locationName: targetName }
+                : { locationType: 'lab', locationId: targetHospitalId || '', locationName: targetName },
+              refs: { transferId: transferRef.id, depoStokId: targetDocId },
+              actorUid: currentUser.uid ?? null,
+              actorName: currentUserProfile.name ?? currentUser.email ?? null,
+              details: { adet: transferQty, company: isBorcMode ? selectedCompany : null },
+            });
+            // Hedefte tüketim takibi kapalıysa transfer aynı anda tüketimdir.
+            if (trackingDisabled) {
+              ledgerEvents.push({
+                type: 'tuketim',
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                seriNumarasi: item.seriNumarasi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: typeof item.miad === 'string' ? item.miad : '',
+                source: { locationType: 'lab', locationId: selectedLabId || '', locationName: targetName },
+                refs: { transferId: transferRef.id },
+                actorUid: currentUser.uid ?? null,
+                actorName: currentUserProfile.name ?? currentUser.email ?? null,
+                details: { reason: 'hedefte_tuketim_takibi_kapali' },
+              });
+            }
           }
           
           const itemRef = doc(db, 'transfers', transferRef.id, 'items', targetDocId);
@@ -1456,6 +1497,19 @@ export default function DirektTransferPanel() {
         }, currentCompanyId));
 
         await batch.commit();
+
+        // Defter yazımı stok yazımından SONRA gelir; burada bir hata olursa
+        // stok transferi geri alınmaz (ürünler gerçekten taşındı). Defter
+        // türetilmiş bir dizindir ve yönetim panelindeki "Seri No Defteri
+        // Doldurma" aracıyla her zaman yeniden kurulabilir.
+        try {
+          await appendSerialEvents(ledgerEvents, currentCompanyId);
+        } catch (ledgerError) {
+          direktTransferLogger.error('Seri No Defteri güncellenemedi', ledgerError, {
+            transferId: transferRef.id,
+            eventCount: ledgerEvents.length,
+          });
+        }
 
         await touchStockMetadata();
 

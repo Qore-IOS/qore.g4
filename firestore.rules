@@ -216,6 +216,40 @@ service cloud.firestore {
       allow create: if writingInCompany();
       allow update, delete: if false;
     }
+
+    // -----------------------------
+    // Seri No Defteri (serialLedger)
+    //
+    // `ürün kodu + seri no` başına TEK satır; her fiziksel birimin nerede
+    // olduğunu ve hangi işlemlerden geçtiğini tutar. Mal kabul, transfer,
+    // sipariş karşılama, tüketim, imha, borç ve depo sayımı bu koleksiyona
+    // yazar; barkod okutulduğunda "bu birim daha önce işlem gördü mü" sorusu
+    // buradan cevaplanır.
+    //
+    // Olaylar (events) değiştirilemez: bir kez yazılır, güncellenmez, silinmez.
+    // Defter satırının kendisi güncellenebilir (son durum/konum burada tutulur),
+    // fakat silinemez — sayımdan düşülen birim silinmez, `serbest` durumuna
+    // geçer ve yeniden işlem görebilir.
+    // -----------------------------
+    match /serialLedger/{id} {
+      allow read: if inCompany();
+      allow create, update: if writingInCompany();
+      allow delete: if isSuperAdmin();
+      match /events/{eventId} {
+        allow read: if inCompany();
+        allow create: if writingInCompany();
+        allow update, delete: if false;
+      }
+    }
+
+    // Eski seri geçmişi. `serialLedger` devreye girene kadar yazılmaya devam
+    // eder ve geriye dönük doldurma bu kayıtları okur. Belge kimliği seri
+    // numarasının kendisi olduğu için üst belge çoğu zaman boştur; kapsam
+    // kontrolü olay belgelerindeki `companyId` üzerinden yapılır.
+    match /serialHistory/{serial} {
+      allow read, write: if isSignedIn();
+      match /events/{eventId}                 { allow read, write: if isSignedIn(); }
+    }
     match /poolWarehouseStock/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /routes/{id}                        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /draftActionForms/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
