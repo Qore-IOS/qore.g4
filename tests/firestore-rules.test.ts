@@ -252,33 +252,21 @@ test('Loose-tier collection denies unauthenticated', async () => {
 });
 
 // ============================================================================
-// Tanımsız koleksiyon — Faz 7 geçici güvenlik ağı devredeyken
+// Tanımsız koleksiyon — varsayılan reddet (güvenlik ağı kaldırıldıktan sonra)
 //
-// DAVRANIŞ DEĞİŞİKLİĞİ (bilinçli): eskiden tanımsız bir koleksiyon her erişime
-// kapalıydı. Bu, kuralı unutulan her koleksiyonun kullanıcıya hiçbir ipucu
-// vermeden kilitlenmesi demekti — `serialHistory` tam olarak böyle sessizce
-// reddediliyordu. Güvenlik ağı bu kilitlenmeyi kaldırır, KİRACI İZOLASYONUNU
-// KORUYARAK: erişim yine oturum + `inCompany()` şartına bağlıdır.
-//
-// Güvenlik ağı Faz 2'de silinince bu test tekrar "reddedilir"e döner.
+// Faz 7 geçici güvenlik ağı silindi; `match` bloğu olmayan koleksiyon yeniden
+// her erişime kapalıdır. Bu testin geri döndürülmesi, ağın gerçekten
+// kaldırıldığının kanıtıdır.
 // ============================================================================
 
-test('Tanımsız koleksiyon: kendi şirketinde erişilebilir (kilitlenme yok)', async () => {
+test('Tanımsız koleksiyon her erişime kapalıdır (varsayılan reddet)', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'someUnknownCollection', 'x'), { companyId: 'companyA' });
   });
   const db = authedAsCompanyA();
-  await assertSucceeds(getDoc(doc(db, 'someUnknownCollection', 'x')));
-  await assertSucceeds(setDoc(doc(db, 'someUnknownCollection', 'y'), { companyId: 'companyA' }));
-});
-
-test('Tanımsız koleksiyon: başka şirkete ve anonime kapalı', async () => {
-  await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'someUnknownCollection', 'b'), { companyId: 'companyB' });
-  });
-  await assertFails(getDoc(doc(authedAsCompanyA(), 'someUnknownCollection', 'b')));
-  await assertFails(getDoc(doc(unauthed(), 'someUnknownCollection', 'b')));
-  await assertFails(setDoc(doc(unauthed(), 'someUnknownCollection', 'z'), { companyId: 'companyA' }));
+  await assertFails(getDoc(doc(db, 'someUnknownCollection', 'x')));
+  await assertFails(setDoc(doc(db, 'someUnknownCollection', 'y'), { companyId: 'companyA' }));
+  await assertFails(getDoc(doc(unauthed(), 'someUnknownCollection', 'x')));
 });
 
 // ============================================================================
@@ -371,14 +359,13 @@ test('serialHistory: oturum açmamış kullanıcı yazamaz', async () => {
 });
 
 // ============================================================================
-// Faz 7 — kuralı eksik kalmış koleksiyonlar ve geçici güvenlik ağı
+// Faz 7 — kuralı eksik kalmış koleksiyonlar
 //
 // Bu blok, kural dosyası yayınlandığında kullanıcıların "veri okuyamaz/
-// yazamaz" hâle gelmesini önleyen davranışı sabitler. İki gereksinim var:
-//   1. Kodun tarayıcıdan kullandığı HER koleksiyon erişilebilir olmalı
-//      (Firestore tanımsız koleksiyonu sessizce reddeder).
-//   2. Güvenlik ağı, kendi bloğu daha sıkı olan koleksiyonları GEVŞETMEMELİ
-//      (Firestore'da `allow` kuralları OR'lanır).
+// yazamaz" hâle gelmesini önleyen davranışı sabitler: kodun tarayıcıdan
+// kullandığı HER koleksiyon erişilebilir olmalı. Geçici güvenlik ağı
+// kaldırıldığı için bu artık tek savunma hattıdır — aşağıdaki listeden bir
+// koleksiyon düşerse üretimde sessizce reddedilir.
 // ============================================================================
 
 const FAZ7_COLLECTIONS = [
@@ -420,35 +407,18 @@ test('etiketsiz (legacy) belgeler okunmaya ve yazılmaya devam eder', async () =
   await assertSucceeds(setDoc(doc(db, 'shortcuts', 'legacy2'), { name: 'etiketsiz' }));
 });
 
-test('güvenlik ağı: envanterde HİÇ olmayan bir koleksiyon da kilitlenmez', async () => {
-  // Statik envanterde gözden kaçan bir koleksiyon, kullanıcıya hiçbir ipucu
-  // vermeyen bir kilitlenmeye yol açmamalı.
+test('envanterde olmayan koleksiyon reddedilir (ağ kaldırıldı)', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'gozdenKacmisKoleksiyon', 'x'), { companyId: 'companyA' });
   });
   const db = authedAsCompanyA();
-  await assertSucceeds(getDoc(doc(db, 'gozdenKacmisKoleksiyon', 'x')));
-  await assertSucceeds(setDoc(doc(db, 'gozdenKacmisKoleksiyon', 'y'), { companyId: 'companyA' }));
+  await assertFails(getDoc(doc(db, 'gozdenKacmisKoleksiyon', 'x')));
+  await assertFails(setDoc(doc(db, 'gozdenKacmisKoleksiyon', 'y'), { companyId: 'companyA' }));
 });
 
-test('güvenlik ağı kiracı izolasyonunu ZAYIFLATMAZ', async () => {
-  await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'gozdenKacmisKoleksiyon', 'b'), { companyId: 'companyB' });
-  });
-  await assertFails(getDoc(doc(authedAsCompanyA(), 'gozdenKacmisKoleksiyon', 'b')));
-  await assertFails(
-    setDoc(doc(authedAsCompanyA(), 'gozdenKacmisKoleksiyon', 'c'), { companyId: 'companyB' }),
-  );
-});
-
-test('güvenlik ağı oturum açmamış kullanıcıya açılmaz', async () => {
-  await assertFails(getDoc(doc(unauthed(), 'gozdenKacmisKoleksiyon', 'x')));
-  await assertFails(setDoc(doc(unauthed(), 'gozdenKacmisKoleksiyon', 'z'), { companyId: 'companyA' }));
-});
-
-// ── Güvenlik ağının EZMEMESİ gereken kurallar ───────────────────────────────
-
-test('güvenlik ağı AuditLogs süper-admin kısıtını ezmez', async () => {
+// Ağ kaldırıldıktan sonra da daha sıkı kuralların yerinde olduğu doğrulanır —
+// silme işlemi yanlışlıkla başka bir bloğa dokunmuş olabilir.
+test('AuditLogs hâlâ yalnızca süper-admin', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'AuditLogs', 'a1'), { companyId: 'companyA' });
   });
@@ -456,26 +426,14 @@ test('güvenlik ağı AuditLogs süper-admin kısıtını ezmez', async () => {
   await assertSucceeds(getDoc(doc(authedAsSuperAdmin(), 'AuditLogs', 'a1')));
 });
 
-test('güvenlik ağı takvim OAuth belgelerini açmaz', async () => {
+test('takvim OAuth belgeleri hâlâ tamamen kapalı', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'calendarOAuthStates', 's1'), { companyId: 'companyA' });
-    await setDoc(doc(ctx.firestore(), 'calendarConnections', 'userA', 'tokens', 't1'), { companyId: 'companyA' });
   });
-  const db = authedAsCompanyA();
-  await assertFails(getDoc(doc(db, 'calendarOAuthStates', 's1')));
-  await assertFails(getDoc(doc(db, 'calendarConnections', 'userA', 'tokens', 't1')));
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'calendarOAuthStates', 's1')));
 });
 
-test('güvenlik ağı stockAdjustmentLogs değiştirilemezliğini bozmaz', async () => {
-  await testEnv.withSecurityRulesDisabled(async (ctx) => {
-    await setDoc(doc(ctx.firestore(), 'stockAdjustmentLogs', 'l1'), { companyId: 'companyA', diff: -1 });
-  });
-  await assertFails(
-    setDoc(doc(authedAsCompanyA(), 'stockAdjustmentLogs', 'l1'), { companyId: 'companyA', diff: 99 }),
-  );
-});
-
-test('güvenlik ağı serialLedger olaylarının değiştirilemezliğini bozmaz', async () => {
+test('serialLedger olayları hâlâ değiştirilemez', async () => {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'serialLedger', 'slA', 'events', 'e9'), {
       companyId: 'companyA', type: 'tuketim',
@@ -485,18 +443,6 @@ test('güvenlik ağı serialLedger olaylarının değiştirilemezliğini bozmaz'
     setDoc(doc(authedAsCompanyA(), 'serialLedger', 'slA', 'events', 'e9'), {
       companyId: 'companyA', type: 'mal_kabul',
     }),
-  );
-});
-
-test('güvenlik ağı kullanıcıların birbirinin profilini yazmasına izin vermez', async () => {
-  await assertFails(
-    setDoc(doc(authedAsCompanyA(), 'users', 'userA2'), { name: 'ele geçirildi', companyId: 'companyA' }),
-  );
-});
-
-test('güvenlik ağı companyStats salt-okunurluğunu bozmaz', async () => {
-  await assertFails(
-    setDoc(doc(authedAsCompanyA(), 'companyStats', 'companyA'), { companyId: 'companyA', total: 1 }),
   );
 });
 

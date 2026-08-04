@@ -135,13 +135,23 @@ kural bloğu eksik demektir.
 
 ### Adım 6 — güvenlik ağını kaldır (Faz 2)
 
-Reddedilen istek gelmediği doğrulandıktan sonra `firestore.rules` içindeki
-"GEÇİCİ GÜVENLİK AĞI" bölümünü (`notNarrowed` fonksiyonu + iki `match` bloğu)
-silin, `pnpm test:rules:emulated` koşun ve yeniden yayınlayın. Silindikten sonra
-tanımsız koleksiyonlar yeniden varsayılan-reddet olur.
+**Bu adım hazır bir PR olarak bekliyor.** `firestore.rules` içindeki "GEÇİCİ
+GÜVENLİK AĞI" bölümü (`notNarrowed` + iki `match` bloğu) kaldırılmış ve
+`tests/firestore-rules.test.ts` içindeki "Tanımsız koleksiyon" testleri
+"reddedilir" beklentisine geri çevrilmiş durumda.
 
-Bu adım yapılırken `tests/firestore-rules.test.ts` içindeki "Tanımsız
-koleksiyon" testleri de "reddedilir" beklentisine geri çevrilmelidir.
+**Merge etmeden önce şunu doğrulayın:**
+
+1. Adım 4'teki deploy yapıldı ve üzerinden en az birkaç iş günü geçti.
+2. Firebase Console → Firestore → Rules → **Monitor** sekmesinde o süre boyunca
+   **hiç "denied" isteği görünmedi**.
+
+Monitor'de reddedilen bir yol varsa **merge etmeyin**: o koleksiyonun `match`
+bloğu eksik demektir. Önce kuralını ekleyin, yeniden yayınlayın, tekrar izleyin.
+
+Merge sonrası `firebase deploy --only firestore:rules` ile yayınlayın. Bu
+noktadan sonra `match` bloğu olmayan koleksiyon yeniden **varsayılan olarak
+reddedilir** — yani ağın sakladığı bir eksik varsa o an yüzeye çıkar.
 
 ## Geri alma
 
