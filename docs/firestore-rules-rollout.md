@@ -123,8 +123,13 @@ node scripts/sync-claims.js --apply    # uygula
 `onUserClaimSync` fonksiyonunun deploy edildiğinden de emin olun:
 
 ```bash
-firebase deploy --only functions:onUserClaimSync
+firebase deploy --only functions:onUserClaimSync --project invpilot
 ```
+
+`--project` **zorunludur**: `firebase deploy` `.firebaserc`'yi değil, son
+`firebase use` durumunu kullanır. Bu komut bir kez projesiz çalıştırıldı ve
+`roche-logistics-hub`'a gitti; üretimdeki (`invpilot`) kopya güncellenmedi.
+Çıktının ilk satırında `Deploying to 'invpilot'` yazdığını teyit edin.
 
 `pnpm rules:preflight` temiz çıkana kadar tekrarlayın.
 
@@ -143,7 +148,7 @@ kullanır; kök `firebase.json` bir `hosting` bloğu içerdiği için doğrudan
 ### Adım 4 — yayınla
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes
+firebase deploy --only firestore:rules,firestore:indexes --project invpilot
 ```
 
 İndeksler önce, kurallar sonra yayınlanır; bileşik indekslerin oluşması birkaç
@@ -171,7 +176,8 @@ GÜVENLİK AĞI" bölümü (`notNarrowed` + iki `match` bloğu) kaldırılmış 
 Monitor'de reddedilen bir yol varsa **merge etmeyin**: o koleksiyonun `match`
 bloğu eksik demektir. Önce kuralını ekleyin, yeniden yayınlayın, tekrar izleyin.
 
-Merge sonrası `firebase deploy --only firestore:rules` ile yayınlayın. Bu
+Merge sonrası `firebase deploy --only firestore:rules --project invpilot` ile
+yayınlayın. Bu
 noktadan sonra `match` bloğu olmayan koleksiyon yeniden **varsayılan olarak
 reddedilir** — yani ağın sakladığı bir eksik varsa o an yüzeye çıkar.
 
@@ -180,6 +186,10 @@ reddedilir** — yani ağın sakladığı bir eksik varsa o an yüzeye çıkar.
 Kurallar sürümlenir. Firebase Console → Firestore → Rules → **History**'den
 önceki sürüm tek tıkla geri yüklenebilir. Yayın öncesi mevcut sürümü
 kopyalayıp saklamak da iyi bir alışkanlıktır.
+
+Yanlış projeye yayınladıysanız geri alma **o projede** yapılır: Console'da
+`roche-logistics-hub`'ı seçip History'den önceki sürümü yükleyin, sonra doğru
+komutu `--project invpilot` ile tekrarlayın.
 
 ## Kalıcı kural: yeni koleksiyon eklerken
 

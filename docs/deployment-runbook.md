@@ -17,6 +17,27 @@ Bu belge, #1760 → #1764 arasındaki değişikliklerin canlıya alınması içi
 
 ---
 
+## Adım 0a — Her komuta `--project invpilot` yazın
+
+Üretim veri düzlemi (Firestore, Auth, Functions) **`invpilot`** projesindedir:
+`apphosting.yaml` → `NEXT_PUBLIC_FIREBASE_PROJECT_ID: "invpilot"`,
+`public/firebase-config.js` ve `.firebaserc` (`projects.default`) hepsi bunu
+gösterir. `roche-logistics-hub` eski/paralel bir projedir — v2 stok, istatistik
+ve maliyet fonksiyonlarının hiçbiri orada yoktur.
+
+`firebase deploy` **`.firebaserc`'yi değil, son `firebase use` durumunu**
+kullanır. Bu bir kez yanlış projeye deploy'a yol açtı: `--project` verilmeyen
+`functions:onUserClaimSync` deploy'u `roche-logistics-hub`'a gitti, üretimdeki
+kopya güncellenmedi.
+
+Bu yüzden aşağıdaki komutların hepsinde proje **açıkça** yazılıdır. `firebase
+use invpilot` **çalıştırmayın** — hosting deploy'u başka bir projeye gittiği
+için global durumu değiştirmek onu bozar.
+
+> **Yayın sonrası teyit:** `firebase deploy` çıktısının ilk satırı
+> `=== Deploying to 'invpilot'...` demiyorsa **durdurun**, komutu `--project`
+> ile tekrarlayın ve yanlış projeye gitmiş olanı geri alın.
+
 ## Adım 0 — Claim'leri doğrula (yazma yok)
 
 Kuralların çalışması `request.auth.token.companyId` custom claim'ine bağlıdır.
@@ -51,19 +72,13 @@ gösterdiğini teyit edin.**
 > görünüyordu** — yalnızca `admin.auth()` düşüyordu. Token'ında `companyId`
 > olmayan kullanıcı için `inCompany()` daima false döner.
 
-> **Bu adım atlanırsa ne olur:** bir kez atlandı ve tüm kullanıcılar stok
-> göremez hâle geldi. `sync-claims.js` proje kimliğini çözemediği için hiçbir
-> claim yazamamıştı; Firestore kısmı çalıştığından hata fark edilmedi ve
-> kurallar yine de yayınlandı. Token'ında `companyId` olmayan kullanıcı için
-> `inCompany()` daima false döner.
-
 ## Adım 1 — Claim senkronunu kur ve çalıştır
 
 Önce fonksiyonu yayınlayın (bundan sonraki her `users/{uid}` yazımında claim
 otomatik güncellensin):
 
 ```bash
-firebase deploy --only functions:onUserClaimSync
+firebase deploy --only functions:onUserClaimSync --project invpilot
 ```
 
 Sonra mevcut kullanıcılar için tek seferlik doldurma:
@@ -81,8 +96,8 @@ ekranından firma atayın.
 
 ```bash
 pnpm test:rules:emulated          # 82 kural testi (JDK 21+ gerekir)
-firebase deploy --only firestore:indexes
-firebase deploy --only firestore:rules
+firebase deploy --only firestore:indexes --project invpilot
+firebase deploy --only firestore:rules   --project invpilot
 ```
 
 İndeksler önce: bileşik indekslerin oluşması birkaç dakika sürebilir, o süre
@@ -99,6 +114,10 @@ Adım 2 tamamlanmadan **yapmayın** (yukarıdaki sıralama uyarısı).
 ```bash
 firebase deploy --only hosting
 ```
+
+> Hosting **kendi projesine** deploy edilir; buraya bilerek `--project invpilot`
+> yazılmadı. Kural/fonksiyon komutlarında kullandığınız projeyi hosting'e
+> taşımayın.
 
 Firebase App Hosting kullanıyorsanız ve `main`'e push otomatik deploy
 tetikliyorsa, PR'lar merge edildiğinde bu adım kendiliğinden olmuş olabilir —
@@ -197,7 +216,7 @@ Adım 8'de birkaç iş günü boyunca **hiç "denied" görülmediyse** #1764'ü 
 edin ve yeniden yayınlayın:
 
 ```bash
-firebase deploy --only firestore:rules
+firebase deploy --only firestore:rules --project invpilot
 ```
 
 Bu noktadan sonra `match` bloğu olmayan koleksiyon yeniden **varsayılan olarak
