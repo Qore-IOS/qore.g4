@@ -76,13 +76,65 @@ function resolveProjectId() {
 function initAdmin(admin, { quiet = false } = {}) {
   const { projectId, source } = resolveProjectId();
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId,
-    });
+    let credential;
+    try {
+      credential = admin.credential.applicationDefault();
+    } catch (err) {
+      throw new Error(buildCredentialHelp(err));
+    }
+    admin.initializeApp({ credential, projectId });
   }
   if (!quiet) console.log(`Proje  : ${projectId}  (kaynak: ${source})`);
   return { db: admin.firestore(), projectId };
+}
+
+/**
+ * Kimlik bilgisi hatasını, ne yapılacağını söyleyen bir mesaja çevirir.
+ *
+ * En sık iki hata:
+ *  - `GOOGLE_APPLICATION_CREDENTIALS` var olmayan bir yolu gösteriyor (belgedeki
+ *    yer tutucu yol olduğu gibi kopyalanmış olabilir). Bu durumda değişkeni
+ *    KALDIRMAK çoğu ortamda yeterlidir: Firebase Studio, Cloud Shell ve
+ *    Compute Engine zaten varsayılan kimlik bilgisi sağlar.
+ *  - Hiçbir kimlik bilgisi yok → gerçek bir service account anahtarı gerekir.
+ */
+function buildCredentialHelp(err) {
+  const message = err && err.message ? err.message : String(err);
+  const gac = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  const dosyaYok = /ENOENT|no such file/i.test(message);
+
+  const satirlar = [`Firebase kimlik bilgisi okunamadı: ${message}`, ''];
+
+  if (gac && dosyaYok) {
+    satirlar.push(
+      `  GOOGLE_APPLICATION_CREDENTIALS şu yolu gösteriyor ama dosya yok:`,
+      `    ${gac}`,
+      '',
+      '  Büyük olasılıkla belgedeki ÖRNEK yol olduğu gibi kopyalandı.',
+      '',
+      '  1) Ortamınız zaten varsayılan kimlik bilgisi sağlıyorsa (Firebase Studio,',
+      '     Cloud Shell, Compute Engine) değişkeni kaldırmanız yeterlidir:',
+      '        unset GOOGLE_APPLICATION_CREDENTIALS',
+      '',
+      '  2) Gerçekten bir anahtar dosyası gerekiyorsa: Firebase Console →',
+      '     Project settings → Service accounts → "Generate new private key"',
+      '     ile indirin ve GERÇEK yolu verin:',
+      '        export GOOGLE_APPLICATION_CREDENTIALS=/indirdiginiz/dosya.json'
+    );
+  } else {
+    satirlar.push(
+      '  Kullanılabilir bir kimlik bilgisi bulunamadı.',
+      '',
+      '  Firebase Console → Project settings → Service accounts →',
+      '  "Generate new private key" ile bir anahtar indirin ve yolunu verin:',
+      '     export GOOGLE_APPLICATION_CREDENTIALS=/indirdiginiz/dosya.json',
+      '',
+      '  Firebase Studio / Cloud Shell gibi ortamlarda genellikle hiçbir şey',
+      '  ayarlamanıza gerek yoktur; bu değişken TANIMSIZ olmalıdır.'
+    );
+  }
+
+  return satirlar.join('\n');
 }
 
 /**
@@ -105,4 +157,4 @@ async function assertAuthUsable(admin) {
   }
 }
 
-module.exports = { resolveProjectId, initAdmin, assertAuthUsable, readFirebaseRc };
+module.exports = { resolveProjectId, initAdmin, assertAuthUsable, readFirebaseRc, buildCredentialHelp };
