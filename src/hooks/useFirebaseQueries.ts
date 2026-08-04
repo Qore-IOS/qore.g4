@@ -1114,57 +1114,25 @@ export function useLabStock(
     queryKey: ['depoStok', 'shipped', labIdKey, labNameKey, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       if (labIds.length === 0) return [];
-      // We can only use 'in' with up to 30 values
-      const ids = labIds.slice(0, 30);
-      const names = labNames.slice(0, 30);
-
-      // Query by hedefKurumId
-      const idSnap = await getDocs(
-        scopedQuery(
-          'depoStok',
-          currentCompanyId,
-          isSuperAdmin,
-          where('hedefKurumId', 'in', ids),
-          where('isShipped', '==', true),
-        ),
-      );
-      const idResults = idSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
-
-      // Also query by hedefKurum (name) for legacy records that may not have hedefKurumId
-      let legacyResults: DepoStokItem[] = [];
-      if (names.length > 0) {
-        const nameSnap = await getDocs(
-          scopedQuery(
-            'depoStok',
-            currentCompanyId,
-            isSuperAdmin,
-            where('hedefKurum', 'in', names),
-            where('isShipped', '==', true),
-          ),
-        );
-        legacyResults = nameSnap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) } as DepoStokItem));
-      }
-
-      // Merge results, avoiding duplicates
-      const resultMap = new Map<string, DepoStokItem>();
-      idResults.forEach(item => resultMap.set(item.id, item));
-      legacyResults.forEach(item => {
-        if (!resultMap.has(item.id)) {
-          resultMap.set(item.id, item);
-        }
+      // Tek kaynak: `fetchLabStock` hem kimlik hem ad üzerinden okur, 30'luk
+      // `in` sınırını partiler hâlinde aşar (eskiden `slice(0, 30)` ile büyük
+      // havuzların üyeleri sessizce düşüyordu) ve şirket kapsamını uygular.
+      //
+      // ÖNEMLİ: Geçmiş onarımı (`getRecoverableTransferredLabStock`) ARTIK bu
+      // sorgunun içinde beklenmiyor. O sunucu eylemi bir havuzun tüm
+      // transferlerini ve her transferin `items` alt-koleksiyonunu tarayıp
+      // geri yazma yapıyor; havuza dâhil bir laboratuvar seçildiğinde saniyeler
+      // süren bu iş canlı stok okumasını bloke ediyor, sorgu zaman aşımına
+      // uğrayıp yeniden deneniyor ve "Havuz stoğu yükleniyor" hiç bitmiyordu.
+      // Onarım aşağıda bağımsız `recoveryQuery` olarak çalışır.
+      const { fetchLabStock } = await import('@/lib/stock-source');
+      return fetchLabStock({
+        labIds,
+        labNames,
+        companyId: currentCompanyId,
+        isSuperAdmin,
+        normalizeTimestamps: processTimestamp,
       });
-
-      // Historical compatibility: old deterministic mal-kabul IDs could
-      // overwrite a transferred lab-stock document when the same serial was
-      // received again. Transfer headers/items still preserve those units.
-      const { getRecoverableTransferredLabStock } = await import('@/actions/stokActions');
-      const idToken = await currentUser?.getIdToken();
-      const recovered = idToken ? await getRecoverableTransferredLabStock(ids, idToken) : [];
-      recovered.forEach(item => {
-        if (!resultMap.has(item.id)) resultMap.set(item.id, item);
-      });
-
-      return filterByCompanyScope(Array.from(resultMap.values()), currentCompanyId, isSuperAdmin);
     },
     enabled: externalEnabled && labIds.length > 0,
     // PERF (Faz 2): Önceden staleTime:0 + refetchInterval:3000 idi → tüm lab stoğunu
@@ -1176,20 +1144,27 @@ export function useLabStock(
     staleTime: 30 * 1000,
     gcTime: 10 * 60 * 1000,
     refetchOnWindowFocus: true,
+    // Sorgu kalıcı bir nedenle (eksik bileşik indeks, yetki) başarısız oluyorsa
+    // varsayılan 3 denemelik üstel geri çekilme paneli dakikalarca "yükleniyor"
+    // durumunda bırakır. Tek bir yeniden deneme yeterli; sonrasında hata
+    // yüzeye çıkar ve kullanıcı sebebi görür.
+    retry: 1,
   });
 
-  // Historical repair is intentionally independent from the live stock read.
-  // Pools can have many transfers and item subcollections; awaiting the repair
-  // here previously left Product Usage stuck at "Havuz stoğu yükleniyor".
+  // Geçmiş onarımı canlı stok okumasından TAMAMEN bağımsızdır ve yalnızca canlı
+  // okuma tamamlandıktan SONRA başlar. Bir havuzun binlerce transferi ve
+  // `items` alt-koleksiyonu olabilir; bu iş ilk boyamayla yarışırsa panel
+  // "Havuz stoğu yükleniyor" ekranında kalır. Sonucu geldiğinde stoğa eklenir,
+  // gelmezse canlı stok yine de gösterilir.
   const recoveryQuery = useQuery({
     queryKey: ['depoStokRecovery', labIdKey, currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const idToken = await currentUser?.getIdToken();
       if (!idToken) return [] as DepoStokItem[];
       const { getRecoverableTransferredLabStock } = await import('@/actions/stokActions');
-      return getRecoverableTransferredLabStock(labIds.slice(0, 30), idToken);
+      return getRecoverableTransferredLabStock(labIds, idToken);
     },
-    enabled: externalEnabled && labIds.length > 0 && !!currentUser,
+    enabled: externalEnabled && labIds.length > 0 && !!currentUser && stockQuery.isSuccess,
     staleTime: 60 * 60 * 1000,
     gcTime: 2 * 60 * 60 * 1000,
     retry: 1,
@@ -1201,9 +1176,12 @@ export function useLabStock(
 
   return {
     ...stockQuery,
+    // Yükleme durumu YALNIZCA canlı okumaya bağlıdır. Onarım sorgusu hâlâ
+    // çalışıyor olsa bile panel stoğu gösterir ve tüketim yapılabilir.
     data: stockQuery.data || recoveryQuery.data
       ? Array.from(mergedData.values())
       : stockQuery.data,
+    isRepairing: recoveryQuery.isFetching,
   };
 }
 

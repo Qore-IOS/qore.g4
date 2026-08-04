@@ -1,7 +1,7 @@
 'use server';
 import { adminDb } from '@/lib/firebase-admin';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, User, Transfer } from '@/lib/types';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 
 // İşlem tipi - tüm alt türleri dahil
 export type IslemTipi =
@@ -45,10 +45,35 @@ export interface ProductMatch {
   anaBirim?: string;
 }
 
+/**
+ * Seri No Defteri'ndeki (serialLedger) güncel satır.
+ *
+ * Arama sonucunda bir seri numarasının ŞU AN nerede olduğunu ve son hangi
+ * işlemden geçtiğini tek bakışta gösterir. Defter `ürün kodu + seri no`
+ * başına tek satır tuttuğu için aynı seri numarası birden çok üründe geçiyorsa
+ * her biri ayrı satır olarak döner.
+ */
+export interface SerialLedgerSummary {
+  id: string;
+  stokKodu: string;
+  stokAdi: string;
+  seriNumarasi: string;
+  lotNumarasi: string;
+  miad: string;
+  status: string;
+  locationType: string;
+  locationName: string;
+  lastEventType: string;
+  lastEventAt: Date | null;
+  eventCount: number;
+}
+
 export interface SearchResult {
   ledgerRows: LedgerRow[];
   stockSummary: StockSummary[];
   searchType: 'product' | 'lot' | 'serial';
+  /** Seri aramasında bulunan defter satırları (birimin güncel durumu). */
+  serialLedger?: SerialLedgerSummary[];
   /** When set, the UI must let the user pick one of these products before loading details. */
   productMatches?: ProductMatch[];
   /** True when the result is just a list of products to choose from (no ledger fetched yet). */
@@ -426,6 +451,19 @@ export async function searchProductLedger(
     corePromises.push(Promise.resolve({ docs: [] }));
   }
 
+  // [6] Seri No Defteri — birimin GÜNCEL durumu (nerede, son işlem ne).
+  // `serialHistory` yalnızca olay akışıdır ve şirket etiketi taşımaz; defter
+  // ise her `ürün kodu + seri no` çifti için tek, kapsamlı bir satır tutar.
+  if (searchType === 'serial') {
+    let ledgerQuery: FirebaseFirestore.Query = adminDb
+      .collection('serialLedger')
+      .where('seriNumarasi', '==', needleOriginal);
+    if (!isSuperAdmin) ledgerQuery = ledgerQuery.where('companyId', '==', normalizeCompanyId(companyId));
+    corePromises.push(ledgerQuery.get());
+  } else {
+    corePromises.push(Promise.resolve({ docs: [] }));
+  }
+
   const [
     depoStokSnap,
     verifSnap,
@@ -433,6 +471,7 @@ export async function searchProductLedger(
     consumptionSnap,
     destroyedKitsSnap,
     serialHistorySnap,
+    serialLedgerSnap,
   ] = await withTimeout(Promise.all(corePromises), QUERY_TIMEOUT);
 
   // Process core data
@@ -446,6 +485,23 @@ export async function searchProductLedger(
   const consumptionRecords: ConsumptionRecord[] = consumptionSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
   const destroyedKits: any[] = destroyedKitsSnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
   const serialHistoryEvents: any[] = serialHistorySnap?.docs?.map((d: any) => ({ id: d.id, ...d.data() })) || [];
+  const serialLedger: SerialLedgerSummary[] = (serialLedgerSnap?.docs || []).map((d: any) => {
+    const data = d.data() || {};
+    return {
+      id: d.id,
+      stokKodu: String(data.stokKodu ?? ''),
+      stokAdi: String(data.stokAdi ?? ''),
+      seriNumarasi: String(data.seriNumarasi ?? ''),
+      lotNumarasi: String(data.lotNumarasi ?? ''),
+      miad: String(data.miad ?? ''),
+      status: String(data.status ?? ''),
+      locationType: String(data.locationType ?? ''),
+      locationName: String(data.locationName ?? ''),
+      lastEventType: String(data.lastEventType ?? ''),
+      lastEventAt: typeof data.lastEventAt?.toDate === 'function' ? data.lastEventAt.toDate() : null,
+      eventCount: Number(data.eventCount) || 0,
+    };
+  });
 
   // For serial search: if depoStok is empty (item was fully consumed and the doc deleted),
   // fetch other items in the same lot to recover depotIds. Use stokKodu/lot from history
@@ -590,7 +646,7 @@ export async function searchProductLedger(
     searchType, needle, productCodes, hospitalNameById
   );
 
-  return { ledgerRows, stockSummary, searchType };
+  return { ledgerRows, stockSummary, searchType, serialLedger };
 }
 
 // =========================================================

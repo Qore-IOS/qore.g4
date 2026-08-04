@@ -49,6 +49,8 @@ import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { siparisToplamaLogger } from '@/lib/logger';
 import { getStockItemQuantity, sumStockItemQuantities } from '@/lib/stock-quantity';
+import { appendSerialEvents } from '@/lib/serial-ledger/client';
+import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
   aggregateOrderItemsByProduct,
   decodeLotPickingIdentifier,
@@ -595,6 +597,8 @@ export default function ToplamaPage() {
 
       const itemsToShipByStockId = new Map<string, DepoStokItem & { transferAdet: number }>();
       const createdConsumptionDocIds: string[] = [];
+      /** Seri No Defteri olayları — stok yazımından sonra parçalı yazılır. */
+      const ledgerEvents: SerialEventInput[] = [];
       const allocatedQuantitiesByStockId = new Map<string, number>();
       const getAllocatedQuantity = (stockId?: string) => stockId ? (allocatedQuantitiesByStockId.get(stockId) || 0) : 0;
       const getRemainingQuantity = (item: DepoStokItem) => getStockItemQuantity(item) - getAllocatedQuantity(item.id);
@@ -837,6 +841,39 @@ export default function ToplamaPage() {
               },
               timestamp: Timestamp.now(),
             });
+            // Seri No Defteri olayları ayrı, parçalı bir yazımda işlenir: bir
+            // sipariş yüzlerce kalem içerebilir ve tek `writeBatch` Firestore'un
+            // 500 işlem sınırına takılır. Hedefte tüketim takibi kapalıysa birim
+            // aynı anda tüketilmiş sayılır ve defter bunu da kaydeder.
+            ledgerEvents.push({
+              type: 'siparis_karsilama',
+              stokKodu: item.stokKodu,
+              stokAdi: item.stokAdi,
+              seriNumarasi: item.seriNumarasi,
+              lotNumarasi: item.lotNumarasi || '',
+              miad: String(item.miad || ''),
+              source: { locationType: 'depot', locationId: order.depotId || '', locationName: depotName },
+              location: { locationType: 'lab', locationId: effectiveLabId, locationName: targetName },
+              refs: { transferId: transferRef.id, orderId: order.id, depoStokId: targetDocId },
+              actorUid: currentUser.uid ?? null,
+              actorName: currentUserProfile.name ?? currentUser?.email ?? null,
+              details: { adet: transferQty },
+            });
+            if (trackingDisabled) {
+              ledgerEvents.push({
+                type: 'tuketim',
+                stokKodu: item.stokKodu,
+                stokAdi: item.stokAdi,
+                seriNumarasi: item.seriNumarasi,
+                lotNumarasi: item.lotNumarasi || '',
+                miad: String(item.miad || ''),
+                source: { locationType: 'lab', locationId: effectiveLabId, locationName: targetName },
+                refs: { transferId: transferRef.id, orderId: order.id },
+                actorUid: currentUser.uid ?? null,
+                actorName: currentUserProfile.name ?? currentUser?.email ?? null,
+                details: { reason: 'hedefte_tuketim_takibi_kapali', adet: transferQty },
+              });
+            }
           }
 
           // Create transfer item record
@@ -895,6 +932,19 @@ export default function ToplamaPage() {
 
       await batch.commit();
       itemsShippedCount = totalShippedAdet;
+
+      // Defter yazımı stok yazımından SONRA gelir; başarısız olursa sipariş
+      // karşılama geri alınmaz (ürünler gerçekten sevk edildi). Defter türetilmiş
+      // bir dizindir ve yönetim panelindeki doldurma aracıyla yeniden kurulabilir.
+      try {
+        await appendSerialEvents(ledgerEvents, currentCompanyId);
+      } catch (ledgerError) {
+        siparisToplamaLogger.error('Seri No Defteri güncellenemedi', ledgerError, {
+          transferId: transferRef.id,
+          orderId: order.id,
+          eventCount: ledgerEvents.length,
+        });
+      }
 
       // ── 2-Step Verification ──
       // Step 1: Verify source depot stock was properly deducted (isShipped = true)

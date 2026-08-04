@@ -18,6 +18,7 @@ import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } fro
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 
 type NewFromCount = {
   stokKodu: string;
@@ -195,6 +196,18 @@ export function useLabCountMissingStock(params: {
           },
           timestamp: serverTimestamp(),
         });
+        appendSerialEventToBatch(batch, {
+          type: 'transfer',
+          stokKodu: depotSource.stokKodu,
+          stokAdi: depotSource.stokAdi || '',
+          seriNumarasi: serial,
+          lotNumarasi: depotSource.lotNumarasi || '',
+          miad: typeof depotSource.miad === 'string' ? depotSource.miad : '',
+          source: { locationType: 'depot', locationId: sourceDepotId, locationName: sourceDepotName },
+          location: { locationType: 'lab', locationId: labId, locationName: labName },
+          refs: { transferId: transferRef.id, depoStokId: depotSource.id },
+          details: { reason: 'lab_sayimi_otomatik_transfer' },
+        }, currentCompanyId);
       }
 
       await batch.commit();
@@ -317,6 +330,18 @@ export function useLabCountMissingStock(params: {
           },
           timestamp: serverTimestamp(),
         });
+        appendSerialEventToBatch(batch, {
+          type: 'lab_transfer',
+          stokKodu: (poolSource as any).stokKodu,
+          stokAdi: (poolSource as any).stokAdi || '',
+          seriNumarasi: serial,
+          lotNumarasi: (poolSource as any).lotNumarasi || '',
+          miad: typeof (poolSource as any).miad === 'string' ? (poolSource as any).miad : '',
+          source: { locationType: 'lab', locationId: sourceLabId, locationName: sourceLabName },
+          location: { locationType: 'lab', locationId: labId, locationName: labName },
+          refs: { transferId: transferRef.id, depoStokId: (poolSource as any).id },
+          details: { reason: 'lab_sayimi_havuz_ici_transfer' },
+        }, currentCompanyId);
       }
 
       await batch.commit();
