@@ -425,53 +425,19 @@ service cloud.firestore {
     match /config_hospitals/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
 
     // -----------------------------
-    // GEÇİCİ GÜVENLİK AĞI — Faz 7 kademeli geçiş
+    // Faz 7 tamamlandı — geçici güvenlik ağı KALDIRILDI.
     //
-    // AMAÇ: yukarıdaki envanterde gözden kaçmış bir koleksiyon yüzünden
-    // kullanıcıların "veri okuyamaz/yazamaz" hâle gelmesini önlemek. Firestore
-    // tanımsız koleksiyonu sessizce reddeder ve bu, kullanıcıya hiçbir ipucu
-    // vermeyen bir kilitlenme olarak görünür.
+    // Geçiş sırasında, kuralı unutulmuş bir koleksiyonun kullanıcıyı
+    // kilitlemesini önlemek için `match /{col}/{docId}` + `/{rest=**}` blokları
+    // vardı (koşulları yine `inCompany()` idi, kiracı izolasyonunu
+    // zayıflatmıyordu). Üretimde "denied" kaydı gelmediği doğrulandıktan sonra
+    // silindi.
     //
-    // ÇOK KİRACILIĞI ZAYIFLATMAZ: koşul yine `inCompany()` /
-    // `writingInCompany()`. Başka şirketin etiketli belgesi yine engellenir.
-    // Düz bir `match /{document=**} { allow read, write: if isSignedIn(); }`
-    // catch-all'ı BİLEREK kullanılmadı — Firestore'da `allow` kuralları OR'lanır,
-    // böyle bir blok yukarıdaki TÜM sıkı kuralları ezip kiracı izolasyonunu
-    // tamamen iptal ederdi.
-    //
-    // `notNarrowed` listesi, kendi bloğu `inCompany()`den DAHA SIKI olan
-    // koleksiyonları ağın dışında tutar (yalnızca-süper-admin, salt-oluşturma,
-    // tamamen kapalı ve belge-kimliği ile kapsanan koleksiyonlar). Bu liste
-    // olmasaydı ağ, OR semantiği yüzünden o kuralları da gevşetirdi.
-    //
-    // KALDIRMA KOŞULU: Faz 2 deploy'unda, üretimde birkaç gün boyunca
-    // "denied" kaydı gelmediği doğrulandıktan sonra bu iki blok silinir.
-    // Silinince tanımsız koleksiyonlar yeniden varsayılan-reddet olur.
+    // ARTIK: `match` bloğu olmayan koleksiyon varsayılan olarak REDDEDİLİR.
+    // Yeni bir koleksiyon eklerken kuralını da eklemeyi ATLAMAYIN — aksi hâlde
+    // ilgili ekran üretimde sessizce çalışmaz ve bu ancak kullanıcı şikâyetiyle
+    // fark edilir. Ayrıntı: docs/firestore-rules-rollout.md
     // -----------------------------
-    function notNarrowed(col) {
-      return !(col in [
-        'AuditLogs',
-        'calendarConnections',
-        'calendarOAuthStates',
-        'cariAuditEvents',
-        'cariPayments',
-        'companies',
-        'companyStats',
-        'costSnapshots',
-        'labPeriodSnapshots',
-        'serialLedger',
-        'stockAdjustmentLogs',
-        'users'
-      ]);
-    }
-    match /{col}/{docId} {
-      allow read: if notNarrowed(col) && inCompany();
-      allow write: if notNarrowed(col) && writingInCompany();
-    }
-    match /{col}/{docId}/{rest=**} {
-      allow read: if notNarrowed(col) && inCompany();
-      allow write: if notNarrowed(col) && writingInCompany();
-    }
 
     // Faz 1 placeholder — koleksiyonlar oluşturulunca aktifleştirilecek:
     // match /cariInvoices/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
