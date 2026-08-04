@@ -49,7 +49,13 @@ next-env.d.ts
 
 # firebase
 firebase-debug.log
-firestore-debug.logproje_arsivi.tar.gz
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+firebase-export-*/
+.firebase/
+proje_arsivi.tar.gz
 qore-studio-work
 
 # Environment files
