@@ -100,8 +100,18 @@ pnpm rules:preflight
 > Yukarıdaki yol bir ÖRNEKTİR; olduğu gibi kopyalamayın. Var olmayan bir yol
 > verilirse script `ENOENT` ile durur (artık ne yapılacağını da söyler).
 
+Script hangi projeye bağlandığını başlıkta yazar — **çalıştırmadan önce doğru
+projeyi gösterdiğini teyit edin.**
+
 Hangi kullanıcıların `companyId` claim'i eksik/uyuşmaz olduğunu listeler. Sorun
 varsa çıkış kodu 1 döner.
+
+> **Bu adımı atlamayın.** Bir kez atlandı ve üretimde tüm kullanıcılar stok
+> göremez hâle geldi: `sync-claims.js` proje kimliğini çözemediği için 112
+> kullanıcının hepsinde hata verdi, hiçbir claim yazılmadı, ama kurallar yine
+> de yayınlandı. Firestore kısmı çalıştığı (kullanıcı dokümanları okunabildiği)
+> için hata "script çalışıyor" gibi görünüyordu — yalnızca `admin.auth()`
+> düşüyordu. Script artık böyle bir durumda **tek ve net bir hatayla durur**.
 
 ### Adım 2 — claim'leri düzelt
 
@@ -113,8 +123,13 @@ node scripts/sync-claims.js --apply    # uygula
 `onUserClaimSync` fonksiyonunun deploy edildiğinden de emin olun:
 
 ```bash
-firebase deploy --only functions:onUserClaimSync
+firebase deploy --only functions:onUserClaimSync --project invpilot
 ```
+
+`--project` **zorunludur**: `firebase deploy` `.firebaserc`'yi değil, son
+`firebase use` durumunu kullanır. Bu komut bir kez projesiz çalıştırıldı ve
+`roche-logistics-hub`'a gitti; üretimdeki (`invpilot`) kopya güncellenmedi.
+Çıktının ilk satırında `Deploying to 'invpilot'` yazdığını teyit edin.
 
 `pnpm rules:preflight` temiz çıkana kadar tekrarlayın.
 
@@ -124,12 +139,16 @@ firebase deploy --only functions:onUserClaimSync
 pnpm test:rules:emulated
 ```
 
-(Java 17 + `firebase-tools` gerekir.)
+**JDK 21+ gerekir** — güncel `firebase-tools` daha eski Java sürümlerini
+desteklemiyor ("firebase-tools no longer supports Java version before 21").
+Komut, `firebase.rules-test.json` adlı minimal bir emülatör yapılandırması
+kullanır; kök `firebase.json` bir `hosting` bloğu içerdiği için doğrudan
+çalıştırıldığında web framework emülasyonuna takılıyordu.
 
 ### Adım 4 — yayınla
 
 ```bash
-firebase deploy --only firestore:rules,firestore:indexes
+firebase deploy --only firestore:rules,firestore:indexes --project invpilot
 ```
 
 İndeksler önce, kurallar sonra yayınlanır; bileşik indekslerin oluşması birkaç
@@ -157,7 +176,8 @@ GÜVENLİK AĞI" bölümü (`notNarrowed` + iki `match` bloğu) kaldırılmış 
 Monitor'de reddedilen bir yol varsa **merge etmeyin**: o koleksiyonun `match`
 bloğu eksik demektir. Önce kuralını ekleyin, yeniden yayınlayın, tekrar izleyin.
 
-Merge sonrası `firebase deploy --only firestore:rules` ile yayınlayın. Bu
+Merge sonrası `firebase deploy --only firestore:rules --project invpilot` ile
+yayınlayın. Bu
 noktadan sonra `match` bloğu olmayan koleksiyon yeniden **varsayılan olarak
 reddedilir** — yani ağın sakladığı bir eksik varsa o an yüzeye çıkar.
 
@@ -166,6 +186,10 @@ reddedilir** — yani ağın sakladığı bir eksik varsa o an yüzeye çıkar.
 Kurallar sürümlenir. Firebase Console → Firestore → Rules → **History**'den
 önceki sürüm tek tıkla geri yüklenebilir. Yayın öncesi mevcut sürümü
 kopyalayıp saklamak da iyi bir alışkanlıktır.
+
+Yanlış projeye yayınladıysanız geri alma **o projede** yapılır: Console'da
+`roche-logistics-hub`'ı seçip History'den önceki sürümü yükleyin, sonra doğru
+komutu `--project invpilot` ile tekrarlayın.
 
 ## Kalıcı kural: yeni koleksiyon eklerken
 
