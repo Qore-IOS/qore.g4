@@ -26,7 +26,7 @@ import {
   assertFails,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { setDoc, doc, getDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { setDoc, doc, getDoc, deleteDoc, writeBatch, collection, getDocs, query, where } from 'firebase/firestore';
 
 const PROJECT_ID = 'qore-multitenancy-test';
 
@@ -534,4 +534,103 @@ test('serialLedger satırı silinemez (süper admin dışında)', async () => {
   });
   await assertFails(deleteDoc(doc(authedAsCompanyA(), 'serialLedger', 'slDel')));
   await assertSucceeds(deleteDoc(doc(authedAsSuperAdmin(), 'serialLedger', 'slDel')));
+});
+
+// ============================================================================
+// Liste (query) kuralları — `__legacy__` etiketli belgeler
+//
+// src/lib/firestore-helpers.ts#getScopedDocs her yüklemede İKİ sorgu atar:
+//   1) where('companyId','==',<şirket>)
+//   2) where('companyId','==','__legacy__')
+// İkincisi `Promise.all` içinde olduğu için reddedilirse TÜM yükleme düşer.
+//
+// Firestore liste kurallarını dönen HER belge için ayrı değerlendirir; tek bir
+// belge kuralı sağlamazsa sorgunun tamamı permission-denied olur.
+// ============================================================================
+
+test('şirket etiketli liste sorgusu geçer', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'malKabulTransactions', 'mkA1'), { companyId: 'companyA' });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDocs(query(
+    collection(db, 'malKabulTransactions'), where('companyId', '==', 'companyA'),
+  )));
+});
+
+test('__legacy__ etiketli liste sorgusu geçer (getScopedDocs bunu her yüklemede atar)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'malKabulTransactions', 'mkLegacy'), { companyId: '__legacy__' });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDocs(query(
+    collection(db, 'malKabulTransactions'), where('companyId', '==', '__legacy__'),
+  )));
+});
+
+test('__legacy__ etiketli belge tek tek de okunabilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'malKabulTransactions', 'mkLegacy2'), { companyId: '__legacy__' });
+  });
+  await assertSucceeds(getDoc(doc(authedAsCompanyA(), 'malKabulTransactions', 'mkLegacy2')));
+});
+
+test('başka şirketin belgesi liste sorgusuyla da alınamaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'malKabulTransactions', 'mkB1'), { companyId: 'companyB' });
+  });
+  const db = authedAsCompanyA();
+  await assertFails(getDocs(query(
+    collection(db, 'malKabulTransactions'), where('companyId', '==', 'companyB'),
+  )));
+});
+
+// REGRESYON — kiracı izolasyonu.
+//
+// Etiketsiz-belge dalı `list` için de açıkken filtresiz sorgu kural motorunca
+// KABUL ediliyor ve bütün şirketlerin belgelerini döndürüyordu. Ayıklama
+// sadece istemcideki `matchesCompanyScope` ile yapıldığı için başka şirketin
+// verisi yine de tarayıcıya iniyordu.
+test('filtresiz liste sorgusu reddedilir — başka şirketin belgesi sızmaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'malKabulTransactions', 'mkA2'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'malKabulTransactions', 'mkB2'), { companyId: 'companyB' });
+  });
+  await assertFails(getDocs(query(collection(authedAsCompanyA(), 'malKabulTransactions'))));
+});
+
+test('etiketsiz belge tek tek okunabilir ama listelenemez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'malKabulTransactions', 'mkNoTag'), { note: 'companyId alanı yok' });
+  });
+  const db = authedAsCompanyA();
+  await assertSucceeds(getDoc(doc(db, 'malKabulTransactions', 'mkNoTag')));
+  await assertFails(getDocs(query(collection(db, 'malKabulTransactions'))));
+});
+
+test('__legacy__ etiketli belge silinebilir (tüketimde depoStok silimi bu kayıtlarda da düşmemeli)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'stokLegacyTag'), { companyId: '__legacy__', adet: 1 });
+  });
+  await assertSucceeds(deleteDoc(doc(authedAsCompanyA(), 'depoStok', 'stokLegacyTag')));
+});
+
+test('__legacy__ etiketiyle yazılabilir (normalizeCompanyId boş şirketi buna çevirir)', async () => {
+  await assertSucceeds(
+    setDoc(doc(authedAsCompanyA(), 'malKabulTransactions', 'yeniLegacy'), { companyId: '__legacy__' }),
+  );
+});
+
+test('total verimlilik panelinin okuduğu koleksiyonlarda da __legacy__ sorgusu geçer', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    for (const col of ['efficiencyPools', 'labPools', 'depots', 'kumulatifHesaplamaGecmisi', 'cihazUstuGecmisi']) {
+      await setDoc(doc(db, col, 'legacyDoc'), { companyId: '__legacy__' });
+    }
+  });
+  const db = authedAsCompanyA();
+  for (const col of ['efficiencyPools', 'labPools', 'depots', 'kumulatifHesaplamaGecmisi', 'cihazUstuGecmisi']) {
+    await assertSucceeds(getDocs(query(collection(db, col), where('companyId', '==', '__legacy__'))));
+  }
 });

@@ -34,20 +34,44 @@ service cloud.firestore {
     function newDocCompany() {
       return request.resource.data.companyId;
     }
+    // OKUMA — `allow read` hem tek belge (`get`) hem sorgu (`list`) demektir.
+    //
+    // 1) `__legacy__` AÇIKÇA izinlidir. `normalizeCompanyId()` boş companyId'yi
+    //    bu değere çevirir, yani bu etiket "şirketi olmayan/eski kayıt"ın
+    //    normalize edilmiş hâlidir. Dahası istemci onu her yüklemede AÇIKÇA
+    //    sorgular (firestore-helpers.ts#getScopedDocs). Kuralda karşılığı
+    //    olmadığı için o sorgu reddediliyor, `Promise.all` içinde olduğundan da
+    //    panelin TAMAMI "veri yüklenemedi" veriyordu (mal kabul geçmişi,
+    //    total verimlilik paneli ve getScopedDocs kullanan diğer ekranlar).
+    //
+    // 2) Etiketsiz belge dalı (`!('companyId' in resource.data)`) yalnızca
+    //    `get` içindir. `list`te de açık olması KİRACI İZOLASYONUNU DELİYORDU:
+    //    filtresiz bir sorgu (ör. `getDocs(collection(db,'depots'))`) kural
+    //    motorunca kabul ediliyor ve BÜTÜN şirketlerin belgelerini döndürüyordu.
+    //    Emülatörde doğrulandı: companyA kullanıcısı companyB'nin belgesini aldı.
+    //    Sorgu ya hepsini döndürür ya hiçbirini; bu yüzden etiketsiz kayıt
+    //    listelenemez — görünür olması için companyId ile backfill edilmelidir.
     function inCompany() {
       return isSignedIn() && (
         isSuperAdmin() ||
-        !('companyId' in resource.data) ||
-        docCompany() == userCompany()
+        docCompany() == userCompany() ||
+        docCompany() == '__legacy__' ||
+        (request.method == 'get' && !('companyId' in resource.data))
       );
     }
     // Mevcut (yazımdan ÖNCEKİ) belge bu kullanıcının şirketine mi ait?
     // Belge yoksa `resource` null olur; bu durumda engellenecek bir sahiplik
     // yoktur (var olmayan belgeyi silmek zararsızdır).
+    //
+    // Burada etiketsiz dal KALIR: yazma/silme tek belge üzerinde işler, sorgu
+    // gibi toplu sızıntı yolu yoktur. `__legacy__` eklendi — aksi hâlde bu
+    // etiketi taşıyan bir depoStok belgesi tüketimde SİLİNEMEZ ve aşağıda
+    // anlatılan üretim arızası bu kayıtlar için aynen tekrarlardı.
     function existingInCompany() {
       return resource == null ||
         !('companyId' in resource.data) ||
-        docCompany() == userCompany();
+        docCompany() == userCompany() ||
+        docCompany() == '__legacy__';
     }
     // DİKKAT — `allow write` create, update VE delete'i kapsar.
     //
@@ -66,7 +90,9 @@ service cloud.firestore {
         isSuperAdmin() ||
         (request.resource == null
           ? existingInCompany()
-          : (!('companyId' in request.resource.data) || newDocCompany() == userCompany()))
+          : (!('companyId' in request.resource.data) ||
+             newDocCompany() == userCompany() ||
+             newDocCompany() == '__legacy__'))
       );
     }
 
