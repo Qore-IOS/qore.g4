@@ -732,6 +732,7 @@ export type AppView =
   | 'kumulatif-hesaplama'
   | 'arama'
   | 'cihaz-ariza-gecmis'
+  | 'bakim-takip'
   | 'personel-islemleri'
   | 'is-analizi'
   | 'total-verimlilik'
