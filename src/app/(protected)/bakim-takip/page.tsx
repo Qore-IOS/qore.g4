@@ -2,11 +2,11 @@
 
 import React, { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Device, Hospital, MaintenanceLog, MaintenancePlan } from '@/lib/types';
+import type { Device, Hospital, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '@/lib/types';
 import BakimTakipPanel from '@/components/bakim-takip-panel';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { useDevicesForLabs, useHospitals, useMaintenanceLogs, useMaintenancePlans } from '@/hooks/useFirebaseQueries';
+import { useDevicesForLabs, useHospitals, useMaintenanceDefinitions, useMaintenanceLogs, useMaintenancePlans } from '@/hooks/useFirebaseQueries';
 import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
 
 export default function BakimTakipPage() {
@@ -21,20 +21,22 @@ export default function BakimTakipPage() {
   const devicesQuery = useDevicesForLabs(labScope);
   const maintenancePlansQuery = useMaintenancePlans();
   const maintenanceLogsQuery = useMaintenanceLogs();
+  const maintenanceDefinitionsQuery = useMaintenanceDefinitions();
 
-  const isLoading = hospitalsQuery.isLoading || devicesQuery.isLoading || maintenancePlansQuery.isLoading || maintenanceLogsQuery.isLoading;
+  const isLoading = hospitalsQuery.isLoading || devicesQuery.isLoading || maintenancePlansQuery.isLoading || maintenanceLogsQuery.isLoading || maintenanceDefinitionsQuery.isLoading;
 
   useEffect(() => {
-    if (hospitalsQuery.isError || devicesQuery.isError || maintenancePlansQuery.isError || maintenanceLogsQuery.isError) {
+    if (hospitalsQuery.isError || devicesQuery.isError || maintenancePlansQuery.isError || maintenanceLogsQuery.isError || maintenanceDefinitionsQuery.isError) {
       toast({ title: 'Veri Hatası', description: 'Bakım takip verileri yüklenemedi.', variant: 'destructive' });
     }
-  }, [devicesQuery.isError, hospitalsQuery.isError, maintenanceLogsQuery.isError, maintenancePlansQuery.isError, toast]);
+  }, [devicesQuery.isError, hospitalsQuery.isError, maintenanceDefinitionsQuery.isError, maintenanceLogsQuery.isError, maintenancePlansQuery.isError, toast]);
 
   const refresh = React.useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['maintenanceLogs'] }),
       queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice'] }),
       queryClient.invalidateQueries({ queryKey: ['maintenancePlans'] }),
+      queryClient.invalidateQueries({ queryKey: ['maintenanceDefinitions'] }),
     ]);
   }, [queryClient]);
 
@@ -46,6 +48,7 @@ export default function BakimTakipPage() {
       devices={(devicesQuery.data ?? []) as Device[]}
       maintenancePlans={(maintenancePlansQuery.data ?? []) as MaintenancePlan[]}
       maintenanceLogs={(maintenanceLogsQuery.data ?? []) as MaintenanceLog[]}
+      maintenanceDefinitions={(maintenanceDefinitionsQuery.data ?? []) as MaintenanceDefinition[]}
       onSaved={refresh}
     />
   );

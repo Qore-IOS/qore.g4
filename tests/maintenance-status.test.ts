@@ -39,3 +39,23 @@ test('vadesi geçen bakım planını kritik olarak işaretler', () => {
   const result = calculateDeviceMaintenanceStatus([plan], [log], new Date('2026-08-05T00:00:00Z'));
   assert.equal(result.status, 'kritik');
 });
+
+
+test('tek bakım kaydındaki taskNames birden fazla planı güncel kabul eder', () => {
+  const secondPlan: MaintenancePlan = { ...basePlan, id: 'plan-2', taskName: 'Dekon Yapıldı' };
+  const log: MaintenanceLog = {
+    id: 'log-batch-1',
+    deviceId: 'device-1',
+    planId: 'plan-1',
+    taskName: 'Pinch Tube Değişimi, Dekon Yapıldı',
+    completedAt: new Date('2026-08-05T00:00:00Z'),
+    completedByUid: 'u1',
+    completedByName: 'Teknisyen',
+    nextDueDate: new Date('2026-12-31T00:00:00Z'),
+    taskNames: ['Pinch Tube Değişimi', 'Dekon Yapıldı'],
+  } as MaintenanceLog & { taskNames: string[] };
+
+  const result = calculateDeviceMaintenanceStatus([basePlan, secondPlan], [log], new Date('2026-08-05T00:00:00Z'));
+  assert.equal(result.status, 'guncel');
+  assert.equal(result.planStatuses.every((item) => item.lastLog?.id === 'log-batch-1'), true);
+});

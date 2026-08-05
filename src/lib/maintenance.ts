@@ -79,7 +79,14 @@ export function calculatePlanStatus(
   now: Date = new Date(),
 ): BakimTakipPlanStatus {
   const relatedLogs = logs
-    .filter((log) => log.planId === plan.id || (log.deviceId === plan.deviceId && log.taskName === plan.taskName))
+    .filter((log) => {
+      const taskNames = Array.isArray((log as any).taskNames) ? (log as any).taskNames : [];
+      const planIds = Array.isArray((log as any).planIds) ? (log as any).planIds : [];
+      return log.planId === plan.id
+        || planIds.includes(plan.id)
+        || taskNames.includes(plan.taskName)
+        || (log.deviceId === plan.deviceId && log.taskName === plan.taskName);
+    })
     .map((log) => ({ log, completedAt: getMaintenanceLogDate(log) }))
     .filter((item): item is { log: MaintenanceLog; completedAt: Date } => Boolean(item.completedAt))
     .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime());

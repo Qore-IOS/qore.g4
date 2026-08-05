@@ -746,6 +746,24 @@ export function useMaintenancePlans() {
 }
 
 /**
+ * Group/model based maintenance definitions for Bakım Takip.
+ */
+export function useMaintenanceDefinitions() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
+  return useQuery({
+    queryKey: ['maintenanceDefinitions', currentCompanyId, isSuperAdmin],
+    queryFn: async () => {
+      const snap = await getDocs(scopedQuery('maintenanceDefinitions', currentCompanyId, isSuperAdmin));
+      const items = snap.docs.map(d => ({ id: d.id, ...processTimestamp(d.data()) }));
+      return filterByCompanyScope(items, currentCompanyId, isSuperAdmin);
+    },
+    enabled: !!currentCompanyId || isSuperAdmin,
+    staleTime: 30 * 60 * 1000,
+    gcTime: 60 * 60 * 1000,
+  });
+}
+
+/**
  * Maintenance logs
  */
 export function useMaintenanceLogs() {

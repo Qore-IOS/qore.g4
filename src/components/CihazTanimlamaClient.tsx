@@ -6,7 +6,7 @@ import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Device, Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
+import type { Device, Hospital, DeviceGroup, MaintenanceDefinition, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table';
@@ -24,7 +24,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import { ScrollArea } from './ui/scroll-area';
-import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Settings, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon } from 'lucide-react';
+import { Calendar, Plus, Trash2, Wrench, FlaskConical, Loader2, Package, ChevronsUpDown, Check as CheckIcon, FileDown, ClipboardList, Building2, Search, Server, Pencil, Boxes, Upload, Download, Image as ImageIcon, ListChecks } from 'lucide-react';
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
@@ -40,6 +40,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
+  gun: 'Gün',
   hafta: 'Hafta',
   ay: 'Ay',
   yil: 'Yıl',
@@ -104,7 +105,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
   const [labFilter, setLabFilter] = useState('all');
-  const [planFilter, setPlanFilter] = useState<'all' | 'planned' | 'unplanned'>('all');
+  const [definitionFilter, setDefinitionFilter] = useState<'all' | 'defined' | 'undefined'>('all');
   const [sortBy, setSortBy] = useState<'name' | 'brand' | 'order'>('name');
   const { toast } = useToast();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
@@ -130,7 +131,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [showPeriodicPartSection, setShowPeriodicPartSection] = useState(false);
   const [exportPdfLoading, setExportPdfLoading] = useState(false);
   const [exportExcelLoading, setExportExcelLoading] = useState(false);
-  const [plannedDeviceIds, setPlannedDeviceIds] = useState<Set<string>>(new Set());
+  const [definedDeviceIds, setDefinedDeviceIds] = useState<Set<string>>(new Set());
 
   // Marka/Model tanım state'leri
   const [modelDefinitions, setModelDefinitions] = useState<DeviceModelDefinition[]>([]);
@@ -150,6 +151,15 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [bulkPeriodicPartRows, setBulkPeriodicPartRows] = useState<BulkPeriodicPartRow[]>([]);
   const [bulkShowPeriodicParts, setBulkShowPeriodicParts] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
+  const [maintenanceDefinitions, setMaintenanceDefinitions] = useState<MaintenanceDefinition[]>([]);
+  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
+  const [definitionManagerOpen, setDefinitionManagerOpen] = useState(false);
+  const [definitionGroupName, setDefinitionGroupName] = useState('');
+  const [definitionModel, setDefinitionModel] = useState('');
+  const [definitionListName, setDefinitionListName] = useState('');
+  const [definitionTaskRows, setDefinitionTaskRows] = useState<Array<{ id: string; taskName: string; periodDays: string; type: MaintenanceType }>>([]);
+  const [editingMaintenanceDefinitionId, setEditingMaintenanceDefinitionId] = useState<string | null>(null);
+  const [isSavingMaintenanceDefinition, setIsSavingMaintenanceDefinition] = useState(false);
   const deviceExcelInputRef = useRef<HTMLInputElement | null>(null);
 
   // Laboratuvar ve cihaz seçimi state'leri
@@ -162,22 +172,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   const fetchDevices = async () => {
     setLoading(true);
-    const [deviceSnap, planSnap] = await Promise.all([
-      getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin)),
-    ]);
+    const deviceSnap = await getDocs(scopedQuery('devices', currentCompanyId, isSuperAdmin));
     const scopedDevices = filterByCompanyScope(
       deviceSnap.docs.map(d => ({ id: d.id, ...d.data() } as Device)),
       currentCompanyId,
       isSuperAdmin
     );
-    const scopedPlans = filterByCompanyScope(
-      planSnap.docs.map(d => ({ id: d.id, ...d.data() }) as MaintenancePlan),
-      currentCompanyId,
-      isSuperAdmin
-    );
     setDevices(scopedDevices);
-    setPlannedDeviceIds(new Set(scopedPlans.map(plan => plan.deviceId)));
     setLoading(false);
   };
   useEffect(() => { fetchDevices(); }, [currentCompanyId, isSuperAdmin]);
@@ -196,6 +197,122 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   useEffect(() => {
     fetchModelDefinitions().catch(err => console.error('Model tanımları alınamadı:', err));
   }, [currentCompanyId, isSuperAdmin]);
+  const fetchMaintenanceDefinitionSetup = async () => {
+    const [definitionSnap, groupSnap] = await Promise.all([
+      getDocs(scopedQuery('maintenanceDefinitions', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('deviceGroups', currentCompanyId, isSuperAdmin)),
+    ]);
+    const definitions = filterByCompanyScope(
+      definitionSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceDefinition)),
+      currentCompanyId,
+      isSuperAdmin
+    );
+    const groups = filterByCompanyScope(
+      groupSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup)),
+      currentCompanyId,
+      isSuperAdmin
+    );
+    definitions.sort((a, b) => `${a.groupName} ${a.model}`.localeCompare(`${b.groupName} ${b.model}`, 'tr'));
+    setMaintenanceDefinitions(definitions);
+    setDeviceGroups(groups);
+  };
+
+  useEffect(() => {
+    fetchMaintenanceDefinitionSetup().catch(err => console.error('Bakım tanımları alınamadı:', err));
+  }, [currentCompanyId, isSuperAdmin]);
+
+  useEffect(() => {
+    setDefinedDeviceIds(new Set(devices.filter(device => Boolean(maintenanceDefinitionForDevice(device))).map(device => device.id)));
+  }, [devices, maintenanceDefinitions, deviceGroups]);
+
+
+  const deviceGroupNameFor = (device: Device) => {
+    const grouped = deviceGroups.find(group => group.deviceIds?.includes(device.id));
+    return grouped?.name || String(device.cihazGrubu || device.groupName || device.brand || 'Genel');
+  };
+
+  const maintenanceDefinitionForDevice = (device: Device) => maintenanceDefinitions.find(definition =>
+    definition.groupName === deviceGroupNameFor(device) && definition.model === device.model
+  );
+
+  const resetMaintenanceDefinitionForm = () => {
+    setDefinitionGroupName('');
+    setDefinitionModel('');
+    setDefinitionListName('');
+    setDefinitionTaskRows([]);
+    setEditingMaintenanceDefinitionId(null);
+  };
+
+  const openMaintenanceDefinitionManager = () => {
+    resetMaintenanceDefinitionForm();
+    setDefinitionManagerOpen(true);
+  };
+
+  const startEditMaintenanceDefinition = (definition: MaintenanceDefinition) => {
+    setEditingMaintenanceDefinitionId(definition.id);
+    setDefinitionGroupName(definition.groupName);
+    setDefinitionModel(definition.model);
+    setDefinitionListName(definition.listName);
+    setDefinitionTaskRows((definition.tasks || []).map(task => ({
+      id: task.id || crypto.randomUUID(),
+      taskName: task.taskName,
+      periodDays: String(task.periodDays || 30),
+      type: task.type || 'teknik_servis',
+    })));
+  };
+
+  const addDefinitionTaskRow = () => {
+    setDefinitionTaskRows(prev => [...prev, { id: crypto.randomUUID(), taskName: '', periodDays: '30', type: 'teknik_servis' }]);
+  };
+
+  const updateDefinitionTaskRow = (id: string, field: 'taskName' | 'periodDays' | 'type', value: string) => {
+    setDefinitionTaskRows(prev => prev.map(row => row.id === id ? { ...row, [field]: value } : row));
+  };
+
+  const removeDefinitionTaskRow = (id: string) => {
+    setDefinitionTaskRows(prev => prev.filter(row => row.id !== id));
+  };
+
+  const saveMaintenanceDefinition = async () => {
+    const tasks = definitionTaskRows
+      .map(row => ({ ...row, taskName: row.taskName.trim(), periodDays: Number(row.periodDays) }))
+      .filter(row => row.taskName && Number.isFinite(row.periodDays) && row.periodDays > 0);
+
+    if (!definitionGroupName || !definitionModel || !definitionListName.trim() || tasks.length === 0) {
+      toast({ title: 'Eksik Bilgi', description: 'Grup, model, liste adı ve en az bir bakım satırı zorunludur.', variant: 'destructive' });
+      return;
+    }
+
+    setIsSavingMaintenanceDefinition(true);
+    try {
+      const id = editingMaintenanceDefinitionId || `${definitionGroupName}-${definitionModel}`.toLowerCase().replace(/[^a-z0-9ğüşöçıİĞÜŞÖÇ]+/gi, '-');
+      const payload = withCompanyScope({
+        groupName: definitionGroupName,
+        model: definitionModel,
+        listName: definitionListName.trim(),
+        tasks: tasks.map(row => ({ id: row.id, taskName: row.taskName, periodDays: row.periodDays, type: row.type })),
+        updatedAt: serverTimestamp(),
+        createdByUid: currentUserProfile?.uid || '',
+        createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
+      }, currentUserProfile?.companyId);
+      await setDoc(doc(db, 'maintenanceDefinitions', id), payload, { merge: true });
+      toast({ title: 'Bakım tanımı kaydedildi', description: `${definitionGroupName} / ${definitionModel} için ${tasks.length} bakım tanımlandı.` });
+      resetMaintenanceDefinitionForm();
+      await fetchMaintenanceDefinitionSetup();
+    } catch (err) {
+      console.error('Bakım tanımı kaydedilemedi:', err);
+      toast({ title: 'Hata', description: 'Bakım tanımı kaydedilemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingMaintenanceDefinition(false);
+    }
+  };
+
+  const removeMaintenanceDefinition = async (id: string) => {
+    if (!confirm('Bu bakım tanımını silmek istediğinize emin misiniz?')) return;
+    await deleteDoc(doc(db, 'maintenanceDefinitions', id));
+    await fetchMaintenanceDefinitionSetup();
+    toast({ title: 'Silindi', description: 'Bakım tanımı silindi.' });
+  };
 
   // Yedek parça ürünlerini getir
   useEffect(() => {
@@ -1072,20 +1189,20 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       const matchesSearch = !searchQuery.trim() || name.includes(searchQuery.toLowerCase()) || hospitalName.includes(searchQuery.toLowerCase());
       const matchesBrand = brandFilter === 'all' || device.brand === brandFilter;
       const matchesLab = labFilter === 'all' || device.hospitalId === labFilter;
-      const hasPlan = plannedDeviceIds.has(device.id);
-      const matchesPlan = planFilter === 'all' || (planFilter === 'planned' ? hasPlan : !hasPlan);
-      return matchesSearch && matchesBrand && matchesLab && matchesPlan;
+      const hasDefinition = definedDeviceIds.has(device.id);
+      const matchesDefinition = definitionFilter === 'all' || (definitionFilter === 'defined' ? hasDefinition : !hasDefinition);
+      return matchesSearch && matchesBrand && matchesLab && matchesDefinition;
     })
     .sort((a, b) => {
       if (sortBy === 'brand') return `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`, 'tr');
-      if (sortBy === 'order') return (a.order || 0) - (b.order || 0);
+      if (sortBy === 'order') return Number(a.order || 0) - Number(b.order || 0);
       return `${a.cihazAdi || ''} ${a.model || ''}`.localeCompare(`${b.cihazAdi || ''} ${b.model || ''}`, 'tr');
     });
 
   const stats = {
     total: devices.length,
-    planned: devices.filter(d => plannedDeviceIds.has(d.id)).length,
-    unplanned: devices.filter(d => !plannedDeviceIds.has(d.id)).length,
+    defined: devices.filter(d => definedDeviceIds.has(d.id)).length,
+    undefined: devices.filter(d => !definedDeviceIds.has(d.id)).length,
     brands: new Set(devices.map(d => d.brand).filter(Boolean)).size,
   };
 
@@ -1110,8 +1227,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Toplam Cihaz</p><p className="text-2xl font-semibold">{stats.total}</p></div>
-          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Bakım Planı Atanmış</p><p className="text-2xl font-semibold text-emerald-600">{stats.planned}</p></div>
-          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Plansız Cihaz</p><p className="text-2xl font-semibold text-amber-600">{stats.unplanned}</p></div>
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Bakım Tanımı Olan</p><p className="text-2xl font-semibold text-emerald-600">{stats.defined}</p></div>
+          <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Tanımsız Cihaz</p><p className="text-2xl font-semibold text-amber-600">{stats.undefined}</p></div>
           <div className="cihaz-card p-4"><p className="text-xs text-[var(--dashboard-muted)]">Marka Sayısı</p><p className="text-2xl font-semibold">{stats.brands}</p></div>
         </div>
 
@@ -1134,12 +1251,12 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
             placeholder="Laboratuvar"
             allOption={{ value: 'all', label: 'Tüm Laboratuvarlar' }}
           />
-          <Select value={planFilter} onValueChange={(v) => setPlanFilter(v as 'all' | 'planned' | 'unplanned')}>
+          <Select value={definitionFilter} onValueChange={(v) => setDefinitionFilter(v as 'all' | 'defined' | 'undefined')}>
             <SelectTrigger className="bg-[var(--dashboard-surface-2)] border-[var(--dashboard-stroke)]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Tüm Durumlar</SelectItem>
-              <SelectItem value="planned">Bakım Planlı</SelectItem>
-              <SelectItem value="unplanned">Bakım Planı Yok</SelectItem>
+              <SelectItem value="defined">Bakım Tanımlı</SelectItem>
+              <SelectItem value="undefined">Bakım Tanımı Yok</SelectItem>
             </SelectContent>
           </Select>
           <Select value={sortBy} onValueChange={(v) => setSortBy(v as 'name' | 'brand' | 'order')}>
@@ -1186,19 +1303,11 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           </Button>
           <Button
             variant="secondary"
-            onClick={() => router.push('/cihaz-tanimlamalari/periyodik-bakim-yonetimi')}
+            onClick={openMaintenanceDefinitionManager}
             className="bg-[var(--dashboard-surface-2)]"
           >
-            <Settings className="h-4 w-4 mr-2" />
-            Periyodik Bakım Yönetimi
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={openBulkModal}
-            className="bg-[var(--dashboard-surface-2)]"
-          >
-            <ClipboardList className="h-4 w-4 mr-2" />
-            Toplu Bakım Planı Ata
+            <ListChecks className="h-4 w-4 mr-2" />
+            Bakım Tanımlamaları
           </Button>
           <Button
             variant="secondary"
@@ -1274,9 +1383,6 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   ) : <span className="text-xs text-amber-600">Resim yok</span>}
                 </TableCell>
                 <TableCell className="space-x-2">
-                  <Button size="sm" variant="outline" onClick={() => openMaintenanceModal(dev)}>
-                    <Calendar className="h-4 w-4 mr-1" /> Bakım Planı
-                  </Button>
                   <Button size="icon" variant="ghost" onClick={() => {
                     setCurrent(dev);
                     setCustomPath('');
@@ -1287,8 +1393,8 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
                   <Button variant="ghost" size="icon" onClick={() => remove(dev.id)}>
                     <Trash2 className="h-4 w-4 text-destructive" />
                   </Button>
-                  <span className={cn("ml-1 inline-flex text-xs px-2 py-1 rounded-full", plannedDeviceIds.has(dev.id) ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
-                    {plannedDeviceIds.has(dev.id) ? 'Bakım Planlı' : 'Bakım Planı Yok'}
+                  <span className={cn("ml-1 inline-flex text-xs px-2 py-1 rounded-full", definedDeviceIds.has(dev.id) ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700")}>
+                    {definedDeviceIds.has(dev.id) ? 'Bakım Tanımlı' : 'Bakım Tanımı Yok'}
                   </span>
                 </TableCell>
               </TableRow>
@@ -1703,802 +1809,96 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
         </DialogContent>
       </Dialog>
 
-      {/* Periyodik Bakım Planı Modal */}
-      <Dialog open={maintenanceModalOpen} onOpenChange={setMaintenanceModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <Dialog open={definitionManagerOpen} onOpenChange={setDefinitionManagerOpen}>
+        <DialogContent className="max-w-5xl">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Calendar className="h-5 w-5" />
-              Periyodik Bakım Planı: {maintenanceDevice?.cihazAdi || maintenanceDevice?.model}
-            </DialogTitle>
+            <DialogTitle>Bakım Tanımlamaları</DialogTitle>
+            <DialogDescription>
+              Bakım Takip panelinde açılacak bakım listelerini cihaz grupları ve model bazında yönetin. Eski cihaz satırı bakım planları yerine ana kaynak burasıdır.
+            </DialogDescription>
           </DialogHeader>
-
-          {isLoadingPlans ? (
-            <div className="flex justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin" />
-            </div>
-          ) : (
-            <Tabs value={maintenanceTab} onValueChange={(v) => setMaintenanceTab(v as MaintenanceType)}>
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="teknik_servis" className="flex items-center gap-2">
-                  <Wrench className="h-4 w-4" /> Teknik Servis ({teknikPlans.length + newTeknikRows.length})
-                </TabsTrigger>
-                <TabsTrigger value="aplikasyon" className="flex items-center gap-2">
-                  <FlaskConical className="h-4 w-4" /> Aplikasyon ({aplikasyonPlans.length + newAplikasyonRows.length})
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="teknik_servis" className="space-y-4 mt-4">
-                <ScrollArea className="h-64 border rounded-md p-3">
-                  {/* Mevcut planlar */}
-                  {teknikPlans.map(plan => (
-                    <div key={plan.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md mb-2">
-                      <div>
-                        <p className="font-medium">{plan.taskName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {plan.periodValue} {PERIOD_UNIT_LABELS[plan.periodUnit]}
-                        </p>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeExistingPlan(plan.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
+          <div className="grid gap-4 lg:grid-cols-[1fr_1.15fr]">
+            <div className="cihaz-card p-4 space-y-3">
+              <p className="cihaz-section-label">Grup / Model Bakım Listesi</p>
+              <Select value={definitionGroupName} onValueChange={setDefinitionGroupName}>
+                <SelectTrigger><SelectValue placeholder="Cihaz grubu seçin" /></SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set([
+                    ...deviceGroups.map(group => group.name),
+                    ...devices.map(device => deviceGroupNameFor(device)),
+                  ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr')).map(groupName => (
+                    <SelectItem key={groupName} value={groupName}>{groupName}</SelectItem>
                   ))}
-
-                  {/* Yeni satırlar */}
-                  {newTeknikRows.map(row => (
-                    <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
-                      <Input
-                        placeholder="İş adı..."
-                        value={row.taskName}
-                        onChange={(e) => updateNewRow('teknik_servis', row.id, 'taskName', e.target.value)}
-                        className="flex-1"
-                      />
-                      <Input
-                        type="number"
-                        min="1"
-                        value={row.periodValue}
-                        onChange={(e) => updateNewRow('teknik_servis', row.id, 'periodValue', Number(e.target.value))}
-                        className="w-20"
-                      />
-                      <Select
-                        value={row.periodUnit}
-                        onValueChange={(v) => updateNewRow('teknik_servis', row.id, 'periodUnit', v)}
-                      >
-                        <SelectTrigger className="w-24">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hafta">Hafta</SelectItem>
-                          <SelectItem value="ay">Ay</SelectItem>
-                          <SelectItem value="yil">Yıl</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button variant="ghost" size="icon" onClick={() => removeNewRow('teknik_servis', row.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {teknikPlans.length === 0 && newTeknikRows.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      Henüz teknik servis bakım planı tanımlanmamış.
-                    </p>
-                  )}
-                </ScrollArea>
-
-                <Button variant="outline" className="w-full" onClick={() => addNewRow('teknik_servis')}>
-                  <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
-                </Button>
-              </TabsContent>
-
-              <TabsContent value="aplikasyon" className="space-y-4 mt-4">
-                <ScrollArea className="h-64 border rounded-md p-3">
-                  {/* Mevcut planlar */}
-                  {aplikasyonPlans.map(plan => (
-                    <div key={plan.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md mb-2">
-                      <div>
-                        <p className="font-medium">{plan.taskName}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {plan.periodValue} {PERIOD_UNIT_LABELS[plan.periodUnit]}
-                        </p>
-                      </div>
-                      <Button variant="ghost" size="icon" onClick={() => removeExistingPlan(plan.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {/* Yeni satırlar */}
-                  {newAplikasyonRows.map(row => (
-                    <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
-                      <Input
-                        placeholder="İş adı..."
-                        value={row.taskName}
-                        onChange={(e) => updateNewRow('aplikasyon', row.id, 'taskName', e.target.value)}
-                        className="flex-1"
-                      />
-                      <Input
-                        type="number"
-                        min="1"
-                        value={row.periodValue}
-                        onChange={(e) => updateNewRow('aplikasyon', row.id, 'periodValue', Number(e.target.value))}
-                        className="w-20"
-                      />
-                      <Select
-                        value={row.periodUnit}
-                        onValueChange={(v) => updateNewRow('aplikasyon', row.id, 'periodUnit', v)}
-                      >
-                        <SelectTrigger className="w-24">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hafta">Hafta</SelectItem>
-                          <SelectItem value="ay">Ay</SelectItem>
-                          <SelectItem value="yil">Yıl</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Button variant="ghost" size="icon" onClick={() => removeNewRow('aplikasyon', row.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </div>
-                  ))}
-
-                  {aplikasyonPlans.length === 0 && newAplikasyonRows.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      Henüz aplikasyon bakım planı tanımlanmamış.
-                    </p>
-                  )}
-                </ScrollArea>
-
-                <Button variant="outline" className="w-full" onClick={() => addNewRow('aplikasyon')}>
-                  <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
-                </Button>
-              </TabsContent>
-            </Tabs>
-          )}
-
-          {/* Periyodik Parça Değişimi Bölümü */}
-          {!isLoadingPlans && (
-            <div className="border-t pt-4 mt-4">
-              <div className="flex items-center justify-between mb-4">
-                <Label className="flex items-center gap-2 font-semibold">
-                  <Package className="h-4 w-4" />
-                  Periyodik Parça Değişimleri ({existingPeriodicParts.length + newPeriodicPartRows.length})
-                </Label>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPeriodicPartSection(!showPeriodicPartSection)}
-                >
-                  {showPeriodicPartSection ? 'Gizle' : 'Göster'}
-                </Button>
-              </div>
-
-              {showPeriodicPartSection && (
-                <div className="space-y-4">
-                  <ScrollArea className="max-h-64 border rounded-md p-3">
-                    {/* Mevcut periyodik parça değişimleri */}
-                    {existingPeriodicParts.map(part => (
-                      <div key={part.id} className="flex items-center justify-between p-2 bg-muted/50 rounded-md mb-2">
-                        <div className="flex-1">
-                          <p className="font-medium text-sm">{part.stokAdi}</p>
-                          <p className="text-xs text-muted-foreground font-mono">{part.stokKodu}</p>
-                          <div className="flex gap-2 mt-1">
-                            <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                              {part.periodDays ? `${part.periodDays} gün` : (part.nextDueDate?.toDate ? new Date(part.nextDueDate.toDate()).toLocaleDateString('tr-TR') : `${part.periodValue} ${PERIOD_UNIT_LABELS[part.periodUnit]}`)}
-                            </span>
-                            <span className="text-xs bg-secondary px-1.5 py-0.5 rounded">
-                              {RESPONSIBILITY_LABELS[part.responsibilityType]}
-                            </span>
-                            {part.requiresSerialTracking && (
-                              <span className="text-xs bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300 px-1.5 py-0.5 rounded">
-                                Seri No
-                              </span>
-                            )}
-                            {part.requiresOutgoingPartInfo && (
-                              <span className="text-xs bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 px-1.5 py-0.5 rounded">
-                                Çıkan Parça
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <Button variant="ghost" size="icon" onClick={() => removeExistingPeriodicPart(part.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-                    ))}
-
-                    {/* Yeni periyodik parça değişimi satırları */}
-                    {newPeriodicPartRows.map(row => (
-                      <div key={row.id} className="border border-dashed rounded-md p-3 mb-2 space-y-3">
-                        {/* İlk satır: Ürün seçici ve periyot */}
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 relative">
-                            <Button
-                              variant="outline"
-                              className="w-full justify-between"
-                              onClick={() => updatePeriodicPartRow(row.id, 'isPopoverOpen', !row.isPopoverOpen)}
-                            >
-                              {row.stokAdi ? (
-                                <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
-                              ) : (
-                                <span className="text-muted-foreground">Ürün seçin...</span>
-                              )}
-                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                            </Button>
-                            {row.isPopoverOpen && (
-                              <div className="absolute left-0 top-full mt-1 w-full min-w-[400px] bg-popover border rounded-md shadow-lg z-50">
-                                <div className="flex items-center border-b px-3">
-                                  <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                                  <input
-                                    type="text"
-                                    className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
-                                    placeholder="Ürün kodu veya adı ara..."
-                                    value={row.searchText}
-                                    onChange={(e) => updatePeriodicPartRow(row.id, 'searchText', e.target.value)}
-                                    autoFocus
-                                  />
-                                </div>
-                                <div className="max-h-[200px] overflow-y-auto p-1">
-                                  {(() => {
-                                    const searchLower = row.searchText.toLowerCase();
-                                    const filtered = productCodes.filter(p =>
-                                      !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
-                                    );
-                                    if (filtered.length === 0) {
-                                      return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
-                                    }
-                                    return filtered.map(product => (
-                                      <div
-                                        key={product.id}
-                                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                                        onClick={() => selectProductForRow(row.id, product)}
-                                      >
-                                        <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                        <div className="flex flex-col">
-                                          <span className="font-medium">{product.stokKodu}</span>
-                                          <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                        </div>
-                                      </div>
-                                    ));
-                                  })()}
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                          <Input
-                            type="date"
-                            value={row.nextDueDate}
-                            onChange={(e) => updatePeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
-                            className="w-40"
-                            placeholder="Tarih seçin"
-                          />
-                          <div className="flex items-center gap-1">
-                            <Input
-                              type="number"
-                              min={1}
-                              step={1}
-                              value={row.periodDays}
-                              onChange={(e) => updatePeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
-                              className="w-24"
-                              placeholder="Gün"
-                            />
-                            <span className="text-xs text-muted-foreground">gün</span>
-                          </div>
-                          <Button variant="ghost" size="icon" onClick={() => removePeriodicPartRow(row.id)}>
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-
-                        {/* İkinci satır: Sorumluluk ve takip seçenekleri */}
-                        <div className="flex flex-wrap items-center gap-4">
-                          <div className="flex items-center gap-2">
-                            <Label className="text-xs text-muted-foreground">Sorumluluk:</Label>
-                            <Select
-                              value={row.responsibilityType}
-                              onValueChange={(v) => updatePeriodicPartRow(row.id, 'responsibilityType', v as PeriodicPartResponsibility)}
-                            >
-                              <SelectTrigger className="w-32 h-8 text-xs">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
-                                <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
-                                <SelectItem value="both">Her İkisi</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`serial-${row.id}`}
-                              checked={row.requiresSerialTracking}
-                              onCheckedChange={(checked) => updatePeriodicPartRow(row.id, 'requiresSerialTracking', checked)}
-                            />
-                            <Label htmlFor={`serial-${row.id}`} className="text-xs cursor-pointer">
-                              Seri No Takibi
-                            </Label>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id={`outgoing-${row.id}`}
-                              checked={row.requiresOutgoingPartInfo}
-                              onCheckedChange={(checked) => updatePeriodicPartRow(row.id, 'requiresOutgoingPartInfo', checked)}
-                            />
-                            <Label htmlFor={`outgoing-${row.id}`} className="text-xs cursor-pointer">
-                              Çıkan Parça Bilgisi
-                            </Label>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {existingPeriodicParts.length === 0 && newPeriodicPartRows.length === 0 && (
-                      <p className="text-center text-muted-foreground py-4">
-                        Henüz periyodik parça değişimi tanımlanmamış.
-                      </p>
-                    )}
-                  </ScrollArea>
-
-                  <Button variant="outline" className="w-full" onClick={addNewPeriodicPartRow}>
-                    <Plus className="h-4 w-4 mr-2" /> Periyodik Parça Değişimi Ekle
-                  </Button>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setMaintenanceModalOpen(false)}>Kapat</Button>
-            <Button onClick={saveMaintenancePlans} disabled={isSavingPlans || (newTeknikRows.length === 0 && newAplikasyonRows.length === 0 && newPeriodicPartRows.length === 0)}>
-              {isSavingPlans ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Kaydet
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Toplu Bakım Planı Modal */}
-      <Dialog open={bulkModalOpen} onOpenChange={setBulkModalOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ClipboardList className="h-5 w-5" />
-              Toplu Bakım Planı Ata
-            </DialogTitle>
-          </DialogHeader>
-
-          <Tabs value={bulkMaintenanceTab} onValueChange={(v) => setBulkMaintenanceTab(v as MaintenanceType)}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="teknik_servis" className="flex items-center gap-2">
-                <Wrench className="h-4 w-4" /> Teknik Servis ({bulkTeknikRows.length})
-              </TabsTrigger>
-              <TabsTrigger value="aplikasyon" className="flex items-center gap-2">
-                <FlaskConical className="h-4 w-4" /> Aplikasyon ({bulkAplikasyonRows.length})
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="teknik_servis" className="space-y-4 mt-4">
-              <ScrollArea className="h-64 border rounded-md p-3">
-                {bulkTeknikRows.map(row => (
-                  <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
-                    <Input
-                      placeholder="İş adı..."
-                      value={row.taskName}
-                      onChange={(e) => updateBulkRow('teknik_servis', row.id, 'taskName', e.target.value)}
-                      className="flex-1"
-                    />
-                    <Input
-                      type="number"
-                      min="1"
-                      value={row.periodValue}
-                      onChange={(e) => updateBulkRow('teknik_servis', row.id, 'periodValue', Number(e.target.value))}
-                      className="w-20"
-                    />
-                    <Select
-                      value={row.periodUnit}
-                      onValueChange={(v) => updateBulkRow('teknik_servis', row.id, 'periodUnit', v)}
-                    >
-                      <SelectTrigger className="w-24">
-                        <SelectValue />
-                      </SelectTrigger>
+                </SelectContent>
+              </Select>
+              <Select value={definitionModel} onValueChange={setDefinitionModel}>
+                <SelectTrigger><SelectValue placeholder="Model seçin" /></SelectTrigger>
+                <SelectContent>
+                  {Array.from(new Set(devices
+                    .filter(device => !definitionGroupName || deviceGroupNameFor(device) === definitionGroupName)
+                    .map(device => device.model)
+                    .filter(Boolean)))
+                    .sort((a, b) => a.localeCompare(b, 'tr'))
+                    .map(model => <SelectItem key={model} value={model}>{model}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={definitionListName} onChange={e => setDefinitionListName(e.target.value)} placeholder="Liste adı (Örn: Q Bakım Listesi)" />
+              <div className="space-y-2">
+                {definitionTaskRows.map(row => (
+                  <div key={row.id} className="grid gap-2 rounded-xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-3 md:grid-cols-[1fr_110px_150px_40px]">
+                    <Input value={row.taskName} onChange={e => updateDefinitionTaskRow(row.id, 'taskName', e.target.value)} placeholder="Bakım adı" />
+                    <Input value={row.periodDays} onChange={e => updateDefinitionTaskRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))} placeholder="Gün" inputMode="numeric" />
+                    <Select value={row.type} onValueChange={value => updateDefinitionTaskRow(row.id, 'type', value)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="hafta">Hafta</SelectItem>
-                        <SelectItem value="ay">Ay</SelectItem>
-                        <SelectItem value="yil">Yıl</SelectItem>
+                        <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
+                        <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Button variant="ghost" size="icon" onClick={() => removeBulkRow('teknik_servis', row.id)}>
+                    <Button type="button" variant="ghost" size="icon" onClick={() => removeDefinitionTaskRow(row.id)}>
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
                   </div>
                 ))}
-                {bulkTeknikRows.length === 0 && (
-                  <p className="text-center text-muted-foreground py-4">
-                    Henüz teknik servis bakım planı eklenmemiş.
-                  </p>
-                )}
-              </ScrollArea>
-              <Button variant="outline" className="w-full" onClick={() => addBulkRow('teknik_servis')}>
-                <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
-              </Button>
-            </TabsContent>
-
-            <TabsContent value="aplikasyon" className="space-y-4 mt-4">
-              <ScrollArea className="h-64 border rounded-md p-3">
-                {bulkAplikasyonRows.map(row => (
-                  <div key={row.id} className="flex items-center gap-2 p-2 border border-dashed rounded-md mb-2">
-                    <Input
-                      placeholder="İş adı..."
-                      value={row.taskName}
-                      onChange={(e) => updateBulkRow('aplikasyon', row.id, 'taskName', e.target.value)}
-                      className="flex-1"
-                    />
-                    <Input
-                      type="number"
-                      min="1"
-                      value={row.periodValue}
-                      onChange={(e) => updateBulkRow('aplikasyon', row.id, 'periodValue', Number(e.target.value))}
-                      className="w-20"
-                    />
-                    <Select
-                      value={row.periodUnit}
-                      onValueChange={(v) => updateBulkRow('aplikasyon', row.id, 'periodUnit', v)}
-                    >
-                      <SelectTrigger className="w-24">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="hafta">Hafta</SelectItem>
-                        <SelectItem value="ay">Ay</SelectItem>
-                        <SelectItem value="yil">Yıl</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <Button variant="ghost" size="icon" onClick={() => removeBulkRow('aplikasyon', row.id)}>
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                ))}
-                {bulkAplikasyonRows.length === 0 && (
-                  <p className="text-center text-muted-foreground py-4">
-                    Henüz aplikasyon bakım planı eklenmemiş.
-                  </p>
-                )}
-              </ScrollArea>
-              <Button variant="outline" className="w-full" onClick={() => addBulkRow('aplikasyon')}>
-                <Plus className="h-4 w-4 mr-2" /> Yeni İş Ekle
-              </Button>
-            </TabsContent>
-          </Tabs>
-
-          {/* Yedek Parça Değişimi Bölümü */}
-          <div className="border-t pt-4 mt-4">
-            <div className="flex items-center justify-between mb-4">
-              <Label className="flex items-center gap-2 font-semibold">
-                <Package className="h-4 w-4" />
-                Yedek Parça Değişimleri ({bulkPeriodicPartRows.length})
-              </Label>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setBulkShowPeriodicParts(!bulkShowPeriodicParts)}
-              >
-                {bulkShowPeriodicParts ? 'Gizle' : 'Göster'}
-              </Button>
-            </div>
-
-            {bulkShowPeriodicParts && (
-              <div className="space-y-4">
-                <ScrollArea className="max-h-80 border rounded-md p-3">
-                  {bulkPeriodicPartRows.map(row => (
-                    <div key={row.id} className="border border-dashed rounded-md p-3 mb-3 space-y-3">
-                      {/* Ürün seçici */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 relative">
-                          <Button
-                            variant="outline"
-                            className="w-full justify-between"
-                            onClick={() => updateBulkPeriodicPartRow(row.id, 'isPopoverOpen', !row.isPopoverOpen)}
-                          >
-                            {row.stokAdi ? (
-                              <span className="truncate">{row.stokKodu} - {row.stokAdi.substring(0, 30)}...</span>
-                            ) : (
-                              <span className="text-muted-foreground">Ürün seçin...</span>
-                            )}
-                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                          </Button>
-                          {row.isPopoverOpen && (
-                            <div className="absolute left-0 top-full mt-1 w-full min-w-[400px] bg-popover border rounded-md shadow-lg z-50">
-                              <div className="flex items-center border-b px-3">
-                                <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-                                <input
-                                  type="text"
-                                  className="flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
-                                  placeholder="Ürün kodu veya adı ara..."
-                                  value={row.searchText}
-                                  onChange={(e) => updateBulkPeriodicPartRow(row.id, 'searchText', e.target.value)}
-                                  autoFocus
-                                />
-                              </div>
-                              <div className="max-h-[200px] overflow-y-auto p-1">
-                                {(() => {
-                                  const searchLower = row.searchText.toLowerCase();
-                                  const filtered = productCodes.filter(p =>
-                                    !searchLower || p.stokKodu.toLowerCase().includes(searchLower) || p.stokAdi.toLowerCase().includes(searchLower)
-                                  );
-                                  if (filtered.length === 0) {
-                                    return <p className="py-6 text-center text-sm text-muted-foreground">Ürün bulunamadı.</p>;
-                                  }
-                                  return filtered.map(product => (
-                                    <div
-                                      key={product.id}
-                                      className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                                      onClick={() => selectBulkProductForRow(row.id, product)}
-                                    >
-                                      <CheckIcon className={cn("mr-2 h-4 w-4", row.productCodeId === product.id ? "opacity-100" : "opacity-0")} />
-                                      <div className="flex flex-col">
-                                        <span className="font-medium">{product.stokKodu}</span>
-                                        <span className="text-sm text-muted-foreground truncate">{product.stokAdi}</span>
-                                      </div>
-                                    </div>
-                                  ));
-                                })()}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                        <Button variant="ghost" size="icon" onClick={() => removeBulkPeriodicPartRow(row.id)}>
-                          <Trash2 className="h-4 w-4 text-destructive" />
-                        </Button>
-                      </div>
-
-                      {/* Tarih seçimi */}
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Label className="text-xs text-muted-foreground">İlk Değişim Tarihi:</Label>
-                        <Input
-                          type="date"
-                          value={row.nextDueDate}
-                          onChange={(e) => updateBulkPeriodicPartRow(row.id, 'nextDueDate', e.target.value)}
-                          className="w-40"
-                        />
-                        <div className="flex items-center gap-1">
-                          <Input
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={row.periodDays}
-                            onChange={(e) => updateBulkPeriodicPartRow(row.id, 'periodDays', e.target.value.replace(/[^0-9]/g, ''))}
-                            className="w-24"
-                            placeholder="Gün"
-                          />
-                          <span className="text-xs text-muted-foreground">gün</span>
-                        </div>
-                      </div>
-
-                      {row.nextDueDate && (
-                        <p className="text-xs text-muted-foreground italic">
-                          {new Date(row.nextDueDate + 'T00:00:00').toLocaleDateString('tr-TR')} tarihinden itibaren her {row.periodDays || '?'} günde bir değişmeli
-                        </p>
-                      )}
-
-                      {/* Sorumluluk ve takip seçenekleri */}
-                      <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex items-center gap-2">
-                          <Label className="text-xs text-muted-foreground">Sorumluluk:</Label>
-                          <Select
-                            value={row.responsibilityType}
-                            onValueChange={(v) => updateBulkPeriodicPartRow(row.id, 'responsibilityType', v as PeriodicPartResponsibility)}
-                          >
-                            <SelectTrigger className="w-32 h-8 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="teknik_servis">Teknik Servis</SelectItem>
-                              <SelectItem value="aplikasyon">Aplikasyon</SelectItem>
-                              <SelectItem value="both">Her İkisi</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`bulk-serial-${row.id}`}
-                            checked={row.requiresSerialTracking}
-                            onCheckedChange={(checked) => updateBulkPeriodicPartRow(row.id, 'requiresSerialTracking', checked)}
-                          />
-                          <Label htmlFor={`bulk-serial-${row.id}`} className="text-xs cursor-pointer">
-                            Seri No Takibi
-                          </Label>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Checkbox
-                            id={`bulk-outgoing-${row.id}`}
-                            checked={row.requiresOutgoingPartInfo}
-                            onCheckedChange={(checked) => updateBulkPeriodicPartRow(row.id, 'requiresOutgoingPartInfo', checked)}
-                          />
-                          <Label htmlFor={`bulk-outgoing-${row.id}`} className="text-xs cursor-pointer">
-                            Çıkan Parça Bilgisi
-                          </Label>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {bulkPeriodicPartRows.length === 0 && (
-                    <p className="text-center text-muted-foreground py-4">
-                      Henüz yedek parça değişimi eklenmemiş.
-                    </p>
-                  )}
-                </ScrollArea>
-
-                <Button variant="outline" className="w-full" onClick={addBulkPeriodicPartRow}>
-                  <Plus className="h-4 w-4 mr-2" /> Yedek Parça Değişimi Ekle
-                </Button>
+                {definitionTaskRows.length === 0 && <div className="rounded-xl border border-dashed p-4 text-sm text-[var(--dashboard-muted)]">Bu listeye bakım satırı ekleyin.</div>}
               </div>
-            )}
-          </div>
-
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setBulkModalOpen(false)}>Kapat</Button>
-            <Button
-              onClick={handleBulkSaveClick}
-              disabled={bulkTeknikRows.length === 0 && bulkAplikasyonRows.length === 0 && bulkPeriodicPartRows.length === 0}
-            >
-              Kaydet ve Laboratuvar Seç
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Laboratuvar / Cihaz Seçimi Modal */}
-      <Dialog open={labSelectionModalOpen} onOpenChange={setLabSelectionModalOpen}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto" onPointerDownOutside={(e) => e.preventDefault()}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              Hedef Seçimi
-            </DialogTitle>
-          </DialogHeader>
-
-          {/* Selection Mode Toggle */}
-          <div className="flex gap-2 border-b pb-3">
-            <Button
-              variant={selectionMode === 'lab' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => { setSelectionMode('lab'); setSelectedDeviceIds([]); }}
-            >
-              <Building2 className="h-4 w-4 mr-1" />
-              Laboratuvar Seçimi
-            </Button>
-            <Button
-              variant={selectionMode === 'device' ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => { setSelectionMode('device'); setSelectedLabIds([]); }}
-            >
-              <Wrench className="h-4 w-4 mr-1" />
-              Cihaz Seçimi
-            </Button>
-          </div>
-
-          {selectionMode === 'lab' ? (
-            <>
-              <LabSelector
-                mode="multi"
-                helperText="Bakım planının atanacağı laboratuvarları seçin. Seçilen laboratuvarlardaki tüm cihazlara plan kaydedilecektir."
-                labs={labsWithDevices.map(lab => ({
-                  id: lab.id,
-                  name: lab.name,
-                  kod: lab.kod,
-                  meta: `${devices.filter(d => d.hospitalId === lab.id).length} cihaz`,
-                }))}
-                values={selectedLabIds}
-                onValuesChange={setSelectedLabIds}
-                placeholder="Laboratuvar seçin"
-                showChips
-              />
-
-              {selectedLabIds.length > 0 && (
-                <div className="bg-muted/50 rounded-md p-3 text-sm">
-                  <p className="font-medium">Özet:</p>
-                  <p className="text-muted-foreground">
-                    {selectedLabIds.length} laboratuvar seçildi &middot;{' '}
-                    {devices.filter(d => selectedLabIds.includes(d.hospitalId || '')).length} cihaza uygulanacak
-                  </p>
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Bakım planının atanacağı cihazları tek tek seçin.
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={addDefinitionTaskRow}><Plus className="mr-2 h-4 w-4" /> Bakım Satırı</Button>
+                <Button type="button" onClick={saveMaintenanceDefinition} disabled={isSavingMaintenanceDefinition}>
+                  {isSavingMaintenanceDefinition ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ListChecks className="mr-2 h-4 w-4" />}
+                  {editingMaintenanceDefinitionId ? 'Tanımı Güncelle' : 'Tanımı Kaydet'}
+                </Button>
+                {editingMaintenanceDefinitionId && <Button type="button" variant="ghost" onClick={resetMaintenanceDefinitionForm}>Vazgeç</Button>}
+              </div>
+              <p className="text-xs text-[var(--dashboard-muted)]">
+                Gün aralığı model/grup bazında farklı olabilir. Bakım Takip paneli gerçekleşen iki bakım arasındaki sapmaya göre liste periyodunu otomatik önerilen aralığa çeker.
               </p>
-
-              <div className="relative mb-2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Cihaz adı, marka, seri no veya lab ara..."
-                  value={deviceSearchQuery}
-                  onChange={(e) => setDeviceSearchQuery(e.target.value)}
-                  className="pl-10"
-                />
+            </div>
+            <ScrollArea className="max-h-[560px] rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
+              <div className="divide-y divide-[var(--dashboard-stroke)]">
+                {maintenanceDefinitions.map(definition => (
+                  <div key={definition.id} className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-[0.25em] text-[var(--dashboard-muted)]">{definition.groupName} / {definition.model}</p>
+                        <h3 className="text-lg font-semibold text-[var(--dashboard-text)]">{definition.listName}</h3>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => startEditMaintenanceDefinition(definition)}><Pencil className="mr-1 h-4 w-4" /> Düzenle</Button>
+                        <Button type="button" variant="ghost" size="icon" onClick={() => removeMaintenanceDefinition(definition.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {(definition.tasks || []).map(task => <span key={task.id} className="rounded-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-3 py-1 text-xs">{task.taskName} · {task.periodDays}g</span>)}
+                    </div>
+                  </div>
+                ))}
+                {maintenanceDefinitions.length === 0 && <div className="p-8 text-center text-sm text-[var(--dashboard-muted)]">Henüz bakım tanımı yok.</div>}
               </div>
-
-              <div className="flex items-center gap-2 border-b pb-3 mb-3">
-                <Checkbox
-                  id="select-all-devices"
-                  checked={selectedDeviceIds.length === (deviceSearchQuery.trim() ? devices.filter(d => {
-                    const q = deviceSearchQuery.toLowerCase();
-                    const hospitalName = hospitals.find(h => h.id === d.hospitalId)?.name || '';
-                    return (d.cihazAdi || d.model || '').toLowerCase().includes(q) ||
-                      (d.brand || '').toLowerCase().includes(q) ||
-                      (d.seriNumarasi || '').toLowerCase().includes(q) ||
-                      hospitalName.toLowerCase().includes(q);
-                  }).length : devices.length) && devices.length > 0}
-                  onCheckedChange={toggleAllDevices}
-                />
-                <Label htmlFor="select-all-devices" className="text-sm font-medium cursor-pointer">
-                  Tümünü Seç ({devices.length} cihaz)
-                </Label>
-              </div>
-
-              <ScrollArea className="max-h-[40vh]">
-                <div className="space-y-2">
-                  {devices
-                    .filter(d => {
-                      if (!deviceSearchQuery.trim()) return true;
-                      const q = deviceSearchQuery.toLowerCase();
-                      const hospitalName = hospitals.find(h => h.id === d.hospitalId)?.name || '';
-                      return (d.cihazAdi || d.model || '').toLowerCase().includes(q) ||
-                        (d.brand || '').toLowerCase().includes(q) ||
-                        (d.seriNumarasi || '').toLowerCase().includes(q) ||
-                        hospitalName.toLowerCase().includes(q);
-                    })
-                    .map(device => {
-                      const hospitalName = hospitals.find(h => h.id === device.hospitalId)?.name || '';
-                      return (
-                        <div
-                          key={device.id}
-                          className={cn(
-                            "flex items-center gap-3 p-3 rounded-md border cursor-pointer transition-colors",
-                            selectedDeviceIds.includes(device.id) ? "bg-primary/10 border-primary" : "hover:bg-muted/50"
-                          )}
-                          onClick={() => toggleDeviceSelection(device.id)}
-                        >
-                          <Checkbox
-                            checked={selectedDeviceIds.includes(device.id)}
-                            onCheckedChange={() => toggleDeviceSelection(device.id)}
-                          />
-                          <div className="flex-1">
-                            <p className="font-medium text-sm">{device.cihazAdi || device.model || `${device.brand} ${device.model}`}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {hospitalName} &middot; SN: {device.seriNumarasi || '-'}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </ScrollArea>
-
-              {selectedDeviceIds.length > 0 && (
-                <div className="bg-muted/50 rounded-md p-3 text-sm">
-                  <p className="font-medium">Özet:</p>
-                  <p className="text-muted-foreground">
-                    {selectedDeviceIds.length} cihaz seçildi
-                  </p>
-                </div>
-              )}
-            </>
-          )}
-
-          <DialogFooter className="mt-4">
-            <Button variant="outline" onClick={() => setLabSelectionModalOpen(false)}>Geri</Button>
-            <Button
-              onClick={saveBulkMaintenancePlans}
-              disabled={isSavingBulk || (selectionMode === 'lab' ? selectedLabIds.length === 0 : selectedDeviceIds.length === 0)}
-            >
-              {isSavingBulk ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Kaydet ({selectionMode === 'lab' ? `${selectedLabIds.length} laboratuvar` : `${selectedDeviceIds.length} cihaz`})
-            </Button>
+            </ScrollArea>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild><Button variant="outline">Kapat</Button></DialogClose>
           </DialogFooter>
         </DialogContent>
       </Dialog>
