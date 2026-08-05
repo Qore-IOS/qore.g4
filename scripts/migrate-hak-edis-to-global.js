@@ -21,19 +21,18 @@
  *   FIREBASE_PROJECT_ID
  */
 const admin = require('firebase-admin');
+const { initAdmin } = require('./lib/firebase-project');
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');
 const ARCHIVE = args.includes('--archive');
 
+// Kimlik bilgisi ve proje kimliği çözümü scripts/lib/firebase-project.js'te
+// ortaklaştırıldı: eksik/yanlış GOOGLE_APPLICATION_CREDENTIALS durumunda ham
+// ENOENT yerine ne yapılacağını söyleyen bir hata verir, proje kimliğini de
+// env yoksa `.firebaserc`'den çözer.
 function init() {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
-  }
-  return admin.firestore();
+  return initAdmin(admin, { quiet: true }).db;
 }
 
 async function main() {

@@ -18,11 +18,18 @@
  *   node scripts/audit-collections.js --output reports/audit-2026-05-23.json
  *   node scripts/audit-collections.js --collections devices,depots  # subset
  *
- * Gerekli env:
- *   GOOGLE_APPLICATION_CREDENTIALS  -> service account JSON path
- *   FIREBASE_PROJECT_ID             -> Firebase project id
+ * Ortam:
+ *   Firebase Studio / Cloud Shell / Compute Engine'de HİÇBİR ŞEY ayarlamayın —
+ *   kimlik bilgisi ortamdan gelir, proje kimliği `.firebaserc`'den çözülür.
+ *
+ *   Yalnızca kendi makinenizde çalışıyorsanız bir anahtar gerekir:
+ *     GOOGLE_APPLICATION_CREDENTIALS -> service account JSON'un GERÇEK yolu
+ *   Var olmayan bir yol verilirse script ne yapılacağını söyleyerek durur.
+ *
+ *   FIREBASE_PROJECT_ID isteğe bağlıdır; verilmezse `.firebaserc` kullanılır.
  */
 const admin = require('firebase-admin');
+const { initAdmin } = require('./lib/firebase-project');
 const fs = require('fs');
 const path = require('path');
 
@@ -81,14 +88,12 @@ function parseArgs() {
   return out;
 }
 
+// Kimlik bilgisi ve proje kimliği çözümü scripts/lib/firebase-project.js'te
+// ortaklaştırıldı: eksik/yanlış GOOGLE_APPLICATION_CREDENTIALS durumunda ham
+// ENOENT yerine ne yapılacağını söyleyen bir hata verir, proje kimliğini de
+// env yoksa `.firebaserc`'den çözer.
 function init() {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
-  }
-  return admin.firestore();
+  return initAdmin(admin, { quiet: true });
 }
 
 function classifyCompanyId(raw) {
@@ -158,10 +163,10 @@ function formatRow(s) {
 
 async function main() {
   const { output, collections } = parseArgs();
-  const db = init();
+  const { db, projectId } = init();
 
   console.log(`Multi-tenancy audit — ${new Date().toISOString()}`);
-  console.log(`Project: ${process.env.FIREBASE_PROJECT_ID || '(applicationDefault)'}`);
+  console.log(`Project: ${projectId}`);
   console.log(`Collections: ${collections.length}\n`);
 
   const results = [];
