@@ -31,46 +31,11 @@ const admin = require('firebase-admin');
 const fs = require('fs');
 const path = require('path');
 const { initAdmin } = require('./lib/firebase-project');
+const { NEVER_SCOPE, discoverCollections } = require('./lib/tenant-collections');
 
 const LEGACY_TAG = '__legacy__';
 const BATCH_SIZE = 500;
 
-const DEFAULT_COLLECTIONS = [
-  // Tier 1
-  'devices',
-  'depots',
-  'hospitals',
-  'users',
-  'depoStok',
-  'hospitalDeviceAssignments',
-  // Tier 2
-  'purchasingTasks',
-  'deviceGroups',
-  'labPools',
-  'addressDefinitions',
-  'personnelAvailability',
-  'deviceFaultReports',
-  'deviceActionForms',
-  'aplikasyonActionForms',
-  'maintenancePlans',
-  'maintenanceLogs',
-  'deviceLabPools',
-  // Tier 3 — filtresizler
-  'tuketimKayitlari',
-  'dailyConsumptionStats',
-  'shipments',
-  'efficiencyHistory',
-  'productCodes',
-  'barcodeFormats',
-  'faultDefinitions',
-  // Tier 4
-  'depotStockCountSessions',
-  'maliyetSayimSessions',
-  'dutyShifts',
-  'borcDepots',
-  'notifications',
-  'irsaliyeFiles',
-];
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -78,7 +43,7 @@ function parseArgs() {
     defaultCompanyId: null,
     fromAudit: null,
     apply: false,
-    collections: DEFAULT_COLLECTIONS,
+    collections: null, // null => keşfet (veya --from-audit'ten al)
   };
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -133,7 +98,16 @@ function classify(raw) {
   return 'scoped';
 }
 
-function loadDefaultFromAudit(auditPath) {
+/**
+ * Audit raporundan hem önerilen şirketi hem de GERÇEKTEN işi olan koleksiyon
+ * listesini okur.
+ *
+ * Eskiden yalnızca `suggestedDefaultCompanyId` okunuyordu; koleksiyonlar yine
+ * script'in kendi sabit listesinden geliyordu. Yani audit "şu koleksiyonda 900
+ * etiketsiz kayıt var" dese bile, koleksiyon o listede yoksa backfill ona hiç
+ * dokunmuyordu.
+ */
+function loadFromAudit(auditPath) {
   const abs = path.resolve(auditPath);
   if (!fs.existsSync(abs)) {
     throw new Error(`Audit dosyası bulunamadı: ${abs}`);
@@ -142,7 +116,13 @@ function loadDefaultFromAudit(auditPath) {
   if (!data || !data.suggestedDefaultCompanyId) {
     throw new Error(`Audit raporunda suggestedDefaultCompanyId yok: ${abs}`);
   }
-  return data.suggestedDefaultCompanyId;
+  return {
+    defaultCompanyId: data.suggestedDefaultCompanyId,
+    // Eski raporlarda bu alan yok — o zaman keşfe düşülür.
+    collections: Array.isArray(data.collectionsNeedingBackfill) && data.collectionsNeedingBackfill.length > 0
+      ? data.collectionsNeedingBackfill
+      : null,
+  };
 }
 
 async function backfillCollection(db, name, defaultCompanyId, apply) {
@@ -209,9 +189,17 @@ function fmt(s, apply) {
 async function main() {
   const opts = parseArgs();
 
-  if (!opts.defaultCompanyId && opts.fromAudit) {
-    opts.defaultCompanyId = loadDefaultFromAudit(opts.fromAudit);
-    console.log(`Audit raporundan defaultCompanyId: ${opts.defaultCompanyId}`);
+  let auditCollections = null;
+  if (opts.fromAudit) {
+    const fromAudit = loadFromAudit(opts.fromAudit);
+    if (!opts.defaultCompanyId) {
+      opts.defaultCompanyId = fromAudit.defaultCompanyId;
+      console.log(`Audit raporundan defaultCompanyId: ${opts.defaultCompanyId}`);
+    }
+    auditCollections = fromAudit.collections;
+    if (auditCollections) {
+      console.log(`Audit raporundan koleksiyon listesi: ${auditCollections.length} adet`);
+    }
   }
   if (!opts.defaultCompanyId) {
     console.error('HATA: --default-company-id veya --from-audit gerekli.');
@@ -226,11 +214,30 @@ async function main() {
   const { db, projectId } = init();
   const mode = opts.apply ? 'APPLY (gerçek yazma)' : 'DRY-RUN (yazma yok)';
 
+  // Öncelik: --collections > --from-audit raporu > keşif
+  let kaynak;
+  if (opts.collections) {
+    kaynak = '--collections';
+  } else if (auditCollections) {
+    opts.collections = auditCollections;
+    kaynak = 'audit raporu';
+  } else {
+    opts.collections = await discoverCollections(db);
+    kaynak = 'keşif (tüm kök koleksiyonlar)';
+  }
+
+  const korunan = opts.collections.filter((c) => NEVER_SCOPE.has(c));
+  opts.collections = opts.collections.filter((c) => !NEVER_SCOPE.has(c));
+
   console.log(`Multi-tenancy backfill — ${new Date().toISOString()}`);
   console.log(`Project           : ${projectId}`);
   console.log(`Mode              : ${mode}`);
   console.log(`Default companyId : ${opts.defaultCompanyId}`);
-  console.log(`Collections       : ${opts.collections.length}\n`);
+  console.log(`Collections       : ${opts.collections.length}  (kaynak: ${kaynak})`);
+  if (korunan.length > 0) {
+    console.log(`Dokunulmayan      : ${korunan.join(', ')}  (ortak tanım / kiracı kütüğü)`);
+  }
+  console.log('');
 
   if (opts.apply) {
     console.log('⚠️  APPLY modu — Firestore yazılacak. 3 saniye içinde Ctrl+C ile iptal et.\n');
