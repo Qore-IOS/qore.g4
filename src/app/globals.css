@@ -7104,10 +7104,27 @@ body > main,
   /* 1) Yatay taşma: mobilde hiçbir panel sayfayı yana kaydırmasın */
   html, body { max-width: 100%; overflow-x: hidden; }
 
-  /* 2) Flex/grid çocuklarının taşma sebebi olan varsayılan min-width:auto —
-        ekran görüntüsündeki "butonlar sağdan kesiliyor" sorununun ana kaynağı. */
-  .page-shell *, .clay-shell *, .mk-shell *, .dt-shell *, .sp-shell *,
-  .ml-root *, .pl-root *, .mg-root *, .cihaz-shell * { min-width: 0; }
+  /* 2) TAŞMA YERİNE SARMA.
+        Daha önce buradaki toptan `min-width:0` kuralı, flex öğelerinin
+        içeriklerinin altına ezilmesine izin veriyordu: "Geri Dön" harf harf alt
+        alta iniyor, adım etiketleri ("Bağlam", "Ürün Ekle") kırpılıyordu.
+        Doğru çözüm ezmek değil, satırı alt satıra sarmak. */
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, [style*="display:flex"], [style*="display: flex"]) {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* 2b) Kontroller ve etiketler içeriğinin altına ezilmez, metinleri bölünmez. */
+  button, [role="button"], [role="tab"], a[class*="btn"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"] {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  /* 2c) İç etiketler de küçülmez: kontrol küçülmese bile içindeki metin span'i
+         flex item olduğu için küçülüp "Bağlam" → "ğlam" gibi kırpılıyordu. */
+  :is(button, [role="button"], [role="tab"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"]) > * {
+    flex-shrink: 0;
+  }
 
   /* 3) Dokunma hedefi: yüksekliği açıkça verilmemiş butonlar ezilmesin */
   button:not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) { min-height: 42px; }
