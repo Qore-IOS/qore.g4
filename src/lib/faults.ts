@@ -198,9 +198,14 @@ export async function closeDeviceFaultReport(
     closeDescription?: string;
     supportPersonnel?: { uid: string; name: string } | null;
     supportPersonnels?: { uid: string; name: string }[];
+    // Kural gereği `list` sorguları companyId ile filtrelenmek zorunda; bu
+    // fonksiyon açık arıza taraması yaptığı için çağıranın şirketini bilmeli.
+    companyId?: string | null;
+    isSuperAdmin?: boolean;
   }
 ) {
   const { closedByUid, closedByName, closeDescription, supportPersonnel } = params;
+  const { companyId: currentCompanyId, isSuperAdmin } = params;
   const supportPersonnels = params.supportPersonnels ?? (supportPersonnel ? [supportPersonnel] : []);
   const primarySupportPersonnel = supportPersonnels[0] || null;
   const reportRef = doc(db, 'deviceFaultReports', reportId);
@@ -250,7 +255,7 @@ export async function closeDeviceFaultReport(
     for (const targetDeviceId of targetDeviceIds) {
       const otherOpenFaults = await getDocs(
         query(
-          collection(db, 'deviceFaultReports'),
+          scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', targetDeviceId),
           where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
         )
@@ -274,7 +279,7 @@ export async function closeDeviceFaultReport(
   } else if (deviceId) {
     const otherOpenFaults = await getDocs(
       query(
-        collection(db, 'deviceFaultReports'),
+        scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
         where('deviceId', '==', deviceId),
         where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
       )
@@ -715,7 +720,10 @@ export async function resolveEjectedKitFault(
   reportId: string,
   resolution: 'imha' | 'tekrar_kullanim',
   actor: { uid: string; name: string },
-  closeDescription?: string
+  closeDescription?: string,
+  // Aynı gerekçe: aşağıdaki açık arıza taraması companyId ile filtrelenmeli.
+  currentCompanyId?: string | null,
+  isSuperAdmin?: boolean,
 ): Promise<void> {
   const reportRef = doc(db, 'deviceFaultReports', reportId);
   const reportSnap = await getDoc(reportRef);
@@ -743,7 +751,7 @@ export async function resolveEjectedKitFault(
   if (deviceId) {
     const otherOpenFaults = await getDocs(
       query(
-        collection(db, 'deviceFaultReports'),
+        scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
         where('deviceId', '==', deviceId),
         where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
       )

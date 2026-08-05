@@ -59,7 +59,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { db } from '@/lib/firebase';
 import {
     collection,
@@ -211,7 +211,7 @@ export default function EjectedKitPanel() {
     // Listen to ejected kit records
     useEffect(() => {
         const q = query(
-            collection(db, 'ejectedKitRecords'),
+            scopedQuery('ejectedKitRecords', currentCompanyId, isSuperAdmin),
             orderBy('createdAt', 'desc')
         );
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -227,7 +227,7 @@ export default function EjectedKitPanel() {
     // Listen to trash bin records
     useEffect(() => {
         const q = query(
-            collection(db, 'trashBinRecords'),
+            scopedQuery('trashBinRecords', currentCompanyId, isSuperAdmin),
             orderBy('createdAt', 'desc')
         );
         const unsubscribe = onSnapshot(q, (snapshot) => {

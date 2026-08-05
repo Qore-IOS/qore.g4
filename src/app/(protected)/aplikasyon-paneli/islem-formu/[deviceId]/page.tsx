@@ -450,7 +450,7 @@ export default function AplikasyonIslemFormuPage() {
     (async () => {
       try {
         const q = query(
-          collection(db, 'personalStock'),
+          scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -1671,7 +1671,7 @@ export default function AplikasyonIslemFormuPage() {
     // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
     if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
-        collection(db, 'yedekParcaDepoStok'),
+        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
         where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
@@ -2059,7 +2059,7 @@ export default function AplikasyonIslemFormuPage() {
 
                 if (removedSerial && removedSerial !== installedSerial) {
                     const duplicateRemovedPartSnap = await getDocs(query(
-                        collection(db, 'yedekParcaDepoStok'),
+                        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
                         where('stokKodu', '==', removedStokKodu),
                         where('serialNumber', '==', removedSerial)
                     ));

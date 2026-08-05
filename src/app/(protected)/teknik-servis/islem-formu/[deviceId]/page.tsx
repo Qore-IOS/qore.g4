@@ -466,7 +466,7 @@ export default function IslemFormuPage() {
     (async () => {
       try {
         const q = query(
-          collection(db, 'personalStock'),
+          scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -1706,7 +1706,7 @@ export default function IslemFormuPage() {
 
     if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
-        collection(db, 'yedekParcaDepoStok'),
+        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
         where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
