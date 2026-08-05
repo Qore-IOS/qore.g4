@@ -30,59 +30,30 @@
  */
 const admin = require('firebase-admin');
 const { initAdmin } = require('./lib/firebase-project');
+const { NEVER_SCOPE, discoverCollections } = require('./lib/tenant-collections');
 const fs = require('fs');
 const path = require('path');
 
 const LEGACY_TAG = '__legacy__';
 
-const DEFAULT_COLLECTIONS = [
-  // Tier 1 — kritik
-  'devices',
-  'depots',
-  'hospitals',
-  'users',
-  'depoStok',
-  'hospitalDeviceAssignments',
-  // Tier 2 — yüksek hacim
-  'purchasingTasks',
-  'deviceGroups',
-  'labPools',
-  'addressDefinitions',
-  'personnelAvailability',
-  'deviceFaultReports',
-  'deviceActionForms',
-  'aplikasyonActionForms',
-  'maintenancePlans',
-  'maintenanceLogs',
-  'deviceLabPools',
-  // Tier 3 — filtresiz olanlar (raporda kırmızı işaretlenmiş)
-  'tuketimKayitlari',
-  'dailyConsumptionStats',
-  'shipments',
-  'efficiencyHistory',
-  'productCodes',
-  'barcodeFormats',
-  'faultDefinitions',
-  // Tier 4
-  'depotStockCountSessions',
-  'maliyetSayimSessions',
-  'dutyShifts',
-  'borcDepots',
-  'notifications',
-  'irsaliyeFiles',
-];
 
 function parseArgs() {
   const args = process.argv.slice(2);
   const out = {
     output: 'audit-report.json',
-    collections: DEFAULT_COLLECTIONS,
+    collections: null, // null => çalışma anında keşfet
   };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--output' && args[i + 1]) {
       out.output = args[++i];
     } else if (args[i] === '--collections' && args[i + 1]) {
       out.collections = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
+    } else if (args[i] === '--help' || args[i] === '-h') {
+      console.log(`Usage:
+  node scripts/audit-collections.js                          # TÜM koleksiyonlar (keşfedilir)
+  node scripts/audit-collections.js --collections a,b,c      # alt küme
+  node scripts/audit-collections.js --output reports/x.json  # rapor yolu`);
+      process.exit(0);
     }
   }
   return out;
@@ -162,12 +133,18 @@ function formatRow(s) {
 }
 
 async function main() {
-  const { output, collections } = parseArgs();
+  const { output, collections: requested } = parseArgs();
   const { db, projectId } = init();
 
   console.log(`Multi-tenancy audit — ${new Date().toISOString()}`);
   console.log(`Project: ${projectId}`);
-  console.log(`Collections: ${collections.length}\n`);
+
+  const collections = requested || (await discoverCollections(db));
+  console.log(
+    requested
+      ? `Collections: ${collections.length} (--collections ile verildi)`
+      : `Collections: ${collections.length} (keşfedildi — tüm kök koleksiyonlar)\n`
+  );
 
   const results = [];
   for (const c of collections) {
@@ -221,6 +198,52 @@ async function main() {
     console.log(`  (Bu yalnızca bir öneridir; Faz 1 PR'ında manuel onayla seçilmelidir.)`);
   }
 
+  // Asıl sorulan soru: companyId'si olmayan kayıt HANGİ koleksiyonlarda?
+  // Özet tablonun içinde kaybolmasın diye ayrıca ve sıralı olarak yazılır.
+  const needsBackfill = results
+    // NEVER_SCOPE hariç: def_* ortak tanım koleksiyonları ve `companies` kiracı
+    // kütüğü kasıtlı olarak etiketsizdir. Burada listelenirlerse rapor "backfill
+    // gerekiyor" der, backfill ise onlara dokunmaz — çelişkili bir çıktı olurdu.
+    .filter((s) => !s.error && !NEVER_SCOPE.has(s.collection) && s.missing + s.empty + s.legacy > 0)
+    .map((s) => ({
+      collection: s.collection,
+      unscoped: s.missing + s.empty + s.legacy,
+      total: s.total,
+      missing: s.missing,
+      empty: s.empty,
+      legacy: s.legacy,
+    }))
+    .sort((a, b) => b.unscoped - a.unscoped);
+
+  console.log('\n=== companyId EKSİK OLAN KOLEKSİYONLAR (backfill gerekenler) ===');
+  if (needsBackfill.length === 0) {
+    console.log('  (Yok — taranan tüm koleksiyonlarda her belge etiketli.)');
+  } else {
+    for (const c of needsBackfill) {
+      console.log(
+        `  ${c.collection.padEnd(32)} ${String(c.unscoped).padStart(6)} / ${String(c.total).padEnd(6)}` +
+          ` (missing=${c.missing} empty=${c.empty} legacy=${c.legacy})`
+      );
+    }
+    console.log(`\n  Toplam ${needsBackfill.length} koleksiyon. Yalnızca bunları backfill'lemek için:`);
+    console.log(`    --collections ${needsBackfill.map((c) => c.collection).join(',')}`);
+  }
+
+  const kastenEtiketsiz = results.filter(
+    (s) => !s.error && NEVER_SCOPE.has(s.collection) && s.missing + s.empty + s.legacy > 0
+  );
+  if (kastenEtiketsiz.length > 0) {
+    console.log('\n  Not — bunlar KASITLI olarak etiketsizdir, listeye dahil edilmedi:');
+    console.log(`    ${kastenEtiketsiz.map((s) => s.collection).join(', ')}`);
+    console.log('    (def_* ortak tanım koleksiyonları ve `companies` kiracı kütüğü)');
+  }
+
+  const erroredCollections = results.filter((s) => s.error).map((s) => s.collection);
+  if (erroredCollections.length > 0) {
+    console.log(`\n  UYARI — taranamayan ${erroredCollections.length} koleksiyon: ${erroredCollections.join(', ')}`);
+    console.log('  Bunlar hakkında rapor bir şey söylemiyor; "temiz" anlamına GELMEZ.');
+  }
+
   // JSON çıktı
   const outputPath = path.resolve(output);
   const outputDir = path.dirname(outputPath);
@@ -229,12 +252,16 @@ async function main() {
   }
   const report = {
     generatedAt: new Date().toISOString(),
-    projectId: process.env.FIREBASE_PROJECT_ID || null,
+    projectId,
     grandTotal,
     grandScoped,
     grandUnscoped,
     globalDistribution,
     suggestedDefaultCompanyId: activeCompanies[0] ? activeCompanies[0][0] : null,
+    // backfill scripti --from-audit ile bu listeyi okur; böylece kendi sabit
+    // listesindeki bir eksik yüzünden koleksiyon atlanmaz.
+    collectionsNeedingBackfill: needsBackfill.map((c) => c.collection),
+    erroredCollections,
     results,
   };
   fs.writeFileSync(outputPath, JSON.stringify(report, null, 2));
