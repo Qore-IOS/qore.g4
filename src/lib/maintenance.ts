@@ -29,11 +29,10 @@ const STATUS_RANK: Record<BakimTakipStatus, number> = {
 };
 
 export const BAKIM_TAKIP_SOURCE_DEFINITIONS = [
-  { taskName: 'Pinch Tube Değişimi', deviceCategory: 'Biyokimya', type: 'teknik_servis', periodValue: 60, periodUnit: 'gun' },
-  { taskName: 'Hat Bakımı', deviceCategory: 'Biyokimya', type: 'teknik_servis', periodValue: 60, periodUnit: 'gun' },
-  { taskName: 'Dekon Yapıldı', deviceCategory: 'Hormon', type: 'aplikasyon', periodValue: 60, periodUnit: 'gun' },
-  { taskName: 'Dekon Yapıldı', deviceCategory: 'ISE', type: 'aplikasyon', periodValue: 60, periodUnit: 'gun' },
+  { taskName: 'Bakım Kiti', deviceCategory: 'Biyokimya', type: 'teknik_servis', periodValue: 60, periodUnit: 'gun' },
+  { taskName: 'Dekon Yapıldı', deviceCategory: 'Biyokimya', type: 'aplikasyon', periodValue: 60, periodUnit: 'gun' },
   { taskName: 'Vacuum Tank', deviceCategory: 'ISE', type: 'teknik_servis', periodValue: 60, periodUnit: 'gun' },
+  { taskName: 'Bidon Temizliği', deviceCategory: 'Biyokimya', type: 'teknik_servis', periodValue: 60, periodUnit: 'gun' },
 ] as const;
 
 export function toDateSafe(value: TimestampLike): Date | null {
