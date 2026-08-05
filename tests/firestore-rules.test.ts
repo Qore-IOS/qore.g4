@@ -634,3 +634,75 @@ test('total verimlilik panelinin okuduğu koleksiyonlarda da __legacy__ sorgusu 
     await assertSucceeds(getDocs(query(collection(db, col), where('companyId', '==', '__legacy__'))));
   }
 });
+
+// ============================================================================
+// Liste (query) kuralları — companyId filtresi zorunlu
+//
+// Firestore `list` kurallarını dönen belgelere bakarak değil, SORGUNUN
+// KISITLARINDAN ispatlanabilirlik üzerinden değerlendirir. Sonuçta yalnızca
+// kendi şirketinin belgeleri gelecek olsa bile, filtre sorguda yoksa istek
+// reddedilir. Bu yüzden panellerin "filtresiz çek, istemcide ayıkla" deseni
+// çalışmaz — üretimde direkt transfer bu yüzden sonsuz loading'de kalmıştı.
+// ============================================================================
+
+test('companyId filtreli liste sorgusu geçer', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'q1'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K1' });
+  });
+  await assertSucceeds(getDocs(query(
+    collection(authedAsCompanyA(), 'depoStok'),
+    where('companyId', '==', 'companyA'),
+    where('depotId', '==', 'D1'),
+  )));
+});
+
+test('companyId filtresi olmayan liste sorgusu reddedilir — belgeler kendi şirketine ait olsa bile', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'depoStok', 'q2'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K1' });
+    await setDoc(doc(db, 'depoStok', 'q3'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K2' });
+  });
+  await assertFails(getDocs(query(
+    collection(authedAsCompanyA(), 'depoStok'),
+    where('depotId', '==', 'D1'),
+  )));
+});
+
+// REGRESYON — özyinelemeli joker kiracı izolasyonunu deliyordu.
+//
+// `match /deviceFaultReports/{id} { match /{path=**} { ... isSignedIn() } }`
+// yazımında joker SIFIR segment de eşleştiği için üst belgenin KENDİSİNİ de
+// kapsıyor ve `isSignedIn()`'i `inCompany()` ile OR'luyordu. Sonuç: başka
+// şirketin arıza raporu okunabiliyor/yazılabiliyordu.
+test('başka şirketin arıza raporu okunamaz (özyinelemeli joker sızdırmamalı)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fB'), { companyId: 'companyB', deviceId: 'd1' });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'deviceFaultReports', 'fB')));
+});
+
+test('başka şirketin arıza raporu yazılamaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fB2'), { companyId: 'companyB', deviceId: 'd1' });
+  });
+  await assertFails(setDoc(doc(authedAsCompanyA(), 'deviceFaultReports', 'fB2'), { companyId: 'companyB', note: 'x' }));
+});
+
+test('arıza raporu filtresiz listelenemez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fA'), { companyId: 'companyA', deviceId: 'd1' });
+  });
+  await assertFails(getDocs(query(
+    collection(authedAsCompanyA(), 'deviceFaultReports'),
+    where('deviceId', '==', 'd1'),
+  )));
+});
+
+test('arıza raporunun alt koleksiyonu hâlâ erişilebilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'deviceFaultReports', 'fA2'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'deviceFaultReports', 'fA2', 'notes', 'n1'), { text: 'not' });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'deviceFaultReports', 'fA2', 'notes')));
+});

@@ -24,6 +24,7 @@ import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
 import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -1835,7 +1836,7 @@ export async function getExpiringProductsCount(
   try {
     // Composite query: isShipped (requires Firestore index)
     const stockQuery = query(
-      collection(db, 'depoStok'),
+      scopedQuery('depoStok', companyId, isSuperAdmin),
       where('isShipped', '==', false)
     );
     const snapshot = await getDocs(stockQuery);

@@ -1229,7 +1229,7 @@ export default function TotalVerimlilikPanel({
         try {
           const ejectedSnaps = await Promise.all(
             Array.from(labIdsToProcess).map(labId =>
-              getDocs(query(collection(db, 'ejectedKitRecords'), where('laboratoryId', '==', labId)))
+              getDocs(query(scopedQuery('ejectedKitRecords', currentCompanyId, isSuperAdmin), where('laboratoryId', '==', labId)))
             )
           );
           ejectedSnaps.forEach(snap => {
@@ -1857,7 +1857,7 @@ export default function TotalVerimlilikPanel({
       }
 
       // "Sevkiyatı mal kabulden al" depolarına bağlı lablar → hariç (bunlar deponun mal kabulünden doldurulur)
-      const depotsSnap = await getDocs(collection(db, 'depots'));
+      const depotsSnap = await getDocs(scopedQuery('depots', currentCompanyId, isSuperAdmin));
       const excludedLabIds = new Set<string>();
       const malKabulDepotIds: string[] = [];
       const labToDepot = new Map<string, string>(); // labId -> mal kabul deposu id
@@ -1891,7 +1891,7 @@ export default function TotalVerimlilikPanel({
       await Promise.all(malKabulDepotIds.map(async (depotId) => {
         try {
           const txSnap = await getDocs(query(
-            collection(db, 'malKabulTransactions'),
+            scopedQuery('malKabulTransactions', currentCompanyId, isSuperAdmin),
             where('depotId', '==', depotId),
             where('timestamp', '>=', monthStart),
             where('timestamp', '<', monthEndExclusive),

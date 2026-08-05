@@ -17,6 +17,7 @@ import { createNotification } from "@/lib/notifications";
 import { useToast } from "@/hooks/use-toast";
 import { getMessaging, getToken } from "firebase/messaging";
 import { app, db } from "@/lib/firebase";
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   collection,
   query,
@@ -42,7 +43,7 @@ type NotificationLog = {
 };
 
 export default function NotificationTester() {
-  const { currentUserProfile } = useAuth();
+  const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const { toast } = useToast();
   const [title, setTitle] = useState("Test Notification");
   const [message, setMessage] = useState("This is a test notification");
@@ -55,7 +56,7 @@ export default function NotificationTester() {
     setLoadingLogs(true);
     try {
       const q = query(
-        collection(db, "notificationLogs"),
+        scopedQuery('notificationLogs', currentCompanyId, isSuperAdmin),
         orderBy("createdAt", "desc"),
         limit(20)
       );

@@ -14,6 +14,7 @@ import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Turkey-wide bounds (no region restriction)
 const TURKEY_CENTER: [number, number] = [39.0, 35.0];
@@ -152,7 +153,7 @@ export default function DeviceMapPanel({
   // Listen to all devices in real-time
   useEffect(() => {
     const unsub = onSnapshot(
-      collection(db, 'devices'),
+      scopedQuery('devices', currentCompanyId, isSuperAdmin),
       (snap) => {
         setAllDevices(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Device));
       }
@@ -164,7 +165,7 @@ export default function DeviceMapPanel({
   useEffect(() => {
     const unsub = onSnapshot(
       query(
-        collection(db, 'deviceFaultReports'),
+        scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
         where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
       ),
       (snap) => {
@@ -190,7 +191,7 @@ export default function DeviceMapPanel({
   useEffect(() => {
     const unsub = onSnapshot(
       query(
-        collection(db, 'maintenancePlans'),
+        scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin),
         where('type', '==', panelType)
       ),
       (snap) => {
@@ -203,7 +204,7 @@ export default function DeviceMapPanel({
   // Listen to maintenance logs
   useEffect(() => {
     const unsub = onSnapshot(
-      collection(db, 'maintenanceLogs'),
+      scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin),
       (snap) => {
         setMaintenanceLogs(snap.docs.map((d) => {
           const data = d.data();

@@ -996,7 +996,7 @@ export default function StokYonetimiPanel() {
     // Fetch all stock for export
     try {
       const stockQuery = query(
-        collection(db, 'depoStok'),
+        scopedQuery('depoStok', currentCompanyId, isSuperAdmin),
         where('depotId', '==', selectedDepotId),
         where('isShipped', '==', false)
       );
@@ -1469,7 +1469,7 @@ export default function StokYonetimiPanel() {
 
     // Query shipped stock for this product
     const shippedQuery = query(
-      collection(db, 'depoStok'),
+      scopedQuery('depoStok', currentCompanyId, isSuperAdmin),
       where('stokKodu', '==', stokKodu),
       where('isShipped', '==', true)
     );
@@ -1565,7 +1565,7 @@ export default function StokYonetimiPanel() {
 
       // Find available items in depot for this product (FEFO order)
       const stockQuery = query(
-        collection(db, 'depoStok'),
+        scopedQuery('depoStok', currentCompanyId, isSuperAdmin),
         where('depotId', '==', selectedDepotId),
         where('stokKodu', '==', stokKodu),
         where('isShipped', '==', false)

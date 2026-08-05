@@ -726,7 +726,7 @@ export default function TedarikciSiparisPanel() {
         const sonuclar = await Promise.all(
           cikisPeriyotlari.map(async (p) => {
             const snap = await getDocs(query(
-              collection(db, 'ceomedSevkiyatResults'),
+              scopedQuery('ceomedSevkiyatResults', currentCompanyId, isSuperAdmin),
               where('year', '==', p.year),
               where('month', '==', p.month),
               where('status', '==', 'done'),

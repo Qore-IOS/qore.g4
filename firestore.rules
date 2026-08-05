@@ -162,8 +162,19 @@ service cloud.firestore {
     match /deviceFaultReports/{id} {
       allow read: if inCompany();
       allow write: if writingInCompany();
-      // Sub-history/notes etc. (varsa) parent scope altında.
-      match /{path=**}                        { allow read, write: if isSignedIn(); }
+      // Alt koleksiyonlar (history/notes vb.) parent scope altında.
+      //
+      // DİKKAT — burada `match /{path=**}` KULLANILAMAZ. Özyinelemeli joker
+      // SIFIR segment de eşleştiği için `deviceFaultReports/{id}`'nin KENDİSİNİ
+      // de kapsar ve `isSignedIn()`'i yukarıdaki `inCompany()` ile OR'lar.
+      // Firestore'da `allow` kuralları OR'landığından bu, arıza raporlarında
+      // kiracı izolasyonunu tamamen iptal ediyordu: başka şirketin raporu
+      // okunabiliyor ve yazılabiliyordu. Emülatörde doğrulandı — filtresiz
+      // `deviceFaultReports` sorgusu geçiyordu.
+      //
+      // `{sub}/{rest=**}` en az iki segment ister, yani yalnızca gerçek alt
+      // koleksiyonları kapsar; üst belgeye dokunmaz.
+      match /{sub}/{rest=**}                  { allow read, write: if isSignedIn(); }
     }
     match /deviceActionForms/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /aplikasyonActionForms/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
