@@ -4,7 +4,7 @@ import React, { useMemo, useState } from 'react';
 import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { ChevronRight, Home, Plus, Search, User, X } from 'lucide-react';
+import { Plus, Search, User, X } from 'lucide-react';
 import type { Device, Hospital, MaintenanceLog, MaintenancePlan } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
@@ -39,7 +39,6 @@ type EnrichedDevice = {
 };
 
 const SOURCE_TASKS = ['Bakım Kiti', 'Dekon Yapıldı', 'Vacuum Tank', 'Bidon Temizliği'];
-const STATUS_ORDER: Record<BakimTakipStatus, number> = { guncel: 0, uyari: 1, kritik: 2, bakim_yok: 2, plansiz: 2 };
 
 function fmt(date?: Date | null) {
   return date ? format(date, 'dd.MM.yyyy', { locale: tr }) : '—';
@@ -105,14 +104,14 @@ function StatusPill({ status, label }: { status: FilterKey; label?: string }) {
 }
 
 function MetricCard({ title, value, color, active, onClick }: { title: string; value: number; color: 'green' | 'yellow' | 'red' | 'white'; active?: boolean; onClick?: () => void }) {
-  const valueCls = color === 'green' ? 'text-emerald-400' : color === 'yellow' ? 'text-amber-400' : color === 'red' ? 'text-red-400' : 'text-white';
+  const valueCls = color === 'green' ? 'text-emerald-400' : color === 'yellow' ? 'text-amber-400' : color === 'red' ? 'text-red-500' : 'text-[var(--dashboard-text)]';
   return (
     <button
       type="button"
       onClick={onClick}
-      className={cn('min-h-[104px] bg-[#1a1a1a] p-5 text-left transition-colors hover:bg-[#222] focus:outline-none focus:ring-2 focus:ring-[#e85d26]', active && 'ring-2 ring-emerald-400')}
+      className={cn('min-h-[104px] rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-5 text-left shadow-[var(--dashboard-raised-soft)] transition-colors hover:bg-[var(--dashboard-surface-2)] focus:outline-none focus:ring-2 focus:ring-[var(--dashboard-accent)]/40', active && 'ring-2 ring-[var(--dashboard-accent)]')}
     >
-      <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.35em] text-[#6f7378]">{title}</div>
+      <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">{title}</div>
       <div className={cn('font-mono text-4xl font-bold leading-none', valueCls)}>{value}</div>
     </button>
   );
@@ -175,6 +174,12 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
   const centralStats = groupStats(centralDevices);
   const peripheralStats = groupStats(peripheralDevices);
 
+  const definitionRows = useMemo(() => hospitalsWithDevices.map(({ hospital, devs }) => ({
+    hospital,
+    cihazSayisi: devs.length,
+    tanimlar: Array.from(new Set(devs.flatMap((item) => item.plans.map((plan) => plan.taskName)))).sort((a, b) => a.localeCompare(b, 'tr-TR')),
+  })), [hospitalsWithDevices]);
+
   const activeList = useMemo(() => {
     const scoped = view === 'hospital' && selectedHospitalId
       ? enriched.filter((item) => item.device.hospitalId === selectedHospitalId)
@@ -192,13 +197,6 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
         .includes(q);
     });
   }, [enriched, filter, query, selectedDevice, selectedHospitalId, view]);
-
-  function goHome() {
-    setView('overview');
-    setSelectedHospitalId(null);
-    setSelectedDeviceId(null);
-    setQuery('');
-  }
 
   function goHospital(id: string) {
     setSelectedHospitalId(id);
@@ -264,53 +262,32 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
     .sort((a, b) => b.completedAt.getTime() - a.completedAt.getTime()) ?? [];
 
   return (
-    <div className="min-h-screen bg-[#eeeae2] text-[#111]">
-      <header className="sticky top-0 z-30 flex h-[60px] items-center justify-between bg-[#1a1a1a] px-4 md:px-7">
-        <button type="button" onClick={goHome} className="font-mono text-2xl font-black uppercase tracking-[0.18em] text-white md:text-3xl">
-          BAKIM<span className="text-[#e85d26]">.</span>TAKİP
-        </button>
-        <div className="flex items-center gap-2 font-mono text-xs uppercase tracking-[0.15em] text-[#777]">
-          <span className="hidden items-center gap-1 sm:inline-flex"><span className="h-2 w-2 rounded-full bg-emerald-400" />Canlı</span>
-          <span className="hidden text-[#e85d26] md:inline">{currentUserProfile?.name || technician}</span>
-          <button type="button" className="border border-[#333] px-3 py-2 hover:border-[#e85d26]">Şifre</button>
-          <button type="button" className="border border-[#333] px-3 py-2 hover:border-[#e85d26]">Çıkış</button>
-        </div>
-      </header>
-
-      <div className="flex">
-        <aside className="hidden w-[268px] shrink-0 bg-[#1a1a1a] text-white md:block">
-          <button type="button" onClick={goHome} className={cn('flex w-full items-center gap-3 border-b border-[#242424] px-5 py-5 font-mono text-sm uppercase tracking-[0.12em] text-[#e85d26]', view === 'overview' && 'bg-[#222]')}>
-            <Home className="h-4 w-4" /> Ana Sayfa
-          </button>
-          <div className="flex items-center justify-between px-4 pb-3 pt-5 font-mono text-[10px] uppercase tracking-[0.45em] text-[#505050]">
-            Kurumlar <span className="border border-[#333] px-2 py-1 text-sm tracking-normal">+</span>
+    <div className="min-h-screen bg-transparent text-[var(--dashboard-text)]">
+      <div className="flex gap-4 md:gap-6">
+        <aside className="hidden w-[268px] shrink-0 rounded-3xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] shadow-[var(--dashboard-raised-soft)] md:block">
+          <div className="flex items-center justify-between border-b border-[var(--dashboard-stroke)] px-4 pb-3 pt-5 font-mono text-[10px] uppercase tracking-[0.45em] text-[var(--dashboard-muted)]">
+            Kurumlar <span className="rounded-lg border border-[var(--dashboard-stroke)] px-2 py-1 text-sm tracking-normal">+</span>
           </div>
           <div className="max-h-[calc(100vh-142px)] overflow-y-auto pb-6">
             {hospitalsWithDevices.map(({ hospital, devs }) => {
               const stats = groupStats(devs);
               const active = selectedHospitalId === hospital.id;
               return (
-                <button key={hospital.id} type="button" onClick={() => goHospital(hospital.id)} className={cn('w-full px-4 py-3 text-left font-mono hover:bg-[#242424]', active && 'bg-[#282828] text-[#e85d26]')}>
+                <button key={hospital.id} type="button" onClick={() => goHospital(hospital.id)} className={cn('w-full px-4 py-3 text-left font-mono hover:bg-[var(--dashboard-surface-2)]', active && 'bg-[var(--dashboard-pressed)] text-[var(--dashboard-accent)]')}>
                   <div className="truncate text-sm">{hospital.name}</div>
-                  <div className="mt-1 text-[11px] text-[#777]">{stats.total} cihaz · <span className="text-red-400">{stats.kritik} kritik</span></div>
+                  <div className="mt-1 text-[11px] text-[var(--dashboard-muted)]">{stats.total} cihaz · <span className="text-red-500">{stats.kritik} kritik</span></div>
                 </button>
               );
             })}
           </div>
         </aside>
 
-        <main className="w-full min-w-0 p-4 md:p-7">
-          <div className="mb-6 flex flex-wrap items-center gap-3 font-mono text-sm">
-            <button type="button" onClick={goHome} className="inline-flex items-center gap-2 bg-[#1a1a1a] px-5 py-3 font-bold uppercase text-white hover:bg-[#e85d26]"><Home className="h-4 w-4" /> Ana Sayfa</button>
-            {selectedHospital && <><ChevronRight className="h-4 w-4 text-[#aaa]" /><button type="button" onClick={() => goHospital(selectedHospital.id)} className="text-[#e85d26]">{String(selectedHospital.name || selectedHospital.ad || 'Kurum')}</button></>}
-            {selectedDevice && <><ChevronRight className="h-4 w-4 text-[#aaa]" /><span>{selectedDevice.category}</span></>}
-          </div>
-
+        <main className="w-full min-w-0 pb-20 md:pb-0">
           {view === 'overview' && (
             <section className="space-y-7">
               <MetricCard title="Toplam Cihaz" value={totalStats.total} color="white" onClick={() => setFilter('all')} active={filter === 'all'} />
               <div>
-                <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.45em] text-[#e85d26]">{centralLabel} — {centralStats.total} Cihaz</h2>
+                <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.45em] text-[var(--dashboard-accent)]">{centralLabel} — {centralStats.total} Cihaz</h2>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <MetricCard title="Güncel ≤150g" value={centralStats.guncel} color="green" active={filter === 'guncel'} onClick={() => setFilter('guncel')} />
                   <MetricCard title="Uyarı 150-165g" value={centralStats.uyari} color="yellow" active={filter === 'uyari'} onClick={() => setFilter('uyari')} />
@@ -318,13 +295,22 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
                 </div>
               </div>
               <div>
-                <h2 className="mb-3 font-mono text-sm uppercase tracking-[0.35em] text-[#8b8f95]">PERİFER — {peripheralStats.total} Cihaz</h2>
+                <h2 className="mb-3 font-mono text-sm uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">PERİFER — {peripheralStats.total} Cihaz</h2>
                 <div className="grid gap-3 sm:grid-cols-3">
                   <MetricCard title="Güncel ≤60g ✓" value={peripheralStats.guncel} color="green" active={filter === 'guncel'} onClick={() => setFilter('guncel')} />
                   <MetricCard title="Uyarı 60-75g" value={peripheralStats.uyari} color="yellow" active={filter === 'uyari'} onClick={() => setFilter('uyari')} />
                   <MetricCard title="Kritik >75g" value={peripheralStats.kritik} color="red" active={filter === 'kritik'} onClick={() => setFilter('kritik')} />
                 </div>
               </div>
+              <section className="rounded-3xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-4 shadow-[var(--dashboard-raised-soft)]">
+                <div className="mb-3 font-mono text-xs uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">Bakım Takip Kaynağı — Lab Tanım Listesi</div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[620px] border-collapse font-mono text-sm">
+                    <thead><tr className="border-b border-[var(--dashboard-stroke)] text-left text-[11px] uppercase tracking-[0.25em] text-[var(--dashboard-muted)]"><th className="px-3 py-3">Lab</th><th className="px-3 py-3">Cihaz</th><th className="px-3 py-3">Tanımlı Bakımlar</th></tr></thead>
+                    <tbody>{definitionRows.map((row) => <tr key={row.hospital.id} className="border-b border-[var(--dashboard-stroke)]/70"><td className="px-3 py-3 font-semibold">{String(row.hospital.name || row.hospital.ad || 'Lab')}</td><td className="px-3 py-3">{row.cihazSayisi}</td><td className="px-3 py-3"><div className="flex flex-wrap gap-2">{row.tanimlar.map((tanim) => <span key={tanim} className="rounded-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-3 py-1 text-xs">{tanim}</span>)}</div></td></tr>)}</tbody>
+                  </table>
+                </div>
+              </section>
               <DeviceTable title={`${filter === 'all' ? 'TÜM' : filter.toLocaleUpperCase('tr-TR')} CİHAZLAR (${activeList.length})`} devices={activeList} onDevice={goDevice} technician={technician} setTechnician={setTechnician} />
             </section>
           )}
@@ -334,15 +320,15 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h1 className="font-mono text-4xl font-black uppercase tracking-tight">{String(selectedHospital.name || selectedHospital.ad || 'Kurum')}</h1>
-                  <p className="mt-2 font-mono text-sm text-[#8b8f95]">{activeList.length} cihaz · <span className="text-red-500">{activeList.filter((d) => statusBucket(d.summary.status) === 'kritik').length} kritik</span></p>
+                  <p className="mt-2 font-mono text-sm text-[var(--dashboard-muted)]">{activeList.length} cihaz · <span className="text-red-500">{activeList.filter((d) => statusBucket(d.summary.status) === 'kritik').length} kritik</span></p>
                 </div>
-                <button type="button" className="bg-[#e85d26] px-5 py-3 font-mono text-sm font-bold uppercase text-white hover:bg-[#ff7040]"><Plus className="mr-1 inline h-4 w-4" /> Cihaz Ekle</button>
+                <button type="button" className="bg-[var(--dashboard-accent)] px-5 py-3 font-mono text-sm font-bold uppercase text-white hover:brightness-110"><Plus className="mr-1 inline h-4 w-4" /> Cihaz Ekle</button>
               </div>
-              <div className="relative"><Search className="absolute left-4 top-3.5 h-4 w-4 text-[#aaa]" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cihaz ara..." className="w-full border border-[#d0ccc4] bg-white px-11 py-3 font-mono outline-none focus:border-[#e85d26]" /></div>
+              <div className="relative"><Search className="absolute left-4 top-3.5 h-4 w-4 text-[var(--dashboard-muted)]" /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Cihaz ara..." className="w-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-11 py-3 font-mono outline-none focus:border-[var(--dashboard-accent)]" /></div>
               <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                {activeList.map((item) => <button key={item.device.id} type="button" onClick={() => goDevice(item.device.id)} className="border border-[#d0ccc4] bg-white p-5 text-left font-mono hover:border-[#e85d26] hover:shadow-md">
-                  <div className="flex justify-between gap-3"><div><div className="font-bold">{item.category}</div><div className="mt-2 text-lg font-black">S/N: {deviceSerial(item.device)}</div></div><span className="text-[#bbb]">⌫</span></div>
-                  <div className="mt-4 text-xs text-[#999]">Son Bakım</div>
+                {activeList.map((item) => <button key={item.device.id} type="button" onClick={() => goDevice(item.device.id)} className="border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-5 text-left font-mono hover:border-[var(--dashboard-accent)] hover:shadow-md">
+                  <div className="flex justify-between gap-3"><div><div className="font-bold">{item.category}</div><div className="mt-2 text-lg font-black">S/N: {deviceSerial(item.device)}</div></div><span className="text-[var(--dashboard-muted)]">⌫</span></div>
+                  <div className="mt-4 text-xs text-[var(--dashboard-muted)]">Son Bakım</div>
                   <div className="mt-1 flex items-center justify-between"><span>{fmt(item.summary.lastCompletedAt)}</span><StatusPill status={statusBucket(item.summary.status)} label={statusBucket(item.summary.status) === 'kritik' ? 'Kritik' : undefined} /></div>
                 </button>)}
               </div>
@@ -354,20 +340,20 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h1 className="font-mono text-4xl font-black uppercase tracking-tight">{selectedDevice.category}</h1>
-                  <div className="mt-4 flex flex-wrap items-end gap-3 font-mono"><span className="bg-white px-2 py-1 text-[#8b8f95]">{String(selectedDevice.hospital?.name || selectedDevice.hospital?.ad || 'Kurum Yok')}</span><span className="text-xs uppercase tracking-[0.35em] text-[#a8a8a8]">{selectedDevice.category} S/N</span><span className="text-xl font-black">{deviceSerial(selectedDevice.device)}</span></div>
+                  <div className="mt-4 flex flex-wrap items-end gap-3 font-mono"><span className="bg-white px-2 py-1 text-[var(--dashboard-muted)]">{String(selectedDevice.hospital?.name || selectedDevice.hospital?.ad || 'Kurum Yok')}</span><span className="text-xs uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">{selectedDevice.category} S/N</span><span className="text-xl font-black">{deviceSerial(selectedDevice.device)}</span></div>
                 </div>
-                <button type="button" onClick={openMaintenanceModal} className="bg-[#e85d26] px-5 py-3 font-mono text-sm font-bold uppercase text-white hover:bg-[#ff7040]">+ Bakım Ekle</button>
+                <button type="button" onClick={openMaintenanceModal} className="bg-[var(--dashboard-accent)] px-5 py-3 font-mono text-sm font-bold uppercase text-white hover:brightness-110">+ Bakım Ekle</button>
               </div>
               <div className="flex flex-wrap gap-2">
                 {selectedDevice.summary.planStatuses.map((item) => <StatusPill key={item.plan.id} status={statusBucket(item.status)} label={`${item.plan.taskName} (${item.daysSinceLast ?? 'Yok'}g)`} />)}
               </div>
               <div className="space-y-3">
-                {lastLogsForDevice.map(({ log, completedAt }) => <div key={log.id} className="flex items-center gap-5 border border-[#d0ccc4] border-l-[#e85d26] border-l-4 bg-white p-4 font-mono">
-                  <div className="w-16 text-center"><div className="text-4xl font-black text-[#e85d26]">{day(completedAt)}</div><div className="text-xs uppercase text-[#aaa]">{monthShort(completedAt)}</div></div>
-                  <div className="min-w-0 flex-1"><div className="flex items-center gap-2 font-bold"><User className="h-4 w-4 text-purple-800" />{log.completedByName || technician}</div><div className="mt-1 text-[#777]">{log.taskName}</div>{(log as any).notes && <div className="mt-1 text-sm text-[#aaa]">{(log as any).notes}</div>}</div>
+                {lastLogsForDevice.map(({ log, completedAt }) => <div key={log.id} className="flex items-center gap-5 border border-[var(--dashboard-stroke)] border-l-[var(--dashboard-accent)] border-l-4 bg-white p-4 font-mono">
+                  <div className="w-16 text-center"><div className="text-4xl font-black text-[var(--dashboard-accent)]">{day(completedAt)}</div><div className="text-xs uppercase text-[var(--dashboard-muted)]">{monthShort(completedAt)}</div></div>
+                  <div className="min-w-0 flex-1"><div className="flex items-center gap-2 font-bold"><User className="h-4 w-4 text-purple-800" />{log.completedByName || technician}</div><div className="mt-1 text-[var(--dashboard-muted)]">{log.taskName}</div>{(log as any).notes && <div className="mt-1 text-sm text-[var(--dashboard-muted)]">{(log as any).notes}</div>}</div>
                   <StatusPill status={statusBucket(calculateDeviceMaintenanceStatus(selectedDevice.plans, [log]).status)} label={`${Math.max(0, Math.abs(Math.floor((Date.now() - completedAt.getTime()) / 86400000)))}g`} />
                 </div>)}
-                {lastLogsForDevice.length === 0 && <div className="border border-dashed border-[#d0ccc4] bg-white/60 p-8 text-center font-mono text-[#999]">Bu cihaz için bakım kaydı yok.</div>}
+                {lastLogsForDevice.length === 0 && <div className="border border-dashed border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-8 text-center font-mono text-[var(--dashboard-muted)]">Bu cihaz için bakım kaydı yok.</div>}
               </div>
             </section>
           )}
@@ -375,21 +361,21 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
       </div>
 
       {modalOpen && selectedDevice && (
-        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/60 p-4 pt-8 md:pt-12">
-          <div className="w-full max-w-[575px] border-t-4 border-[#e85d26] bg-white p-8 font-mono shadow-2xl md:p-10">
+        <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/35 backdrop-blur-sm p-4 pt-8 md:pt-12">
+          <div className="w-full max-w-[575px] rounded-3xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-8 font-mono shadow-[var(--dashboard-raised)] md:p-10">
             <h2 className="mb-8 text-2xl font-black uppercase tracking-[0.12em]">Bakım Kaydı Ekle</h2>
-            <div className="mb-5 border border-[#e5e0d8] bg-[#faf8f4] px-4 py-3 text-[#888]">{selectedDevice.category} — {String(selectedDevice.hospital?.name || selectedDevice.hospital?.ad || 'Kurum Yok')}</div>
-            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[#8b8f95]">Bakım Tarihi</label>
-            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mb-5 w-full border border-[#d0ccc4] bg-[#faf8f4] px-4 py-3 outline-none focus:border-[#e85d26]" />
-            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[#8b8f95]">Teknisyen</label>
-            <input value={technician} onChange={(e) => setTechnician(e.target.value)} className="mb-5 w-full border border-[#e5e0d8] bg-[#f5f3ee] px-4 py-3 text-[#888] outline-none focus:border-[#e85d26]" />
-            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[#8b8f95]">Yapılan İşlemler</label>
-            <div className="mb-5 space-y-3 border border-[#d0ccc4] bg-[#faf8f4] p-4">
-              {selectedDevice.plans.map((plan) => <label key={plan.id} className="flex min-h-8 cursor-pointer items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5 accent-[#e85d26]" checked={checkedTasks.includes(plan.taskName)} onChange={(e) => setCheckedTasks((prev) => e.target.checked ? [...prev, plan.taskName] : prev.filter((task) => task !== plan.taskName))} />{plan.taskName}</label>)}
+            <div className="mb-5 border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-4 py-3 text-[var(--dashboard-muted)]">{selectedDevice.category} — {String(selectedDevice.hospital?.name || selectedDevice.hospital?.ad || 'Kurum Yok')}</div>
+            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[var(--dashboard-muted)]">Bakım Tarihi</label>
+            <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mb-5 w-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-4 py-3 outline-none focus:border-[var(--dashboard-accent)]" />
+            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[var(--dashboard-muted)]">Teknisyen</label>
+            <input value={technician} onChange={(e) => setTechnician(e.target.value)} className="mb-5 w-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-4 py-3 text-[var(--dashboard-muted)] outline-none focus:border-[var(--dashboard-accent)]" />
+            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[var(--dashboard-muted)]">Yapılan İşlemler</label>
+            <div className="mb-5 space-y-3 border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4">
+              {selectedDevice.plans.map((plan) => <label key={plan.id} className="flex min-h-8 cursor-pointer items-center gap-3 text-sm"><input type="checkbox" className="h-5 w-5 accent-[var(--dashboard-accent)]" checked={checkedTasks.includes(plan.taskName)} onChange={(e) => setCheckedTasks((prev) => e.target.checked ? [...prev, plan.taskName] : prev.filter((task) => task !== plan.taskName))} />{plan.taskName}</label>)}
             </div>
-            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[#8b8f95]">Notlar</label>
-            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ek notlar..." className="mb-7 min-h-24 w-full border border-[#d0ccc4] bg-[#faf8f4] px-4 py-3 outline-none focus:border-[#e85d26]" />
-            <div className="flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="border border-[#d0ccc4] px-6 py-3 hover:border-[#e85d26]">İptal</button><button type="button" disabled={saving || checkedTasks.length === 0} onClick={saveMaintenance} className="bg-[#e85d26] px-6 py-3 font-bold uppercase text-white disabled:opacity-50">{saving ? 'Kaydediliyor...' : 'Kaydet'}</button></div>
+            <label className="mb-2 block text-[11px] uppercase tracking-[0.45em] text-[var(--dashboard-muted)]">Notlar</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Ek notlar..." className="mb-7 min-h-24 w-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-4 py-3 outline-none focus:border-[var(--dashboard-accent)]" />
+            <div className="flex justify-end gap-3"><button type="button" onClick={() => setModalOpen(false)} className="border border-[var(--dashboard-stroke)] px-6 py-3 hover:border-[var(--dashboard-accent)]">İptal</button><button type="button" disabled={saving || checkedTasks.length === 0} onClick={saveMaintenance} className="bg-[var(--dashboard-accent)] px-6 py-3 font-bold uppercase text-white disabled:opacity-50">{saving ? 'Kaydediliyor...' : 'Kaydet'}</button></div>
           </div>
         </div>
       )}
@@ -401,13 +387,13 @@ function DeviceTable({ title, devices, onDevice, technician, setTechnician }: { 
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-mono text-sm uppercase tracking-[0.35em] text-[#8b8f95]">{title}</h2>
-        <div className="flex items-center gap-2"><select value={technician} onChange={(e) => setTechnician(e.target.value)} className="bg-[#1a1a1a] px-4 py-2 font-mono text-xs uppercase text-[#e85d26] outline-none"><option>{technician}</option></select><X className="h-4 w-4 text-[#b8b8b8]" /></div>
+        <h2 className="font-mono text-sm uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">{title}</h2>
+        <div className="flex items-center gap-2"><select value={technician} onChange={(e) => setTechnician(e.target.value)} className="bg-[var(--dashboard-surface)] px-4 py-2 font-mono text-xs uppercase text-[var(--dashboard-accent)] outline-none"><option>{technician}</option></select><X className="h-4 w-4 text-[var(--dashboard-muted)]" /></div>
       </div>
-      <div className="overflow-x-auto border border-[#d0ccc4] bg-white">
+      <div className="overflow-x-auto border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)]">
         <table className="w-full min-w-[620px] border-collapse font-mono">
-          <thead><tr className="border-b border-[#d0ccc4] text-left text-[11px] uppercase tracking-[0.35em] text-[#8b8f95]"><th className="px-4 py-4">Cihaz</th><th className="px-4 py-4">Kurum</th><th className="px-4 py-4">Son Bakım</th><th className="px-4 py-4">Bakım Türü</th></tr></thead>
-          <tbody>{devices.map((item) => <tr key={item.device.id} className="cursor-pointer border-b border-[#eee] hover:bg-[#faf8f4]" onClick={() => onDevice(item.device.id)}><td className="px-4 py-4"><div className="font-black">{item.category}</div><div className="text-[#8b8f95]">S/N {deviceSerial(item.device)}</div></td><td className="px-4 py-4"><span className="bg-[#f1eee8] px-2 py-1 text-[#777]">{String(item.hospital?.name || item.hospital?.ad || '—')}</span></td><td className="px-4 py-4">{fmt(item.summary.lastCompletedAt)}</td><td className="px-4 py-4 font-bold text-emerald-700">{item.summary.worstPlan?.plan.taskName || '—'}</td></tr>)}</tbody>
+          <thead><tr className="border-b border-[var(--dashboard-stroke)] text-left text-[11px] uppercase tracking-[0.35em] text-[var(--dashboard-muted)]"><th className="px-4 py-4">Cihaz</th><th className="px-4 py-4">Kurum</th><th className="px-4 py-4">Son Bakım</th><th className="px-4 py-4">Bakım Türü</th></tr></thead>
+          <tbody>{devices.map((item) => <tr key={item.device.id} className="cursor-pointer border-b border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]" onClick={() => onDevice(item.device.id)}><td className="px-4 py-4"><div className="font-black">{item.category}</div><div className="text-[var(--dashboard-muted)]">S/N {deviceSerial(item.device)}</div></td><td className="px-4 py-4"><span className="bg-[var(--dashboard-surface-2)] px-2 py-1 text-[var(--dashboard-muted)]">{String(item.hospital?.name || item.hospital?.ad || '—')}</span></td><td className="px-4 py-4">{fmt(item.summary.lastCompletedAt)}</td><td className="px-4 py-4 font-bold text-emerald-700">{item.summary.worstPlan?.plan.taskName || '—'}</td></tr>)}</tbody>
         </table>
       </div>
     </div>
