@@ -595,6 +595,12 @@ export function useDock() {
               href: ownStockHref,
             },
             {
+              key: 'bakim-takip-field',
+              label: 'Bakım Takip',
+              icon: Wrench,
+              href: '/bakim-takip',
+            },
+            {
               key: 'kumulatif-hesaplama-field',
               label: 'Kümülatif Hesapla',
               icon: Calculator,
@@ -637,6 +643,14 @@ export function useDock() {
             type: 'nav',
             href: stockHref,
             onClick: () => router.push(stockHref),
+          },
+          {
+            key: 'bakim-takip-field-mobile',
+            label: 'Bakım Takip',
+            icon: Wrench,
+            type: 'nav',
+            href: '/bakim-takip',
+            onClick: () => router.push('/bakim-takip'),
           },
           {
             key: 'kumulatif-hesaplama-field-mobile',
