@@ -657,10 +657,17 @@ const checkFefoOptimized = async (
   for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
     const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
 
-    const q = query(
-      collection(db, 'depoStok'),
+    // companyId sorguya DAHİL olmalı — yalnızca istemcide ayıklamak yetmez.
+    // Kurallar `list`te companyId filtresi istiyor; filtresiz sorgu
+    // permission-denied alır (bu, transfer butonunu sonsuz loading'de bırakan
+    // hatanın ta kendisiydi). Ayrıca filtresiz sorgu başka şirketin
+    // belgelerini de istemciye indiriyordu.
+    const q = scopedQuery(
+      'depoStok',
+      currentCompanyId,
+      isSuperAdmin,
       where('depotId', '==', depotId),
-      where('stokKodu', 'in', batchCodes)
+      where('stokKodu', 'in', batchCodes),
     );
     const snap = await getDocs(q);
     snap.docs.forEach(d => {
@@ -1178,10 +1185,13 @@ export default function DirektTransferPanel() {
 
     for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
       const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
-      const q = query(
-        collection(db, 'depoStok'),
+      // companyId sorguya dahil — gerekçe checkFefoOptimized'daki notta.
+      const q = scopedQuery(
+        'depoStok',
+        currentCompanyId,
+        isSuperAdmin,
         where('depotId', '==', selectedDepotId),
-        where('stokKodu', 'in', batchCodes)
+        where('stokKodu', 'in', batchCodes),
       );
       const snap = await getDocs(q);
       snap.docs.forEach(d => {
@@ -1305,16 +1315,32 @@ export default function DirektTransferPanel() {
     let allocationError = false;
 
     // Ağ çağrısı gerektiren ön tahsis işlemini yapalım (bu çok hızlıdır, 0.5s sürer)
-    for (const row of directTransferItems) {
-      const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
-      if (!picks) {
-        toast({ title: 'Yetersiz Stok', description: `${row.stokAdi} ${row.lotNumarasi ? `(Lot: ${row.lotNumarasi})` : ''} için depoda yeterli adet (${row.adet}) yok.`, variant: 'destructive' });
-        allocationError = true;
-        break;
+    //
+    // try/catch şart: `allocateDocsForGroup` Firestore'a sorgu atar ve
+    // fırlayabilir. Korumasız bırakılırsa istisna yukarı gider,
+    // `setShipmentLoading(false)` hiç çalışmaz ve buton sonsuz loading'de kalır
+    // — handleCompleteDirectTransfer'deki aynı hatanın ikizi.
+    try {
+      for (const row of directTransferItems) {
+        const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
+        if (!picks) {
+          toast({ title: 'Yetersiz Stok', description: `${row.stokAdi} ${row.lotNumarasi ? `(Lot: ${row.lotNumarasi})` : ''} için depoda yeterli adet (${row.adet}) yok.`, variant: 'destructive' });
+          allocationError = true;
+          break;
+        }
+        itemsToShip.push(...(picks as DepoStokItem[]));
       }
-      itemsToShip.push(...(picks as DepoStokItem[]));
+    } catch (err) {
+      direktTransferLogger.error('Ön tahsis başarısız', err, { depotId: selectedDepotId });
+      toast({
+        title: 'Transfer başlatılamadı',
+        description: err instanceof Error ? err.message : 'Stok okunurken beklenmeyen bir hata oluştu.',
+        variant: 'destructive',
+      });
+      setShipmentLoading(false);
+      return;
     }
-    
+
     if (allocationError) {
       setShipmentLoading(false);
       return;
@@ -1588,51 +1614,69 @@ export default function DirektTransferPanel() {
 
     setShipmentLoading(true);
 
-    const itemsToShip: DepoStokItem[] = [];
+    // DİKKAT — bu fonksiyonun gövdesi try/finally İÇİNDE olmak zorunda.
+    //
+    // Eskiden `setShipmentLoading(false)` yalnızca mutlu yollarda çağrılıyordu.
+    // Aradaki `await`lerden biri fırlarsa (ör. bir Firestore sorgusu
+    // permission-denied alırsa) istisna yukarı gidiyor, bayrak `true` kalıyor
+    // ve "Transfer Et" butonu SONSUZA KADAR loading'de kalıyordu — kullanıcıya
+    // ne bir hata ne de bir çıkış yolu görünüyordu.
+    try {
+      const itemsToShip: DepoStokItem[] = [];
 
-    // OPTIMIZED: Use batch allocation for all groups at once
-    const groupRows = directTransferItems.filter(row => row.isGroup);
-    const nonGroupRows = directTransferItems.filter(row => !row.isGroup);
+      // OPTIMIZED: Use batch allocation for all groups at once
+      const groupRows = directTransferItems.filter(row => row.isGroup);
+      const nonGroupRows = directTransferItems.filter(row => !row.isGroup);
 
-    // Add non-group items directly (already allocated)
-    itemsToShip.push(...nonGroupRows as DepoStokItem[]);
+      // Add non-group items directly (already allocated)
+      itemsToShip.push(...nonGroupRows as DepoStokItem[]);
 
-    // Batch allocate all groups in one query
-    if (groupRows.length > 0) {
-      const { allocations, error } = await batchAllocateForGroups(groupRows);
+      // Batch allocate all groups in one query
+      if (groupRows.length > 0) {
+        const { allocations, error } = await batchAllocateForGroups(groupRows);
 
-      if (error) {
-        toast({
-          title: 'Yetersiz Stok',
-          description: `${error.stokAdi} ${error.lotNumarasi ? `(Lot: ${error.lotNumarasi})` : ''} için yeterli stok bulunmuyor.`,
-          variant: 'destructive'
+        if (error) {
+          toast({
+            title: 'Yetersiz Stok',
+            description: `${error.stokAdi} ${error.lotNumarasi ? `(Lot: ${error.lotNumarasi})` : ''} için yeterli stok bulunmuyor.`,
+            variant: 'destructive'
+          });
+          return;
+        }
+
+        // Collect all allocated items
+        groupRows.forEach(row => {
+          const picks = allocations.get(row.key);
+          if (picks) {
+            itemsToShip.push(...picks);
+          }
         });
-        setShipmentLoading(false);
-        return;
       }
 
-      // Collect all allocated items
-      groupRows.forEach(row => {
-        const picks = allocations.get(row.key);
-        if (picks) {
-          itemsToShip.push(...picks);
-        }
+      // OPTIMIZED FEFO CHECK: Sadece ilgili ürünler için FEFO kontrolü yap
+      const violations = await checkFefoOptimized(itemsToShip, selectedDepotId, currentCompanyId, isSuperAdmin);
+
+      if (violations.length > 0) {
+        // Benzersiz violationları filtrele
+        const uniqueViolations = violations.filter((v, i, a) =>
+          a.findIndex(t => t.scannedItem.id === v.scannedItem.id) === i
+        );
+        setFefoViolations(uniqueViolations);
+      } else {
+        processTransfer();
+      }
+    } catch (err) {
+      direktTransferLogger.error('Transfer hazırlığı başarısız', err, {
+        depotId: selectedDepotId,
+        itemCount: directTransferItems.length,
       });
-    }
-
-    // OPTIMIZED FEFO CHECK: Sadece ilgili ürünler için FEFO kontrolü yap
-    const violations = await checkFefoOptimized(itemsToShip, selectedDepotId, currentCompanyId, isSuperAdmin);
-
-    setShipmentLoading(false);
-
-    if (violations.length > 0) {
-      // Benzersiz violationları filtrele
-      const uniqueViolations = violations.filter((v, i, a) =>
-        a.findIndex(t => t.scannedItem.id === v.scannedItem.id) === i
-      );
-      setFefoViolations(uniqueViolations);
-    } else {
-      processTransfer();
+      toast({
+        title: 'Transfer başlatılamadı',
+        description: err instanceof Error ? err.message : 'Stok okunurken beklenmeyen bir hata oluştu.',
+        variant: 'destructive',
+      });
+    } finally {
+      setShipmentLoading(false);
     }
   };
 
