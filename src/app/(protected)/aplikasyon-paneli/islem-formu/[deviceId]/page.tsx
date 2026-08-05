@@ -33,6 +33,7 @@ import type { SignaturePadRef } from '@/components/SignaturePad';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
+import { enqueueIrsaliyeGiris } from '@/lib/ceomed/enqueue-irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -92,6 +93,8 @@ type ActionItem = {
   poolWarehouseId?: string;
   poolWarehouseName?: string;
   serialNumber?: string;
+  /** Kaynak stok kaydından taşınan lot numarası — Ceomed irsaliye girişi lot alanı için. */
+  lotNumber?: string;
   hucreNumarasi?: string;
   removedHucreNumarasi?: string;
   channelSelections?: ('CH1' | 'CH2')[];
@@ -990,6 +993,7 @@ export default function AplikasyonIslemFormuPage() {
         stokKodu: matchingStockItem.stokKodu,
         stokAdi: matchingStockItem.stokAdi,
         serialNumber: matchingStockItem.serialNumber,
+        lotNumber: matchingStockItem.lotNumber,
         personalStockId: matchingStockItem.id,
         quantity: 1,
         periodicPartChangeId: partChangeId,
@@ -1361,6 +1365,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedStockItem.stokAdi,
         anaBirim: (selectedStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedStockItem.serialNumber,
+        lotNumber: selectedStockItem.lotNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
@@ -1395,6 +1400,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedPoolStockItem.stokAdi,
         anaBirim: (selectedPoolStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedPoolStockItem.serialNumber,
+        lotNumber: selectedPoolStockItem.lotNumber,
         poolStockId: selectedPoolStockItem.id,
         poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
         poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
@@ -1430,6 +1436,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedDepotStockItem.stokAdi,
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
+        lotNumber: selectedDepotStockItem.lotNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
         depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
@@ -1894,7 +1901,9 @@ export default function AplikasyonIslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
         const createdFormsData: any[] = [];
-        
+        // Ceomed irsaliyesi eksik veri yüzünden kuyrukta bekleyen formların gerekçeleri.
+        const blockedIrsaliyeNotices: string[] = [];
+
         for (const currentDevice of devicesToProcess) {
             if (!currentDevice) continue;
             const deviceSpecificActions = previousActions.filter(action => {
@@ -1973,6 +1982,28 @@ export default function AplikasyonIslemFormuPage() {
                 hospital: hospital,
                 actionRecord: { id: formRef.id, ...formData }
             });
+
+            // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa al.
+            // Aynı batch'te yazılır: form kaydı düşmezse irsaliye işi de düşmez.
+            const irsaliyeGirisi = enqueueIrsaliyeGiris(db, batch, {
+                formId: formRef.id,
+                formNo,
+                formType: 'aplikasyon',
+                tarih: baslangicTarihi,
+                hospitalId: hospital?.id || currentDevice.hospitalId || '',
+                cariKodu: hospital?.ceomedCariKodu,
+                labName: hospital?.name,
+                deviceId: currentDevice.id,
+                cihazAdi: currentDevice.cihazAdi || currentDevice.model,
+                seriNumarasi: currentDevice.seriNumarasi,
+                personnelName: currentUserProfile?.name,
+                personnelUid: currentUserProfile?.uid,
+                companyId: currentCompanyId,
+                actions: deviceSpecificActions,
+            });
+            if (irsaliyeGirisi.enqueued && irsaliyeGirisi.status === 'blocked') {
+                blockedIrsaliyeNotices.push(irsaliyeGirisi.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
+            }
 
             if (!isLabMode) createdFormIds.push(formRef.id);
 
@@ -2290,6 +2321,17 @@ export default function AplikasyonIslemFormuPage() {
             </ToastAction>
           )
         });
+
+        if (blockedIrsaliyeNotices.length > 0) {
+          // Form kaydedildi ama muhasebe irsaliyesi otomatik gönderilemeyecek.
+          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
+          toast({
+            title: 'Ceomed irsaliyesi beklemede',
+            description: Array.from(new Set(blockedIrsaliyeNotices)).join(' '),
+            variant: 'destructive',
+            duration: 12000,
+          });
+        }
 
     } catch(err) {
         console.error("Error saving action form (Optimistic):", err);
@@ -3252,6 +3294,7 @@ export default function AplikasyonIslemFormuPage() {
               depotStockId: row.stockSourceTab === 'depot' ? selectedItem.id : undefined,
               isDepotSelection: row.stockSourceTab === 'depot',
               serialNumber: selectedItem.serialNumber,
+              lotNumber: (selectedItem as any).lotNumber,
               hucreNumarasi: selectedItem.hucreNumarasi || '',
               removedHucreNumarasi: removedHn,
               channelSelections: row.selectedChannel ? [row.selectedChannel] : [],

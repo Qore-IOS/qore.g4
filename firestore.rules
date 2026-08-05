@@ -472,6 +472,9 @@ service cloud.firestore {
     match /ceomedDepoStok/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /ceomedSevkiyatRequests/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /ceomedSevkiyatResults/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
+    // Ceomed muhasebe irsaliyesi giriş kuyruğu. Panel okur/yeniden kuyruğa alır;
+    // durum alanlarını asıl yazan, Admin SDK ile çalışan on-prem worker'dır.
+    match /ceomedIrsaliyeGirisJobs/{id}       { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /isAnaliziVerileri/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /analysis_results/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /actionFormNumberCounters/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
