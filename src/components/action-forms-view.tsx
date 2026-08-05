@@ -8,7 +8,7 @@ import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban } from 'lucide-react';
-import { format } from 'date-fns';
+import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -45,7 +45,9 @@ type ActionRecord = {
   createdAt?: { toDate?: () => Date };
   createdByName?: string;
   createdByUid?: string;
+  baslangicTarihi?: string;
   baslangicSaati?: string;
+  bitisTarihi?: string;
   bitisSaati?: string;
   cihazDurumu?: string;
   selectedFaultName?: string;
@@ -400,6 +402,83 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
   const [cancelPartModalOpen, setCancelPartModalOpen] = useState(false);
   const [cancelActionIndex, setCancelActionIndex] = useState<number | null>(null);
   const [isCancellingPart, setIsCancellingPart] = useState(false);
+  const [dateEditModalOpen, setDateEditModalOpen] = useState(false);
+  const [editedOperationDate, setEditedOperationDate] = useState('');
+  const [isSavingOperationDate, setIsSavingOperationDate] = useState(false);
+
+
+  const formCreatedDate = form?.createdAt?.toDate ? form.createdAt.toDate() : null;
+  const canEditOperationDate = !!form && (
+    currentUserProfile?.role === 'admin'
+    || currentUserProfile?.role === 'super_admin'
+    || form.createdByUid === currentUserProfile?.uid
+  );
+
+  const openDateEditModal = () => {
+    if (!formCreatedDate) return;
+    setEditedOperationDate(format(formCreatedDate, "yyyy-MM-dd'T'HH:mm"));
+    setDateEditModalOpen(true);
+  };
+
+  const saveOperationDate = async () => {
+    if (!form || !editedOperationDate) return;
+
+    const nextDate = new Date(editedOperationDate);
+    if (!isValid(nextDate)) {
+      toast({ title: 'Geçersiz tarih', description: 'Lütfen geçerli bir işlem tarihi seçin.', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      setIsSavingOperationDate(true);
+      const previousDate = form.createdAt?.toDate ? form.createdAt.toDate() : null;
+      const nextTimestamp = Timestamp.fromDate(nextDate);
+      const nextDateOnly = format(nextDate, 'yyyy-MM-dd');
+      const batch = writeBatch(db);
+
+      batch.update(doc(db, getCollectionName(moduleType), form.id), {
+        createdAt: nextTimestamp,
+        baslangicTarihi: nextDateOnly,
+        bitisTarihi: nextDateOnly,
+        operationDateEditedAt: serverTimestamp(),
+        operationDateEditedByUid: currentUserProfile?.uid || '',
+        operationDateEditedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      });
+
+      const historyRef = doc(collection(db, 'actionFormHistoryLogs'));
+      batch.set(historyRef, withCompanyScope({
+        formId: form.id,
+        moduleType,
+        type: 'operation_date_updated',
+        previousCreatedAt: previousDate ? Timestamp.fromDate(previousDate) : null,
+        previousBaslangicTarihi: form.baslangicTarihi || null,
+        previousBitisTarihi: form.bitisTarihi || null,
+        newCreatedAt: nextTimestamp,
+        newBaslangicTarihi: nextDateOnly,
+        newBitisTarihi: nextDateOnly,
+        deviceId: form.deviceId,
+        deviceName: form.cihazAdi || '',
+        deviceSerial: form.seriNumarasi || '',
+        labName: form.labName || '',
+        hospitalId: form.hospitalId || '',
+        updatedByUid: currentUserProfile?.uid || '',
+        updatedByName: currentUserProfile?.name || currentUserProfile?.email || '',
+        updatedAt: serverTimestamp(),
+      }, currentCompanyId));
+
+      await batch.commit();
+
+      setForm((prev) => (prev ? { ...prev, createdAt: nextTimestamp, baslangicTarihi: nextDateOnly, bitisTarihi: nextDateOnly } : prev));
+      setDateEditModalOpen(false);
+      toast({ title: 'İşlem tarihi güncellendi', description: 'Form ve PDF çıktısı yeni işlem tarihine göre güncellendi.' });
+    } catch (error) {
+      console.error('Operation date update error:', error);
+      toast({ title: 'Kayıt hatası', description: 'İşlem tarihi güncellenemedi.', variant: 'destructive' });
+    } finally {
+      setIsSavingOperationDate(false);
+    }
+  };
 
   useEffect(() => {
     const fetchForm = async () => {
@@ -1242,7 +1321,18 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <InfoField label="Form ID" value={`${form.id.slice(0, 8)}...`} />
                 <InfoField label="Oluşturan" value={form.createdByName || '-'} />
-                <InfoField label="Tarih" value={form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'} />
+                <div className="flex flex-col gap-1">
+                  <InfoField label="Tarih" value={formCreatedDate ? format(formCreatedDate, 'dd.MM.yyyy HH:mm', { locale: tr }) : '-'} />
+                  {canEditOperationDate && formCreatedDate && (
+                    <button
+                      type="button"
+                      onClick={openDateEditModal}
+                      className="cihaz-tool-item w-fit px-2.5 py-1 text-[11px] text-[var(--dashboard-accent)]"
+                    >
+                      İşlem Tarihini Değiştir
+                    </button>
+                  )}
+                </div>
                 <InfoField label="İşlem Tipi" value={ISLEM_TIPI_LABELS[form.islemTipi || ''] || '-'} />
                 <InfoField label="İşlem Türü" value={ISLEM_TURU_LABELS[form.islemTuru || ''] || '-'} />
                 <InfoField label="Cihaz Durumu" value={CIHAZ_DURUMU_LABELS[form.cihazDurumu || ''] || '-'} />
@@ -1331,6 +1421,36 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           </>
         )}
       </div>
+
+
+      <Dialog open={dateEditModalOpen} onOpenChange={setDateEditModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>İşlem Tarihini Değiştir</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-sm text-[var(--dashboard-muted)]">
+              Seçilen tarih; form detayında, tüm formlar listesinde, başlangıç/bitiş tarih alanlarında ve PDF çıktısında kullanılacak işlem tarihi olarak kaydedilir.
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="operation-date">İşlem tarihi ve saati</Label>
+              <Input
+                id="operation-date"
+                type="datetime-local"
+                value={editedOperationDate}
+                onChange={(event) => setEditedOperationDate(event.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDateEditModalOpen(false)} disabled={isSavingOperationDate}>İptal</Button>
+            <Button onClick={saveOperationDate} disabled={isSavingOperationDate || !editedOperationDate}>
+              {isSavingOperationDate ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : null}
+              Kaydet
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={partTransferModalOpen} onOpenChange={setPartTransferModalOpen}>
         <DialogContent className="max-w-xl">
