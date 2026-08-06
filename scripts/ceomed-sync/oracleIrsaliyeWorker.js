@@ -77,6 +77,7 @@ const MAX_PER_DAY = num(process.env.ORACLE_MAX_PER_DAY, 200);
 const STALE_CLAIM_MIN = num(process.env.ORACLE_STALE_CLAIM_MIN, 15);
 const POLL_SEC = num(process.env.ORACLE_POLL_SEC, 30);
 const COMPANY_ID = (process.env.CEOMED_COMPANY_ID || '').trim();
+const INTEGRATION_ENABLED = process.env.ORACLE_INTEGRATION_ENABLED === '1';
 const WORKER_BUILD = 'fill-only-v2-no-controls';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
@@ -153,73 +154,6 @@ async function markSent(db, job, result) {
     screenshotPath: result.screenshotPath || null,
     driver: DRIVER_NAME,
   });
-}
-
-async function markAwaitingReview(db, job, result) {
-  await db.collection(COLLECTION).doc(job.id).update({
-    status: 'awaiting_review',
-    previewedAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    lastError: null,
-    screenshotPath: result.screenshotPath || null,
-    driver: DRIVER_NAME,
-  });
-}
-
-async function hasAwaitingReview(db) {
-  let q = db.collection(COLLECTION).where('status', '==', 'awaiting_review');
-  if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
-  const snap = await q.limit(1).get();
-  return !snap.empty;
-}
-
-/**
- * Başarılı gönderimde push bildirimi yazar.
- *
- * Doğrudan FCM'e göndermek yerine `notifications` koleksiyonuna belge yazıyoruz:
- * mevcut Cloud Function (`notifications/{id}` onCreate) hedef kitleyi çözüp
- * dağıtımı zaten yapıyor. Kitle çözümleme mantığını burada tekrarlamak, iki
- * yerde ayrışacak bir kopya demek olurdu.
- *
- * Hedef `audience:all`: her push jetonu bu anahtarı taşır
- * (`buildMembershipKeysFromProfile`), Function da `companyId` ile aynı şirkete
- * daraltır.
- *
- * HATASI İŞİ BOZMAZ: e-irsaliye gönderilmiştir. Bildirim yazılamadı diye işi
- * başarısız saymak, tekrar denemeye ve MÜKERRER İRSALİYEYE yol açar.
- */
-async function bildirimYaz(db, job, result) {
-  const metin = (v) => (v == null ? '' : String(v).trim());
-  try {
-    const satirSayisi = Array.isArray(job.satirlar) ? job.satirlar.length : 0;
-    await db.collection('notifications').add({
-      type: 'ceomed_irsaliye_olusturuldu',
-      title: 'Ceomed irsaliyesi oluşturuldu',
-      message:
-        `${metin(job.irsaliyeNo)} · ${metin(job.cariKodu)} · ${satirSayisi} kalem yedek parça` +
-        `${job.labName ? ` · ${metin(job.labName)}` : ''}`,
-      href: '/dosya-yonetimi',
-      targets: ['audience:all'],
-      actor: { uid: 'ceomed-worker', name: 'Ceomed Otomasyonu' },
-      channel: 'push',
-      readBy: [],
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      ...(job.companyId ? { companyId: job.companyId } : {}),
-      meta: {
-        jobId: job.id,
-        irsaliyeNo: metin(job.irsaliyeNo),
-        cariKodu: metin(job.cariKodu),
-        formNo: metin(job.formNo),
-        formId: metin(job.formId),
-        satirSayisi,
-        ceomedIrsaliyeNo: (result && result.ceomedIrsaliyeNo) || null,
-      },
-    });
-    log('bildirim', `${metin(job.irsaliyeNo)} için push bildirimi kuyruğa yazıldı.`);
-  } catch (e) {
-    // Yalnızca logla; gönderim geri alınamaz, iş başarılı kalmalı.
-    errLog('bildirim', `Push bildirimi yazılamadı (gönderim etkilenmedi): ${e.message || e}`);
-  }
 }
 
 async function markAwaitingReview(db, job, result) {
@@ -400,6 +334,10 @@ async function recoverStaleClaims(db) {
 }
 
 async function main() {
+  if (!INTEGRATION_ENABLED) {
+    log('kapalı', 'Oracle/Ceomed yazma entegrasyonu acil devre kesiciyle kapalı. Hiçbir kuyruk işi alınmayacak.');
+    return;
+  }
   if (!process.env.FIREBASE_PROJECT_ID) {
     throw new Error('FIREBASE_PROJECT_ID env değişkeni zorunlu.');
   }

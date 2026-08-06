@@ -59,6 +59,12 @@ if not defined CEOMED_COMPANY_ID (
   exit /b 1
 )
 
+if /I not "%ORACLE_INTEGRATION_ENABLED%"=="1" (
+  echo [%date% %time%] Oracle/Ceomed yazma entegrasyonu KAPALI. Worker baslatilmadi. >> oracle-worker.log
+  echo Oracle/Ceomed yazma entegrasyonu kapali. Acmak icin kontrollu geciste ORACLE_INTEGRATION_ENABLED=1 gerekir.
+  exit /b 0
+)
+
 :loop
 echo [%date% %time%] oracle worker basliyor (BUILD=fill-only-v2-no-controls, DRY_RUN=%ORACLE_DRY_RUN%, FILL_ONLY=%ORACLE_FILL_ONLY%) >> oracle-worker.log
 node oracleIrsaliyeWorker.js >> oracle-worker.log 2>&1

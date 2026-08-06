@@ -20,8 +20,19 @@ import {
 } from './irsaliye-giris';
 
 export type EnqueueOutcome =
-  | { enqueued: false; reason: 'yedek_parca_yok' }
+  | { enqueued: false; reason: 'yedek_parca_yok' | 'entegrasyon_acil_kapali' }
   | { enqueued: true; jobId: string; status: 'pending' | 'blocked'; blockedDetail: string | null };
+
+/**
+ * ACİL DEVRE KESİCİ — Oracle/Ceomed yazma entegrasyonu geçici olarak kapalı.
+ *
+ * Form kaydıyla aynı batch'e kuyruk yazısı eklemek, canlı Firestore rules
+ * yayını geride kaldığında formun tamamını `permission-denied` ile geri
+ * alıyordu. Normal teknik/aplikasyon form akışını derhal geri getirmek için
+ * kuyruk üretimi burada merkezi olarak kesildi. Yeniden açma ayrı ve kontrollü
+ * bir canlıya geçiş değişikliği olmalıdır.
+ */
+const CEOMED_IRSALIYE_INTEGRATION_ENABLED = false;
 
 /**
  * İşi verilen batch'e ekler. Formun kendi kaydıyla AYNI batch'te yazılmalıdır:
@@ -35,6 +46,10 @@ export function enqueueIrsaliyeGiris(
   batch: WriteBatch,
   input: BuildIrsaliyeGirisInput,
 ): EnqueueOutcome {
+  if (!CEOMED_IRSALIYE_INTEGRATION_ENABLED) {
+    return { enqueued: false, reason: 'entegrasyon_acil_kapali' };
+  }
+
   const result: BuildIrsaliyeGirisResult = buildIrsaliyeGirisDoc(input);
 
   if (result.outcome === 'skip') {
