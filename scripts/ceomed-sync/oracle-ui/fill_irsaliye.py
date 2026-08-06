@@ -78,10 +78,15 @@ def emit(payload: dict) -> int:
     return 0 if payload.get("ok") else 1
 
 
-def fail(error: str, retryable: bool, screenshot: str | None = None) -> int:
+def fail(error: str, retryable: bool, screenshot: str | None = None,
+         log: list[str] | None = None) -> int:
+    """Hata sonucu. `log` HER ZAMAN eklenir: bir kuru çalışma tıkandığında
+    'nerede durdu' sorusunun cevabı adım geçmişindedir, ekran görüntüsü tek
+    başına yetmez."""
     payload = {"ok": False, "error": error, "retryable": retryable}
     if screenshot:
         payload["screenshotPath"] = screenshot
+    payload["log"] = log or []
     return emit(payload)
 
 
@@ -224,6 +229,19 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
 
 def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
     """Bir grid satırını doldurur: Stok Kodu → LOT → Miat → KT → Miktar."""
+    stok = str(satir.get("stokKodu") or "")
+    if any(ord(ch) > 127 for ch in stok):
+        # Provada ölçüldü: 'ALK-BİO-E-CI' alana doğru yazıldı ve Edit'ten doğru
+        # okundu, ama Forms değeri veritabanına yazarken 'İ' harfi '?' oldu ve
+        # stok kartı bulunamadı. GERİ OKUMA BU HATAYI YAKALAYAMAZ — kayıp
+        # commit anında, alanın içeriği doğru görünürken oluşuyor. Bu yüzden
+        # denenmeden durduruluyor.
+        raise Durdu(
+            f"Stok kodu {stok!r} ASCII dışı karakter içeriyor. Ceomed'in "
+            "karakter kümesi bunları taşımıyor (ör. 'İ' → '?') ve stok kartı "
+            "bulunamıyor. Kaybı geri okuma yakalayamadığı için denenmedi; "
+            "stok kodunu Ceomed'deki gerçek yazımıyla girin."
+        )
     hedefler = {
         "stokKodu": str(satir.get("stokKodu") or ""),
         "lot": str(satir.get("lot") or ""),
@@ -235,6 +253,8 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
     for beklenen_sutun in GRID_SIRASI:
         o = ui60.odak()
         ad = alan_adi(o["pencere_ici"], grid_modu=True)
+        log.append(f"grid: {beklenen_sutun} bekleniyor, odak {o['pencere_ici']} "
+                   f"({ad or 'tanınmayan'})")
         if ad != beklenen_sutun:
             raise Durdu(
                 f"Grid'de {beklenen_sutun} bekleniyordu, odak {ad or o['pencere_ici']} "
@@ -361,11 +381,11 @@ def main() -> int:
 
     except ui60.TehlikeliOdak as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-tehlikeli")
-        return fail(f"Güvenlik durdurması: {exc}", retryable=False, screenshot=goruntu)
+        return fail(f"Güvenlik durdurması: {exc}", retryable=False, screenshot=goruntu, log=log)
     except (Durdu, ui60.AlanReddedildi) as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-hata")
         retryable = getattr(exc, "retryable", False)
-        return fail(str(exc), retryable=retryable, screenshot=goruntu)
+        return fail(str(exc), retryable=retryable, screenshot=goruntu, log=log)
     except Exception as exc:  # beklenmedik: sonucu belirsiz, yeniden denenmez
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-beklenmedik")
         return fail(
@@ -373,6 +393,7 @@ def main() -> int:
             "körlemesine tekrar denenmeyecek.",
             retryable=False,
             screenshot=goruntu,
+            log=log,
         )
 
 
