@@ -288,10 +288,21 @@ def tehlikeli_odak_kontrol() -> None:
         )
 
 
+VK_SHIFT = 0x10
+
+
 def tus(ad: str, bekle_ms: int = 120) -> None:
     tehlikeli_odak_kontrol()
-    vk = VK[ad]
-    _gonder([_tus_girdi(vk, False), _tus_girdi(vk, True)])
+    if ad == "SHIFTTAB":
+        # Forms'ta "önceki alan". Odakta olmayan alan okunamadığı için, bir
+        # değeri seçim sonrası doğrulamanın tek yolu geri dönüp okumak.
+        _gonder([
+            _tus_girdi(VK_SHIFT, False), _tus_girdi(VK["TAB"], False),
+            _tus_girdi(VK["TAB"], True), _tus_girdi(VK_SHIFT, True),
+        ])
+    else:
+        vk = VK[ad]
+        _gonder([_tus_girdi(vk, False), _tus_girdi(vk, True)])
     time.sleep(bekle_ms / 1000.0)
 
 
