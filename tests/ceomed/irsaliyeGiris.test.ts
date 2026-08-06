@@ -11,7 +11,6 @@ import {
   CEOMED_DEPO,
   CEOMED_ISLEM_TIPI,
 } from '../../src/lib/ceomed/irsaliye-giris';
-import { sonrakiSeq } from '../../src/lib/form-number';
 
 const baseInput = {
   formId: 'form-1',
@@ -278,13 +277,12 @@ test('doc.irsaliyeNo çevrilmiş değeri taşır, ham form numarasını değil',
   assert.equal(r.doc.formNo, 'BT-T0042');
 });
 
-// --- Form numarası: şirket bazlı sayaç ---------------------------------------
-// Sayaç kullanıcı bazlıyken aynı baş harfli iki personel aynı numarayı
-// üretebiliyordu ve Ceomed mükerrer irsaliye numarasını REDDEDİYOR (sahada
-// gözlendi). Şirket bazına çekilince sıra numarası tekilleşiyor.
+// --- Form numarası → irsaliye no dönüşümü ------------------------------------
+// Sıra numarası farklıysa dönüşüm de farklı irsaliye numarası üretir. Sıranın
+// KİM tarafından tekilleştirileceği ayrı bir konu: şirket bazlı sayaç denendi
+// ama Firestore list kuralına takıldı ve geri alındı (bkz. ORACLE-IRSALIYE.md).
 
-test('aynı baş harfli iki personel artık farklı irsaliye numarası alır', () => {
-  // Şirket sayacı: Batuhan Tubasar 42'yi, Burak Toprak 43'ü alır.
+test('farklı sıra numarası farklı irsaliye numarası üretir', () => {
   const batuhan = ceomedIrsaliyeNo('BT-T0042');
   const burak = ceomedIrsaliyeNo('BT-T0043');
 
@@ -293,18 +291,11 @@ test('aynı baş harfli iki personel artık farklı irsaliye numarası alır', (
   assert.notEqual(batuhan, burak);
 });
 
-test('kullanıcı bazlı sayaçta çakışma olurdu — regresyon kaydı', () => {
-  // İki personel de kendi sayacında 42'ye ulaşsaydı aynı numarayı üretirlerdi.
+test('AÇIK RİSK: aynı baş harf + aynı sıra = aynı irsaliye numarası', () => {
+  // Sayaç kullanıcı bazlı olduğu için iki personel de kendi sayacında 42'ye
+  // ulaşırsa aynı numarayı üretir. Ceomed mükerrer numarayı REDDEDİYOR
+  // (sahada gözlendi), yani ikincisinin irsaliyesi gönderilemez.
+  // Çözüm bekliyor; şirket bazlı sayaç denemesi kural hatası verdi.
   assert.equal(ceomedIrsaliyeNo('BT-T0042'), ceomedIrsaliyeNo('BT-T0042'));
 });
 
-test('sonrakiSeq tohumu bir kez uygular, numarayı geri götürmez', () => {
-  // İlk çağrı: sayaç 0, eski kullanıcı sayaçlarının en büyüğü 50.
-  assert.equal(sonrakiSeq(0, 50), 51);
-  // Sonraki çağrı: sayaç 51, tohum yeniden uygulanmamalı.
-  assert.equal(sonrakiSeq(51, 50), 52);
-  // Tohum yoksa normal artış.
-  assert.equal(sonrakiSeq(7, 0), 8);
-  // Bozuk değerler 0 sayılır.
-  assert.equal(sonrakiSeq(NaN as unknown as number, 0), 1);
-});
