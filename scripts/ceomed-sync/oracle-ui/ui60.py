@@ -187,20 +187,15 @@ def mdi_belge_kokü(hwnd: int) -> int:
     ölçümler bozulur. Provada tam bu oldu: İrsaliye No (123,113) yerine
     (9,100)'de göründü ve sürücü "form yarıda kalmış" sanıp durdu.
     """
-    # Normal kontrollerde ebeveyn zinciri yeterlidir. Forms'un alan üzerine
-    # taşıdığı geçici Edit ise her kurulumda MDI belgesinin çocuğu değil.
-    h = hwnd
-    while h:
-        if sinif_adi(h) == MDI_BELGE_SINIFI:
-            return h
-        h = user32.GetParent(h)
-    # Uçuşan Edit için belgeyi ana pencereden ara. Birden fazla belge varsa
-    # odağı içeren en küçük görünür belge etkin belgedir.
+    # Forms'ta odaktaki geçici Edit bazen iç içe başka bir MDI document
+    # kontrolünün altında görünüyor. Ebeveyn zincirindeki ilk document'i
+    # almak Prova 7'de alt Açıklama koordinatını başlıktaki bir butona
+    # taşıdı. Kaynak belgeyi önce ana pencereden ve belge başlığından bul.
     kok = user32.GetAncestor(hwnd, GA_ROOT)
     if not kok:
         return 0
     odak_rect = dikdortgen(hwnd)
-    adaylar: list[tuple[int, int]] = []
+    adaylar: list[tuple[bool, int, int]] = []
 
     def geri_cagri(aday, _lparam):
         if sinif_adi(aday) == MDI_BELGE_SINIFI and user32.IsWindowVisible(aday):
@@ -208,11 +203,26 @@ def mdi_belge_kokü(hwnd: int) -> int:
             if (r[0] <= odak_rect[0] < r[2]
                     and r[1] <= odak_rect[1] < r[3]):
                 alan = max(0, r[2] - r[0]) * max(0, r[3] - r[1])
-                adaylar.append((alan, aday))
+                belge_baslikli = bool(baslik(aday).strip())
+                adaylar.append((belge_baslikli, alan, aday))
         return True
 
     user32.EnumChildWindows(kok, ENUMPROC(geri_cagri), 0)
-    return min(adaylar)[1] if adaylar else 0
+    baslikli = [a for a in adaylar if a[0]]
+    if baslikli:
+        # Gerçek form belgesi "Çıkış İrsaliyesi" başlığını taşır;
+        # iç document kontrolleri başlıksızdır. Birden çok başlıklı aday
+        # olursa odağı kapsayan en küçük olanı seç.
+        return min(baslikli, key=lambda a: a[1])[2]
+
+    # Eski kurulumlar belge başlığı vermeyebilir; o durumda normal
+    # ebeveyn zincirine geri dön.
+    h = hwnd
+    while h:
+        if sinif_adi(h) == MDI_BELGE_SINIFI:
+            return h
+        h = user32.GetParent(h)
+    return min(adaylar, key=lambda a: a[1])[2] if adaylar else 0
 
 
 def odak() -> dict:
@@ -364,7 +374,7 @@ def yaz(metin: str, karakter_ms: int = 25) -> None:
         time.sleep(karakter_ms / 1000.0)
 
 
-def mdi_noktasina_tikla(mdi_ici: tuple[int, int], bekle_ms: int = 300) -> None:
+def mdi_noktasina_tikla(mdi_ici: tuple[int, int], bekle_ms: int = 300) -> dict:
     """Etkin MDI belge içindeki ölçülmüş noktaya sol tıklar.
 
     Oracle Forms alanlarını tuvale çizdiği için HWND ile odaklamak mümkün
@@ -387,6 +397,12 @@ def mdi_noktasina_tikla(mdi_ici: tuple[int, int], bekle_ms: int = 300) -> None:
     user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
     user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
     time.sleep(bekle_ms / 1000.0)
+    return {
+        "mdi": mdi,
+        "mdi_baslik": baslik(mdi),
+        "mdi_rect": (l, t, r, b),
+        "ekran_noktasi": (x, y),
+    }
 
 
 def alan_temizle(uzunluk: int = 40) -> None:

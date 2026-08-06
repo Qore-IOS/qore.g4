@@ -368,12 +368,13 @@ def aciklama_doldur(deger: str, log: list[str]) -> None:
 
     hedef = ALAN_KONUMLARI["aciklama"]
     # Ölçüm aktif Edit'in sol üstü; kenarlığa değil hücrenin içine tıkla.
-    ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    tiklama = ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
     o = ui60.odak()
     if alan_adi(o["mdi_ici"]) != "aciklama" or o["sinif"] != "Edit":
         raise Durdu(
             f"Açıklama alanı odaklanamadı; odak {o['mdi_ici']} "
-            f"({o['sinif'] or 'sınıfsız'}) konumunda. Yazılmadı."
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. "
+            f"Tıklama: {tiklama!r}. Yazılmadı."
         )
 
     ui60.alan_yaz(deger.strip(), "aciklama")

@@ -45,6 +45,13 @@ olduğunu doğruladıktan sonra bu hücrenin içine tıklar, personel adını
 yazar ve geri okur. Tıklama beklenen `Edit` alanını odaklamazsa hiçbir
 değer yazılmadan iş durdurulur.
 
+Prova 7'de grid içindeki geçici Edit'in ebeveyn zincirindeki ilk
+`ui60MDIdocument_W32` gerçek form belgesi olmadığı için Açıklama tıklaması
+başlıktaki bir butona kaydı. Belge kökü artık ebeveyn zincirindeki ilk
+document yerine, ana pencere altında odağı kapsayan ve **Çıkış İrsaliyesi**
+başlığını taşıyan MDI belgeden alınır. Başarısız tıklama hatası MDI
+başlığını, belge dikdörtgenini ve hesaplanan ekran noktasını da raporlar.
+
 ### Başlıktan grid'e geçiş
 
 Boş **Anlaşma No** alanından `ENTER` ile çıkışın kararlı olmadığı
