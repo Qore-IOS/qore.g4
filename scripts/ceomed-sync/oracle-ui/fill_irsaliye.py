@@ -225,6 +225,15 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
         if ad == "stokKodu":
             return  # grid'e ulaşıldı
 
+        if ad == "anlasmaNo":
+            # Bu kurulumda boş Anlaşma No'dan ENTER ile çıkış kararlı
+            # değil: Prova 5'te grid'e geçti, Prova 6'da aynı alan odağı
+            # hapsetti. Boş alanı valide etmeye çalışmak yerine ölçülmüş
+            # Stok Kodu hücresini doğrulamalı tıkla.
+            log.append("anlasmaNo: dokunulmadı")
+            grid_stok_koduna_git(log)
+            return
+
         if ad and degerler.get(ad):
             if ad in LOV_ALANLARI:
                 lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
@@ -244,6 +253,23 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
     raise Durdu(
         f"{MAX_ADIM} adımda grid'e ulaşılamadı. Form beklenenden farklı; "
         "sessizce yanlış alana yazmamak için durduruldu."
+    )
+
+
+def grid_stok_koduna_git(log: list[str]) -> None:
+    """Başlıktan grid'in ilk Stok Kodu hücresine doğrulamalı geçer."""
+    hedef = ALAN_KONUMLARI["stokKodu"]
+    ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    o = ui60.odak()
+    if (alan_adi(o["mdi_ici"], grid_modu=True) != "stokKodu"
+            or o["sinif"] != "Edit"):
+        raise Durdu(
+            f"Grid Stok Kodu alanı odaklanamadı; odak {o['mdi_ici']} "
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. Yazılmadı."
+        )
+    log.append(
+        f"grid: Stok Kodu alanı tıklanarak odaklandı "
+        f"(mdi {o['mdi_ici']}, pencere {o['pencere_ici']})"
     )
 
 
