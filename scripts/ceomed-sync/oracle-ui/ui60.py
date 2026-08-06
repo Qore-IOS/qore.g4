@@ -57,6 +57,10 @@ VK = {
     "TAB": 0x09, "ENTER": 0x0D, "ESC": 0x1B, "END": 0x23, "HOME": 0x24,
     "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28,
     "DELETE": 0x2E, "BACKSPACE": 0x08,
+    # Oracle Forms'ta kayıt temizleme. Ceomed'de E-İRSALİYE GÖNDER'den sonra
+    # form kayıt bilgileriyle EKRANDA KALIYOR; F6 yeni boş form getiriyor.
+    # Zincirin kesilmeden sürmesi buna bağlı.
+    "F6": 0x75,
 }
 
 # Odak bu metinlerden birini taşıyan bir butondayken tuş göndermek geri alınamaz
@@ -216,11 +220,14 @@ def mdi_belge_kokü(hwnd: int) -> int:
 
 
 def odak() -> dict:
-    """Odaktaki kontrolün tam tarifi."""
+    """Odaktaki kontrolün tam tarifi.
+
+    Odak yoksa (başka bir pencere öne gelmişse) `hwnd` 0 döner ama sözlük yine
+    TÜM anahtarları taşır. Çağıranlar `hwnd == 0` kontrolüyle bunu ayırt eder.
+    """
     hwnd = odak_hwnd()
     if not hwnd:
-        return {"hwnd": 0, "sinif": "", "deger": "", "kok": 0,
-                "kok_baslik": "", "pencere_ici": (0, 0), "rect": (0, 0, 0, 0)}
+        return dict(ODAK_BOS)
     r = dikdortgen(hwnd)
     kok = user32.GetAncestor(hwnd, GA_ROOT)
     kr = dikdortgen(kok) if kok else (0, 0, 0, 0)
@@ -228,6 +235,7 @@ def odak() -> dict:
     taban = mdi or kok
     tr = dikdortgen(taban) if taban else (0, 0, 0, 0)
     return {
+        **ODAK_BOS,
         "hwnd": hwnd,
         "sinif": sinif_adi(hwnd),
         "deger": pencere_metni(hwnd),
@@ -261,13 +269,28 @@ def cocuk_metinleri(kok: int) -> list[str]:
     return bulunan
 
 
-def pencere_bul(baslik_icerir: str) -> list[int]:
-    """Başlığında verilen metni geçen tüm üst düzey pencereler."""
+# Ceomed ana penceresinin sınıfı (Oracle Forms MDI kökü). Başlık eşleştirmesi
+# tek başına YETMEZ: worker'ın kendi konsol penceresinin başlığı
+# `...\scripts\ceomed-sync\run-oracle-worker.bat` olduğu için "ceomed" içerir ve
+# sahada "2 pencere eşleşti" hatasına yol açtı. Sınıf adı kesin ayırt eder —
+# konsol penceresinin sınıfı `ConsoleWindowClass`.
+MDI_KOK_SINIFI = "ui60MDIroot_W32"
+
+
+def pencere_bul(baslik_icerir: str, sinif: str | None = None) -> list[int]:
+    """Başlığında verilen metni geçen üst düzey pencereler.
+
+    `sinif` verilirse yalnızca o pencere sınıfındakiler döner — başka
+    uygulamaların (ve bu worker'ın kendi konsolunun) yanlışlıkla eşleşmesini
+    önler.
+    """
     aranan = normalize(baslik_icerir).lower()
     bulunan: list[int] = []
 
     def geri_cagri(hwnd, _lparam):
         if user32.IsWindowVisible(hwnd):
+            if sinif and sinif_adi(hwnd) != sinif:
+                return True
             t = normalize(baslik(hwnd)).lower()
             if aranan in t:
                 bulunan.append(hwnd)

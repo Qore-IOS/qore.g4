@@ -447,6 +447,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--controls", required=False,
                         help="Geriye dönük uyumluluk; konumlar artık kodda ölçülmüş.")
+    parser.add_argument("--f6-yenileme-yok", action="store_true",
+                        help="Formu F6 ile yenileme. Varsayılan: işin başında ve "
+                             "gönderim sonrası F6 basılır, böylece sıradaki iş "
+                             "temiz forma yazar.")
     parser.add_argument("--gercek", action="store_true",
                         help="E-İRSALİYE GÖNDER'e bas. Verilmezse form doldurulur "
                              "ve doğrulanır ama GÖNDERİLMEZ.")
@@ -479,7 +483,8 @@ def main() -> int:
     if len(pencereler) > 1:
         # Belirsizlik tahminle kapatılmaz: yanlış pencereye yazmak geri alınamaz.
         return fail(
-            f"{len(pencereler)} pencere '{args.pencere}' ile eşleşti. "
+            f"{len(pencereler)} Ceomed penceresi eşleşti "
+            f"({', '.join(repr(ui60.baslik(h)[:60]) for h in pencereler)}). "
             "Fazla Ceomed penceresini kapatın.",
             retryable=True,
         )
@@ -569,14 +574,32 @@ def main() -> int:
 
         ui60.user32.SendMessageW(gonder, ui60.BM_CLICK, 0, 0)
         time.sleep(2.0)
+        # Görüntü F6'DAN ÖNCE alınır: gönderim sonrası forma yazılan irsaliye
+        # kayıt bilgileri gönderimin kanıtıdır, F6 onları siler.
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-gonderildi")
 
-        return emit({
+        # E-irsaliye GÖNDERİLDİ. Buradan sonraki hiçbir hata işi başarısız
+        # saymamalı — gönderim geri alınamaz, tekrar denenirse mükerrer olur.
+        yenileme_notu = None
+        if not args.f6_yenileme_yok:
+            try:
+                form_yenile(ana, log, "gönderim sonrası, sıradaki iş için")
+            except Exception as exc:
+                yenileme_notu = (
+                    f"Gönderim başarılı ama form F6 ile yenilenemedi: {exc}. "
+                    "Sıradaki işten önce Ceomed'de yeni boş form açın."
+                )
+                log.append(yenileme_notu)
+
+        sonuc = {
             "ok": True,
             "ceomedIrsaliyeNo": degerler["irsaliyeNo"],
             "screenshotPath": goruntu,
             "log": log,
-        })
+        }
+        if yenileme_notu:
+            sonuc["uyari"] = yenileme_notu
+        return emit(sonuc)
 
     except ui60.TehlikeliOdak as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-tehlikeli")

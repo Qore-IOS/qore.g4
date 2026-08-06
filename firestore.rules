@@ -109,6 +109,14 @@ service cloud.firestore {
         request.auth.uid == uid ||
         isSuperAdmin()
       );
+      // Push bildirim token'ları (src/lib/pushTokens.ts). Kuralı yoktu, yani
+      // token kaydı sessizce reddediliyordu. Başkasının token'ına erişmek için
+      // bir gerekçe yok — sahibi ve süper admin ile sınırlı.
+      match /pushTokens/{token} {
+        allow read, write: if isSignedIn() && (
+          request.auth.uid == uid || isSuperAdmin()
+        );
+      }
     }
 
     // -----------------------------
@@ -128,6 +136,10 @@ service cloud.firestore {
       match /minMaxRules/{ruleId}             { allow read, write: if isSignedIn(); }
       match /subPoints/{spId}                 { allow read, write: if isSignedIn(); }
       match /stockCounts/{countId}            { allow read, write: if isSignedIn(); }
+      // Eski model: hak ediş tanımları laboratuvarın alt koleksiyonunda
+      // (yenisi kök `hakEdisDefinitions`). Total verimlilik paneli hâlâ buradan
+      // okuyor — kuralı olmadığı için okuma reddediliyordu.
+      match /hakEdisDefinitions/{defId}       { allow read, write: if isSignedIn(); }
     }
     match /borcDepots/{id}                    { allow read: if inCompany(); allow write: if writingInCompany(); }
 
@@ -316,7 +328,21 @@ service cloud.firestore {
     match /periodicPartChangeLogs/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /archiveRacks/{id}                  { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /pendingCeomedIrsaliye/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
-    match /totalEfficiencyRecords/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /totalEfficiencyRecords/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      // rowChunks — satır kümesi 850 KB'ı aşınca ana belgeye sığmadığı için
+      // 250'lik parçalara bölünüp buraya yazılır
+      // (src/lib/total-efficiency-record-storage.ts).
+      //
+      // Kuralı YOKTU. Firestore kuralları alt koleksiyonlara İNMEZ; üst belgede
+      // `allow write` olması burayı kapsamaz, kuralsız yol varsayılan olarak
+      // REDDEDİLİR. Sonuç: total verimlilik panelinde hem ara kayıt hem ana
+      // kayıt, satır sayısı eşiği aştığı anda hata veriyordu — hem yazma
+      // (setDoc) hem de sonradan okuma (loadTotalEfficiencyRows) bu yoldan
+      // geçiyor.
+      match /rowChunks/{chunkId}              { allow read, write: if isSignedIn(); }
+    }
     match /irsaliyeDosyalari/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /consumableRequests/{id}            { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /sarfTransfers/{id}                 { allow read: if inCompany(); allow write: if writingInCompany(); }
@@ -468,7 +494,11 @@ service cloud.firestore {
     match /labTransferDates/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /labManualSerialSnapshots/{id}      { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /depoSayimBackfillLogs/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
-    match /yedekParcaDepoMinMax/{id}          { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /yedekParcaDepoMinMax/{id} {
+      allow read: if inCompany();
+      allow write: if writingInCompany();
+      match /minMaxRules/{ruleId}             { allow read, write: if isSignedIn(); }
+    }
     match /ceomedDepoStok/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /ceomedSevkiyatRequests/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /ceomedSevkiyatResults/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
