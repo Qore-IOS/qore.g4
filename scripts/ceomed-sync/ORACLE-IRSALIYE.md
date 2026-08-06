@@ -313,6 +313,83 @@ Güvenlik sınırları koda gömülüdür:
 Yine de YENİ ve BOŞ bir irsaliye formunda çalıştırın: ENTER bazı formlarda kaydet
 anlamına gelir.
 
+### Ölçüm 4 sonucu — arama penceresi (LOV) planı değiştirdi
+
+`probe_keys.py --tuslar "TAB*25"` turu, Cari Kodu'ndan Tab'la çıkmanın tek başına
+bir **arama penceresi açtığını** gösterdi:
+
+```
+ 3  TAB  Edit           (-1806,70,…)    ''      ← Cari Kodu
+ 4  TAB  ui60Drawn_W32  (25,97,1537,894)        ← PENCERE AÇILDI
+ 5  TAB  Button 'Bul'
+ 6  TAB  Button 'Tamam'
+ 7  TAB  Button 'İptal'
+ 8  TAB  Edit           (547,52,1109,85) '%'    ← arama filtresi
+ 9-25 … aynı dört durak, sonsuza kadar
+```
+
+Pencere kullanıcı tıklamasıyla değil, alandan çıkmakla açılıyor ve **Tab pencereden
+dışarı çıkmıyor**. "Alanı yaz, Tab'la geç" varsayımına dayanan bir sürücü ilk cari
+kodunda sonsuz döngüye girerdi.
+
+`--tuslar "ENTER*4"` turu çıkışı gösterdi: ENTER, listede seçili satırı `Tamam`
+sayıp pencereyi kapatıyor ve form kendiliğinden doluyor (Sevk Adresi geldi).
+
+**Tasarım sonucu:** liste `ui60Drawn_W32` olduğu için içeriği okunamaz — hangi
+satırın seçili olduğunu görmeden `Tamam`'a basmak kabul edilemez. Sürücü pencereyle
+savaşmak yerine onu kullanacak:
+
+1. Filtre alanına cari kodunu yaz
+2. `Bul`
+3. `Tamam`
+4. **Pencere kapandıktan sonra Cari Kodu alanını geri oku**
+5. Beklenen kod değilse işi `failed` damgala, gönderme
+
+Liste okunamıyor ama sonucu okunabiliyor; güvence böyle korunuyor.
+
+### Birleşik tab sırası
+
+| # | Alan | Form içi (x,y) | Not |
+|---|---|---|---|
+| 1 | İrsaliye No | (114, 51) | uygulama üretir |
+| 2 | Tarih | (237, 51) | |
+| 3 | Fiili Sevk Tarihi | (435, 48) | |
+| 4 | Cari Kodu | (114, 70) | → arama penceresi |
+| 5 | Sevk Adresi | (114, 112) | seçimle otomatik dolar |
+| 6 | İşlem Tipi | (846, 87) | `35` |
+| 7 | Depo | (846, 107) | `10` → arama penceresi |
+| 8-10 | Teslim Eden / Teslim Alan / Anlaşma No | (846, 127-186) | |
+| 11 | Grid — Stok Kodu | (5, 235) | |
+| son | **E-IRSALIYE GÖNDER** | Button | |
+
+### `probe_type.py` — yazan prob
+
+Kalan iki soru yazmadan cevaplanamıyor: (a) cari kodu YAZILINCA pencere yine
+açılıyor mu, (b) grid'de sütun geçişi hangi tuşla. `probe_keys.py` metni bilerek
+reddettiği için ayrı araç:
+
+```powershell
+python probe_type.py --adimlar "YAZ:120.01.001,TAB" --onayla
+python probe_type.py --adimlar "YAZ:TESTKOD,RIGHT" --onayla   # grid hücresinden başlayarak
+```
+
+Canlı uygulamaya yazdığı için sınırlar koda gömülü:
+
+* `--onayla` yoksa planı basar, hiçbir şey göndermez.
+* **Her adımdan önce** odaktaki kontrol okunur; odak GÖNDER / SIL / TAMAMLANDI /
+  GÜNCELLE / YAZDIR / KOPYALA / ONAYLA / KAYDET / İPTAL içeren bir butondaysa
+  betik durur. ENTER odaktaki butona bastığı için bu koruma olmadan yanlış bir
+  adım e-irsaliye gönderebilirdi. Arama penceresinin `Tamam` ve `Bul` butonları
+  bilerek serbesttir — gerekli ve geri alınabilirler.
+* Ön plandaki pencere başlığı doğrulanır; yanlışsa hiçbir şey gönderilmez.
+* Fare kullanılmaz, butona tıklanmaz.
+
+Koruma gerçek buton metinleriyle doğrulandı: `E-IRSALIYE GÖNDER`, `Belge
+Tamamlandı`, `SIL`, `Ref No Güncelle`, `İrsaliye Yazdır`, `Fatura Kopyala` bloke;
+`Tamam`, `Bul`, `E-IRSALIYE ÖNİZLE` geçiyor.
+
+Ölçüm formunu her zaman KAYDETMEDEN kapatın.
+
 ---
 
 ## UI sürücüsü (API bulunamazsa)
