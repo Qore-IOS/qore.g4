@@ -352,19 +352,41 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
                 log.append("başlangıç: mevcut İrsaliye No otomatik temizlenecek")
             return
 
+        if not o["hwnd"]:
+            # Odak hiçbir yerde: başka bir pencere öne gelmiş ya da oturum
+            # kilitlenmiş olabilir. Geçici bir durum, yeniden denenmeli.
+            raise Durdu(
+                "Ceomed penceresi odağı kaybetti (başka bir pencere öne gelmiş "
+                "ya da oturum kilitli olabilir). Ceomed'i öne alıp tekrar deneyin.",
+                retryable=True,
+            )
+
         baslik_alani = alan_adi(o["mdi_ici"])
         grid_alani = alan_adi(o["mdi_ici"], grid_modu=True)
         if baslik_alani is None and grid_alani is None:
+            # Konumu tek başına yazmak çıkmaz sokak: (305,170)'te NE olduğunu
+            # söylemiyor. Kontrolün sınıfı, değeri ve MDI belge başlığı,
+            # yanlış formda mıyız yoksa tabloyu mu güncellemek gerekiyor
+            # sorusunu tek bakışta ayırt ettirir.
             raise Durdu(
-                f"Başlangıç odağı tanınmıyor (mdi {o['mdi_ici']}, "
-                f"pencere {o['pencere_ici']}); "
-                "yanlış forma tuş göndermemek için durduruldu.",
+                "Başlangıç odağı tanınmıyor — "
+                f"sınıf {o['sinif']!r}, değer {o['deger']!r}, "
+                f"mdi {o['mdi_ici']}, pencere {o['pencere_ici']}, "
+                f"MDI belgesi {o['mdi_baslik']!r}. "
+                "Çıkış İrsaliyesi formu açık değilse açın; açıksa alan konum "
+                "tablosu bu kurulumda kaymış olabilir "
+                "(python fill_irsaliye.py --tani ile ölçün). "
+                "Yanlış forma tuş göndermemek için durduruldu.",
                 retryable=True,
             )
         ui60.tus("SHIFTTAB", bekle_ms=250)
 
+    son = ui60.odak()
     raise Durdu(
-        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı.",
+        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı. "
+        f"Son odak: sınıf {son['sinif']!r}, mdi {son['mdi_ici']}, "
+        f"MDI belgesi {son['mdi_baslik']!r}. "
+        "Form beklenenden farklı olabilir.",
         retryable=True,
     )
 

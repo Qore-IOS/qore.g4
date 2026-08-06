@@ -219,12 +219,35 @@ def mdi_belge_kokü(hwnd: int) -> int:
     return min(adaylar)[1] if adaylar else 0
 
 
+# `odak()` sözlüğünün TAM şekli. İki dönüş yolu bunu paylaşır; ayrışmasınlar.
+#
+# Sahada ayrıştılar: odak kaybolduğunda dönen erken sözlükte `mdi_ici` yoktu ve
+# her çağıran `o["mdi_ici"]` dediği için KeyError atıyordu. Genel `except` onu
+# "Beklenmedik hata" sayıp retryable=False yapıyor, iş de kalıcı olarak
+# "ELLE MÜDAHALE GEREKİR" damgası yiyordu — oysa odak kaybı geçici bir durum.
+ODAK_BOS: dict = {
+    "hwnd": 0,
+    "sinif": "",
+    "deger": "",
+    "kok": 0,
+    "kok_baslik": "",
+    "mdi": 0,
+    "mdi_baslik": "",
+    "mdi_ici": (0, 0),
+    "pencere_ici": (0, 0),
+    "rect": (0, 0, 0, 0),
+}
+
+
 def odak() -> dict:
-    """Odaktaki kontrolün tam tarifi."""
+    """Odaktaki kontrolün tam tarifi.
+
+    Odak yoksa (başka bir pencere öne gelmişse) `hwnd` 0 döner ama sözlük yine
+    TÜM anahtarları taşır. Çağıranlar `hwnd == 0` kontrolüyle bunu ayırt eder.
+    """
     hwnd = odak_hwnd()
     if not hwnd:
-        return {"hwnd": 0, "sinif": "", "deger": "", "kok": 0,
-                "kok_baslik": "", "pencere_ici": (0, 0), "rect": (0, 0, 0, 0)}
+        return dict(ODAK_BOS)
     r = dikdortgen(hwnd)
     kok = user32.GetAncestor(hwnd, GA_ROOT)
     kr = dikdortgen(kok) if kok else (0, 0, 0, 0)
@@ -232,6 +255,7 @@ def odak() -> dict:
     taban = mdi or kok
     tr = dikdortgen(taban) if taban else (0, 0, 0, 0)
     return {
+        **ODAK_BOS,
         "hwnd": hwnd,
         "sinif": sinif_adi(hwnd),
         "deger": pencere_metni(hwnd),
