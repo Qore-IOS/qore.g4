@@ -36,6 +36,23 @@ Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
 
 Bir formda birden çok yedek parça varsa **tek irsaliye, çok satır** açılır.
 
+### Açıklama alanının saha ölçümü
+
+Grid doldurma provası başarılı olsa da sol alttaki **Açıklama** alanının
+Oracle Forms odak konumu henüz ölçülmedi. Personel adını ekran
+görüntüsünden tahmin edilen koordinata yazmak muhasebe kaydı için kabul
+edilemez. Ölçüm için kuru doldurulmuş formda Açıklama ilk satırına
+tıklayıp şunu çalıştırın:
+
+```powershell
+python fill_irsaliye.py --tani
+```
+
+Tanı modu stdin istemez ve hiçbir tuş göndermez. Çıktıdaki `mdi_ici`,
+`pencere_ici`, `sinif` ve `deger` bilgileri Açıklama alanını haritaya
+eklemek için kullanılır. Bu alan haritalanıp geri okuma ile doğrulanmadan
+`--gercek` kullanılmamalıdır.
+
 ### İrsaliye No neden olduğu gibi yazılamıyor
 
 Alanın kuralı ölçülmüştür: **2 harf + en fazla 6 rakam, toplam 8 karakter.**
