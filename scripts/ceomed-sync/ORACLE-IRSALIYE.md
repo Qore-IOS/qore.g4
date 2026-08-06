@@ -248,6 +248,148 @@ kontrolün boyutunu ve değerini kaydeder.
 Odak hiç görünür kontrole düşmezse doğrulama yalnızca gönderim öncesi ekran
 görüntüsüne kalır; o durumda tam otomatik gönderim yeniden değerlendirilmelidir.
 
+### Ölçüm 3 sonucu — geri okuma ÇALIŞIYOR
+
+`probe_focus.py` turunda 22 odak olayının **hepsi** gerçek, boyutlu bir `Edit`
+kontrolüne düştü ve değerleri okundu (`SI007787`, `06/08/2026`, `02`, `01`).
+Hipotez doğrulandı: 4GL çalışma zamanı odaktaki alan için gerçek bir Edit açıp
+alanın üstüne taşıyor.
+
+**Sonuç: "yaz → geri oku → uyuşmazsa gönderme" güvencesi korunabiliyor.**
+Tam otomatik gönderim kararı bu güvenceye dayanır; kaybedilirse karar yeniden
+değerlendirilmelidir.
+
+Ölçülen alan konumları (pencere ikinci ekranda olduğu için ham koordinatlar
+negatif; form içi konum = ham + 1920):
+
+| Sıra | Alan | Form içi (x, y) | Okunan |
+|---|---|---|---|
+| 1 | İrsaliye No | (114, 51) | `SI007787` |
+| 2 | Tarih | (237, 51) | `06/08/2026` |
+| 3 | Fiili Sevk Tarihi | (435, 48) | `06/08/2026` |
+| 4 | Cari Kodu | (114, 70) | |
+| 8 | Sevk Adresi | (114, 112) | `EĞİTİM MAH. DR. ERKİN CAD.` |
+| 9 | İşlem Tipi | (846, 87) | `02` (bizde `35` olacak) |
+| 12 | Depo | (846, 107) | `01` (bizde `10` olacak) |
+| 13-15 | Teslim Eden / Teslim Alan / Anlaşma No | (846, 127-186) | |
+| 16 | Grid ilk hücre (Stok Kodu) | (5, 235) | |
+| 22 | **E-IRSALIYE GÖNDER** (Button) | — | |
+
+### Açık kalan üç soru
+
+1. **Grid içinde gezinme.** Grid'in ilk hücresinden sonra TAB grid'den *çıkıp*
+   alt bölüme atladı. Stok Kodu → Lot → Miktar geçişi başka bir tuşla oluyor
+   (ok tuşu veya ENTER). Bu bilinmeden satır yazılamaz.
+2. **Tab sırası eksik.** Cari Kodu'ndan sonra açılan arama penceresi sırayı
+   böldü; Sevk Carisi, Posta Kodu, İl Kodu, Ref No hiç görülmedi.
+3. **Arama pencereleri.** Cari Kodu ve Depo alanlarında `ui60Drawn_W32` +
+   `Tamam` butonlu bir arama penceresi açıldı. Kendiliğinden mi açılıyor yoksa
+   kullanıcı ▼ butonuna mı tıkladı — belirsiz. Kendiliğinden açılıyorsa sürücü
+   bu pencereyi kapatmayı bilmeli.
+
+### `probe_keys.py` — tuşu betik gönderir
+
+`probe_focus.py`'de tuşlara kullanıcı bastığı için hangi hareketin hangi tuştan
+geldiği kesin değildi. Bu betik tuşları kendisi gönderir:
+
+```powershell
+# Temiz tab sırası (arama pencereleri araya girmeden)
+python probe_keys.py --tuslar "TAB*25" --json tabsirasi.json
+
+# Grid içinde sütun geçişi hangi tuşla?
+python probe_keys.py --tuslar "RIGHT*4"
+python probe_keys.py --tuslar "ENTER*4"
+```
+
+Güvenlik sınırları koda gömülüdür:
+
+* Yalnızca **gezinme** tuşları gönderilir (TAB, oklar, ENTER, ESC, HOME, END).
+  Harf/rakam gönderilemez — `--tuslar 35` reddedilir. Bu bir ölçüm aracıdır,
+  veri girme aracı değil.
+* Butona tıklamaz; E-İRSALİYE GÖNDER'e asla dokunmaz.
+* Tuşları göndermeden önce ön plandaki pencerenin başlığını doğrular; yanlış
+  pencere öndeyse **hiçbir tuş göndermeden** çıkar.
+
+Yine de YENİ ve BOŞ bir irsaliye formunda çalıştırın: ENTER bazı formlarda kaydet
+anlamına gelir.
+
+### Ölçüm 4 sonucu — arama penceresi (LOV) planı değiştirdi
+
+`probe_keys.py --tuslar "TAB*25"` turu, Cari Kodu'ndan Tab'la çıkmanın tek başına
+bir **arama penceresi açtığını** gösterdi:
+
+```
+ 3  TAB  Edit           (-1806,70,…)    ''      ← Cari Kodu
+ 4  TAB  ui60Drawn_W32  (25,97,1537,894)        ← PENCERE AÇILDI
+ 5  TAB  Button 'Bul'
+ 6  TAB  Button 'Tamam'
+ 7  TAB  Button 'İptal'
+ 8  TAB  Edit           (547,52,1109,85) '%'    ← arama filtresi
+ 9-25 … aynı dört durak, sonsuza kadar
+```
+
+Pencere kullanıcı tıklamasıyla değil, alandan çıkmakla açılıyor ve **Tab pencereden
+dışarı çıkmıyor**. "Alanı yaz, Tab'la geç" varsayımına dayanan bir sürücü ilk cari
+kodunda sonsuz döngüye girerdi.
+
+`--tuslar "ENTER*4"` turu çıkışı gösterdi: ENTER, listede seçili satırı `Tamam`
+sayıp pencereyi kapatıyor ve form kendiliğinden doluyor (Sevk Adresi geldi).
+
+**Tasarım sonucu:** liste `ui60Drawn_W32` olduğu için içeriği okunamaz — hangi
+satırın seçili olduğunu görmeden `Tamam`'a basmak kabul edilemez. Sürücü pencereyle
+savaşmak yerine onu kullanacak:
+
+1. Filtre alanına cari kodunu yaz
+2. `Bul`
+3. `Tamam`
+4. **Pencere kapandıktan sonra Cari Kodu alanını geri oku**
+5. Beklenen kod değilse işi `failed` damgala, gönderme
+
+Liste okunamıyor ama sonucu okunabiliyor; güvence böyle korunuyor.
+
+### Birleşik tab sırası
+
+| # | Alan | Form içi (x,y) | Not |
+|---|---|---|---|
+| 1 | İrsaliye No | (114, 51) | uygulama üretir |
+| 2 | Tarih | (237, 51) | |
+| 3 | Fiili Sevk Tarihi | (435, 48) | |
+| 4 | Cari Kodu | (114, 70) | → arama penceresi |
+| 5 | Sevk Adresi | (114, 112) | seçimle otomatik dolar |
+| 6 | İşlem Tipi | (846, 87) | `35` |
+| 7 | Depo | (846, 107) | `10` → arama penceresi |
+| 8-10 | Teslim Eden / Teslim Alan / Anlaşma No | (846, 127-186) | |
+| 11 | Grid — Stok Kodu | (5, 235) | |
+| son | **E-IRSALIYE GÖNDER** | Button | |
+
+### `probe_type.py` — yazan prob
+
+Kalan iki soru yazmadan cevaplanamıyor: (a) cari kodu YAZILINCA pencere yine
+açılıyor mu, (b) grid'de sütun geçişi hangi tuşla. `probe_keys.py` metni bilerek
+reddettiği için ayrı araç:
+
+```powershell
+python probe_type.py --adimlar "YAZ:120.01.001,TAB" --onayla
+python probe_type.py --adimlar "YAZ:TESTKOD,RIGHT" --onayla   # grid hücresinden başlayarak
+```
+
+Canlı uygulamaya yazdığı için sınırlar koda gömülü:
+
+* `--onayla` yoksa planı basar, hiçbir şey göndermez.
+* **Her adımdan önce** odaktaki kontrol okunur; odak GÖNDER / SIL / TAMAMLANDI /
+  GÜNCELLE / YAZDIR / KOPYALA / ONAYLA / KAYDET / İPTAL içeren bir butondaysa
+  betik durur. ENTER odaktaki butona bastığı için bu koruma olmadan yanlış bir
+  adım e-irsaliye gönderebilirdi. Arama penceresinin `Tamam` ve `Bul` butonları
+  bilerek serbesttir — gerekli ve geri alınabilirler.
+* Ön plandaki pencere başlığı doğrulanır; yanlışsa hiçbir şey gönderilmez.
+* Fare kullanılmaz, butona tıklanmaz.
+
+Koruma gerçek buton metinleriyle doğrulandı: `E-IRSALIYE GÖNDER`, `Belge
+Tamamlandı`, `SIL`, `Ref No Güncelle`, `İrsaliye Yazdır`, `Fatura Kopyala` bloke;
+`Tamam`, `Bul`, `E-IRSALIYE ÖNİZLE` geçiyor.
+
+Ölçüm formunu her zaman KAYDETMEDEN kapatın.
+
 ---
 
 ## UI sürücüsü (API bulunamazsa)
