@@ -32,7 +32,6 @@ import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFo
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { reserveActionFormNumber } from '@/lib/form-number';
-import { enqueueIrsaliyeGiris } from '@/lib/ceomed/enqueue-irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -1936,8 +1935,6 @@ export default function IslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'teknikServisActionForms')) : null;
         const createdFormsData: any[] = [];
-        // Ceomed irsaliyesi eksik veri yüzünden kuyrukta bekleyen formların gerekçeleri.
-        const blockedIrsaliyeNotices: string[] = [];
 
         // Parallel PDF generation and DB writing start here
         const formNumberPromises: Promise<string>[] = [];
@@ -2041,28 +2038,6 @@ export default function IslemFormuPage() {
              actionRecord: { id: formRef.id, ...formEntries }
           });
 
-          // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa al.
-          // Aynı batch'te yazılır: form kaydı düşmezse irsaliye işi de düşmez.
-          const irsaliyeGirisi = enqueueIrsaliyeGiris(db, batch, {
-            formId: formRef.id,
-            formNo,
-            formType: 'teknik_servis',
-            tarih: baslangicTarihi,
-            hospitalId: currentDevice.hospitalId,
-            cariKodu: hospital?.ceomedCariKodu,
-            labName: hospital?.name,
-            deviceId: currentDeviceId,
-            cihazAdi: currentDevice.cihazAdi || currentDevice.model,
-            seriNumarasi: currentDevice.seriNumarasi,
-            personnelName: currentUserProfile?.name,
-            personnelUid: currentUserProfile?.uid,
-            companyId: currentCompanyId,
-            actions: deviceActions,
-          });
-          if (irsaliyeGirisi.enqueued && irsaliyeGirisi.status === 'blocked') {
-            blockedIrsaliyeNotices.push(irsaliyeGirisi.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
-          }
-
           if (!isLabMode) {
             const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
             batch.set(deviceFormRef, formEntries);
@@ -2079,7 +2054,7 @@ export default function IslemFormuPage() {
             const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
             const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-            batch.set(faultReportRef, {
+            batch.set(faultReportRef, withCompanyScope({
               deviceId: currentDeviceId,
               hospitalId: currentDevice.hospitalId,
               labName: hospital?.name,
@@ -2112,7 +2087,7 @@ export default function IslemFormuPage() {
               relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
               isCustomFault: isCustomFault || false,
               createdFromActionForm: true,
-            });
+            }, currentCompanyId));
 
             const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
             batch.set(historyOpenedRef, {
@@ -2346,17 +2321,6 @@ export default function IslemFormuPage() {
             </ToastAction>
           )
         });
-
-        if (blockedIrsaliyeNotices.length > 0) {
-          // Form kaydedildi ama muhasebe irsaliyesi otomatik gönderilemeyecek.
-          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
-          toast({
-            title: 'Ceomed irsaliyesi beklemede',
-            description: Array.from(new Set(blockedIrsaliyeNotices)).join(' '),
-            variant: 'destructive',
-            duration: 12000,
-          });
-        }
 
       } catch (err) {
         console.error("Error saving action form (Optimistic):", err);

@@ -33,7 +33,6 @@ import type { SignaturePadRef } from '@/components/SignaturePad';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
-import { enqueueIrsaliyeGiris } from '@/lib/ceomed/enqueue-irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -1901,8 +1900,6 @@ export default function AplikasyonIslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
         const createdFormsData: any[] = [];
-        // Ceomed irsaliyesi eksik veri yüzünden kuyrukta bekleyen formların gerekçeleri.
-        const blockedIrsaliyeNotices: string[] = [];
 
         for (const currentDevice of devicesToProcess) {
             if (!currentDevice) continue;
@@ -1983,28 +1980,6 @@ export default function AplikasyonIslemFormuPage() {
                 actionRecord: { id: formRef.id, ...formData }
             });
 
-            // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa al.
-            // Aynı batch'te yazılır: form kaydı düşmezse irsaliye işi de düşmez.
-            const irsaliyeGirisi = enqueueIrsaliyeGiris(db, batch, {
-                formId: formRef.id,
-                formNo,
-                formType: 'aplikasyon',
-                tarih: baslangicTarihi,
-                hospitalId: hospital?.id || currentDevice.hospitalId || '',
-                cariKodu: hospital?.ceomedCariKodu,
-                labName: hospital?.name,
-                deviceId: currentDevice.id,
-                cihazAdi: currentDevice.cihazAdi || currentDevice.model,
-                seriNumarasi: currentDevice.seriNumarasi,
-                personnelName: currentUserProfile?.name,
-                personnelUid: currentUserProfile?.uid,
-                companyId: currentCompanyId,
-                actions: deviceSpecificActions,
-            });
-            if (irsaliyeGirisi.enqueued && irsaliyeGirisi.status === 'blocked') {
-                blockedIrsaliyeNotices.push(irsaliyeGirisi.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
-            }
-
             if (!isLabMode) createdFormIds.push(formRef.id);
 
             if (!isLabMode) {
@@ -2026,7 +2001,7 @@ export default function AplikasyonIslemFormuPage() {
                 const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
                 const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-                batch.set(faultReportRef, {
+                batch.set(faultReportRef, withCompanyScope({
                     deviceId: currentDevice.id,
                     hospitalId: hospital?.id,
                     labName: hospital?.name,
@@ -2059,7 +2034,7 @@ export default function AplikasyonIslemFormuPage() {
                     relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
                     isCustomFault: isCustomFault || false,
                     createdFromActionForm: true,
-                });
+                }, currentCompanyId));
 
                 const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
                 batch.set(historyOpenedRef, {
@@ -2321,17 +2296,6 @@ export default function AplikasyonIslemFormuPage() {
             </ToastAction>
           )
         });
-
-        if (blockedIrsaliyeNotices.length > 0) {
-          // Form kaydedildi ama muhasebe irsaliyesi otomatik gönderilemeyecek.
-          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
-          toast({
-            title: 'Ceomed irsaliyesi beklemede',
-            description: Array.from(new Set(blockedIrsaliyeNotices)).join(' '),
-            variant: 'destructive',
-            duration: 12000,
-          });
-        }
 
     } catch(err) {
         console.error("Error saving action form (Optimistic):", err);
