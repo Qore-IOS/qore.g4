@@ -163,12 +163,42 @@ Mevcut `scripts/ceomed-sync/.env` dosyasına ekleyin:
 ```env
 # --- Ceomed yazma worker'ı ---
 ORACLE_DRY_RUN=1          # 0 = GERÇEKTEN GÖNDER. Önce 1'de doğrulayın.
+ORACLE_FILL_ONLY=0        # 1 = Oracle formunu doldur, gönderme; incelemede beklet
 ORACLE_DRIVER=ui          # ui | api
 ORACLE_MAX_ATTEMPTS=3     # bir işin en fazla deneme sayısı
 ORACLE_MAX_PER_DAY=200    # günlük gönderim tavanı (otomasyon çıldırırsa emniyet)
 ORACLE_STALE_CLAIM_MIN=15 # takılı kalan işi kaç dk sonra kurtar
 ORACLE_PYTHON=python      # UI sürücüsü için Python yorumlayıcısı
 ```
+
+### Canlı form-doldur testi (gönderimsiz)
+
+Qore'da kapanan gerçek teknik/aplikasyon formlarının Ceomed ekranına
+yazılması, fakat **E-İRSALİYE GÖNDER** butonuna basılmaması için:
+
+```env
+ORACLE_FILL_ONLY=1
+ORACLE_DRY_RUN=1
+ORACLE_DRIVER=ui
+ORACLE_ALLOW_POST_QUANTITY_WARNING=1
+```
+
+Bu mod klasik `ORACLE_DRY_RUN=1` modundan farklıdır: klasik kuru mod yalnızca
+planı loglar; `ORACLE_FILL_ONLY=1` Python sürücüsünü gerçekten çalıştırıp
+Oracle formunu doldurur, ancak `--gercek` vermediği için göndermez.
+
+Tek masaüstü formu aynı anda yalnızca bir işi taşıyabilir. Bu nedenle ilk
+iş doldurulunca durumu `awaiting_review` olur ve arkadan gelen işler `pending`
+olarak sırada kalır; boşa düşmez ve mevcut ekranı ezmez. Operatör:
+
+1. Ceomed ekranındaki doldurulmuş formu kontrol eder.
+2. Ceomed'de yeni ve boş bir **Çıkış İrsaliyesi** formu açar.
+3. Qore'daki Ceomed kuyruğunda **Test tamam, sıradakine geç** butonuna basar.
+4. İncelenen iş `previewed` olur; worker sıradaki en eski `pending` işi doldurur.
+
+Worker veya bilgisayar kapanırsa `pending` işler Firestore kuyruğunda kalır.
+Yeniden başlatıldığında sıradan devam eder. `awaiting_review` iş operatör
+tamamlamadan sonraki kayıt işlenmez.
 
 `GOOGLE_APPLICATION_CREDENTIALS`, `FIREBASE_PROJECT_ID` ve `CEOMED_COMPANY_ID`
 zaten okuma worker'ı için tanımlı olmalı; aynıları kullanılır.

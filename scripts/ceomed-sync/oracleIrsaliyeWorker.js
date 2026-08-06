@@ -30,6 +30,8 @@
  * Env (.env):
  *   GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID, CEOMED_COMPANY_ID
  *   ORACLE_DRY_RUN            (varsayılan 1)  0 = gerçekten gönder
+ *   ORACLE_FILL_ONLY          (varsayılan 0)  1 = formu doldur, gönderme;
+ *                              operatör onayına kadar sıradakini beklet
  *   ORACLE_DRIVER             (varsayılan ui) ui | api
  *   ORACLE_MAX_ATTEMPTS       (varsayılan 3)  bir işin en fazla deneme sayısı
  *   ORACLE_MAX_PER_DAY        (varsayılan 200) günlük gönderim tavanı
@@ -47,6 +49,7 @@ const num = (v, def) => {
 };
 
 const DRY_RUN = process.env.ORACLE_DRY_RUN !== '0';
+const FILL_ONLY = process.env.ORACLE_FILL_ONLY === '1';
 const DRIVER_NAME = (process.env.ORACLE_DRIVER || 'ui').toLowerCase();
 const MAX_ATTEMPTS = num(process.env.ORACLE_MAX_ATTEMPTS, 3);
 const MAX_PER_DAY = num(process.env.ORACLE_MAX_PER_DAY, 200);
@@ -130,6 +133,24 @@ async function markSent(db, job, result) {
   });
 }
 
+async function markAwaitingReview(db, job, result) {
+  await db.collection(COLLECTION).doc(job.id).update({
+    status: 'awaiting_review',
+    previewedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastError: null,
+    screenshotPath: result.screenshotPath || null,
+    driver: DRIVER_NAME,
+  });
+}
+
+async function hasAwaitingReview(db) {
+  let q = db.collection(COLLECTION).where('status', '==', 'awaiting_review');
+  if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
+  const snap = await q.limit(1).get();
+  return !snap.empty;
+}
+
 /**
  * Hatayı kaydeder. Yeniden denenebilir ve deneme hakkı kaldıysa iş `pending`'e
  * döner; aksi hâlde `failed` olur ve elle müdahale bekler.
@@ -170,6 +191,28 @@ async function processJob(db, driver, jobId) {
   if (gunlukTavanAsildiMi()) {
     await markFailure(db, job, `Günlük gönderim tavanı (${MAX_PER_DAY}) aşıldı; iş yarın denenecek.`, true);
     errLog('tavan', `${ozet}: günlük tavan doldu, iş kuyrukta bekliyor.`);
+    return;
+  }
+
+  if (FILL_ONLY) {
+    log('test', `${ozet} — Oracle formu dolduruluyor; GÖNDER butonuna basılmayacak.`);
+    let result;
+    try {
+      result = await driver.submit(job);
+    } catch (e) {
+      const tekrar = await markFailure(db, job, e.message || String(e), true);
+      errLog('hata', `${ozet}: ${e.message || e}${tekrar ? ' — yeniden denenecek' : ' — DENEME HAKKI BİTTİ'}`);
+      return;
+    }
+    if (!result || !result.ok) {
+      const mesaj = (result && result.error) || 'Sürücü sebep belirtmeden başarısız döndü.';
+      const retryable = !result || result.retryable !== false;
+      const tekrar = await markFailure(db, job, mesaj, retryable);
+      errLog('hata', `${ozet}: ${mesaj}${tekrar ? ' — yeniden denenecek' : ' — ELLE MÜDAHALE GEREKİR'}`);
+      return;
+    }
+    await markAwaitingReview(db, job, result);
+    log('bekliyor', `${ozet} — form dolduruldu, gönderilmedi. Panelden test tamamlanana kadar sıradaki iş bekleyecek.`);
     return;
   }
 
@@ -217,6 +260,10 @@ async function drain(db, driver) {
   if (draining || !running) return;
   draining = true;
   try {
+    if (FILL_ONLY && await hasAwaitingReview(db)) {
+      log('bekliyor', 'Oracle ekranında incelenen bir form var; kuyruktaki yeni işler sırada tutuluyor.');
+      return;
+    }
     while (running) {
       let q = db.collection(COLLECTION).where('status', '==', 'pending');
       if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
@@ -226,10 +273,11 @@ async function drain(db, driver) {
       for (const doc of snap.docs) {
         if (!running) break;
         await processJob(db, driver, doc.id);
+        if (FILL_ONLY) break;
       }
 
       // Kuru çalışmada işler pending kalır — sonsuz döngüye girmemek için tek tur.
-      if (DRY_RUN) break;
+      if (DRY_RUN || FILL_ONLY) break;
     }
   } catch (e) {
     errLog('kuyruk', `Tüketim hatası: ${e.message || e}`);
@@ -269,8 +317,10 @@ async function main() {
   const db = initFirestore();
   const driver = loadDriver();
 
-  log('başlat', `worker=${WORKER_ID} sürücü=${DRIVER_NAME} kuru_çalışma=${DRY_RUN ? 'AÇIK' : 'KAPALI'}`);
-  if (DRY_RUN) {
+  log('başlat', `worker=${WORKER_ID} sürücü=${DRIVER_NAME} mod=${FILL_ONLY ? 'FORM_DOLDUR_TEST' : DRY_RUN ? 'PLAN_KURU' : 'GERÇEK'}`);
+  if (FILL_ONLY) {
+    log('başlat', 'FORM DOLDUR TESTİ: Oracle formu doldurulacak, E-İRSALİYE GÖNDER butonuna basılmayacak.');
+  } else if (DRY_RUN) {
     log('başlat', 'KURU ÇALIŞMA: hiçbir e-irsaliye gönderilmeyecek. Gerçek gönderim için ORACLE_DRY_RUN=0.');
   } else {
     log('başlat', `GERÇEK GÖNDERİM AÇIK. Günlük tavan: ${MAX_PER_DAY}. E-irsaliye gönderimi geri alınamaz.`);
