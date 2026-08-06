@@ -650,6 +650,44 @@ Bir kuru çalışma tıkandığında "nerede durdu" sorusunun cevabı adım geç
 ekran görüntüsü tek başına yetmiyor. `fail()` artık `log`'u her zaman döndürüyor
 ve grid satırında hangi sütunun beklendiği de loga yazılıyor.
 
+### Prova 3 — konumlar MDI belge penceresine göre tutulmalı
+
+İki hata çıktı, ikisi de öğretici.
+
+**1. Konum kayması.**
+
+```
+odak (9, 100) konumunda, İrsaliye No bekleniyordu   [beklenen (123, 113)]
+```
+
+Odak doğru alandaydı ama koordinatlar kaymıştı. Sebep tasarımdaki bir
+zayıflıktı: konumlar **ana pencereye** göre ölçülüyordu. Ceomed bir MDI
+uygulaması — form, ana pencerenin içinde ayrı bir alt pencerede (`ui60MDIdocument_W32`)
+duruyor. Ana pencere yeniden boyutlanınca ya da form penceresi içeride kayınca
+bütün ölçümler bozuluyor.
+
+Düzeltme: konumlar artık **MDI belge penceresine** göre. `ui60.odak()` bunun için
+`mdi_ici` alanı döndürüyor; `mdi_belge_kokü()` kontrolü içeren MDI alt penceresini
+buluyor. Ham ölçümler ana pencere kökü `(-1929,-62)`, MDI belge kökü `(-1923,-31)`
+ile yapılmıştı; aradaki `(-6,-31)` farkı tabloya işlendi.
+
+`--tani` modu eklendi: hiçbir şey yazmadan odağın `mdi_ici` konumunu bildirir.
+Tablo başka bir kurulumda kayarsa gerçek değerler bununla ölçülür.
+
+**2. İrsaliye No reddedildi.**
+
+```
+irsaliyeNo: 'BT10042' yazıldı ve geri okundu
+→ irsaliyeNo alanından çıkılamadı — uygulama değeri reddetti
+```
+
+Değer alana yazıldı, geri okundu, doğrulandı — ama Forms alandan çıkmaya izin
+vermedi. Aynı numara üçüncü kez deneniyordu: **uygulamanın kendi mükerrer
+koruması** çalışıyor ve sürücü onu doğru okuyor. Hata mesajına bu ipucu eklendi.
+
+Bu, `odak_ilerledi_mi()` sinyalinin gerçek bir işte beklendiği gibi çalıştığını
+da gösteriyor — modal pencere açılmadan, yalnızca navigasyonun durmasından.
+
 ### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
 
 Muhasebe kararı: Qore form numarası İrsaliye No alanında görünecek. Ancak Qore'un
