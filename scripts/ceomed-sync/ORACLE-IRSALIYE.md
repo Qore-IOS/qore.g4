@@ -202,9 +202,17 @@ dosyadaki proje kimliği gösterilir.
 
 En sık iki sebep:
 
-* **Tırnaklı yol.** `.env` içinde `GOOGLE_APPLICATION_CREDENTIALS="C:\..."`
-  yazılırsa `.bat` tırnakları değere dahil eder, dosya bulunamaz.
-* **Proje uyuşmazlığı.** Anahtar başka bir projeye ait. Betik bunu açıkça söyler.
+* **Tırnaklı değer.** `.bat`, `.env`'i `set "%A=%B"` ile okuduğu için tırnak
+  **değerin parçası** olur. Sahada tam olarak bu yaşandı:
+  `FIREBASE_PROJECT_ID="invpilot"` yazılmıştı, worker `"invpilot"` adında bir
+  proje aradı ve `PERMISSION_DENIED` aldı. Hata mesajındaki tırnaklar Google'ın
+  biçimlendirmesi sanıldığı için sebep uzun süre görünmedi.
+
+  Worker artık okuduğu yapılandırma değerlerini saran tırnakları soyuyor
+  (yapılandırma değerlerinin hiçbiri meşru olarak tırnakla başlayıp bitmez), ama
+  `.env`'e tırnaksız yazmak yine de doğrusudur.
+* **Proje uyuşmazlığı.** Anahtar başka bir projeye ait. Betik iki `project_id`'yi
+  karşılaştırıp açıkça söyler.
 
 ### Canlı form-doldur testi (gönderimsiz)
 
