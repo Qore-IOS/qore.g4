@@ -182,8 +182,6 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
         time.sleep(0.5)
 
     o = ui60.odak()
-    geri_donuldu = False
-
     if not konum_eslesiyor(o["mdi_ici"], hedef):
         # Forms ilerletmiş; okumak için geri dön.
         ui60.tus("SHIFTTAB", bekle_ms=450)
@@ -194,7 +192,6 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
                 f"(odak {o['pencere_ici']}, beklenen {hedef}). "
                 "Değer doğrulanamadığı için gönderim yapılmayacak."
             )
-        geri_donuldu = True
 
     okunan = o["deger"]
     if okunan != deger:
@@ -205,9 +202,11 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
         )
     log.append(f"{ad}: geri okundu, {okunan!r} doğrulandı")
 
-    if geri_donuldu:
-        # İleri dön. Alandan çıkış LOV'u yeniden açabilir; değer artık çözülmüş
-        # olduğu için aynı satır seçilir.
+    if konum_eslesiyor(ui60.odak()["mdi_ici"], hedef):
+        # Geri okuma sonrası (veya Forms seçimden sonra ilerlemediyse) ileri
+        # dön. Alandan çıkış LOV'u yeniden açabilir; değer artık çözülmüş
+        # olduğu için aynı satır seçilir. Fonksiyonun sözleşmesi: döndüğünde
+        # odak bir sonraki alandadır.
         ui60.tus("ENTER", bekle_ms=600)
         if ui60.lov_acik_mi(ana_pencere) and not ui60.uyari_penceresi_mi(ana_pencere):
             ui60.lov_kabul_et(ana_pencere)
@@ -226,6 +225,9 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
         if ad and degerler.get(ad):
             if ad in LOV_ALANLARI:
                 lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
+                # Geri okuma için dönülen alandan sonraki alana yeniden
+                # lov_ile_yaz geçer; aşağıdaki ilerle ikinci kez geçmemeli.
+                continue
             else:
                 ui60.alan_yaz(degerler[ad], ad)
                 log.append(f"{ad}: {degerler[ad]!r} yazıldı ve geri okundu")
@@ -286,8 +288,36 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
         else:
             log.append(f"{beklenen_sutun}: boş bırakıldı")
 
-        if beklenen_sutun != GRID_SIRASI[-1]:
+        if (beklenen_sutun != GRID_SIRASI[-1]
+                and beklenen_sutun not in LOV_ALANLARI):
             ilerle(beklenen_sutun)
+
+
+def irsaliye_numarasina_git(log: list[str]) -> None:
+    """Odağı İrsaliye No'ya getirir; var olan değeri yazma adımı siler."""
+    for adim in range(MAX_ADIM):
+        o = ui60.odak()
+        if alan_adi(o["mdi_ici"]) == "irsaliyeNo":
+            if adim:
+                log.append(f"başlangıç: İrsaliye No alanına {adim} geri adımda gelindi")
+            if o["deger"]:
+                log.append("başlangıç: mevcut İrsaliye No otomatik temizlenecek")
+            return
+
+        baslik_alani = alan_adi(o["mdi_ici"])
+        grid_alani = alan_adi(o["mdi_ici"], grid_modu=True)
+        if baslik_alani is None and grid_alani is None:
+            raise Durdu(
+                f"Başlangıç odağı tanınmıyor ({o['pencere_ici']}); "
+                "yanlış forma tuş göndermemek için durduruldu.",
+                retryable=True,
+            )
+        ui60.tus("SHIFTTAB", bekle_ms=250)
+
+    raise Durdu(
+        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı.",
+        retryable=True,
+    )
 
 
 def main() -> int:
@@ -361,15 +391,9 @@ def main() -> int:
     goruntu = None
 
     try:
-        # Formun YENİ ve BOŞ olduğunu doğrula: odak İrsaliye No'da olmalı.
-        o = ui60.odak()
-        if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
-            raise Durdu(
-                f"Form yeni/boş görünmüyor — odak {o['pencere_ici']} konumunda, "
-                "İrsaliye No bekleniyordu. Yarım kalmış bir forma yazmamak için "
-                "durduruldu.",
-                retryable=True,
-            )
+        # Ceomed odağı ve önceki numarayı koruyabiliyor. Kullanıcıya elle
+        # sildirmek yerine odağı kur; alan_yaz mevcut değeri temizleyecek.
+        irsaliye_numarasina_git(log)
 
         degerler = {
             "irsaliyeNo": str(header.get("irsaliyeNo") or ""),
