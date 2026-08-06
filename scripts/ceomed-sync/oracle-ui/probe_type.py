@@ -417,7 +417,11 @@ def main() -> int:
         # Odak kıpırdamadıysa uygulama değeri reddetmiştir: Forms alandan çıkışta
         # doğrulama yapıyor ve geçersiz değerde odağı bırakmıyor. Sürücü için
         # bedava hata sinyali; ölçümde de görünsün.
-        if tur == "TUS" and deger in ("TAB", "ENTER") and bilgi["hwnd"] == onceki["hwnd"]:
+        # Kimlik hwnd DEĞİL (hwnd, konum): Forms ardışık alanlar için aynı Edit'i
+        # taşıyıp yeniden kullanabiliyor — grid 4.→5. sütunda hwnd sabit kaldı.
+        ilerledi = (bilgi["hwnd"], bilgi["rect"] and tuple(bilgi["rect"].values())) != (
+            onceki["hwnd"], onceki["rect"] and tuple(onceki["rect"].values()))
+        if tur == "TUS" and deger in ("TAB", "ENTER") and not ilerledi:
             bilgi["uyari"] = "odak ilerlemedi — değer reddedilmiş olabilir"
         kayitlar.append(bilgi)
         yazdir(i, etiket, bilgi)

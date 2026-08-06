@@ -378,14 +378,30 @@ def lov_kabul_et(ana_pencere: int, timeout_ms: int = 5000) -> None:
     raise AlanReddedildi("LOV penceresi kapanmadı.")
 
 
-def odak_ilerledi_mi(onceki_hwnd: int) -> bool:
-    """TAB sonrası odak kıpırdamadıysa uygulama değeri reddetmiştir.
+def odak_kimligi() -> tuple[int, tuple[int, int, int, int]]:
+    """Odağın kimliği: (hwnd, konum).
+
+    Yalnızca `hwnd` YETMEZ. Forms, ardışık alanlar için çoğu zaman AYNI `Edit`
+    kontrolünü taşıyıp yeniden kullanıyor: grid'de 4. sütundan 5. sütuna
+    geçildiğinde `hwnd` sabit kaldı, yalnızca dikdörtgen değişti. `hwnd`
+    karşılaştıran bir kontrol bu geçişi "ilerlemedi" sanır ve geçerli bir değeri
+    reddedilmiş gibi raporlar.
+    """
+    o = odak()
+    return (o["hwnd"], o["rect"])
+
+
+def odak_ilerledi_mi(onceki_kimlik: tuple[int, tuple[int, int, int, int]]) -> bool:
+    """Odak gerçekten başka bir alana geçti mi?
 
     Forms alandan çıkışta WHEN-VALIDATE-ITEM çalıştırır; tetikçi hata verirse
-    navigasyonu durdurur —
-    bedava bir hata sinyali.
+    navigasyonu durdurur. Odak yerinde kaldıysa değer reddedilmiştir.
+
+    Bu, hatanın modal pencere AÇMADIĞI durumlarda da çalışan tek güvenilir
+    sinyaldir — Forms hataları çoğu zaman formun alt mesaj satırında görünür
+    (ör. "WHEN-VALIDATE-ITEM … ORA-01403"), yakalanacak bir pencere olmaz.
     """
-    return odak_hwnd() != onceki_hwnd
+    return odak_kimligi() != onceki_kimlik
 
 
 # --- Ekran görüntüsü ----------------------------------------------------------

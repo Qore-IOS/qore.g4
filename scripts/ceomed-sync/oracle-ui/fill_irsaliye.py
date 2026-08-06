@@ -1,35 +1,78 @@
-"""Ceomed "Çıkış İrsaliyesi" formunu doldurur ve e-irsaliyeyi gönderir.
+"""Ceomed "Çıkış İrsaliyesi" formunu doldurur (Oracle Forms 6i).
 
-stdin'den tek bir JSON okur, son satırda tek bir JSON sonuç basar:
+Node tarafı (`drivers/uiDriver.js`) işi stdin'e JSON olarak verir; bu betik son
+satıra tek satırlık JSON sonuç basar.
 
-    girdi : {"jobId": "...", "job": {"header": {...}, "rows": [...], "aciklama": "..."}}
-    çıktı : {"ok": true,  "ceomedIrsaliyeNo": "SI007787", "screenshotPath": "..."}
-            {"ok": false, "error": "...", "retryable": false}
+TASARIM — neden alan sırası sabit varsayılmıyor:
 
-TASARIM İLKESİ — "YAZ, SONRA GERİ OKU". Ekran otomasyonunda bir tuş vuruşunun
-hedefine ulaştığını varsaymak, muhasebeye yanlış kayıt göndermenin en kısa
-yoludur. Bu betik yazdığı HER alanı geri okur; bir tanesi bile uyuşmazsa
-E-İRSALİYE GÖNDER'e BASMADAN çıkar. Yarım kalmış form, yanlış gönderilmiş
-irsaliyeden ucuzdur: ilki elle düzeltilir, ikincisi düzeltilemez.
+Formun görünen alanları Windows kontrolü değil, tuvale çizilmiş; `child_window()`
+ile bulunamıyorlar. Elimizde ölçülmüş TAB/ENTER sırası var ama ona körlemesine
+güvenmek tehlikeli: form sürümü değişir, bir alan eklenir, koşullu bir alan
+atlanırsa sürücü yanlış alana yazar ve bunu fark etmez. Muhasebeye yanlış kayıt
+gider.
 
-`retryable` sözleşmesi:
-  true  → forma HİÇ dokunulmadı ya da gönderim öncesi güvenle iptal edildi.
-  false → gönderim denendi veya durum belirsiz. Otomatik tekrar YASAK; insan baksın.
+Bunun yerine sürücü her adımda **odağın nerede olduğunu okur** ve konumdan hangi
+alanda olduğunu tanır. Tanımadığı alanı atlar, tanıdığına yazar, beklediği yere
+varamazsa durur. Ölçülen konumlar pencereye GÖRE tutulur; pencere taşınsa da
+geçerli kalır.
+
+GÜVENLİK:
+  * Varsayılan KURU çalışma: form doldurulur, doğrulanır, ekran görüntüsü alınır
+    ama E-İRSALİYE GÖNDER'e BASILMAZ. Gerçek gönderim `--gercek` ister.
+  * Her alan yazıldıktan sonra GERİ OKUNUR; uyuşmazlıkta gönderim yapılmaz.
+  * Odak ilerlemediyse değer reddedilmiştir (Forms `WHEN-VALIDATE-ITEM`); iş
+    durur. Bu, hatanın modal pencere açmadığı durumlarda da çalışır.
+  * `ui60.tehlikeli_odak_kontrol()` her tuştan önce çalışır.
 """
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 import os
 import sys
 import time
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import ui60  # noqa: E402
 
-# --- Sonuç yardımcıları -------------------------------------------------------
+
+# Ölçülmüş alan konumları — pencerenin sol üst köşesine GÖRE (ham ekran
+# koordinatı değil: pencere taşınınca bozulmasın). Tutanak: ORACLE-IRSALIYE.md
+ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
+    # Başlık
+    "irsaliyeNo":      (123, 113),
+    "tarih":           (246, 113),
+    "fiiliSevkTarihi": (444, 110),
+    "cariKodu":        (123, 132),
+    "sevkAdresi":      (123, 174),
+    "islemTipi":       (855, 149),
+    "depo":            (855, 169),
+    "teslimEden":      (855, 189),
+    "teslimAlan":      (855, 209),
+    "anlasmaNo":       (855, 229),
+    # Grid ilk satır (y sabit; sonraki satırlarda y artar, eşleştirme x'e bakar)
+    "stokKodu":        (14, 297),
+    "lot":             (575, 297),
+    "miat":            (649, 297),
+    "kt":              (725, 297),
+    "miktar":          (760, 297),
+}
+
+KONUM_TOLERANS = 18
+
+# Bu alanlardan çıkışta Forms bir LOV (arama) penceresi açar. Filtre alanı
+# yazdığımız değer + '%' olarak kendiliğinden dolar; ENTER seçili satırı kabul
+# eder. Liste çizilmiş olduğu için OKUNAMAZ — pencere kapandıktan sonra alanı
+# geri okumak tek güvencedir.
+LOV_ALANLARI = {"cariKodu", "depo", "stokKodu"}
+
+# Grid satırındaki sütunlar, ENTER ile gezilen sırada.
+GRID_SIRASI = ["stokKodu", "lot", "miat", "kt", "miktar"]
+
+MAX_ADIM = 60  # sonsuz döngü koruması
+
 
 def emit(payload: dict) -> int:
-    """Sonucu son satıra tek satırlık JSON olarak basar."""
     print(json.dumps(payload, ensure_ascii=False))
     sys.stdout.flush()
     return 0 if payload.get("ok") else 1
@@ -42,150 +85,153 @@ def fail(error: str, retryable: bool, screenshot: str | None = None) -> int:
     return emit(payload)
 
 
-# --- Kontrol çözümleme --------------------------------------------------------
+def alan_adi(pencere_ici: tuple[int, int], grid_modu: bool = False) -> str | None:
+    """Konumdan alan adını çözer; tanınmayan konumda None.
 
-def resolve(parent, spec: dict, label: str):
-    """controls.json'daki bir alan tarifini gerçek kontrole çevirir.
-
-    Sıra: automation_id → title → class_name+index. İlk ikisi uygulama
-    güncellemesine dayanıklıdır; üçüncüsü değildir, o yüzden en sona konur.
+    Grid modunda yalnızca x karşılaştırılır: aynı sütun sonraki satırda farklı
+    y'de olur.
     """
-    auto_id = (spec.get("automation_id") or "").strip()
-    title = (spec.get("title") or "").strip()
-    class_name = (spec.get("class_name") or "").strip()
-    index = spec.get("index")
+    px, py = pencere_ici
+    for ad, (bx, by) in ALAN_KONUMLARI.items():
+        if grid_modu and ad in GRID_SIRASI:
+            if abs(px - bx) <= KONUM_TOLERANS:
+                return ad
+        elif abs(px - bx) <= KONUM_TOLERANS and abs(py - by) <= KONUM_TOLERANS:
+            return ad
+    return None
 
-    if auto_id:
-        return parent.child_window(auto_id=auto_id).wrapper_object()
-    if title:
-        return parent.child_window(title=title).wrapper_object()
-    if class_name and index is not None:
-        return parent.child_window(class_name=class_name, found_index=int(index)).wrapper_object()
 
-    raise LookupError(
-        f"'{label}' için controls.json'da tutamak yok "
-        "(automation_id / title / class_name+index alanlarından biri dolu olmalı)."
+class Durdu(RuntimeError):
+    """Sürücü güvenli biçimde durdu; gönderim yapılmayacak."""
+
+    def __init__(self, mesaj: str, retryable: bool = False):
+        super().__init__(mesaj)
+        self.retryable = retryable
+
+
+def ilerle(etiket: str) -> None:
+    """ENTER'la bir sonraki alana geçer ve gerçekten geçtiğini doğrular."""
+    kimlik = ui60.odak_kimligi()
+    ui60.tus("ENTER", bekle_ms=350)
+    if not ui60.odak_ilerledi_mi(kimlik):
+        raise Durdu(
+            f"{etiket} alanından çıkılamadı — uygulama değeri reddetti. "
+            "Formun alt mesaj satırında bir hata olabilir (ör. WHEN-VALIDATE-ITEM). "
+            "Ekran görüntüsüne bakın."
+        )
+
+
+def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
+    """LOV açan bir alana yazar: yaz → ENTER → pencere → kabul → GERİ OKU.
+
+    Liste okunamadığı için hangi satırın seçildiğini göremiyoruz; tek güvence
+    pencere kapandıktan sonra alandaki değeri okumak. Beklediğimiz değilse
+    gönderime geçilmez.
+    """
+    ui60.alan_yaz(deger, ad)
+    log.append(f"{ad}: {deger!r} yazıldı")
+
+    ui60.tus("ENTER", bekle_ms=600)
+
+    bitis = time.time() + 6
+    while time.time() < bitis and not ui60.lov_acik_mi(ana_pencere):
+        time.sleep(0.15)
+
+    if ui60.lov_acik_mi(ana_pencere):
+        if ui60.uyari_penceresi_mi(ana_pencere):
+            raise Durdu(
+                f"{ad}: arama penceresi yerine uyarı penceresi açıldı "
+                f"({deger!r} kabul edilmemiş olabilir)."
+            )
+        ui60.lov_kabul_et(ana_pencere)
+        log.append(f"{ad}: arama penceresi onaylandı")
+        time.sleep(0.4)
+
+    okunan = ui60.odak()["deger"]
+    if okunan != deger:
+        raise Durdu(
+            f"{ad}: arama penceresinden {okunan!r} seçildi, beklenen {deger!r}. "
+            "Liste okunamadığı için seçim körlemesine yapılıyor; uyuşmazlıkta "
+            "gönderim yapılmaz."
+        )
+    log.append(f"{ad}: geri okundu, {okunan!r} doğrulandı")
+
+
+def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) -> None:
+    """Başlık alanlarını konumdan tanıyarak doldurur, grid'e varınca durur."""
+    for _ in range(MAX_ADIM):
+        o = ui60.odak()
+        ad = alan_adi(o["pencere_ici"])
+
+        if ad == "stokKodu":
+            return  # grid'e ulaşıldı
+
+        if ad and degerler.get(ad):
+            if ad in LOV_ALANLARI:
+                lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
+            else:
+                ui60.alan_yaz(degerler[ad], ad)
+                log.append(f"{ad}: {degerler[ad]!r} yazıldı ve geri okundu")
+        elif ad:
+            log.append(f"{ad}: dokunulmadı")
+        else:
+            log.append(f"tanınmayan alan {o['pencere_ici']} — atlandı")
+
+        ilerle(ad or f"konum {o['pencere_ici']}")
+
+    raise Durdu(
+        f"{MAX_ADIM} adımda grid'e ulaşılamadı. Form beklenenden farklı; "
+        "sessizce yanlış alana yazmamak için durduruldu."
     )
 
 
-def read_text(ctrl) -> str:
-    try:
-        return (ctrl.window_text() or "").strip()
-    except Exception:
-        return ""
+def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
+    """Bir grid satırını doldurur: Stok Kodu → LOT → Miat → KT → Miktar."""
+    hedefler = {
+        "stokKodu": str(satir.get("stokKodu") or ""),
+        "lot": str(satir.get("lot") or ""),
+        "miat": str(satir.get("miad") or ""),
+        "kt": "",  # dokunulmuyor
+        "miktar": str(satir.get("miktar") or ""),
+    }
 
+    for beklenen_sutun in GRID_SIRASI:
+        o = ui60.odak()
+        ad = alan_adi(o["pencere_ici"], grid_modu=True)
+        if ad != beklenen_sutun:
+            raise Durdu(
+                f"Grid'de {beklenen_sutun} bekleniyordu, odak {ad or o['pencere_ici']} "
+                "konumunda. Sütun sırası beklenenden farklı; durduruldu."
+            )
 
-def type_and_verify(ctrl, value: str, label: str, settle_ms: int) -> None:
-    """Alanı temizler, yazar, bekler ve geri okuyup doğrular."""
-    ctrl.set_focus()
-    try:
-        ctrl.set_edit_text("")
-        ctrl.set_edit_text(value)
-    except Exception:
-        # set_edit_text her kontrolde yok (maskeli alanlar, grid hücreleri).
-        # Tuş vuruşuna düş: Ctrl+A ile seç, üstüne yaz.
-        ctrl.type_keys("^a{DEL}", set_foreground=True)
-        ctrl.type_keys(value, with_spaces=True, set_foreground=True)
+        deger = hedefler[beklenen_sutun]
+        if deger:
+            if beklenen_sutun in LOV_ALANLARI:
+                lov_ile_yaz(beklenen_sutun, deger, ana_pencere, log)
+            else:
+                ui60.alan_yaz(deger, beklenen_sutun)
+                log.append(f"{beklenen_sutun}: {deger!r} yazıldı ve geri okundu")
+        else:
+            log.append(f"{beklenen_sutun}: boş bırakıldı")
 
-    time.sleep(settle_ms / 1000.0)
+        if beklenen_sutun != GRID_SIRASI[-1]:
+            ilerle(beklenen_sutun)
 
-    okunan = read_text(ctrl)
-    if okunan.replace(" ", "") != value.replace(" ", ""):
-        raise ValueError(
-            f"'{label}' alanı doğrulanamadı: yazılan {value!r}, okunan {okunan!r}. "
-            "Form yarım bırakıldı, e-irsaliye GÖNDERİLMEDİ."
-        )
-
-
-def screenshot(window, directory: str, job_id: str, suffix: str) -> str | None:
-    try:
-        os.makedirs(directory, exist_ok=True)
-        stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = os.path.join(directory, f"{stamp}_{job_id}_{suffix}.png")
-        window.capture_as_image().save(path)
-        return path
-    except Exception:
-        # Ekran görüntüsü alınamaması işi durdurmaz — kanıt kaybı, veri hatası değil.
-        return None
-
-
-# --- Grid doldurma ------------------------------------------------------------
-
-def fill_grid(window, grid_spec: dict, rows: list, timing: dict) -> None:
-    """Ürün satırlarını grid'e girer.
-
-    Grid otomasyonu formun en kırılgan yeridir: Delphi TDBGrid hücreleri ayrı
-    kontroller değildir, klavye ile dolaşılır. Bu yüzden hücreden hücreye Tab,
-    satır sonunda Enter kullanılır ve stok kodundan sonra ürün adının GELMESİ
-    beklenir (uygulama sunucudan çekiyorsa gecikme olur).
-    """
-    grid = resolve(window, grid_spec, "grid")
-    columns = grid_spec.get("columns") or {}
-    settle_ms = int(timing.get("field_settle_ms", 120))
-    lookup_ms = int(timing.get("lookup_timeout_ms", 5000))
-
-    grid.set_focus()
-
-    for i, row in enumerate(rows):
-        # Sütun sırasına göre yaz: stok kodu → (ürün adı otomatik) → lot → miad → miktar
-        sirali = sorted(
-            (idx, ad) for ad, idx in columns.items() if ad != "stokAdi"
-        )
-
-        onceki_kolon = 0
-        for kolon_idx, alan in sirali:
-            atlanacak = kolon_idx - onceki_kolon
-            if atlanacak > 0:
-                grid.type_keys("{TAB}" * atlanacak, set_foreground=True)
-            onceki_kolon = kolon_idx
-
-            deger = str(row.get(alan, "") or "")
-            if alan == "miktar":
-                deger = str(row.get("miktar") or 1)
-
-            if deger:
-                grid.type_keys("^a{DEL}", set_foreground=True)
-                grid.type_keys(deger, with_spaces=True, set_foreground=True)
-                time.sleep(settle_ms / 1000.0)
-
-            if alan == "stokKodu":
-                # Ürün adının dolmasını bekle: dolmuyorsa stok kodu tanınmamıştır
-                # ve satır boş ürünle kaydedilir. Bu sessiz hatayı burada yakala.
-                _bekle_urun_adi(grid, deger, lookup_ms)
-
-        grid.type_keys("{ENTER}", set_foreground=True)
-        time.sleep(settle_ms / 1000.0)
-
-        if i < len(rows) - 1:
-            # Yeni satıra in. Uygulama Enter ile otomatik yeni satır açmıyorsa
-            # aşağı ok gerekir; ikisi de zararsızdır.
-            grid.type_keys("{DOWN}", set_foreground=True)
-            grid.type_keys("{HOME}", set_foreground=True)
-
-
-def _bekle_urun_adi(grid, stok_kodu: str, timeout_ms: int) -> None:
-    """Stok kodundan sonra ürün adının gelmesini bekler.
-
-    Ürün adı gelmiyorsa stok kodu Ceomed'de tanımlı değil demektir. Bunu
-    yutup devam etmek, muhasebeye ürünsüz satır göndermektir.
-    """
-    son = time.time() + timeout_ms / 1000.0
-    while time.time() < son:
-        metin = read_text(grid)
-        if stok_kodu and stok_kodu in metin:
-            return
-        time.sleep(0.1)
-    # Grid metnini güvenilir okuyamadığımız durumlar var; bu yüzden hata değil
-    # uyarı: nihai doğrulama gönderim öncesi ekran görüntüsüyle yapılır.
-    print(f"UYARI: '{stok_kodu}' için ürün adı doğrulanamadı.", file=sys.stderr)
-
-
-# --- Ana akış -----------------------------------------------------------------
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--controls", required=True)
+    parser.add_argument("--controls", required=False,
+                        help="Geriye dönük uyumluluk; konumlar artık kodda ölçülmüş.")
+    parser.add_argument("--gercek", action="store_true",
+                        help="E-İRSALİYE GÖNDER'e bas. Verilmezse form doldurulur "
+                             "ve doğrulanır ama GÖNDERİLMEZ.")
+    parser.add_argument("--pencere", default="CEOMED")
+    parser.add_argument("--goruntu-dizini", default=os.environ.get(
+        "ORACLE_SCREENSHOT_DIR", os.path.join(os.path.dirname(__file__), "goruntuler")))
     args = parser.parse_args()
+
+    if not sys.platform.startswith("win"):
+        return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
 
     try:
         payload = json.load(sys.stdin)
@@ -196,161 +242,101 @@ def main() -> int:
     job_id = str(payload.get("jobId") or "job")
     header = job.get("header") or {}
     rows = job.get("rows") or []
-    aciklama = job.get("aciklama") or ""
 
     if not rows:
         return fail("İşte yazılacak satır yok.", retryable=False)
 
-    try:
-        with open(args.controls, encoding="utf-8") as fh:
-            controls = json.load(fh)
-    except Exception as exc:
-        return fail(f"controls.json okunamadı: {exc}", retryable=True)
-
-    try:
-        from pywinauto import Application, Desktop
-    except ImportError:
-        return fail("pywinauto kurulu değil (pip install pywinauto).", retryable=True)
-
-    backend = controls.get("backend", "win32")
-    title_contains = ((controls.get("window") or {}).get("title_contains") or "").strip()
-    if not title_contains:
-        return fail("controls.json → window.title_contains boş.", retryable=True)
-
-    # --- Pencereyi bul ---
-    try:
-        eslesenler = [
-            w for w in Desktop(backend=backend).windows()
-            if title_contains.lower() in (w.window_text() or "").lower()
-        ]
-    except Exception as exc:
-        return fail(f"Masaüstü pencereleri okunamadı: {exc}", retryable=True)
-
-    if not eslesenler:
+    pencereler = ui60.pencere_bul(args.pencere)
+    if not pencereler:
         return fail(
-            f"'{title_contains}' başlıklı Ceomed penceresi açık değil. "
-            "Uygulamaya giriş yapıp irsaliye giriş formunu açın.",
+            f"'{args.pencere}' başlıklı Ceomed penceresi açık değil. "
+            "Uygulamaya giriş yapıp Çıkış İrsaliyesi formunu açın.",
             retryable=True,
         )
-    if len(eslesenler) > 1:
+    if len(pencereler) > 1:
         # Belirsizlik tahminle kapatılmaz: yanlış pencereye yazmak geri alınamaz.
-        basliklar = ", ".join(repr(w.window_text()) for w in eslesenler)
         return fail(
-            f"{len(eslesenler)} pencere '{title_contains}' ile eşleşti ({basliklar}). "
-            "controls.json → window.title_contains değerini daha ayırt edici yapın.",
+            f"{len(pencereler)} pencere '{args.pencere}' ile eşleşti. "
+            "Fazla Ceomed penceresini kapatın.",
             retryable=True,
         )
 
-    window = eslesenler[0]
-    timing = controls.get("timing") or {}
-    settle_ms = int(timing.get("field_settle_ms", 120))
-    shot_dir = controls.get("screenshot_dir") or "screenshots"
-    fields = controls.get("fields") or {}
+    ana = pencereler[0]
+    if not ui60.one_getir(ana):
+        return fail("Ceomed penceresi öne getirilemedi (oturum kilitli olabilir).",
+                    retryable=True)
+
+    log: list[str] = []
+    goruntu = None
 
     try:
-        window.set_focus()
-    except Exception as exc:
-        return fail(f"Pencere öne getirilemedi: {exc}", retryable=True)
-
-    # --- Başlık alanları: yaz + geri oku ---
-    yazilacak = [
-        ("irsaliyeNo", header.get("irsaliyeNo")),
-        ("cariKodu", header.get("cariKodu")),
-        ("tarih", header.get("tarih")),
-        ("islemTipi", header.get("islemTipi")),
-        ("depo", header.get("depo")),
-    ]
-    for ad, deger in yazilacak:
-        if not deger:
-            return fail(f"Zorunlu alan boş geldi: {ad}", retryable=False)
-        spec = fields.get(ad)
-        if not spec:
-            return fail(f"controls.json → fields.{ad} tanımlı değil.", retryable=True)
-        try:
-            ctrl = resolve(window, spec, ad)
-            type_and_verify(ctrl, str(deger), ad, settle_ms)
-        except Exception as exc:
-            shot = screenshot(window, shot_dir, job_id, "hata-baslik")
-            # Buraya kadar gönderim YAPILMADI; form yarım kaldı, güvenle iptal.
-            return fail(f"Başlık alanı yazılamadı ({ad}): {exc}", retryable=True, screenshot=shot)
-
-    # --- Grid satırları ---
-    try:
-        fill_grid(window, controls.get("grid") or {}, rows, timing)
-    except Exception as exc:
-        shot = screenshot(window, shot_dir, job_id, "hata-grid")
-        return fail(f"Ürün satırları girilemedi: {exc}", retryable=True, screenshot=shot)
-
-    # --- Açıklama (işlemi yapan personel) ---
-    if aciklama:
-        spec = fields.get("aciklama")
-        if not spec:
-            return fail("controls.json → fields.aciklama tanımlı değil.", retryable=True)
-        try:
-            ctrl = resolve(window, spec, "aciklama")
-            type_and_verify(ctrl, aciklama, "aciklama", settle_ms)
-        except Exception as exc:
-            shot = screenshot(window, shot_dir, job_id, "hata-aciklama")
-            return fail(f"Açıklama yazılamadı: {exc}", retryable=True, screenshot=shot)
-
-    # --- Gönderim öncesi kanıt ---
-    onceki_shot = screenshot(window, shot_dir, job_id, "gonderim-oncesi")
-
-    # --- E-İRSALİYE GÖNDER ---
-    submit_spec = controls.get("submit") or {}
-    buton_basligi = (submit_spec.get("button_title") or "").strip()
-    if not buton_basligi:
-        return fail("controls.json → submit.button_title boş.", retryable=True, screenshot=onceki_shot)
-
-    try:
-        buton = window.child_window(title=buton_basligi).wrapper_object()
-    except Exception as exc:
-        return fail(
-            f"'{buton_basligi}' butonu bulunamadı: {exc}. Form dolduruldu ama GÖNDERİLMEDİ.",
-            retryable=True,
-            screenshot=onceki_shot,
-        )
-
-    try:
-        buton.click_input()
-    except Exception as exc:
-        # Tıklama başarısız: gönderilip gönderilmediği BELİRSİZ. Otomatik tekrar yok.
-        return fail(
-            f"Gönder butonuna tıklanamadı: {exc}. Ceomed ekranını ELLE kontrol edin.",
-            retryable=False,
-            screenshot=onceki_shot,
-        )
-
-    # --- Onay penceresi ---
-    confirm = submit_spec.get("confirm_dialog") or {}
-    confirm_title = (confirm.get("title_contains") or "").strip()
-    if confirm_title:
-        try:
-            time.sleep(0.6)
-            dlg = Desktop(backend=backend).window(title_re=f".*{confirm_title}.*")
-            dlg.child_window(title=confirm.get("accept_button") or "Evet").click_input()
-        except Exception as exc:
-            return fail(
-                f"Onay penceresi kapatılamadı: {exc}. Gönderim durumu BELİRSİZ, elle kontrol edin.",
-                retryable=False,
-                screenshot=onceki_shot,
+        # Formun YENİ ve BOŞ olduğunu doğrula: odak İrsaliye No'da olmalı.
+        o = ui60.odak()
+        if alan_adi(o["pencere_ici"]) != "irsaliyeNo":
+            raise Durdu(
+                f"Form yeni/boş görünmüyor — odak {o['pencere_ici']} konumunda, "
+                "İrsaliye No bekleniyordu. Yarım kalmış bir forma yazmamak için "
+                "durduruldu.",
+                retryable=True,
             )
 
-    time.sleep(1.0)
-    sonraki_shot = screenshot(window, shot_dir, job_id, "gonderim-sonrasi")
+        degerler = {
+            "irsaliyeNo": str(header.get("irsaliyeNo") or ""),
+            "tarih": str(header.get("tarih") or ""),
+            "cariKodu": str(header.get("cariKodu") or ""),
+            "islemTipi": str(header.get("islemTipi") or ""),
+            "depo": str(header.get("depo") or ""),
+        }
+        baslik_doldur(degerler, ana, log)
 
-    # Uygulamanın ürettiği irsaliye numarasını geri oku (izlenebilirlik için).
-    ceomed_no = None
-    try:
-        ceomed_no = read_text(resolve(window, fields["irsaliyeNo"], "irsaliyeNo")) or None
-    except Exception:
-        pass
+        for i, satir in enumerate(rows, start=1):
+            log.append(f"--- satır {i}/{len(rows)} ---")
+            satir_doldur(satir, ana, log)
+            if i < len(rows):
+                ilerle(f"satır {i} sonu")
 
-    return emit({
-        "ok": True,
-        "ceomedIrsaliyeNo": ceomed_no,
-        "screenshotPath": sonraki_shot or onceki_shot,
-    })
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
+
+        if not args.gercek:
+            return emit({
+                "ok": True,
+                "kuru": True,
+                "screenshotPath": goruntu,
+                "log": log,
+                "not": "Form dolduruldu ve doğrulandı; E-İRSALİYE GÖNDER'e "
+                       "BASILMADI. Gerçek gönderim için --gercek gerekir.",
+            })
+
+        gonder = ui60.buton_bul(ana, "E-IRSALIYE GÖNDER")
+        if not gonder:
+            raise Durdu("E-İRSALİYE GÖNDER butonu bulunamadı.", retryable=True)
+
+        ui60.user32.SendMessageW(gonder, ui60.BM_CLICK, 0, 0)
+        time.sleep(2.0)
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-gonderildi")
+
+        return emit({
+            "ok": True,
+            "ceomedIrsaliyeNo": degerler["irsaliyeNo"],
+            "screenshotPath": goruntu,
+            "log": log,
+        })
+
+    except ui60.TehlikeliOdak as exc:
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-tehlikeli")
+        return fail(f"Güvenlik durdurması: {exc}", retryable=False, screenshot=goruntu)
+    except (Durdu, ui60.AlanReddedildi) as exc:
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-hata")
+        retryable = getattr(exc, "retryable", False)
+        return fail(str(exc), retryable=retryable, screenshot=goruntu)
+    except Exception as exc:  # beklenmedik: sonucu belirsiz, yeniden denenmez
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-beklenmedik")
+        return fail(
+            f"Beklenmedik hata: {exc}. Gönderilip gönderilmediği bilinmiyor, "
+            "körlemesine tekrar denenmeyecek.",
+            retryable=False,
+            screenshot=goruntu,
+        )
 
 
 if __name__ == "__main__":
