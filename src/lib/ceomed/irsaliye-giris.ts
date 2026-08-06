@@ -30,6 +30,8 @@ export const IRSALIYE_GIRIS_COLLECTION = 'ceomedIrsaliyeGirisJobs';
 export type IrsaliyeGirisStatus =
   | 'pending'     // kuyrukta, worker henüz almadı
   | 'processing'  // worker uygulamaya yazıyor
+  | 'awaiting_review' // Oracle formu dolduruldu; operatör inceliyor, kuyruk bekler
+  | 'previewed'   // göndermeden test edildi; operatör sıradaki işe izin verdi
   | 'sent'        // e-irsaliye gönderildi
   | 'failed'      // yazma denendi, hata aldı (yeniden denenebilir)
   | 'blocked';    // eksik/çelişkili veri — elle müdahale gerekir, DENENMEZ

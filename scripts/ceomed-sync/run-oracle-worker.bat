@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 > nul
 REM ============================================================================
 REM Qore -> Ceomed muhasebe irsaliyesi YAZMA worker'i (surekli acik)
 REM
@@ -6,10 +7,9 @@ REM watch.js Ceomed'den Qore'a OKUR; bu worker ters yonde YAZAR: bir teknik/
 REM aplikasyon formunda yedek parca kullanildiginda Ceomed masaustu
 REM uygulamasindaki Cikis Irsaliyesi formunu doldurup e-irsaliyeyi gonderir.
 REM
-REM ONEMLI - VARSAYILAN KURU CALISMADIR (ORACLE_DRY_RUN=1). Bu modda hicbir
-REM e-irsaliye gonderilmez; worker sadece ne yazacagini loga basar. Gercek
-REM gonderim icin .env dosyasina ORACLE_DRY_RUN=0 yazin. E-irsaliye gonderimi
-REM GERI ALINAMAZ - once kuru calismada loglari dogrulayin.
+REM ORACLE_FILL_ONLY=1: Oracle formunu gercekten doldurur ama GONDER'e basmaz;
+REM operator panelden testi tamamlayana kadar siradaki is kuyrukta bekler.
+REM ORACLE_DRY_RUN=1 ve FILL_ONLY=0: yalnizca plani loglar.
 REM
 REM Bu worker Ceomed masaustu uygulamasinin ACIK ve irsaliye formunun EKRANDA
 REM oldugu makinede calismalidir (UI surucusu kullaniliyorsa). Oturum kilitliyse
@@ -37,6 +37,7 @@ if not defined ENV_LOADED (
   echo   FIREBASE_PROJECT_ID=invpilot
   echo   CEOMED_COMPANY_ID=your-company-id
   echo   ORACLE_DRY_RUN=1
+  echo   ORACLE_FILL_ONLY=1
   echo   ORACLE_DRIVER=ui
   exit /b 1
 )
@@ -55,7 +56,7 @@ if not defined CEOMED_COMPANY_ID (
 )
 
 :loop
-echo [%date% %time%] oracle worker basliyor (DRY_RUN=%ORACLE_DRY_RUN%) >> oracle-worker.log
+echo [%date% %time%] oracle worker basliyor (BUILD=fill-only-v2-no-controls, DRY_RUN=%ORACLE_DRY_RUN%, FILL_ONLY=%ORACLE_FILL_ONLY%) >> oracle-worker.log
 node oracleIrsaliyeWorker.js >> oracle-worker.log 2>&1
 echo [%date% %time%] oracle worker durdu (exit %ERRORLEVEL%), 15 sn sonra yeniden baslatiliyor >> oracle-worker.log
 timeout /t 15 /nobreak > nul
