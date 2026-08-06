@@ -171,6 +171,20 @@ ORACLE_STALE_CLAIM_MIN=15 # takılı kalan işi kaç dk sonra kurtar
 ORACLE_PYTHON=python      # UI sürücüsü için Python yorumlayıcısı
 ```
 
+### "2 pencere 'CEOMED' ile eşleşti"
+
+Sahada çıktı: sürücü Ceomed penceresini yalnızca **başlıkla** arıyordu ve
+worker'ın kendi konsol penceresi de eşleşiyordu — başlığı
+`...\scripts\ceomed-sync\run-oracle-worker.bat` olduğu için içinde "ceomed"
+geçiyor.
+
+Düzeltme: pencere araması artık **sınıf** filtresi de kullanıyor. Ceomed ana
+penceresinin sınıfı `ui60MDIroot_W32` (Oracle Forms MDI kökü); konsol
+penceresininki `ConsoleWindowClass`. Sınıf kesin ayırt eder.
+
+Hata gerçekten iki Ceomed örneği açıkken çıkarsa mesaj artık **eşleşen pencere
+başlıklarını da yazıyor**, hangisinin fazla olduğu görünüyor.
+
 ### PERMISSION_DENIED — Firestore bağlantı tanısı
 
 Worker `7 PERMISSION_DENIED: Permission denied on resource project "..."` ile
