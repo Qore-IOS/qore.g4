@@ -254,6 +254,45 @@ Kayıtlar `test: true` ile işaretlenir. Betik yazmadan önce doğrular:
   ve geri okuma bunu yakalayamıyor, o yüzden baştan engelleniyor.
 * Miktarın pozitif olması.
 
+### "Beklenmedik hata: 'mdi_ici'" — odak sözlüğünün iki şekli
+
+Sahada işler kalıcı olarak `ELLE MÜDAHALE GEREKİR` damgası yedi:
+
+```
+[hata] TT150307 → M51009: Beklenmedik hata: 'mdi_ici'. Gönderilip
+gönderilmediği bilinmiyor, körlemesine tekrar denenmeyecek.
+```
+
+Sebep bir Python `KeyError`'dı. `ui60.odak()` iki farklı sözlük döndürüyordu:
+odak varken tam sözlük, odak yokken (başka pencere öne geldiğinde) `mdi_ici`
+anahtarı OLMAYAN kısa bir sözlük. Her çağıran `o["mdi_ici"]` dediği için
+`KeyError` atıyor, genel `except` onu "Beklenmedik hata" sayıp
+`retryable=False` yapıyordu.
+
+Sonuç ikinci bir hataydı: **geçici bir odak kaybı kalıcı bir başarısızlığa
+dönüşüyordu.** `retryable=False` gerekçesi "gönderilip gönderilmediği
+bilinmiyor" — ama burada hiçbir tuş gönderilmemişti.
+
+Düzeltme yapısal: `ODAK_BOS` sözlüğü tam şekli tanımlar, iki dönüş yolu da onu
+kullanır (`dict(ODAK_BOS)` ve `{**ODAK_BOS, ...}`). Anahtarların bir daha
+ayrışması mümkün değil.
+
+Ayrıca odak kaybı artık kendi mesajını veriyor:
+
+> Ceomed penceresi odağı kaybetti (başka bir pencere öne gelmiş ya da oturum
+> kilitli olabilir).
+
+### "Başlangıç odağı tanınmıyor" — mesaj artık teşhis ediyor
+
+Eski mesaj yalnızca konumu yazıyordu: `(mdi (305, 170), pencere (305, 170))`.
+Bu çıkmaz sokak — (305,170)'te NE olduğunu söylemiyor.
+
+Mesaj artık kontrolün sınıfını, değerini ve MDI belge başlığını da veriyor.
+Böylece "yanlış formdayız" ile "alan konum tablosu bu kurulumda kaymış" ayrımı
+tek bakışta yapılabiliyor; ikincisi için `--tani` moduna yönlendiriyor.
+
+Aynı zenginleştirme `MAX_ADIM geri adımda ulaşılamadı` mesajına da uygulandı.
+
 ### "Oracle ekranında incelenen bir form var" — kuyruk kapısı
 
 `ORACLE_FILL_ONLY=1` modunda worker bir formu doldurduktan sonra işi
