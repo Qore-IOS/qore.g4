@@ -614,6 +614,42 @@ beklenen alana varılamazsa iş durur — körlemesine kabul edilmez.
 
 `ui60.tus()` artık `SHIFTTAB` destekliyor.
 
+### Prova 2 — zincir baştan sona çalıştı
+
+SHIFT+TAB düzeltmesiyle sürücü başlıktan grid satırına kadar gitti:
+
+```
+İrsaliye No : BT10042                              ✓
+Cari Kodu   : M51009 → SANCAKTEPE ŞEHİT PROF. …    ✓
+İşlem Tipi  : 35 YEDEK PARÇA                       ✓
+Depo        : 10 OFİS YEDEK PARÇA                  ✓
+Grid        : 03753379001 PİNCH TUBE E 170 (4 PCS) ✓
+```
+
+Konumdan alan tanıma, LOV açma/kabul/geri okuma ve grid satırı yazma zincirinin
+tamamı gerçek formda doğrulandı.
+
+### ⚠ Türkçe karakter kaybı — geri okuma bunu YAKALAYAMAZ
+
+İlk denemede stok kodu `ALK-BİO-E-CI` verildi; grid'de `ALK-B?O-E-CI` göründü ve
+stok kartı bulunamadı.
+
+Önemli ayrım: **tuş gönderimi doğru çalışıyor.** Prob turlarında aynı metin
+alana yazılıp `Edit`'ten `ALK-BİO-E-CI` olarak geri okunabilmişti. Kayıp, Forms
+değeri veritabanına yazarken oluşuyor — Oracle karakter kümesi `İ` harfini
+taşımıyor.
+
+Bunun sonucu: **yaz-sonra-geri-oku güvencesi bu hata sınıfını kapsamıyor.**
+Alandaki değer doğru görünürken commit anında bozuluyor. Bu yüzden sürücü ASCII
+dışı karakter içeren stok kodunu **denemeden durduruyor**; stok kodu Ceomed'deki
+gerçek yazımıyla girilmelidir.
+
+### Hata çıktısına `log` eklendi
+
+Bir kuru çalışma tıkandığında "nerede durdu" sorusunun cevabı adım geçmişinde;
+ekran görüntüsü tek başına yetmiyor. `fail()` artık `log`'u her zaman döndürüyor
+ve grid satırında hangi sütunun beklendiği de loga yazılıyor.
+
 ### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
 
 Muhasebe kararı: Qore form numarası İrsaliye No alanında görünecek. Ancak Qore'un
