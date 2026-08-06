@@ -103,55 +103,93 @@ alınamaz, kuru çalışma da tek provadır.
 
 ---
 
-## API keşfi (önce bu — tercih edilen yol)
+## API keşfi — YAPILDI (2026-08-06), sonuç: web API'si bu işi yapamıyor
 
-Ekran otomasyonu çalışır ama kırılgandır: uygulama sürümü, pencere boyutu,
-sekme sırası ya da beklenmedik bir uyarı penceresi bozar. Masaüstü uygulaması
-verisini bir yere yazıyor; o yolu bulursak yazma işi düz bir çağrıya döner.
+Bu bölüm bir "yapılacaklar" listesi değil, **tamamlanmış bir ölçümün tutanağıdır**.
+Aynı araştırmayı tekrar yapmayın; yeni bilgi çıkarsa buraya işleyin.
 
-Okuma tarafındaki Ceomed **web** arayüzü `http://192.168.1.5:8081` üzerinde bir
-HTTP API sunuyor (`/login/doLogin`, `/api/sevk/selectIrsaliyeMaster`). Masaüstü
-uygulaması ya aynı servise ya doğrudan Oracle'a bağlanıyor. Hangisi olduğunu
-**ölçerek** bulun:
+### Ölçüm 1 — Masaüstü uygulaması nereye bağlanıyor?
 
-### Adım 1 — Uygulama nereye bağlanıyor?
-
-Ceomed masaüstü uygulaması açıkken, yönetici PowerShell'de:
+Ceomed masaüstü uygulaması açık ve irsaliye formu ekrandayken:
 
 ```powershell
-# Uygulamanın process id'sini bul
-Get-Process | Where-Object { $_.MainWindowTitle -like "*CEOMED*" } | Select-Object Id, ProcessName, MainWindowTitle
-
-# O process'in açık bağlantıları
+Get-Process | Where-Object { $_.MainWindowTitle -like "*CEOMED*" } |
+  Select-Object Id, ProcessName, MainWindowTitle
 Get-NetTCPConnection -OwningProcess <PID> | Select-Object RemoteAddress, RemotePort, State
 ```
 
-Sonucu yorumlayın:
+**Sonuç:**
 
-- **Port 1521 / 1522** → doğrudan Oracle. HTTP API yok; UI sürücüsüyle devam.
-  (Oracle'a doğrudan yazmak teknik olarak mümkündür ama uygulamanın iş
-  kurallarını — e-irsaliye gönderimi, stok düşümü, numara üretimi — atlar.
-  Muhasebe tutarsızlığı riski yüksektir; bu yol bilinçli olarak seçilmedi.)
-- **Port 8081 veya başka bir HTTP portu** → servis katmanı var, Adım 2'ye geçin.
+```
+Process : ifrun60          (Informix 4GL çalışma zamanı)
+Bağlantı: 192.168.1.5:1521  Established
+```
 
-### Adım 2 — HTTP ise isteği yakala
+Tek canlı bağlantı **1521** — Oracle TNS listener. Araya HTTP servisi yok, yani
+masaüstü uygulamasının isteğini yakalayıp taklit etmek mümkün değil.
 
-Uygulama HTTP konuşuyorsa, bir irsaliyeyi **elle** girip gönderirken trafiği
-kaydedin (Fiddler Classic ya da Wireshark). Aranan: `POST` isteği, gövdesinde
-irsaliye no / cari kodu / stok kodu geçen.
+Not: `192.168.1.5`, okuma tarafında kullandığımız web Ceomed'in (`:8081`) de
+sunucusudur. Aynı makine, farklı iki istemci.
 
-Kaydedilmesi gerekenler:
+### Ölçüm 2 — Web API'sinin tam yüzeyi
 
-- İstek yolu (ör. `/api/sevk/insertIrsaliye`)
-- Gövde biçimi (form-urlencoded mi JSON mu) ve **tam alan adları**
-- Kimlik doğrulama başlığı (okuma tarafı `X-Access-Token` kullanıyor)
-- Başarılı yanıtın gövdesi (üretilen irsaliye numarası nerede dönüyor)
-- E-irsaliye gönderiminin ayrı bir çağrı mı olduğu
+Web arayüzü AngularJS; `appConfig.apiRootUrl="api"` ve tüm uç noktalar
+`build/app.js` içinde `a.api("POST"|"GET", "/modul/metod", {params})` biçiminde
+tanımlı. Tam katalog:
 
-Bunlar elde edildiğinde `drivers/apiDriver.js` doldurulur ve
-`ORACLE_DRIVER=api` ile devreye alınır. Dosya şu an **bilerek boş**: uç noktayı
-tahmin ederek yazmak, kuru çalışmada doğru görünüp gerçek modda muhasebeye
-bozuk kayıt göndermek demektir.
+```powershell
+$js = (Invoke-WebRequest -Uri "http://192.168.1.5:8081/build/app.js?v=1.30" -UseBasicParsing).Content
+$pattern = '_\.[A-Z_0-9]+=function\([^)]*\)\{var\s+\w+=\{[^{}]*\};return a\.api\("(?:GET|POST)","[^"]+"'
+[regex]::Matches($js, $pattern) | ForEach-Object { $_.Value } | Out-File -Encoding utf8 katalog.txt
+```
+
+**187 uç nokta bulundu. Hiçbiri çıkış irsaliyesi oluşturmuyor.**
+
+En yakın üç aday ve neden yetmedikleri:
+
+| Uç nokta | Parametreleri | Neden olmuyor |
+|---|---|---|
+| `/dogrulama/insertIrsaliye` | `IRSALIYE_NO, DEPO_KODU` | Cari kodu yok. **Var olan** bir irsaliyeyi doğrulamaya başlatır |
+| `/irsaliye/insertIrsaliyeImportMaster` | `CARI_KODU, REFERANS_NO, EVRAK_TIPI, ACIKLAMA, ID_DEPO` | Tarih ve işlem tipi yok; `EVRAK_TIPI` yalnızca `IMPORT`/`SAYIM` — giriş/sayım belgesi |
+| `/sevk/insertDepoTransferEvrak` | `CARI_KODU, KAYNAK_DEPO, HEDEF_DEPO, P_EVRAK_TARIHI, P_ISLEM_TIPI` | Yapı olarak en yakını (belge aç → satır ekle → onayla üçlüsü, işlem tipi bile var) ama **depolar arası transfer**, müşteriye çıkış değil |
+
+Adı en umut verici olan `/sevk/insertIrsaliyeMaster` yanıltıcıdır:
+
+```js
+_.INSERT_IRSALIYE_MASTER = function(e){
+  var r = { IRSALIYE_NO: e };                       // TEK parametre
+  return a.api("POST", "/sevk/insertIrsaliyeMaster", r, !1).data
+}
+```
+
+Belge oluşturmaz; mevcut bir sevk kaydına irsaliye numarası işler. **Uç nokta
+adına bakıp `apiDriver.js`'i doldursaydık, muhasebeye çöp gönderirdik.**
+
+### Belirleyici eksik: e-irsaliye gönderimi
+
+Katalogda e-irsaliye/e-fatura gönderen **tek bir uç nokta yok**. `kurumSevkGonder`
+mevcut bir `ID_SEVK_MASTER` üzerinde çalışır, yeni belge göndermez.
+
+Bu tek başına meseleyi kapatır: belge bir şekilde oluşturulabilse bile akışın son
+adımı — **E-İRSALİYE GÖNDER** — web tarafından tetiklenemez. O adım yasal olarak
+anlamlıdır, atlanamaz.
+
+API'nin genel şekli de bunu doğrular: bu bir depo/barkod operasyon API'sidir.
+Belgeler masaüstü uygulamasında (doğrudan Oracle'da) açılır; web yalnızca barkod
+okutup onaylar.
+
+### Buradan sonrası — iki seçenek
+
+1. **Ceomed Yazılım'a sorun (önerilen).** Sorulacak şey nettir: "Çıkış irsaliyesi
+   oluşturup e-irsaliye gönderen bir uç noktanız var mı?" Web arayüzünün
+   kullanmadığı uç noktalar sunucuda duruyor olabilir — katalogda görünmemesi yok
+   demek değildir. Cevap gelirse `drivers/apiDriver.js` doldurulur ve iş biter.
+2. **UI sürücüsü.** Aşağıdaki bölüm. Önce `inspect_form.py` ile `ifrun60`'ın
+   gerçek Windows kontrolü kullanıp kullanmadığı ölçülmelidir — 4GL çalışma
+   zamanları formu tek bir çizim yüzeyi olarak da render edebilir, o durumda
+   alan bazlı otomasyon çalışmaz ve koordinat bazlı yola geçilir.
+
+`drivers/apiDriver.js` bu ölçümden sonra da **bilerek boş** bırakılmıştır.
 
 ---
 

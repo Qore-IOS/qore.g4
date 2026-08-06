@@ -1,16 +1,27 @@
 /**
- * API sürücüsü — TERCİH EDİLEN yol, henüz TAMAMLANMADI.
+ * API sürücüsü — TERCİH EDİLEN yol, ama keşif sonucu HENÜZ KULLANILAMAZ.
  *
- * Ceomed masaüstü uygulaması verisini bir yere yazıyor: ya okuma tarafındaki gibi
- * bir HTTP servisine (`fetchIrsaliyeMaster.js`'in kullandığı 8081 portu gibi) ya
- * da doğrudan Oracle'a. İlkiyse yazma işi tuş vuruşu taklidi değil, düz bir HTTP
- * çağrısı olur: uygulama sürümünden, pencere boyutundan, açılan uyarılardan
- * bağımsız — yani UI sürücüsünün bütün kırılganlığı ortadan kalkar.
+ * BU DOSYA BİLEREK BOŞ ve bu, eksik iş değil ölçülmüş bir sonuçtur.
  *
- * BU DOSYA BİLEREK BOŞ. Uç noktayı tahmin ederek yazmak, kuru çalışmada "çalışıyor"
- * görünüp gerçek modda muhasebeye bozuk kayıt göndermek demektir. Keşif adımları
- * `ORACLE-IRSALIYE.md` içindeki "API keşfi" bölümündedir; sonuçlar geldiğinde
- * `submit()` doldurulacak ve ORACLE_DRIVER=api ile devreye alınacaktır.
+ * 2026-08-06 keşfi (tutanak: `ORACLE-IRSALIYE.md` → "API keşfi") şunu buldu:
+ *
+ *   1. Masaüstü uygulaması (`ifrun60`, Informix 4GL çalışma zamanı) doğrudan
+ *      Oracle'a bağlanıyor — 192.168.1.5:1521. Araya HTTP servisi yok, yani
+ *      isteğini yakalayıp taklit etmek mümkün değil.
+ *   2. Aynı sunucudaki web Ceomed'in (:8081) TÜM API yüzeyi çıkarıldı: 187 uç
+ *      nokta. Hiçbiri cari kodu + tarih + işlem tipi + depo alıp serbest ürün
+ *      satırlarıyla çıkış irsaliyesi oluşturmuyor.
+ *   3. Katalogda e-irsaliye gönderen tek bir uç nokta yok. Belge oluşturulabilse
+ *      bile akışın son adımı web tarafından tetiklenemez.
+ *
+ * Adı en umut verici olan `/sevk/insertIrsaliyeMaster` yanıltıcıdır: tek
+ * parametre (`IRSALIYE_NO`) alır ve belge oluşturmaz, mevcut bir sevk kaydına
+ * numara işler. Uç nokta adına bakıp burayı doldurmak, kuru çalışmada "çalışıyor"
+ * görünüp gerçek modda muhasebeye çöp göndermek olurdu.
+ *
+ * Bu dosyanın dolması için gereken: Ceomed Yazılım'dan çıkış irsaliyesi oluşturan
+ * + e-irsaliye gönderen bir uç nokta. Web arayüzünün kullanmadığı uç noktalar
+ * sunucuda duruyor olabilir; katalogda görünmemesi yok demek değildir.
  *
  * Doldurulurken korunacak sözleşme:
  *   submit(job) -> { ok: true, ceomedIrsaliyeNo? }
@@ -23,8 +34,10 @@
 const { describeJob, toKeystrokePlan } = require('../lib/irsaliyeJob');
 
 const NOT_IMPLEMENTED =
-  'API sürücüsü henüz tanımlanmadı. Ceomed masaüstü uygulamasının yazma uç noktası ' +
-  'tespit edilene kadar ORACLE_DRIVER=ui kullanın (ayrıntı: ORACLE-IRSALIYE.md).';
+  'API sürücüsü kullanılamıyor: 2026-08-06 keşfinde Ceomed web API\'sinde (187 uç nokta) ' +
+  'çıkış irsaliyesi oluşturan veya e-irsaliye gönderen bir uç nokta bulunamadı; masaüstü ' +
+  'uygulaması da doğrudan Oracle\'a bağlanıyor. ORACLE_DRIVER=ui kullanın ' +
+  '(ayrıntı: ORACLE-IRSALIYE.md → "API keşfi").';
 
 async function init() {
   throw new Error(NOT_IMPLEMENTED);
