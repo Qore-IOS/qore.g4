@@ -1,0 +1,71 @@
+{
+  "_aciklama": [
+    "Ceomed 'Çıkış İrsaliyesi' formunun kontrol haritası.",
+    "Bu dosyayı controls.json olarak kopyalayıp DEĞERLERİ ÖLÇEREK doldurun:",
+    "  python inspect_form.py --title \"Çıkış İrsaliyesi\" --json agac.json",
+    "Her alan için sırasıyla şu tutamaklardan İLK bulunanı kullanın:",
+    "  1. automation_id  (en kararlı)",
+    "  2. title          (etiket metni kararlıysa)",
+    "  3. class_name + index  (son çare — uygulama güncellemesinde kayabilir)",
+    "Boş bırakılan zorunlu alan varsa fill_irsaliye.py hiçbir şey yazmadan çıkar."
+  ],
+
+  "backend": "win32",
+
+  "window": {
+    "title_contains": "Çıkış İrsaliyesi",
+    "_not": "Başlık uygulama sürümüne göre değişebilir; en kısa ayırt edici parçayı yazın."
+  },
+
+  "timing": {
+    "field_settle_ms": 120,
+    "_not_field_settle": "Her alandan sonra beklenecek süre. Uygulama stok kodundan ürün adını sunucudan çekiyorsa artırın.",
+    "lookup_timeout_ms": 5000,
+    "_not_lookup": "Stok kodu girildikten sonra 'Stok Adı' hücresinin dolmasını bu kadar bekle."
+  },
+
+  "fields": {
+    "irsaliyeNo": { "class_name": "TEdit", "index": 0, "automation_id": "", "title": "" },
+    "cariKodu":   { "class_name": "TEdit", "index": 1, "automation_id": "", "title": "" },
+    "tarih":      { "class_name": "TEdit", "index": 2, "automation_id": "", "title": "" },
+    "islemTipi":  { "class_name": "TEdit", "index": 3, "automation_id": "", "title": "" },
+    "depo":       { "class_name": "TEdit", "index": 4, "automation_id": "", "title": "" },
+    "aciklama":   { "class_name": "TMemo", "index": 0, "automation_id": "", "title": "" }
+  },
+
+  "grid": {
+    "class_name": "TDBGrid",
+    "index": 0,
+    "automation_id": "",
+    "_not": "Ürün satırlarının girildiği tablo.",
+    "columns": {
+      "stokKodu": 0,
+      "stokAdi": 1,
+      "lot": 2,
+      "miad": 3,
+      "miktar": 5
+    },
+    "_not_columns": [
+      "Sütun sıraları ekrandaki başlık sırasına göre 0'dan başlar:",
+      "Stok Kodu | Stok Adı | LOT | Miat | KT | Miktar | Brm | ...",
+      "Doğrulamak için inspect_form.py çıktısındaki hücre metinlerine bakın.",
+      "stokAdi salt okunurdur (stok kodundan otomatik gelir) — yazılmaz, DOĞRULANIR."
+    ],
+    "row_navigation": "tab",
+    "_not_row_navigation": "tab = hücreden hücreye Tab ile geç, satır sonunda Enter. Alternatif: 'click' (hücreye koordinatla tıkla)."
+  },
+
+  "submit": {
+    "button_title": "E-IRSALIYE GÖNDER",
+    "class_name": "TButton",
+    "index": null,
+    "confirm_dialog": {
+      "_not": "Gönder'e basınca onay penceresi çıkıyorsa buraya yazın; çıkmıyorsa title_contains'i boş bırakın.",
+      "title_contains": "",
+      "accept_button": "Evet"
+    }
+  },
+
+  "screenshot_dir": "screenshots",
+  "_not_screenshot": "Her koşuda gönderim ÖNCESİ ve SONRASI ekran görüntüsü buraya yazılır. Kanıt ve hata teşhisi için silmeyin."
+}

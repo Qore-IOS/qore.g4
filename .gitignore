@@ -63,3 +63,10 @@ qore-studio-work
 .env*.local
 
 scripts/ceomed-sync/sevkiyat-watcher.log
+
+# Ceomed yazma worker'ı (scripts/ceomed-sync)
+scripts/ceomed-sync/oracle-worker.log
+scripts/ceomed-sync/oracle-ui/controls.json
+scripts/ceomed-sync/oracle-ui/screenshots/
+scripts/ceomed-sync/oracle-ui/agac.json
+scripts/ceomed-sync/oracle-ui/__pycache__/

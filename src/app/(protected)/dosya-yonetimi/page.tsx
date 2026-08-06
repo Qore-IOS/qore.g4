@@ -36,6 +36,7 @@ import {
   Info,
 } from 'lucide-react';
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
+import CeomedIrsaliyeGirisKuyrugu from '@/components/ceomed/CeomedIrsaliyeGirisKuyrugu';
 import IrsaliyeScanModal from '@/components/dosya-yonetimi/IrsaliyeScanModal';
 import { useProductCodes } from '@/hooks/useFirebaseQueries';
 import { matchLocationFromFileName, type LocationCandidate } from '@/lib/match-location-from-filename';
@@ -889,6 +890,11 @@ export default function DosyaYonetimiPage() {
         {/* ─── Ceomed İrsaliyeleri ─────────────────────────────── */}
         <div style={{ marginBottom: 16 }}>
           <CeomedIrsaliyePanel />
+        </div>
+
+        {/* ─── Ceomed muhasebe irsaliyesi giriş kuyruğu (Qore → Ceomed) ── */}
+        <div style={{ marginBottom: 16 }}>
+          <CeomedIrsaliyeGirisKuyrugu />
         </div>
       </div>
 
