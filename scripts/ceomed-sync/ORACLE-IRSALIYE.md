@@ -187,6 +187,12 @@ Bu mod klasik `ORACLE_DRY_RUN=1` modundan farklıdır: klasik kuru mod yalnızca
 planı loglar; `ORACLE_FILL_ONLY=1` Python sürücüsünü gerçekten çalıştırıp
 Oracle formunu doldurur, ancak `--gercek` vermediği için göndermez.
 
+Bu sürücü `oracle-ui/controls.json` istemez. Eski kontrol haritası,
+pywinauto tabanlı ilk taslaktan kalmadır; Oracle Forms alanları gerçek Windows
+kontrolleri olmadığı için kullanımdan kaldırılmıştır. Worker başlangıcında
+`Kontrol haritası yok` hatası alınması güncel olmayan `uiDriver.js`
+çalıştırıldığını gösterir.
+
 Tek masaüstü formu aynı anda yalnızca bir işi taşıyabilir. Bu nedenle ilk
 iş doldurulunca durumu `awaiting_review` olur ve arkadan gelen işler `pending`
 olarak sırada kalır; boşa düşmez ve mevcut ekranı ezmez. Operatör:

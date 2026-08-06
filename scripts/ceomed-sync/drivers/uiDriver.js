@@ -1,19 +1,19 @@
 /**
  * UI sürücüsü — Ceomed masaüstü uygulamasının "Çıkış İrsaliyesi" formunu
- * pywinauto ile doldurur.
+ * Win32/Oracle Forms odak sürücüsüyle doldurur.
  *
  * Node tarafı işi hazırlar ve Python'a JSON olarak verir; tuş vuruşlarını
  * `oracle-ui/fill_irsaliye.py` atar. Neden Python: Win32/UIA erişimi için
- * pywinauto olgun ve Delphi/VCL pencerelerinde (bu uygulama öyle görünüyor)
- * Node alternatiflerinden çok daha güvenilir.
+ * saf Win32 API erişimi Python'un standart `ctypes` modülüyle sağlanır;
+ * Ceomed makinesine ek UI otomasyon paketi kurulması gerekmez.
  *
  * DÜRÜST SINIR: ekran otomasyonu kırılgandır. Uygulama sürümü, pencere boyutu,
  * sekme sırası ya da bir açılır uyarı değişirse bozulur. Bu yüzden:
  *   - Her koşuda ekran görüntüsü alınır (kanıt + hata teşhisi).
  *   - Python tarafı her alanı YAZDIKTAN SONRA geri okuyup doğrular; uyuşmazlıkta
  *     e-irsaliye gönderilmeden çıkar.
- *   - Kontrol kimlikleri koda gömülmez, `oracle-ui/controls.json` dosyasından
- *     okunur; uygulama değişince kod değil yapılandırma güncellenir.
+ *   - Alan konumları sahada ölçülmüş MDI/pencere koordinatlarıyla tanınır;
+ *     her yazım aktif Edit kontrolünden geri okunarak doğrulanır.
  *
  * Bu sürücü kalıcı çözüm değil, API keşfi sonuçsuz kalırsa kullanılacak yoldur.
  */
@@ -25,19 +25,11 @@ const { toKeystrokePlan, describeJob } = require('../lib/irsaliyeJob');
 
 const PYTHON = process.env.ORACLE_PYTHON || 'python';
 const SCRIPT = path.join(__dirname, '..', 'oracle-ui', 'fill_irsaliye.py');
-const CONTROLS = process.env.ORACLE_CONTROLS || path.join(__dirname, '..', 'oracle-ui', 'controls.json');
 const TIMEOUT_MS = (parseInt(process.env.ORACLE_UI_TIMEOUT_SEC, 10) || 180) * 1000;
 
 async function init() {
   if (!fs.existsSync(SCRIPT)) {
     throw new Error(`UI sürücü betiği bulunamadı: ${SCRIPT}`);
-  }
-  if (!fs.existsSync(CONTROLS)) {
-    throw new Error(
-      `Kontrol haritası yok: ${CONTROLS}\n` +
-      'Ceomed makinesinde "python oracle-ui/inspect_form.py" çalıştırıp ' +
-      'controls.example.json dosyasını controls.json olarak doldurun.',
-    );
   }
 }
 
@@ -69,7 +61,10 @@ function submit(job) {
   const plan = toKeystrokePlan(job, { dateSeparator: process.env.ORACLE_DATE_SEP || '/' });
 
   return new Promise((resolve) => {
-    const args = [SCRIPT, '--controls', CONTROLS];
+    // Oracle Forms alanları Windows kontrolleri olarak sunmadığı için eski
+    // controls.json/pywinauto haritası kullanılmıyor. Python sürücüsü sahada
+    // ölçülmüş MDI/pencere konumlarını ve geri okumayı kullanıyor.
+    const args = [SCRIPT];
     if (process.env.ORACLE_ALLOW_POST_QUANTITY_WARNING === '1') {
       args.push('--miktar-uyarisini-onayla');
     }
