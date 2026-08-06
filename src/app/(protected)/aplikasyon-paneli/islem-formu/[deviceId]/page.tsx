@@ -2026,7 +2026,7 @@ export default function AplikasyonIslemFormuPage() {
                 const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
                 const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-                batch.set(faultReportRef, {
+                batch.set(faultReportRef, withCompanyScope({
                     deviceId: currentDevice.id,
                     hospitalId: hospital?.id,
                     labName: hospital?.name,
@@ -2059,7 +2059,7 @@ export default function AplikasyonIslemFormuPage() {
                     relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
                     isCustomFault: isCustomFault || false,
                     createdFromActionForm: true,
-                });
+                }, currentCompanyId));
 
                 const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
                 batch.set(historyOpenedRef, {
