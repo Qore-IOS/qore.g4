@@ -57,6 +57,10 @@ VK = {
     "TAB": 0x09, "ENTER": 0x0D, "ESC": 0x1B, "END": 0x23, "HOME": 0x24,
     "LEFT": 0x25, "UP": 0x26, "RIGHT": 0x27, "DOWN": 0x28,
     "DELETE": 0x2E, "BACKSPACE": 0x08,
+    # Oracle Forms'ta kayıt temizleme. Ceomed'de E-İRSALİYE GÖNDER'den sonra
+    # form kayıt bilgileriyle EKRANDA KALIYOR; F6 yeni boş form getiriyor.
+    # Zincirin kesilmeden sürmesi buna bağlı.
+    "F6": 0x75,
 }
 
 # Odak bu metinlerden birini taşıyan bir butondayken tuş göndermek geri alınamaz

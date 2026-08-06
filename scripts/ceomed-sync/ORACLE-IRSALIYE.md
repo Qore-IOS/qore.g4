@@ -185,6 +185,32 @@ penceresininki `ConsoleWindowClass`. Sınıf kesin ayırt eder.
 Hata gerçekten iki Ceomed örneği açıkken çıkarsa mesaj artık **eşleşen pencere
 başlıklarını da yazıyor**, hangisinin fazla olduğu görünüyor.
 
+### Gönderim sonrası form kapanmıyor — F6 ile yenileme
+
+Sahada ölçüldü: **E-İRSALİYE GÖNDER'e basıldıktan sonra form kapanmıyor.**
+Açıklama alanının altına irsaliye kayıt bilgileri yazılıyor ve form ekranda
+kayıtlarla birlikte kalıyor. Operatör **F6** ile yeni boş form açıyor.
+
+Sürücü bunu kendisi yapmazsa sıradaki iş dolu bir formun üstüne yazmaya çalışır
+ve zincir kesilir. `form_yenile()` iki yerde çağrılır:
+
+1. **İşin başında** — form önceki işten (ya da elle yapılmış bir denemeden)
+   dolu kalmış olabilir. Zincirlemeyi mümkün kılan asıl yer burasıdır: operatörün
+   her seferinde elle boş form açması gerekmez.
+2. **Gönderim sonrası** — ekran temiz kalsın diye.
+
+Sıra önemlidir: **ekran görüntüsü F6'dan ÖNCE alınır.** Gönderim sonrası forma
+yazılan irsaliye kayıt bilgileri gönderimin kanıtıdır; F6 onları siler.
+
+Gönderim sonrası F6 başarısız olursa **iş başarısız sayılmaz** — e-irsaliye
+gönderilmiştir ve tekrar denenirse mükerrer olur. Sonuçta `uyari` alanıyla
+bildirilir ve operatör bir sonraki işten önce elle boş form açar.
+
+Ekranda açık bir uyarı ya da arama penceresi varken F6 çalışmaz; `form_yenile()`
+bunu önceden kontrol edip anlaşılır bir hatayla durur.
+
+Kapatmak için: `--f6-yenileme-yok` (worker'da kullanılmıyor, elle prova içindir).
+
 ### PERMISSION_DENIED — Firestore bağlantı tanısı
 
 Worker `7 PERMISSION_DENIED: Permission denied on resource project "..."` ile
