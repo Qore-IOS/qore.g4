@@ -25,6 +25,25 @@ const admin = require('firebase-admin');
 const COLLECTION = 'ceomedIrsaliyeGirisJobs';
 
 const yaz = (durum, mesaj) => console.log(`[${durum}] ${mesaj}`);
+
+/**
+ * .env değerlerini saran tırnakları ayıklar ve tırnak bulunup bulunmadığını
+ * bildirir.
+ *
+ * `.bat` dosyası .env'i `set "%A=%B"` ile okuduğu için tırnaklar DEĞERİN
+ * PARÇASI olur. Sahada tam olarak bu oldu: FIREBASE_PROJECT_ID="invpilot"
+ * yazılmıştı, worker projeyi `"invpilot"` diye aradı ve Google
+ * "Permission denied on resource project" dedi — hata mesajındaki tırnaklar
+ * Google'ın biçimlendirmesi sanıldığı için sebep uzun süre görünmedi.
+ */
+const tirnaksiz = (deger) => {
+  if (typeof deger !== 'string') return { deger, tirnakli: false };
+  const tirnakli = /^["'].*["']$/.test(deger.trim());
+  return {
+    deger: tirnakli ? deger.trim().slice(1, -1) : deger,
+    tirnakli,
+  };
+};
 const ok = (m) => yaz('  OK  ', m);
 const hata = (m) => yaz(' HATA ', m);
 const bilgi = (m) => yaz(' bilgi', m);
@@ -33,32 +52,38 @@ async function main() {
   let sorun = 0;
 
   // --- 1. Ortam değişkenleri --------------------------------------------------
-  const projectId = process.env.FIREBASE_PROJECT_ID;
-  const companyId = process.env.CEOMED_COMPANY_ID;
-  const credPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
   console.log('=== 1. Ortam değişkenleri ===');
-  if (projectId) ok(`FIREBASE_PROJECT_ID = ${projectId}`);
-  else { hata('FIREBASE_PROJECT_ID tanımsız'); sorun++; }
 
-  if (companyId) ok(`CEOMED_COMPANY_ID = ${companyId}`);
-  else { hata('CEOMED_COMPANY_ID tanımsız — worker hangi firmanın işlerini alacağını bilemez'); sorun++; }
+  const okuAyikla = (ad, zorunlu, aciklama) => {
+    const ham = process.env[ad];
+    if (!ham) {
+      if (zorunlu) { hata(`${ad} tanımsız${aciklama ? ' — ' + aciklama : ''}`); sorun++; }
+      return null;
+    }
+    const { deger, tirnakli } = tirnaksiz(ham);
+    if (tirnakli) {
+      // Bu, worker'ın gördüğü değerin YANLIŞ olduğu anlamına gelir; tırnak
+      // değerin parçasıdır ve hiçbir kaynakla eşleşmez.
+      hata(`${ad} TIRNAK İÇİNDE: ${ham}`);
+      hata(`  Worker bunu ${JSON.stringify(ham)} olarak görüyor, ${JSON.stringify(deger)} olarak değil.`);
+      hata(`  .env dosyasında tırnakları kaldırın:  ${ad}=${deger}`);
+      sorun++;
+    } else {
+      ok(`${ad} = ${deger}`);
+    }
+    return deger;
+  };
 
-  if (credPath) ok(`GOOGLE_APPLICATION_CREDENTIALS = ${credPath}`);
-  else { hata('GOOGLE_APPLICATION_CREDENTIALS tanımsız'); sorun++; }
+  const projectId = okuAyikla('FIREBASE_PROJECT_ID', true);
+  const companyId = okuAyikla('CEOMED_COMPANY_ID', true,
+    'worker hangi firmanın işlerini alacağını bilemez');
+  const credPath = okuAyikla('GOOGLE_APPLICATION_CREDENTIALS', true);
 
   // --- 2. Kimlik dosyası ------------------------------------------------------
   console.log('\n=== 2. Servis hesabı dosyası ===');
   let sa = null;
   if (credPath) {
-    // Tırnaklı yol yaygın bir tuzak: .env içinde GOOGLE_APPLICATION_CREDENTIALS="C:\..."
-    // yazılırsa .bat tırnakları değere dahil eder ve dosya bulunamaz.
-    if (/^["'].*["']$/.test(credPath)) {
-      hata('Yol tırnak içinde. .env dosyasında tırnakları kaldırın:');
-      hata(`  GOOGLE_APPLICATION_CREDENTIALS=${credPath.slice(1, -1)}`);
-      sorun++;
-    }
-    const temiz = credPath.replace(/^["']|["']$/g, '').trim();
+    const temiz = credPath.trim();
     if (!fs.existsSync(temiz)) {
       hata(`Dosya YOK: ${temiz}`);
       hata('applicationDefault() bu durumda hata vermez, sessizce başka bir kimliğe düşer.');

@@ -469,7 +469,9 @@ def main() -> int:
     if not sys.platform.startswith("win"):
         return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
 
-    pencereler = ui60.pencere_bul(args.pencere)
+    # Sınıf filtresi şart: worker'ın kendi konsol penceresi de başlığında
+    # "ceomed-sync" taşıdığı için başlık eşleştirmesi tek başına yetmiyor.
+    pencereler = ui60.pencere_bul(args.pencere, sinif=ui60.MDI_KOK_SINIFI)
     if not pencereler:
         return fail(
             f"'{args.pencere}' başlıklı Ceomed penceresi açık değil. "
@@ -479,7 +481,8 @@ def main() -> int:
     if len(pencereler) > 1:
         # Belirsizlik tahminle kapatılmaz: yanlış pencereye yazmak geri alınamaz.
         return fail(
-            f"{len(pencereler)} pencere '{args.pencere}' ile eşleşti. "
+            f"{len(pencereler)} Ceomed penceresi eşleşti "
+            f"({', '.join(repr(ui60.baslik(h)[:60]) for h in pencereler)}). "
             "Fazla Ceomed penceresini kapatın.",
             retryable=True,
         )

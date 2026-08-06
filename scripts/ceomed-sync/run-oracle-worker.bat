@@ -21,6 +21,10 @@ REM ============================================================================
 setlocal
 cd /d %~dp0
 
+REM Log'a UTF-8 yaz: varsayilan kod sayfasinda Turkce karakterler bozuluyor
+REM ve hata mesajlari okunamaz hale geliyor ("e le ti" <- "eslesti").
+chcp 65001 >nul 2>&1
+
 set ENV_LOADED=
 if exist set-env.bat (
   call set-env.bat

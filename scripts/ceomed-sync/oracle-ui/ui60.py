@@ -261,13 +261,28 @@ def cocuk_metinleri(kok: int) -> list[str]:
     return bulunan
 
 
-def pencere_bul(baslik_icerir: str) -> list[int]:
-    """Başlığında verilen metni geçen tüm üst düzey pencereler."""
+# Ceomed ana penceresinin sınıfı (Oracle Forms MDI kökü). Başlık eşleştirmesi
+# tek başına YETMEZ: worker'ın kendi konsol penceresinin başlığı
+# `...\scripts\ceomed-sync\run-oracle-worker.bat` olduğu için "ceomed" içerir ve
+# sahada "2 pencere eşleşti" hatasına yol açtı. Sınıf adı kesin ayırt eder —
+# konsol penceresinin sınıfı `ConsoleWindowClass`.
+MDI_KOK_SINIFI = "ui60MDIroot_W32"
+
+
+def pencere_bul(baslik_icerir: str, sinif: str | None = None) -> list[int]:
+    """Başlığında verilen metni geçen üst düzey pencereler.
+
+    `sinif` verilirse yalnızca o pencere sınıfındakiler döner — başka
+    uygulamaların (ve bu worker'ın kendi konsolunun) yanlışlıkla eşleşmesini
+    önler.
+    """
     aranan = normalize(baslik_icerir).lower()
     bulunan: list[int] = []
 
     def geri_cagri(hwnd, _lparam):
         if user32.IsWindowVisible(hwnd):
+            if sinif and sinif_adi(hwnd) != sinif:
+                return True
             t = normalize(baslik(hwnd)).lower()
             if aranan in t:
                 bulunan.append(hwnd)
