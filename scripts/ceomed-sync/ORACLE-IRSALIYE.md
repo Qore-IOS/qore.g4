@@ -465,6 +465,75 @@ ekran koordinatı değil pencereye göre tutulur (pencere taşınınca bozulmas�
 | `depo` | (855, 169) |
 | `grid` | (14, 297) |
 
+### Ölçüm 6 sonucu — grid, uyarı penceresi ve İrsaliye No formatı
+
+**Grid'de `RIGHT` sütun değiştirmiyor** — sadece imleci metin içinde oynatıyor:
+
+```
+2  YAZ 'TEST'   pen(14,297)  'TEST'
+3  RIGHT        pen(14,297)  'TEST'    ← aynı hücre
+```
+
+`TAB` ve `ENTER` ikisi de uyarı penceresi açtı, ama sebebi `TEST`'in gerçek bir
+stok kodu olmaması. Hangisinin sütun değiştirdiği **hâlâ ölçülmedi**; gerçek bir
+stok koduyla tekrarlanmalı.
+
+**Uyarı penceresinin mesajı okunamıyor.** `EnumChildWindows` yalnızca `'&Tamam'`
+getirdi; mesaj da tuvale çizilmiş. Sürücü bir uyarı penceresi açıldığını
+anlayabilir ama **nedenini okuyamaz** — teşhis için ekran görüntüsü almalı ve işi
+`failed` damgalarken loga onun yolunu yazmalı.
+
+### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
+
+Muhasebe kararı: Qore form numarası İrsaliye No alanında görünecek. Ancak Qore'un
+ürettiği numara Ceomed'in kuralına **olduğu gibi uymuyor.**
+
+Qore formatı (`src/lib/form-number.ts:55`):
+
+```ts
+return `${personnelCode}-${formTypeLetter}${formatSeq(seq)}`;   // BT-T0042
+```
+
+Ceomed kuralı: *ilk 2 karakterden sonrası sadece rakam.*
+
+| Deneme | Sonuç |
+|---|---|
+| `BT-T0042` → tire silinir → `BTT0042` | ilk 2 = `BT`, kalan `T0042` → **`T` harfi var, reddedilir** |
+| 3 isimli personel: `AMY-T0042` → `AMYT0042` | ilk 2 = `AM`, kalan `YT0042` → **reddedilir** |
+
+İki ayrı sorun:
+
+1. **Form tipi harfi** (`T`/`A`) rakam bölgesine düşüyor.
+2. **Personel kodu sabit uzunlukta değil** — `buildPersonnelCode` isimdeki tüm
+   kelimelerin baş harflerini alır, 3+ harf olabilir.
+
+**Önerilen dönüşüm** (karar muhasebeyle birlikte verilmeli):
+
+| Parça | Kural | Örnek |
+|---|---|---|
+| İlk 2 karakter | personel kodunun ilk 2 harfi | `BT` |
+| 3. karakter | form tipi: `T`→`1`, `A`→`2` | `1` |
+| Kalan | sıra numarası | `0042` |
+
+`BT-T0042` → `BT10042`
+
+**Çözülmemiş risk:** sayaç kullanıcı bazlı olduğu için aynı baş harfli iki
+personel aynı numarayı üretebilir (`BT-T0042`). Qore tarafında bu zaten
+mevcut bir durum, ama irsaliye numarası yasal olarak tekil olmak zorundadır.
+Sıra numarasının global yapılması veya personel koduna ayırt edici bir parça
+eklenmesi gerekir — bu bir ürün kararıdır, sürücü tek başına çözemez.
+
+**Ölçülmesi gereken:** alanın karakter sınırı. Cari Kodu 8 karakterde kesiyordu;
+İrsaliye No da 8 ise 5 haneli sıra numarasında (`BT110042`) tam sınırda kalınır ve
+sessiz kesilme muhasebeye yanlış numara gönderir.
+
+```powershell
+python probe_type.py --baslangic irsaliyeno --adimlar "TEMIZLE,YAZ:AB12345678901234567890" --onayla
+```
+
+TAB yok, uyarı penceresi çıkmaz; prob artık `Edit` değerlerinin uzunluğunu da
+yazdırır.
+
 ---
 
 ## UI sürücüsü (API bulunamazsa)

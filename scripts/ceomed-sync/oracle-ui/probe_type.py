@@ -307,8 +307,12 @@ def yazdir(sira: int, adim: str, bilgi: dict) -> None:
     px, py = bilgi.get("pencere_ici", (0, 0))
     print(f"{sira:>3}  {adim:<22} {bilgi['class_name']:<16} {konum:<28} "
           f"pen({px},{py}){'':<3} {bilgi['deger']!r}")
+    if bilgi.get("pencere_basligi"):
+        print(f"       ↳ pencere başlığı: {bilgi['pencere_basligi']!r}")
     for metin in bilgi.get("pencere_metinleri", []) or []:
         print(f"       ↳ pencere metni: {metin!r}")
+    if bilgi["class_name"] == "Edit":
+        print(f"       ↳ uzunluk: {len(bilgi['deger'])} karakter")
 
 
 def main() -> int:
