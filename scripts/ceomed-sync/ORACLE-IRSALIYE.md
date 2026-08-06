@@ -254,6 +254,35 @@ Kayıtlar `test: true` ile işaretlenir. Betik yazmadan önce doğrular:
   ve geri okuma bunu yakalayamıyor, o yüzden baştan engelleniyor.
 * Miktarın pozitif olması.
 
+### "Oracle ekranında incelenen bir form var" — kuyruk kapısı
+
+`ORACLE_FILL_ONLY=1` modunda worker bir formu doldurduktan sonra işi
+`awaiting_review` damgalar ve **operatör onaylayana kadar sıradaki işi almaz**:
+
+```
+[bekliyor] Oracle ekranında incelenen bir form var; kuyruktaki yeni işler sırada tutuluyor.
+```
+
+Bu kasıtlıdır — iki iş üst üste yazmasın diye. Ama dışarıdan "form dolmuyor"
+gibi görünür; log satırı `[hata]` değil `[bekliyor]` olduğu için ayırt edilir.
+
+Serbest bırakmanın iki yolu var:
+
+* **Panel** — Dosya Yönetimi → kuyruk panelinde işin "Testi tamamla" butonu.
+* **Komut satırı** — peş peşe test yaparken panele gidip gelmemek için:
+
+```powershell
+cd scripts\ceomed-sync
+release-review.bat            # bekleyenleri listeler ve serbest bırakır
+release-review.bat --listele  # yalnızca listeler, dokunmaz
+```
+
+Serbest bırakma toplu yazmayla yapılır: hepsi geçer ya da hiçbiri. Yarım
+bırakılmış bir serbest bırakma, kuyruğun neden tıkalı olduğunu anlamayı
+zorlaştırırdı.
+
+Gerçek gönderim modunda (`ORACLE_FILL_ONLY=0`) bu durum hiç oluşmaz.
+
 ### Başarılı gönderimde push bildirimi
 
 Gerçek gönderim tamamlandığında worker `notifications` koleksiyonuna bir belge
