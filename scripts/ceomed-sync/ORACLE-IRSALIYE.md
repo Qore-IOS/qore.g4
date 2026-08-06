@@ -585,6 +585,35 @@ düzeltildi: kimlik artık `(hwnd, konum)`.
 Sürücü bu sinyale dayandığı için hata sessiz değildi — gerçek bir işte geçerli
 satırları reddederdi.
 
+### Prova 1 — form doğru doldu, doğrulama yanlış yeri okudu
+
+İlk kuru çalışmada başlık doğru dolduruldu:
+
+```
+İrsaliye No : BT10042        ✓
+Tarih       : 06/08/2026     ✓
+Cari Kodu   : M51009         ✓  → SANCAKTEPE ŞEHİT PROF. DR. İLHAN VARANK
+Sevk Adresi : otomatik doldu
+Posta/İl    : otomatik doldu
+```
+
+Ama sürücü durdu:
+
+```
+cariKodu: arama penceresinden 'EMEK, NAMIK KEMAL CD. NO:7' seçildi,
+beklenen 'M51009'
+```
+
+`M51009` alana doğru yazılmıştı. Hata doğrulamada: **Forms, LOV kabul edilince
+odağı bir sonraki alana taşıyor**, sürücü de "odaktaki alanın değeri" diye Sevk
+Adresi'ni okuyordu.
+
+Bu, "odakta olmayan alan okunamaz" kısıtının doğrudan sonucu. Çözüm: odak
+ilerlediyse `SHIFT+TAB` ile alana geri dön, oku, sonra ileri dön. Geri dönüşte
+beklenen alana varılamazsa iş durur — körlemesine kabul edilmez.
+
+`ui60.tus()` artık `SHIFTTAB` destekliyor.
+
 ### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
 
 Muhasebe kararı: Qore form numarası İrsaliye No alanında görünecek. Ancak Qore'un

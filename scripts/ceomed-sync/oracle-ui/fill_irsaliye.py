@@ -121,13 +121,27 @@ def ilerle(etiket: str) -> None:
         )
 
 
-def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
-    """LOV açan bir alana yazar: yaz → ENTER → pencere → kabul → GERİ OKU.
+def konum_eslesiyor(pencere_ici: tuple[int, int], hedef: tuple[int, int]) -> bool:
+    return (abs(pencere_ici[0] - hedef[0]) <= KONUM_TOLERANS
+            and abs(pencere_ici[1] - hedef[1]) <= KONUM_TOLERANS)
 
-    Liste okunamadığı için hangi satırın seçildiğini göremiyoruz; tek güvence
-    pencere kapandıktan sonra alandaki değeri okumak. Beklediğimiz değilse
-    gönderime geçilmez.
+
+def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
+    """LOV açan bir alana yazar ve seçimi DOĞRULAR.
+
+    Liste çizilmiş olduğu için hangi satırın seçildiğini göremiyoruz; tek güvence
+    seçim sonrası alandaki değeri okumak.
+
+    ZORLUK: Forms, LOV kabul edilince odağı çoğu zaman BİR SONRAKİ alana taşıyor.
+    Odakta olmayan alan okunamıyor (hepsi tuvale çizili), dolayısıyla "odaktaki
+    değeri oku" yaklaşımı yanlış alanı okur — ilk provada Cari Kodu yerine Sevk
+    Adresi okundu ve geçerli bir seçim reddedilmiş gibi göründü.
+
+    Çözüm: odak ilerlediyse SHIFT+TAB ile alana geri dön, oku, sonra ileri dön.
+    Geri dönüşte beklenen alana varılamazsa iş durur — körlemesine kabul edilmez.
     """
+    hedef = ALAN_KONUMLARI[ad]
+
     ui60.alan_yaz(deger, ad)
     log.append(f"{ad}: {deger!r} yazıldı")
 
@@ -145,9 +159,24 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
             )
         ui60.lov_kabul_et(ana_pencere)
         log.append(f"{ad}: arama penceresi onaylandı")
-        time.sleep(0.4)
+        time.sleep(0.5)
 
-    okunan = ui60.odak()["deger"]
+    o = ui60.odak()
+    geri_donuldu = False
+
+    if not konum_eslesiyor(o["pencere_ici"], hedef):
+        # Forms ilerletmiş; okumak için geri dön.
+        ui60.tus("SHIFTTAB", bekle_ms=450)
+        o = ui60.odak()
+        if not konum_eslesiyor(o["pencere_ici"], hedef):
+            raise Durdu(
+                f"{ad}: seçim sonrası alana geri dönülemedi "
+                f"(odak {o['pencere_ici']}, beklenen {hedef}). "
+                "Değer doğrulanamadığı için gönderim yapılmayacak."
+            )
+        geri_donuldu = True
+
+    okunan = o["deger"]
     if okunan != deger:
         raise Durdu(
             f"{ad}: arama penceresinden {okunan!r} seçildi, beklenen {deger!r}. "
@@ -155,6 +184,14 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
             "gönderim yapılmaz."
         )
     log.append(f"{ad}: geri okundu, {okunan!r} doğrulandı")
+
+    if geri_donuldu:
+        # İleri dön. Alandan çıkış LOV'u yeniden açabilir; değer artık çözülmüş
+        # olduğu için aynı satır seçilir.
+        ui60.tus("ENTER", bekle_ms=600)
+        if ui60.lov_acik_mi(ana_pencere) and not ui60.uyari_penceresi_mi(ana_pencere):
+            ui60.lov_kabul_et(ana_pencere)
+            time.sleep(0.4)
 
 
 def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) -> None:
