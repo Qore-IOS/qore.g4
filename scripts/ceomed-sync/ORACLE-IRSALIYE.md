@@ -546,6 +546,45 @@ stok doğrulaması büyük olasılıkla depo/cari üzerinden bakiye arıyor. Yan
 başına ölçülemez, form sırayla dolmak zorunda.** Grid sütun geçişi ölçümü, header
 gerçek değerlerle doldurulduktan sonra tekrarlanmalıdır.
 
+### Ölçüm 8 — grid sütun sırası çözüldü (header dolu olduğunda)
+
+Header gerçek değerlerle doldurulduktan sonra grid ölçümü çalıştı. ENTER, LOV
+kabul edildikten sonra sütunları geziyor:
+
+```
+ 3  ENTER → LOV açıldı
+ 5  ENTER → kabul, odak pen(575,297)
+ 7  ENTER → pen(649,297)
+ 9  ENTER → pen(725,297)
+11  ENTER → pen(760,297)
+```
+
+| Pencere içi x | Sütun | Qore kaynağı |
+|---|---|---|
+| `14` | **Stok Kodu** | yedek parçanın stok kodu (LOV açar) |
+| `575` | **LOT** | seri no varsa seri no, yoksa lot |
+| `649` | **Miat** | ürün miadı — genelde boş |
+| `725` | **KT** | dokunulmuyor |
+| `760` | **Miktar** | formdaki adet |
+
+**Stok Adı atlanıyor** — uygulama stok kodundan kendisi dolduruyor.
+
+Bu ölçüm ayrıca `ORA-01403`'ün sebebini doğruladı: header boşken stok doğrulaması
+bakiye bulamıyordu. Form **sırayla** dolmak zorunda.
+
+### Odak kimliği `hwnd` DEĞİL, `(hwnd, konum)`
+
+11. adımda prob "odak ilerlemedi" dedi ama odak gerçekten 725'ten 760'a geçmişti.
+Sebep: **Forms ardışık alanlar için çoğu zaman aynı `Edit` kontrolünü taşıyıp
+yeniden kullanıyor** — `hwnd` sabit kalıyor, yalnızca dikdörtgen değişiyor.
+
+`hwnd` karşılaştıran bir kontrol bu geçişi "ilerlemedi" sanar ve geçerli bir
+değeri reddedilmiş gibi raporlar. `ui60.odak_ilerledi_mi()` ve `probe_type.py`
+düzeltildi: kimlik artık `(hwnd, konum)`.
+
+Sürücü bu sinyale dayandığı için hata sessiz değildi — gerçek bir işte geçerli
+satırları reddederdi.
+
 ### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
 
 Muhasebe kararı: Qore form numarası İrsaliye No alanında görünecek. Ancak Qore'un
