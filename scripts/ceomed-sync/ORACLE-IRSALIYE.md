@@ -178,18 +178,75 @@ API'nin genel şekli de bunu doğrular: bu bir depo/barkod operasyon API'sidir.
 Belgeler masaüstü uygulamasında (doğrudan Oracle'da) açılır; web yalnızca barkod
 okutup onaylar.
 
-### Buradan sonrası — iki seçenek
+### Karar: UI otomasyonu
 
-1. **Ceomed Yazılım'a sorun (önerilen).** Sorulacak şey nettir: "Çıkış irsaliyesi
-   oluşturup e-irsaliye gönderen bir uç noktanız var mı?" Web arayüzünün
-   kullanmadığı uç noktalar sunucuda duruyor olabilir — katalogda görünmemesi yok
-   demek değildir. Cevap gelirse `drivers/apiDriver.js` doldurulur ve iş biter.
-2. **UI sürücüsü.** Aşağıdaki bölüm. Önce `inspect_form.py` ile `ifrun60`'ın
-   gerçek Windows kontrolü kullanıp kullanmadığı ölçülmelidir — 4GL çalışma
-   zamanları formu tek bir çizim yüzeyi olarak da render edebilir, o durumda
-   alan bazlı otomasyon çalışmaz ve koordinat bazlı yola geçilir.
+Ceomed Yazılım'a çıkış irsaliyesi oluşturan + e-irsaliye gönderen bir uç nokta
+sorulmuş, **olumsuz cevap alınmıştır** (2026-08-06). API yolu kapalıdır;
+`drivers/apiDriver.js` bu yüzden boş kalmaya devam eder.
 
-`drivers/apiDriver.js` bu ölçümden sonra da **bilerek boş** bırakılmıştır.
+---
+
+## UI ölçümü — `ifrun60` ne tür bir arayüz çiziyor?
+
+`inspect_form.py --title "rsaliyesi"` çıktısının özeti:
+
+**Pencere hiyerarşisi** (Informix 4GL "UI 6.0" çalışma zamanı):
+
+```
+ui60MDIroot_W32  "… CEOMED YAZILIM V:12c … [ Çıkış İrsaliyesi Yeni ** ]"
+└─ MDIClient
+   └─ ui60MDIdocument_W32  "Çıkış İrsaliyesi"
+      └─ ui60Drawn_W32     ← form buraya ÇİZİLİYOR
+```
+
+**Butonlar gerçek ve isimle bulunabiliyor** — 40'tan fazla `Button`, hepsi
+okunabilir metinle:
+
+```
+[Button] text='E-IRSALIYE GÖNDER'   (L-589, T633, R-424, B663)
+[Button] text='E-IRSALIYE ÖNİZLE'
+[Button] text='Belge Tamamlandı'
+[Button] text='Açık Siparişler'
+```
+
+Akışın en riskli adımı — gönder butonu — koordinata değil `title`'a bağlanabilir.
+Pencere kaysa ya da boyut değişse bile doğru butona basılır.
+
+**Form alanları kontrol DEĞİL.** Yalnızca 6 gerçek boyutlu `Edit` var (alt
+taraftaki açıklama ve e-irsaliye kutuları). İrsaliye No, Cari Kodu, Tarih, İşlem
+Tipi, Depo ve grid `ui60Drawn_W32` tuvaline çizilmiştir; `child_window()` ile
+bulunamazlar.
+
+**Kritik ipucu:** sıfır boyuta park edilmiş `Edit` kontrollerinden biri ekrandaki
+İrsaliye No değerini taşıyor:
+
+```
+[Edit] text='SI007787'  (L-1920, T1, R-1920, B1)   ← sıfır boyut
+```
+
+Bu, 4GL'in bilinen davranışına işaret eder: odaktaki alan için gerçek bir Edit
+kontrolü açılır, alanın üstüne taşınır, odak gidince geri park edilir. Doğruysa
+her alan yazıldıktan sonra **geri okunabilir** — e-irsaliye gönderimi geri
+alınamadığı için bu güvence pazarlık konusu değildir.
+
+### Bunu ölçen betik: `probe_focus.py`
+
+```powershell
+cd scripts\ceomed-sync\oracle-ui
+python probe_focus.py --json odak.json
+```
+
+Ceomed penceresine geçip İrsaliye No alanına tıklayın, TAB'a yavaşça 15-20 kez
+basın, sonra Ctrl+C. Betik hiçbir şey yazmaz; odağın hangi kontrole düştüğünü,
+kontrolün boyutunu ve değerini kaydeder.
+
+Çıktı iki şeyi birden verir:
+
+1. **Alanların TAB sırası** — sürücü klavye gezinmesini bu sıraya göre kuracak.
+2. **Geri okuma mümkün mü** — odak görünür boyutlu bir `Edit`'e düşüyorsa evet.
+
+Odak hiç görünür kontrole düşmezse doğrulama yalnızca gönderim öncesi ekran
+görüntüsüne kalır; o durumda tam otomatik gönderim yeniden değerlendirilmelidir.
 
 ---
 
