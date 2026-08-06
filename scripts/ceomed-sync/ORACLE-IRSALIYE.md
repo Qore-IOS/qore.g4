@@ -22,7 +22,7 @@ Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
 
 | Ceomed formu | Qore kaynağı |
 |---|---|
-| İrsaliye No | form numarası (`formNo`, ör. `BT-T0042`) |
+| İrsaliye No | form numarasının **çevrilmiş** hali (`BT-T0042` → `BT10042`) — bkz. aşağıdaki not |
 | Cari Kodu | Yönetim → Laboratuvarlar → **Ceomed Cari Kodu** (`hospitals.ceomedCariKodu`) |
 | Tarih | işlemin başlangıç tarihi |
 | Stok Kodu | yedek parçanın stok kodu (Ürün Adı uygulamadan otomatik gelir) |
@@ -35,6 +35,38 @@ Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
 | Kapanış | **E-İRSALİYE GÖNDER** |
 
 Bir formda birden çok yedek parça varsa **tek irsaliye, çok satır** açılır.
+
+### İrsaliye No neden olduğu gibi yazılamıyor
+
+Alanın kuralı ölçülmüştür: **2 harf + en fazla 6 rakam, toplam 8 karakter.**
+Uygulama fazlasını *sessizce* kesiyor — `AB12345678901234567890` yazıldığında
+alanda `AB123456` kalıyor, hiçbir uyarı çıkmıyor. Hatalı biçimde ise uyarı
+veriyor: *"İrsaliye numarasının ilk 2 karakterinden sonrası, sadece rakam
+olmalıdır"*.
+
+Qore form numarası `${personelKodu}-${T|A}${sıra}` biçiminde (`BT-T0042`).
+Tireyi silmek yetmez: `BTT0042` → ilk 2 karakterden sonra `T` harfi kalır,
+reddedilir.
+
+`ceomedIrsaliyeNo()` (`src/lib/ceomed/irsaliye-giris.ts`) dönüşümü yapar:
+
+| Parça | Kural | Örnek |
+|---|---|---|
+| İlk 2 karakter | personel kodunun ilk 2 harfi (kısaysa `X` ile tamamlanır) | `BT` |
+| 3. karakter | form tipi: `T`→`1`, `A`→`2` | `1` |
+| Kalan | sıra numarası | `0042` |
+
+`BT-T0042` → **`BT10042`**
+
+**Sığmayan numara kesilmez, iş `blocked` damgalanır** (`form_no_ceomed_formatina_uymuyor`).
+Sessiz kesilmeye izin vermek muhasebeye yanlış numara yazmak olurdu.
+
+**Açık kalan ürün kararı — numara tekilliği.** Sayaç kullanıcı bazlı
+(`${companyId}_${userUid}_${formTypeLetter}`), dolayısıyla aynı baş harfli iki
+personel aynı numarayı üretebilir: "Batuhan Tubasar" ve "Burak Toprak" ikisi de
+`BT-T0042` → `BT10042`. İrsaliye numarası yasal olarak tekil olmak zorundadır.
+Çözüm ya sıra numarasını şirket bazına çekmek ya da personele sabit 2 karakterlik
+kod atamaktır; ikisi de sürücünün değil ürünün kararıdır.
 
 ### LOT kuralının tek cümlesi
 
