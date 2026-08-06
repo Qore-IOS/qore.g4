@@ -154,6 +154,55 @@ async function markSent(db, job, result) {
   });
 }
 
+/**
+ * Başarılı gönderimde push bildirimi yazar.
+ *
+ * Doğrudan FCM'e göndermek yerine `notifications` koleksiyonuna belge yazıyoruz:
+ * mevcut Cloud Function (`notifications/{id}` onCreate) hedef kitleyi çözüp
+ * dağıtımı zaten yapıyor. Kitle çözümleme mantığını burada tekrarlamak, iki
+ * yerde ayrışacak bir kopya demek olurdu.
+ *
+ * Hedef `audience:all`: her push jetonu bu anahtarı taşır
+ * (`buildMembershipKeysFromProfile`), Function da `companyId` ile aynı şirkete
+ * daraltır.
+ *
+ * HATASI İŞİ BOZMAZ: e-irsaliye gönderilmiştir. Bildirim yazılamadı diye işi
+ * başarısız saymak, tekrar denemeye ve MÜKERRER İRSALİYEYE yol açar.
+ */
+async function bildirimYaz(db, job, result) {
+  const metin = (v) => (v == null ? '' : String(v).trim());
+  try {
+    const satirSayisi = Array.isArray(job.satirlar) ? job.satirlar.length : 0;
+    await db.collection('notifications').add({
+      type: 'ceomed_irsaliye_olusturuldu',
+      title: 'Ceomed irsaliyesi oluşturuldu',
+      message:
+        `${metin(job.irsaliyeNo)} · ${metin(job.cariKodu)} · ${satirSayisi} kalem yedek parça` +
+        `${job.labName ? ` · ${metin(job.labName)}` : ''}`,
+      href: '/dosya-yonetimi',
+      targets: ['audience:all'],
+      actor: { uid: 'ceomed-worker', name: 'Ceomed Otomasyonu' },
+      channel: 'push',
+      readBy: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(job.companyId ? { companyId: job.companyId } : {}),
+      meta: {
+        jobId: job.id,
+        irsaliyeNo: metin(job.irsaliyeNo),
+        cariKodu: metin(job.cariKodu),
+        formNo: metin(job.formNo),
+        formId: metin(job.formId),
+        satirSayisi,
+        ceomedIrsaliyeNo: (result && result.ceomedIrsaliyeNo) || null,
+      },
+    });
+    log('bildirim', `${metin(job.irsaliyeNo)} için push bildirimi kuyruğa yazıldı.`);
+  } catch (e) {
+    // Yalnızca logla; gönderim geri alınamaz, iş başarılı kalmalı.
+    errLog('bildirim', `Push bildirimi yazılamadı (gönderim etkilenmedi): ${e.message || e}`);
+  }
+}
+
 async function markAwaitingReview(db, job, result) {
   await db.collection(COLLECTION).doc(job.id).update({
     status: 'awaiting_review',
@@ -273,6 +322,7 @@ async function processJob(db, driver, jobId) {
 
   dailyCounter.adet += 1;
   await markSent(db, job, result);
+  await bildirimYaz(db, job, result);
   log('ok', `${ozet} — e-irsaliye gönderildi${result.ceomedIrsaliyeNo ? ` (Ceomed no: ${result.ceomedIrsaliyeNo})` : ''}`);
 }
 

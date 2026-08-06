@@ -44,6 +44,7 @@ export type NotificationType =
   | "weekly_plan_approval_requested"
   | "weekly_plan_approved"
   | "weekly_plan_rejected"
+  | "ceomed_irsaliye_olusturuldu"
   | "custom";
 
 export type ResourceType =

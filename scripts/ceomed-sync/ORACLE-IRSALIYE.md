@@ -211,6 +211,65 @@ bunu önceden kontrol edip anlaşılır bir hatayla durur.
 
 Kapatmak için: `--f6-yenileme-yok` (worker'da kullanılmıyor, elle prova içindir).
 
+### Numara tekilliği çözüldü — sayaç şirket bazına çekildi
+
+Sayaç kullanıcı bazlıydı (`${companyId}_${uid}_${tip}`) ve her kullanıcı 1'den
+başlıyordu. Aynı baş harfli iki personel — "Batuhan Tubasar" ve "Burak Toprak" —
+ikisi de `BT-T0042` üretebiliyor, dönüşümden sonra ikisi de `BT10042` oluyordu.
+Sahada uygulamanın **mükerrer irsaliye numarasını reddettiği** gözlendi, yani
+ikincisinin irsaliyesi gönderilemezdi.
+
+Sayaç artık şirket bazlı: `${companyId}_${tip}`. Sıra numarası şirket içinde
+tekil olduğu için baş harfler çakışsa bile numaralar ayrışır
+(`BT10042` / `BT10043`).
+
+**Geçiş tuzağı ve çözümü:** şirket sayacı sıfırdan başlasaydı var olan
+numaralarla çakışırdı — A kullanıcısı `T0001..T0050`, B kullanıcısı
+`T0001..T0030` üretmişse yeni sayaç yine `T0001` verirdi. Bu yüzden şirket
+sayacı ilk kez oluşturulurken **eski kullanıcı sayaçlarının en büyüğünden**
+tohumlanır. Tohum işlem DIŞINDA okunur (Firestore işlemlerinde sorgu
+çalıştırılamaz); yarış durumu zararsızdır çünkü `sonrakiSeq()` içindeki
+`Math.max` tohumu yalnızca bir kez uygular ve numarayı geri götürmez.
+
+Karakter sınırı hatırlatması: `BT` + tip rakamı + sıra = en fazla 8 karakter.
+Şirket bazlı sayaç daha hızlı büyür; 5 haneli sıra (`BT199999`) sığar, 6 haneli
+sığmaz ve iş `blocked` damgalanır.
+
+### Test işi kuyruğa ekleme (Qore'da form kapatmadan)
+
+Sürücüyü denemek için gerçek bir teknik/aplikasyon formu kapatmak gerekmiyor:
+
+```powershell
+cd scripts\ceomed-sync
+enqueue-test-job.bat
+enqueue-test-job.bat --irsaliye-no BT10099 --stok-kodu 03753379001
+enqueue-test-job.bat --cari-kodu M51009 --miktar 2 --lot LOT123
+```
+
+Kayıtlar `test: true` ile işaretlenir. Betik yazmadan önce doğrular:
+
+* İrsaliye no biçimi (2 harf + en fazla 6 rakam) — uygulama mükerrer numarayı
+  reddettiği için her denemede farklı verin; verilmezse saatten türetilir.
+* Stok kodunda ASCII dışı karakter — `İ` harfi veritabanına `?` olarak gidiyor
+  ve geri okuma bunu yakalayamıyor, o yüzden baştan engelleniyor.
+* Miktarın pozitif olması.
+
+### Başarılı gönderimde push bildirimi
+
+Gerçek gönderim tamamlandığında worker `notifications` koleksiyonuna bir belge
+yazar; mevcut Cloud Function (`notifications/{id}` onCreate) hedef kitleyi çözüp
+FCM ile dağıtır. Kitle çözümleme mantığı worker'da **tekrarlanmaz** — iki yerde
+ayrışacak bir kopya olurdu.
+
+Hedef `audience:all`; her push jetonu bu anahtarı taşır ve Function `companyId`
+ile aynı şirkete daraltır.
+
+Bildirim yazımı başarısız olursa **iş başarısız sayılmaz**: e-irsaliye
+gönderilmiştir, tekrar denemek mükerrer irsaliye üretir. Hata yalnızca loglanır.
+
+`ORACLE_FILL_ONLY=1` modunda bildirim gönderilmez — o modda irsaliye
+oluşturulmuyor, yalnızca form dolduruluyor.
+
 ### PERMISSION_DENIED — Firestore bağlantı tanısı
 
 Worker `7 PERMISSION_DENIED: Permission denied on resource project "..."` ile
