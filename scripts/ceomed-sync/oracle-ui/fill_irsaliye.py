@@ -70,6 +70,11 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
     "aciklama":        (64, 667),
 }
 
+# Prova 5'te aynı Açıklama Edit'i ana Ceomed penceresine göre de ölçüldü.
+# Grid ile alt Açıklama alanı farklı iç MDI document'lere bağlanabildiği
+# için bu iki bölge arasındaki tıklama ana pencereye göre yapılır.
+ACIKLAMA_PENCERE_KONUMU = (70, 698)
+
 KONUM_TOLERANS = 18
 
 # Bu alanlardan çıkışta Forms bir LOV (arama) penceresi açar. Filtre alanı
@@ -340,7 +345,8 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
         grid_alani = alan_adi(o["mdi_ici"], grid_modu=True)
         if baslik_alani is None and grid_alani is None:
             raise Durdu(
-                f"Başlangıç odağı tanınmıyor ({o['pencere_ici']}); "
+                f"Başlangıç odağı tanınmıyor (mdi {o['mdi_ici']}, "
+                f"pencere {o['pencere_ici']}); "
                 "yanlış forma tuş göndermemek için durduruldu.",
                 retryable=True,
             )
@@ -352,7 +358,7 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
     )
 
 
-def aciklama_doldur(deger: str, log: list[str]) -> None:
+def aciklama_doldur(deger: str, ana_pencere: int, log: list[str]) -> None:
     """Sol alttaki Açıklama ilk satırına personel adını yazar."""
     if not deger.strip():
         raise Durdu("Açıklama/personel adı boş; gönderim yapılmayacak.")
@@ -366,9 +372,14 @@ def aciklama_doldur(deger: str, log: list[str]) -> None:
             f"{once['mdi_ici']} konumunda. Tıklanmadı."
         )
 
+    # Prova 7, grid odağındaki MDI kökünün Açıklama bölgesinin kökü
+    # olmadığını gösterdi. Aynı saha ölçümünün ana pencere karşılığını
+    # kullan; tıklama sonrası MDI konumunu yine geri okuyup doğrula.
     hedef = ALAN_KONUMLARI["aciklama"]
-    # Ölçüm aktif Edit'in sol üstü; kenarlığa değil hücrenin içine tıkla.
-    tiklama = ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    tiklama = ui60.pencere_noktasina_tikla(
+        ana_pencere,
+        (ACIKLAMA_PENCERE_KONUMU[0] + 10, ACIKLAMA_PENCERE_KONUMU[1] + 8),
+    )
     o = ui60.odak()
     if alan_adi(o["mdi_ici"]) != "aciklama" or o["sinif"] != "Edit":
         raise Durdu(
@@ -475,7 +486,7 @@ def main() -> int:
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
 
-        aciklama_doldur(str(job.get("aciklama") or ""), log)
+        aciklama_doldur(str(job.get("aciklama") or ""), ana, log)
 
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
 

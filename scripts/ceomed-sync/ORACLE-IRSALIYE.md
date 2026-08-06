@@ -45,12 +45,14 @@ olduğunu doğruladıktan sonra bu hücrenin içine tıklar, personel adını
 yazar ve geri okur. Tıklama beklenen `Edit` alanını odaklamazsa hiçbir
 değer yazılmadan iş durdurulur.
 
-Prova 7'de grid içindeki geçici Edit'in ebeveyn zincirindeki ilk
-`ui60MDIdocument_W32` gerçek form belgesi olmadığı için Açıklama tıklaması
-başlıktaki bir butona kaydı. Belge kökü artık ebeveyn zincirindeki ilk
-document yerine, ana pencere altında odağı kapsayan ve **Çıkış İrsaliyesi**
-başlığını taşıyan MDI belgeden alınır. Başarısız tıklama hatası MDI
-başlığını, belge dikdörtgenini ve hesaplanan ekran noktasını da raporlar.
+Prova 7, grid ile alt Açıklama bölgesinin aynı iç MDI document kökünü
+paylaşmadığını gösterdi; grid köküne göre Açıklama tıklaması başlıktaki
+bir butona kaydı. Prova 8'de MDI kökünü global olarak değiştirmek ise daha
+başlangıçtaki İrsaliye No alan tanımasını bozdu. Bu nedenle normal alan
+tanıma için kanıtlanmış MDI davranışı korunur; yalnızca bölgeler arasındaki
+Açıklama tıklaması sahada ölçülmüş ana pencere koordinatı `(70, 698)`
+üzerinden yapılır. Tıklama sonrası alan yine MDI koordinatı ve `Edit` sınıfı
+ile doğrulanır.
 
 ### Başlıktan grid'e geçiş
 
