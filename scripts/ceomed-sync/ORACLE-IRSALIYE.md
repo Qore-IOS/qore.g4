@@ -171,6 +171,41 @@ ORACLE_STALE_CLAIM_MIN=15 # takılı kalan işi kaç dk sonra kurtar
 ORACLE_PYTHON=python      # UI sürücüsü için Python yorumlayıcısı
 ```
 
+### PERMISSION_DENIED — Firestore bağlantı tanısı
+
+Worker `7 PERMISSION_DENIED: Permission denied on resource project "..."` ile
+düşüyorsa sorun Ceomed tarafında değil, kimlik doğrulamadadır.
+
+Bu hata yanıltıcıdır çünkü `admin.credential.applicationDefault()`,
+`GOOGLE_APPLICATION_CREDENTIALS` dosyasını **bulamazsa hata vermez** — sessizce
+başka bir kimliğe düşer (gcloud kullanıcı hesabı, makine kimliği). O kimliğin
+projeye erişimi olmadığı için hata en sonda, ilk sorguda çıkar ve sorunun
+dosyada mı, rolde mi, proje kimliğinde mi olduğu görünmez.
+
+```powershell
+cd scripts\ceomed-sync
+check-firestore.bat
+```
+
+Betik `.env`'i worker'ın kullandığı **yöntemle aynı şekilde** yükler — `.env`'i
+elle okuyup "doğru görünüyor" demek yeterli değildir, sorun çoğu zaman
+yüklemenin kendisindedir. Zinciri tek tek doğrular:
+
+1. Ortam değişkenleri tanımlı mı
+2. Servis hesabı dosyası **var mı**, tırnak içinde mi kalmış, içindeki
+   `project_id` `FIREBASE_PROJECT_ID` ile aynı mı
+3. Gerçek bir Firestore okuması
+4. Kuyruktaki işlerin durum dağılımı
+
+Özel anahtar hiçbir zaman basılmaz; yalnızca servis hesabının e-postası ve
+dosyadaki proje kimliği gösterilir.
+
+En sık iki sebep:
+
+* **Tırnaklı yol.** `.env` içinde `GOOGLE_APPLICATION_CREDENTIALS="C:\..."`
+  yazılırsa `.bat` tırnakları değere dahil eder, dosya bulunamaz.
+* **Proje uyuşmazlığı.** Anahtar başka bir projeye ait. Betik bunu açıkça söyler.
+
 ### Canlı form-doldur testi (gönderimsiz)
 
 Qore'da kapanan gerçek teknik/aplikasyon formlarının Ceomed ekranına
