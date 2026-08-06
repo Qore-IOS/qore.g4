@@ -1,4 +1,5 @@
 @echo off
+chcp 65001 > nul
 REM ============================================================================
 REM Qore -> Ceomed muhasebe irsaliyesi YAZMA worker'i (surekli acik)
 REM
@@ -59,7 +60,7 @@ if not defined CEOMED_COMPANY_ID (
 )
 
 :loop
-echo [%date% %time%] oracle worker basliyor (DRY_RUN=%ORACLE_DRY_RUN%, FILL_ONLY=%ORACLE_FILL_ONLY%) >> oracle-worker.log
+echo [%date% %time%] oracle worker basliyor (BUILD=fill-only-v2-no-controls, DRY_RUN=%ORACLE_DRY_RUN%, FILL_ONLY=%ORACLE_FILL_ONLY%) >> oracle-worker.log
 node oracleIrsaliyeWorker.js >> oracle-worker.log 2>&1
 echo [%date% %time%] oracle worker durdu (exit %ERRORLEVEL%), 15 sn sonra yeniden baslatiliyor >> oracle-worker.log
 timeout /t 15 /nobreak > nul

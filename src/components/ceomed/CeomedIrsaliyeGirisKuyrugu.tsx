@@ -150,7 +150,7 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
       });
       toast({
         title: 'Test tamamlandı',
-        description: 'Worker sıradaki formu doldurabilir. Ceomed formunu F6 ile kendisi temizliyor; elle yeni form açmanız gerekmez.',
+        description: 'Worker kuyruktaki sıradaki formu doldurabilir. Oracle’da yeni ve boş form açık olmalıdır.',
       });
     } catch (e: any) {
       toast({ title: 'Hata', description: e?.message || 'Test tamamlanamadı.', variant: 'destructive' });
@@ -244,8 +244,8 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
 
                   {job.status === 'awaiting_review' && (
                     <p className="mt-2 rounded bg-violet-50 p-2 text-xs text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
-                      Oracle formunu kontrol edin. Sıradaki işe geçildiğinde sürücü formu F6 ile
-                      temizleyip yeni boş forma geçer; elle form açmanız gerekmez.
+                      Oracle formunu kontrol edin. Sıradakine geçmeden önce Ceomed’de yeni ve boş bir
+                      Çıkış İrsaliyesi formu açın; aksi halde sonraki iş mevcut ekranın üzerine yazabilir.
                     </p>
                   )}
 

@@ -352,41 +352,19 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
                 log.append("başlangıç: mevcut İrsaliye No otomatik temizlenecek")
             return
 
-        if not o["hwnd"]:
-            # Odak hiçbir yerde: başka bir pencere öne gelmiş ya da oturum
-            # kilitlenmiş olabilir. Geçici bir durum, yeniden denenmeli.
-            raise Durdu(
-                "Ceomed penceresi odağı kaybetti (başka bir pencere öne gelmiş "
-                "ya da oturum kilitli olabilir). Ceomed'i öne alıp tekrar deneyin.",
-                retryable=True,
-            )
-
         baslik_alani = alan_adi(o["mdi_ici"])
         grid_alani = alan_adi(o["mdi_ici"], grid_modu=True)
         if baslik_alani is None and grid_alani is None:
-            # Konumu tek başına yazmak çıkmaz sokak: (305,170)'te NE olduğunu
-            # söylemiyor. Kontrolün sınıfı, değeri ve MDI belge başlığı,
-            # yanlış formda mıyız yoksa tabloyu mu güncellemek gerekiyor
-            # sorusunu tek bakışta ayırt ettirir.
             raise Durdu(
-                "Başlangıç odağı tanınmıyor — "
-                f"sınıf {o['sinif']!r}, değer {o['deger']!r}, "
-                f"mdi {o['mdi_ici']}, pencere {o['pencere_ici']}, "
-                f"MDI belgesi {o['mdi_baslik']!r}. "
-                "Çıkış İrsaliyesi formu açık değilse açın; açıksa alan konum "
-                "tablosu bu kurulumda kaymış olabilir "
-                "(python fill_irsaliye.py --tani ile ölçün). "
-                "Yanlış forma tuş göndermemek için durduruldu.",
+                f"Başlangıç odağı tanınmıyor (mdi {o['mdi_ici']}, "
+                f"pencere {o['pencere_ici']}); "
+                "yanlış forma tuş göndermemek için durduruldu.",
                 retryable=True,
             )
         ui60.tus("SHIFTTAB", bekle_ms=250)
 
-    son = ui60.odak()
     raise Durdu(
-        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı. "
-        f"Son odak: sınıf {son['sinif']!r}, mdi {son['mdi_ici']}, "
-        f"MDI belgesi {son['mdi_baslik']!r}. "
-        "Form beklenenden farklı olabilir.",
+        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı.",
         retryable=True,
     )
 
@@ -449,27 +427,6 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
     log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
 
 
-def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
-    """F6 ile formu temizleyip yeni boş forma geçer.
-
-    Ceomed'de E-İRSALİYE GÖNDER'den sonra form KAPANMIYOR: kayıt bilgileriyle
-    ekranda kalıyor ve operatör F6'ya basarak yeni boş form açıyor. Sürücü bunu
-    kendisi yapmazsa sıradaki iş dolu bir formun üstüne yazmaya çalışır.
-
-    İşin BAŞINDA da çağrılır: form önceki işten (ya da elle yapılmış bir
-    denemeden) dolu kalmış olabilir. Böylece worker gözetimsiz çalışırken
-    operatörün her seferinde elle boş form açması gerekmez.
-    """
-    if ui60.lov_acik_mi(ana_pencere):
-        raise Durdu(
-            "Form yenilenemedi: ekranda açık bir pencere var (uyarı ya da arama "
-            "penceresi). F6 bu durumda çalışmaz; pencere kapatılmalı.",
-            retryable=True,
-        )
-    ui60.tus("F6", bekle_ms=1500)
-    log.append(f"F6 ile form yenilendi ({sebep})")
-
-
 def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:
     """E-İRSALİYE GÖNDER butonunu yazısından bulur; tıklamaz."""
     gonder = ui60.buton_bul(ana_pencere, "E-IRSALIYE GÖNDER")
@@ -516,9 +473,7 @@ def main() -> int:
     if not sys.platform.startswith("win"):
         return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
 
-    # Sınıf filtresi şart: worker'ın kendi konsol penceresi de başlığında
-    # "ceomed-sync" taşıdığı için başlık eşleştirmesi tek başına yetmiyor.
-    pencereler = ui60.pencere_bul(args.pencere, sinif=ui60.MDI_KOK_SINIFI)
+    pencereler = ui60.pencere_bul(args.pencere)
     if not pencereler:
         return fail(
             f"'{args.pencere}' başlıklı Ceomed penceresi açık değil. "
@@ -575,11 +530,6 @@ def main() -> int:
     goruntu = None
 
     try:
-        # Önceki iş formu kayıt bilgileriyle ekranda bırakmış olabilir; F6 temiz
-        # sayfa getirir. Operatörün her seferinde elle boş form açması gerekmesin.
-        if not args.f6_yenileme_yok:
-            form_yenile(ana, log, "işe başlamadan önce temiz form")
-
         # Ceomed odağı ve önceki numarayı koruyabiliyor. Kullanıcıya elle
         # sildirmek yerine odağı kur; alan_yaz mevcut değeri temizleyecek.
         irsaliye_numarasina_git(log)

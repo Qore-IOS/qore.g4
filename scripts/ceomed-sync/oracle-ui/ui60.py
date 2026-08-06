@@ -219,26 +219,6 @@ def mdi_belge_kokü(hwnd: int) -> int:
     return min(adaylar)[1] if adaylar else 0
 
 
-# `odak()` sözlüğünün TAM şekli. İki dönüş yolu bunu paylaşır; ayrışmasınlar.
-#
-# Sahada ayrıştılar: odak kaybolduğunda dönen erken sözlükte `mdi_ici` yoktu ve
-# her çağıran `o["mdi_ici"]` dediği için KeyError atıyordu. Genel `except` onu
-# "Beklenmedik hata" sayıp retryable=False yapıyor, iş de kalıcı olarak
-# "ELLE MÜDAHALE GEREKİR" damgası yiyordu — oysa odak kaybı geçici bir durum.
-ODAK_BOS: dict = {
-    "hwnd": 0,
-    "sinif": "",
-    "deger": "",
-    "kok": 0,
-    "kok_baslik": "",
-    "mdi": 0,
-    "mdi_baslik": "",
-    "mdi_ici": (0, 0),
-    "pencere_ici": (0, 0),
-    "rect": (0, 0, 0, 0),
-}
-
-
 def odak() -> dict:
     """Odaktaki kontrolün tam tarifi.
 

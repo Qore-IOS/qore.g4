@@ -77,6 +77,7 @@ const MAX_PER_DAY = num(process.env.ORACLE_MAX_PER_DAY, 200);
 const STALE_CLAIM_MIN = num(process.env.ORACLE_STALE_CLAIM_MIN, 15);
 const POLL_SEC = num(process.env.ORACLE_POLL_SEC, 30);
 const COMPANY_ID = (process.env.CEOMED_COMPANY_ID || '').trim();
+const WORKER_BUILD = 'fill-only-v2-no-controls';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
 
@@ -152,6 +153,24 @@ async function markSent(db, job, result) {
     screenshotPath: result.screenshotPath || null,
     driver: DRIVER_NAME,
   });
+}
+
+async function markAwaitingReview(db, job, result) {
+  await db.collection(COLLECTION).doc(job.id).update({
+    status: 'awaiting_review',
+    previewedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastError: null,
+    screenshotPath: result.screenshotPath || null,
+    driver: DRIVER_NAME,
+  });
+}
+
+async function hasAwaitingReview(db) {
+  let q = db.collection(COLLECTION).where('status', '==', 'awaiting_review');
+  if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
+  const snap = await q.limit(1).get();
+  return !snap.empty;
 }
 
 /**
@@ -388,7 +407,7 @@ async function main() {
   const db = initFirestore();
   const driver = loadDriver();
 
-  log('başlat', `worker=${WORKER_ID} sürücü=${DRIVER_NAME} mod=${FILL_ONLY ? 'FORM_DOLDUR_TEST' : DRY_RUN ? 'PLAN_KURU' : 'GERÇEK'}`);
+  log('başlat', `build=${WORKER_BUILD} worker=${WORKER_ID} sürücü=${DRIVER_NAME} mod=${FILL_ONLY ? 'FORM_DOLDUR_TEST' : DRY_RUN ? 'PLAN_KURU' : 'GERÇEK'}`);
   if (FILL_ONLY) {
     log('başlat', 'FORM DOLDUR TESTİ: Oracle formu doldurulacak, E-İRSALİYE GÖNDER butonuna basılmayacak.');
   } else if (DRY_RUN) {

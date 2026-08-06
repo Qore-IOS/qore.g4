@@ -2079,7 +2079,7 @@ export default function IslemFormuPage() {
             const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
             const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-            batch.set(faultReportRef, {
+            batch.set(faultReportRef, withCompanyScope({
               deviceId: currentDeviceId,
               hospitalId: currentDevice.hospitalId,
               labName: hospital?.name,
@@ -2112,7 +2112,7 @@ export default function IslemFormuPage() {
               relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
               isCustomFault: isCustomFault || false,
               createdFromActionForm: true,
-            });
+            }, currentCompanyId));
 
             const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
             batch.set(historyOpenedRef, {
