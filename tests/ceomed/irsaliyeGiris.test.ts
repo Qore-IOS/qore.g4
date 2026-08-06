@@ -11,6 +11,7 @@ import {
   CEOMED_DEPO,
   CEOMED_ISLEM_TIPI,
 } from '../../src/lib/ceomed/irsaliye-giris';
+import { sonrakiSeq } from '../../src/lib/form-number';
 
 const baseInput = {
   formId: 'form-1',
@@ -275,4 +276,35 @@ test('doc.irsaliyeNo çevrilmiş değeri taşır, ham form numarasını değil',
   if (r.outcome !== 'ready') return;
   assert.equal(r.doc.irsaliyeNo, 'BT10042');
   assert.equal(r.doc.formNo, 'BT-T0042');
+});
+
+// --- Form numarası: şirket bazlı sayaç ---------------------------------------
+// Sayaç kullanıcı bazlıyken aynı baş harfli iki personel aynı numarayı
+// üretebiliyordu ve Ceomed mükerrer irsaliye numarasını REDDEDİYOR (sahada
+// gözlendi). Şirket bazına çekilince sıra numarası tekilleşiyor.
+
+test('aynı baş harfli iki personel artık farklı irsaliye numarası alır', () => {
+  // Şirket sayacı: Batuhan Tubasar 42'yi, Burak Toprak 43'ü alır.
+  const batuhan = ceomedIrsaliyeNo('BT-T0042');
+  const burak = ceomedIrsaliyeNo('BT-T0043');
+
+  assert.equal(batuhan, 'BT10042');
+  assert.equal(burak, 'BT10043');
+  assert.notEqual(batuhan, burak);
+});
+
+test('kullanıcı bazlı sayaçta çakışma olurdu — regresyon kaydı', () => {
+  // İki personel de kendi sayacında 42'ye ulaşsaydı aynı numarayı üretirlerdi.
+  assert.equal(ceomedIrsaliyeNo('BT-T0042'), ceomedIrsaliyeNo('BT-T0042'));
+});
+
+test('sonrakiSeq tohumu bir kez uygular, numarayı geri götürmez', () => {
+  // İlk çağrı: sayaç 0, eski kullanıcı sayaçlarının en büyüğü 50.
+  assert.equal(sonrakiSeq(0, 50), 51);
+  // Sonraki çağrı: sayaç 51, tohum yeniden uygulanmamalı.
+  assert.equal(sonrakiSeq(51, 50), 52);
+  // Tohum yoksa normal artış.
+  assert.equal(sonrakiSeq(7, 0), 8);
+  // Bozuk değerler 0 sayılır.
+  assert.equal(sonrakiSeq(NaN as unknown as number, 0), 1);
 });
