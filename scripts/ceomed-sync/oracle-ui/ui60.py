@@ -177,7 +177,7 @@ MDI_BELGE_SINIFI = "ui60MDIdocument_W32"
 
 
 def mdi_belge_kokü(hwnd: int) -> int:
-    """Kontrolü içeren MDI belge penceresi (yoksa 0).
+    """Etkin kontrolün MDI belge penceresi (yoksa 0).
 
     Ceomed bir MDI uygulaması: form, ana pencerenin içinde ayrı bir alt
     pencerede duruyor. Konumları ANA pencereye göre ölçmek kırılgan — ana
@@ -185,12 +185,32 @@ def mdi_belge_kokü(hwnd: int) -> int:
     ölçümler bozulur. Provada tam bu oldu: İrsaliye No (123,113) yerine
     (9,100)'de göründü ve sürücü "form yarıda kalmış" sanıp durdu.
     """
+    # Normal kontrollerde ebeveyn zinciri yeterlidir. Forms'un alan üzerine
+    # taşıdığı geçici Edit ise her kurulumda MDI belgesinin çocuğu değil.
     h = hwnd
     while h:
         if sinif_adi(h) == MDI_BELGE_SINIFI:
             return h
         h = user32.GetParent(h)
-    return 0
+    # Uçuşan Edit için belgeyi ana pencereden ara. Birden fazla belge varsa
+    # odağı içeren en küçük görünür belge etkin belgedir.
+    kok = user32.GetAncestor(hwnd, GA_ROOT)
+    if not kok:
+        return 0
+    odak_rect = dikdortgen(hwnd)
+    adaylar: list[tuple[int, int]] = []
+
+    def geri_cagri(aday, _lparam):
+        if sinif_adi(aday) == MDI_BELGE_SINIFI and user32.IsWindowVisible(aday):
+            r = dikdortgen(aday)
+            if (r[0] <= odak_rect[0] < r[2]
+                    and r[1] <= odak_rect[1] < r[3]):
+                alan = max(0, r[2] - r[0]) * max(0, r[3] - r[1])
+                adaylar.append((alan, aday))
+        return True
+
+    user32.EnumChildWindows(kok, ENUMPROC(geri_cagri), 0)
+    return min(adaylar)[1] if adaylar else 0
 
 
 def odak() -> dict:
