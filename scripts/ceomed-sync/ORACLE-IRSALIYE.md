@@ -71,10 +71,12 @@ Bayrak yoksa iş, uyarı penceresi açıkken gönderime ilerlemeden durur.
 
 Boş **Anlaşma No** alanından `ENTER` ile çıkışın kararlı olmadığı
 sahada ölçüldü: Prova 5 grid'e ilerlerken Prova 6 aynı alanda odağı
-hapsetti. Sürücü bu alanı valide etmeye çalışmaz. Anlaşma No'ya
-dokunmadan, MDI belgeye göre ölçülmüş ilk **Stok Kodu** hücresini
-tıklar ve yazmadan önce odağın `Edit` sınıfında ve Stok Kodu
-konumunda olduğunu doğrular.
+hapsetti. Prova 10 ayrıca başlık MDI köküne göre yapılan grid tıklamasının
+odağı Anlaşma No'da bırakabildiğini gösterdi. Header ile grid farklı iç MDI
+köklerine bağlanabildiğinden bu bölgeler arasındaki geçiş, sahada ölçülmüş
+ana pencere koordinatı `(14, 297)` üzerinden yapılır. Tıklama sonrası odak
+yine MDI koordinatı `(8, 266)` ve `Edit` sınıfıyla doğrulanır; doğrulanmazsa
+stok kodu yazılmaz.
 
 ### İrsaliye No neden olduğu gibi yazılamıyor
 

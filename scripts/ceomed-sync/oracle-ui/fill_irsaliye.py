@@ -74,6 +74,10 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
 # Grid ile alt Açıklama alanı farklı iç MDI document'lere bağlanabildiği
 # için bu iki bölge arasındaki tıklama ana pencereye göre yapılır.
 ACIKLAMA_PENCERE_KONUMU = (70, 698)
+# Prova loglarında ilk Stok Kodu Edit'i ana pencereye göre tutarlı olarak
+# (14, 297) konumunda ölçüldü. Başlık ile grid de farklı iç MDI köklerine
+# bağlanabildiği için bölgeler arası geçişte bu karşılık kullanılır.
+STOK_KODU_PENCERE_KONUMU = (14, 297)
 
 KONUM_TOLERANS = 18
 
@@ -236,7 +240,7 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
             # hapsetti. Boş alanı valide etmeye çalışmak yerine ölçülmüş
             # Stok Kodu hücresini doğrulamalı tıkla.
             log.append("anlasmaNo: dokunulmadı")
-            grid_stok_koduna_git(log)
+            grid_stok_koduna_git(ana_pencere, log)
             return
 
         if ad and degerler.get(ad):
@@ -261,16 +265,23 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
     )
 
 
-def grid_stok_koduna_git(log: list[str]) -> None:
+def grid_stok_koduna_git(ana_pencere: int, log: list[str]) -> None:
     """Başlıktan grid'in ilk Stok Kodu hücresine doğrulamalı geçer."""
-    hedef = ALAN_KONUMLARI["stokKodu"]
-    ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    # Prova 10, Anlaşma No'nun bağlı olduğu MDI köküne göre hesaplanan
+    # grid noktasının grid'e geçmediğini gösterdi. Header -> grid bir bölge
+    # geçişidir; sahada ölçülmüş ana pencere koordinatını kullan.
+    tiklama = ui60.pencere_noktasina_tikla(
+        ana_pencere,
+        (STOK_KODU_PENCERE_KONUMU[0] + 10,
+         STOK_KODU_PENCERE_KONUMU[1] + 8),
+    )
     o = ui60.odak()
     if (alan_adi(o["mdi_ici"], grid_modu=True) != "stokKodu"
             or o["sinif"] != "Edit"):
         raise Durdu(
             f"Grid Stok Kodu alanı odaklanamadı; odak {o['mdi_ici']} "
-            f"({o['sinif'] or 'sınıfsız'}) konumunda. Yazılmadı."
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. "
+            f"Tıklama: {tiklama!r}. Yazılmadı."
         )
     log.append(
         f"grid: Stok Kodu alanı tıklanarak odaklandı "
