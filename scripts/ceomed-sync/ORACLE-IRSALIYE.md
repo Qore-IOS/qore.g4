@@ -153,7 +153,7 @@ Get-NetTCPConnection -OwningProcess <PID> | Select-Object RemoteAddress, RemoteP
 **Sonuç:**
 
 ```
-Process : ifrun60          (Informix 4GL çalışma zamanı)
+Process : ifrun60          (Oracle Forms 6i çalışma zamanı)
 Bağlantı: 192.168.1.5:1521  Established
 ```
 
@@ -222,7 +222,7 @@ sorulmuş, **olumsuz cevap alınmıştır** (2026-08-06). API yolu kapalıdır;
 
 `inspect_form.py --title "rsaliyesi"` çıktısının özeti:
 
-**Pencere hiyerarşisi** (Informix 4GL "UI 6.0" çalışma zamanı):
+**Pencere hiyerarşisi** (Oracle Forms 6i — `ifrun60.exe` = Interactive Forms Runtime 6.0):
 
 ```
 ui60MDIroot_W32  "… CEOMED YAZILIM V:12c … [ Çıkış İrsaliyesi Yeni ** ]"
@@ -256,7 +256,7 @@ bulunamazlar.
 [Edit] text='SI007787'  (L-1920, T1, R-1920, B1)   ← sıfır boyut
 ```
 
-Bu, 4GL'in bilinen davranışına işaret eder: odaktaki alan için gerçek bir Edit
+Bu, Oracle Forms'un bilinen davranışına işaret eder: odaktaki alan için gerçek bir Edit
 kontrolü açılır, alanın üstüne taşınır, odak gidince geri park edilir. Doğruysa
 her alan yazıldıktan sonra **geri okunabilir** — e-irsaliye gönderimi geri
 alınamadığı için bu güvence pazarlık konusu değildir.
@@ -284,7 +284,7 @@ görüntüsüne kalır; o durumda tam otomatik gönderim yeniden değerlendirilm
 
 `probe_focus.py` turunda 22 odak olayının **hepsi** gerçek, boyutlu bir `Edit`
 kontrolüne düştü ve değerleri okundu (`SI007787`, `06/08/2026`, `02`, `01`).
-Hipotez doğrulandı: 4GL çalışma zamanı odaktaki alan için gerçek bir Edit açıp
+Hipotez doğrulandı: Forms çalışma zamanı odaktaki alan için gerçek bir Edit açıp
 alanın üstüne taşıyor.
 
 **Sonuç: "yaz → geri oku → uyuşmazsa gönderme" güvencesi korunabiliyor.**
@@ -436,11 +436,11 @@ Tamamlandı`, `SIL`, `Ref No Güncelle`, `İrsaliye Yazdır`, `Fatura Kopyala` b
 
 Sürücü **her alanı yazmadan önce temizlemek zorundadır**. Aksi halde muhasebeye
 `m5101612` gibi uydurma cari kodları gider. `probe_type.py` bunun için `TEMIZLE`
-adımı sunar (END + BACKSPACE×40; 4GL alanlarında seçim davranışı öngörülemez
+adımı sunar (END + BACKSPACE×40; Forms alanlarında seçim davranışı öngörülemez
 olduğu için Ctrl+A tercih edilmedi).
 
 **2. Geçersiz değer odağı hapsediyor.** Yukarıdaki turda TAB odağı ilerletmedi.
-4GL alandan çıkışta doğrulama yapıyor ve değer geçersizse bırakmıyor. Bu bedava
+Forms alandan çıkışta `WHEN-VALIDATE-ITEM` çalıştırıyor; tetikçi hata verirse navigasyonu durduruyor. Bu bedava
 bir hata sinyalidir: *TAB'dan sonra odak aynı kontroldeyse değer reddedilmiştir.*
 `probe_type.py` bu durumu artık kendisi işaretler.
 
@@ -514,6 +514,37 @@ stok koduyla tekrarlanmalı.
 getirdi; mesaj da tuvale çizilmiş. Sürücü bir uyarı penceresi açıldığını
 anlayabilir ama **nedenini okuyamaz** — teşhis için ekran görüntüsü almalı ve işi
 `failed` damgalarken loga onun yolunu yazmalı.
+
+### Ölçüm 7 — çalışma zamanı Oracle Forms 6i, ve hatalar her zaman pencere açmıyor
+
+Grid'de gerçek bir stok kodu (`ALK-BİO-E-CI`) LOV'dan seçildikten sonra ENTER da
+TAB da odağı ilerletmedi. Formun alt mesaj satırında şu çıktı:
+
+```
+WHEN-VALIDATE-ITEM tetikçisi, işlenemeyen kuraldışı durum ortaya çıktı ORA-01403.
+```
+
+**İki sonuç:**
+
+**1. Çalışma zamanı Oracle Forms 6i.** `WHEN-VALIDATE-ITEM` ve `ORA-01403` Oracle
+Forms kavramları; `ifrun60.exe` = Interactive Forms Runtime 6.0 ve `ui60*` pencere
+sınıfları da onun. (Bu belgenin önceki sürümlerinde "Informix 4GL" yazıyordu —
+yanlıştı, düzeltildi. Ölçülen davranışların hiçbiri değişmiyor.)
+
+**2. Hata her zaman modal pencere açmıyor.** Bu sefer uyarı yalnızca alt mesaj
+satırında göründü — pencere yok, buton yok, `EnumChildWindows` ile yakalanacak bir
+şey yok. Sürücü "modal pencere açıldı mı" sinyaline dayanırsa bu sınıf hatayı
+tamamen kaçırır.
+
+Güvenilir sinyal `odak_ilerledi_mi()`: Forms, `WHEN-VALIDATE-ITEM` hata verdiğinde
+navigasyonu durdurur. **Odak kıpırdamadıysa değer reddedilmiştir** — modal olsun
+olmasın çalışır. Sürücü buna dayanır.
+
+**ORA-01403 = "veri bulunamadı".** Stok kodu geçerliydi (LOV'dan seçildi), ama
+doğrulama tetikçisi arka planda boş dönüyor. Ölçüm sırasında Cari Kodu ve Depo boştu;
+stok doğrulaması büyük olasılıkla depo/cari üzerinden bakiye arıyor. Yani **grid tek
+başına ölçülemez, form sırayla dolmak zorunda.** Grid sütun geçişi ölçümü, header
+gerçek değerlerle doldurulduktan sonra tekrarlanmalıdır.
 
 ### ⚠ İrsaliye No: muhasebe Qore form numarasını istiyor, ama format uymuyor
 

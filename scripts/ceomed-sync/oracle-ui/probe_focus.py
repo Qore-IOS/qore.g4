@@ -1,11 +1,11 @@
 """Ceomed formunda odağı takip eder: hangi alanda ne var, sırayla yazar.
 
 NEDEN GEREKLİ: `inspect_form.py`, formun görünen alanlarının Windows kontrolü
-OLMADIĞINI gösterdi — Informix 4GL çalışma zamanı (`ui60Drawn_W32`) hepsini
+OLMADIĞINI gösterdi — Oracle Forms 6i çalışma zamanı (`ui60Drawn_W32`) hepsini
 tuvale çiziyor. Ama sıfır boyuta park edilmiş `Edit` kontrollerinden birinin
 ekrandaki İrsaliye No değerini (`SI007787`) taşıdığı görüldü.
 
-Bu, 4GL'in bilinen davranışına işaret eder: odaktaki alan için gerçek bir Edit
+Bu, Oracle Forms'un bilinen davranışına işaret eder: odaktaki alan için gerçek bir Edit
 kontrolü oluşturulur, alanın üstüne taşınır, odak gidince geri park edilir.
 
 DOĞRUYSA otomasyon için kritik bir kazanç: her alana yazdıktan sonra değeri
@@ -167,7 +167,7 @@ def main() -> int:
         boyutlu = [k for k in kayitlar if k["genislik"] > 0 and k["yukseklik"] > 0]
         print(f"Bunların {len(boyutlu)} tanesi görünür boyutta bir kontroldü.")
         if boyutlu:
-            print("\nSONUÇ: 4GL çalışma zamanı odaktaki alan için GERÇEK kontrol açıyor.")
+            print("\nSONUÇ: Forms çalışma zamanı odaktaki alan için GERÇEK kontrol açıyor.")
             print("       Alan alan yaz-sonra-geri-oku doğrulaması MÜMKÜN.")
         else:
             print("\nSONUÇ: Odak hiç görünür bir kontrole düşmedi.")

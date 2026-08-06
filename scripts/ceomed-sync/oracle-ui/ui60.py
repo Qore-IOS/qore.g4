@@ -1,21 +1,29 @@
-"""Informix 4GL (`ifrun60`) formlarıyla konuşmak için ortak katman.
+"""Oracle Forms 6i (`ifrun60`) formlarıyla konuşmak için ortak katman.
 
 Ölçümlerle KESİNLEŞMİŞ davranışları tek yerde toplar; `fill_irsaliye.py` ve
 problar bunun üstüne kurulur. Ölçüm tutanağı: ORACLE-IRSALIYE.md.
 
-Neden pywinauto değil de saf ctypes: 4GL formunun görünen alanları Windows
-kontrolü değil, tuvale çizilmiş. `child_window()` ile bulunamazlar, dolayısıyla
+`ifrun60.exe` = Interactive Forms Runtime 6.0; pencere sınıfları `ui60MDIroot_W32`,
+`ui60Viewcore_W32`, `ui60Drawn_W32` ve hata mesajları (`WHEN-VALIDATE-ITEM`,
+`ORA-01403`) bunu doğruluyor.
+
+Neden pywinauto değil de saf ctypes: Forms'un görünen alanları Windows kontrolü
+değil, tuvale çizilmiş. `child_window()` ile bulunamazlar, dolayısıyla
 pywinauto'nun asıl faydası burada yok. Buna karşılık kurulum sorunu ölçümü
 engelleyebiliyor (Ceomed makinesinde pip başarısız oldu). ctypes her Python'da
 hazır.
 
 DAVRANIŞ MODELİ (ölçülmüş):
 
-  * Odaktaki alan için 4GL gerçek bir `Edit` kontrolü açıp alanın üstüne taşır.
+  * Odaktaki alan için Forms gerçek bir `Edit` kontrolü açıp alanın üstüne taşır.
     Odak gidince sıfır boyuta park eder. → Alan alan GERİ OKUMA mümkün.
   * Alan temizlenmeden yazılırsa değer birleşir ('m51016' + '12' = 'm5101612').
     → Her yazımdan önce TEMIZLE şart.
-  * Geçersiz değerde TAB odağı ilerletmez. → Odak kıpırdamadıysa değer reddedildi.
+  * Geçersiz değerde TAB odağı ilerletmez (Forms `WHEN-VALIDATE-ITEM` tetikçisi
+    hata verince navigasyonu durdurur). → Odak kıpırdamadıysa değer reddedildi.
+    Bu, hatanın modal pencere AÇMADIĞI durumlarda da çalışan tek güvenilir
+    sinyaldir: Forms hataları çoğu zaman formun alt mesaj satırında görünür
+    (ör. "WHEN-VALIDATE-ITEM … ORA-01403"), pencere açılmaz.
   * Arama alanları (Cari Kodu, Depo, Stok Kodu) TAB'da bir LOV penceresi açar.
     Filtre `yazdığımız%` olarak kendiliğinden dolar; ENTER seçili satırı kabul
     eder. Liste çizilmiş olduğu için OKUNAMAZ → pencere kapandıktan sonra alanı
@@ -373,7 +381,8 @@ def lov_kabul_et(ana_pencere: int, timeout_ms: int = 5000) -> None:
 def odak_ilerledi_mi(onceki_hwnd: int) -> bool:
     """TAB sonrası odak kıpırdamadıysa uygulama değeri reddetmiştir.
 
-    4GL alandan çıkışta doğrulama yapar ve geçersiz değerde odağı bırakmaz —
+    Forms alandan çıkışta WHEN-VALIDATE-ITEM çalıştırır; tetikçi hata verirse
+    navigasyonu durdurur —
     bedava bir hata sinyali.
     """
     return odak_hwnd() != onceki_hwnd
