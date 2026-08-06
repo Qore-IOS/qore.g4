@@ -270,8 +270,11 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
     for beklenen_sutun in GRID_SIRASI:
         o = ui60.odak()
         ad = alan_adi(o["mdi_ici"], grid_modu=True)
-        log.append(f"grid: {beklenen_sutun} bekleniyor, odak {o['pencere_ici']} "
-                   f"({ad or 'tanınmayan'})")
+        log.append(
+            f"grid: {beklenen_sutun} bekleniyor, "
+            f"mdi {o['mdi_ici']}, pencere {o['pencere_ici']} "
+            f"({ad or 'tanınmayan'})"
+        )
         if ad != beklenen_sutun:
             raise Durdu(
                 f"Grid'de {beklenen_sutun} bekleniyordu, odak {ad or o['pencere_ici']} "
@@ -339,19 +342,6 @@ def main() -> int:
     if not sys.platform.startswith("win"):
         return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
 
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        return fail(f"stdin JSON okunamadı: {exc}", retryable=True)
-
-    job = payload.get("job") or {}
-    job_id = str(payload.get("jobId") or "job")
-    header = job.get("header") or {}
-    rows = job.get("rows") or []
-
-    if not rows:
-        return fail("İşte yazılacak satır yok.", retryable=False)
-
     pencereler = ui60.pencere_bul(args.pencere)
     if not pencereler:
         return fail(
@@ -383,9 +373,26 @@ def main() -> int:
             "pencere_ici": list(o["pencere_ici"]),
             "mdi_baslik": o["mdi_baslik"],
             "taninan_alan": alan_adi(o["mdi_ici"]),
+            "taninan_grid_alani": alan_adi(o["mdi_ici"], grid_modu=True),
             "not": "Hiçbir şey yazılmadı. 'mdi_ici' beklenen konumla "
                    "eşleşmiyorsa ALAN_KONUMLARI güncellenmeli.",
         })
+
+    # Tanı modu salt-okunurdur ve stdin istemez. JSON'u bundan sonra okumak,
+    # `python fill_irsaliye.py --tani` komutunun PowerShell'de girdiyi sonsuza
+    # kadar beklemesini engeller.
+    try:
+        payload = json.load(sys.stdin)
+    except Exception as exc:
+        return fail(f"stdin JSON okunamadı: {exc}", retryable=True)
+
+    job = payload.get("job") or {}
+    job_id = str(payload.get("jobId") or "job")
+    header = job.get("header") or {}
+    rows = job.get("rows") or []
+
+    if not rows:
+        return fail("İşte yazılacak satır yok.", retryable=False)
 
     log: list[str] = []
     goruntu = None
