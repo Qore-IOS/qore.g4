@@ -248,6 +248,71 @@ kontrolün boyutunu ve değerini kaydeder.
 Odak hiç görünür kontrole düşmezse doğrulama yalnızca gönderim öncesi ekran
 görüntüsüne kalır; o durumda tam otomatik gönderim yeniden değerlendirilmelidir.
 
+### Ölçüm 3 sonucu — geri okuma ÇALIŞIYOR
+
+`probe_focus.py` turunda 22 odak olayının **hepsi** gerçek, boyutlu bir `Edit`
+kontrolüne düştü ve değerleri okundu (`SI007787`, `06/08/2026`, `02`, `01`).
+Hipotez doğrulandı: 4GL çalışma zamanı odaktaki alan için gerçek bir Edit açıp
+alanın üstüne taşıyor.
+
+**Sonuç: "yaz → geri oku → uyuşmazsa gönderme" güvencesi korunabiliyor.**
+Tam otomatik gönderim kararı bu güvenceye dayanır; kaybedilirse karar yeniden
+değerlendirilmelidir.
+
+Ölçülen alan konumları (pencere ikinci ekranda olduğu için ham koordinatlar
+negatif; form içi konum = ham + 1920):
+
+| Sıra | Alan | Form içi (x, y) | Okunan |
+|---|---|---|---|
+| 1 | İrsaliye No | (114, 51) | `SI007787` |
+| 2 | Tarih | (237, 51) | `06/08/2026` |
+| 3 | Fiili Sevk Tarihi | (435, 48) | `06/08/2026` |
+| 4 | Cari Kodu | (114, 70) | |
+| 8 | Sevk Adresi | (114, 112) | `EĞİTİM MAH. DR. ERKİN CAD.` |
+| 9 | İşlem Tipi | (846, 87) | `02` (bizde `35` olacak) |
+| 12 | Depo | (846, 107) | `01` (bizde `10` olacak) |
+| 13-15 | Teslim Eden / Teslim Alan / Anlaşma No | (846, 127-186) | |
+| 16 | Grid ilk hücre (Stok Kodu) | (5, 235) | |
+| 22 | **E-IRSALIYE GÖNDER** (Button) | — | |
+
+### Açık kalan üç soru
+
+1. **Grid içinde gezinme.** Grid'in ilk hücresinden sonra TAB grid'den *çıkıp*
+   alt bölüme atladı. Stok Kodu → Lot → Miktar geçişi başka bir tuşla oluyor
+   (ok tuşu veya ENTER). Bu bilinmeden satır yazılamaz.
+2. **Tab sırası eksik.** Cari Kodu'ndan sonra açılan arama penceresi sırayı
+   böldü; Sevk Carisi, Posta Kodu, İl Kodu, Ref No hiç görülmedi.
+3. **Arama pencereleri.** Cari Kodu ve Depo alanlarında `ui60Drawn_W32` +
+   `Tamam` butonlu bir arama penceresi açıldı. Kendiliğinden mi açılıyor yoksa
+   kullanıcı ▼ butonuna mı tıkladı — belirsiz. Kendiliğinden açılıyorsa sürücü
+   bu pencereyi kapatmayı bilmeli.
+
+### `probe_keys.py` — tuşu betik gönderir
+
+`probe_focus.py`'de tuşlara kullanıcı bastığı için hangi hareketin hangi tuştan
+geldiği kesin değildi. Bu betik tuşları kendisi gönderir:
+
+```powershell
+# Temiz tab sırası (arama pencereleri araya girmeden)
+python probe_keys.py --tuslar "TAB*25" --json tabsirasi.json
+
+# Grid içinde sütun geçişi hangi tuşla?
+python probe_keys.py --tuslar "RIGHT*4"
+python probe_keys.py --tuslar "ENTER*4"
+```
+
+Güvenlik sınırları koda gömülüdür:
+
+* Yalnızca **gezinme** tuşları gönderilir (TAB, oklar, ENTER, ESC, HOME, END).
+  Harf/rakam gönderilemez — `--tuslar 35` reddedilir. Bu bir ölçüm aracıdır,
+  veri girme aracı değil.
+* Butona tıklamaz; E-İRSALİYE GÖNDER'e asla dokunmaz.
+* Tuşları göndermeden önce ön plandaki pencerenin başlığını doğrular; yanlış
+  pencere öndeyse **hiçbir tuş göndermeden** çıkar.
+
+Yine de YENİ ve BOŞ bir irsaliye formunda çalıştırın: ENTER bazı formlarda kaydet
+anlamına gelir.
+
 ---
 
 ## UI sürücüsü (API bulunamazsa)
