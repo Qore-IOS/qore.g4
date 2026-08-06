@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Eye,
   Loader2,
   RefreshCw,
   Send,
@@ -56,13 +57,17 @@ type JobRow = {
 const STATUS_META: Record<IrsaliyeGirisStatus, { label: string; icon: React.ElementType; className: string }> = {
   pending:    { label: 'Kuyrukta',   icon: Clock,        className: 'text-amber-600 dark:text-amber-400' },
   processing: { label: 'Yazılıyor',  icon: Loader2,      className: 'text-blue-600 dark:text-blue-400' },
+  awaiting_review: { label: 'Oracle’da incelemede', icon: Eye, className: 'text-violet-600 dark:text-violet-400' },
+  previewed:  { label: 'Göndermeden test edildi', icon: CheckCircle2, className: 'text-cyan-600 dark:text-cyan-400' },
   sent:       { label: 'Gönderildi', icon: CheckCircle2, className: 'text-emerald-600 dark:text-emerald-400' },
   failed:     { label: 'Başarısız',  icon: XCircle,      className: 'text-red-600 dark:text-red-400' },
   blocked:    { label: 'Eksik veri', icon: AlertTriangle, className: 'text-orange-600 dark:text-orange-400' },
 };
 
 /** Önce müdahale gerektirenler: bozuk işin listenin dibinde kaybolması işe yaramaz. */
-const STATUS_ORDER: IrsaliyeGirisStatus[] = ['blocked', 'failed', 'processing', 'pending', 'sent'];
+const STATUS_ORDER: IrsaliyeGirisStatus[] = [
+  'blocked', 'failed', 'awaiting_review', 'processing', 'pending', 'previewed', 'sent',
+];
 
 export default function CeomedIrsaliyeGirisKuyrugu() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -89,7 +94,9 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
   }, [currentCompanyId, isSuperAdmin]);
 
   const siraliJobs = useMemo(() => {
-    const gorunur = showSent ? jobs : jobs.filter((j) => j.status !== 'sent');
+    const gorunur = showSent
+      ? jobs
+      : jobs.filter((j) => j.status !== 'sent' && j.status !== 'previewed');
     return [...gorunur].sort((a, b) => {
       const fark = STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status);
       if (fark !== 0) return fark;
@@ -132,6 +139,26 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
     }
   };
 
+  const testiTamamla = async (job: JobRow) => {
+    if (job.status !== 'awaiting_review') return;
+    setRequeuing(job.id);
+    try {
+      await updateDoc(doc(db, IRSALIYE_GIRIS_COLLECTION, job.id), {
+        status: 'previewed',
+        reviewCompletedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      toast({
+        title: 'Test tamamlandı',
+        description: 'Worker kuyruktaki sıradaki formu doldurabilir. Oracle’da yeni ve boş form açık olmalıdır.',
+      });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'Test tamamlanamadı.', variant: 'destructive' });
+    } finally {
+      setRequeuing(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 rounded-lg border p-6 text-sm text-muted-foreground">
@@ -161,7 +188,7 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
             );
           })}
           <Button variant="ghost" size="sm" onClick={() => setShowSent((v) => !v)}>
-            {showSent ? 'Gönderilenleri gizle' : 'Gönderilenleri göster'}
+            {showSent ? 'Tamamlananları gizle' : 'Tamamlananları göster'}
           </Button>
         </div>
       </div>
@@ -215,6 +242,13 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
                     </p>
                   )}
 
+                  {job.status === 'awaiting_review' && (
+                    <p className="mt-2 rounded bg-violet-50 p-2 text-xs text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">
+                      Oracle formunu kontrol edin. Sıradakine geçmeden önce Ceomed’de yeni ve boş bir
+                      Çıkış İrsaliyesi formu açın; aksi halde sonraki iş mevcut ekranın üzerine yazabilir.
+                    </p>
+                  )}
+
                   {job.status === 'sent' && job.ceomedIrsaliyeNo && (
                     <div className="mt-1 text-xs text-emerald-600 dark:text-emerald-400">
                       Ceomed irsaliye no: {job.ceomedIrsaliyeNo}
@@ -233,6 +267,17 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
                       ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                       : <RefreshCw className="mr-1.5 h-3.5 w-3.5" />}
                     Yeniden dene
+                  </Button>
+                )}
+                {job.status === 'awaiting_review' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={requeuing === job.id}
+                    onClick={() => testiTamamla(job)}
+                  >
+                    {requeuing === job.id && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                    Test tamam, sıradakine geç
                   </Button>
                 )}
               </div>
