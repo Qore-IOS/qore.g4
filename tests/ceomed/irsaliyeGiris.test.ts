@@ -6,6 +6,7 @@ import {
   formatTarihForCeomed,
   normalizeTarih,
   resolveLotValue,
+  ceomedIrsaliyeNo,
   selectPartActions,
   CEOMED_DEPO,
   CEOMED_ISLEM_TIPI,
@@ -53,7 +54,8 @@ test('tam veriyle iş pending olarak hazırlanır ve sabitler yerine oturur', ()
   if (r.outcome !== 'ready') return;
 
   assert.equal(r.doc.status, 'pending');
-  assert.equal(r.doc.irsaliyeNo, 'BT-T0042');
+  // İrsaliye No artık ham form numarası değil, Ceomed biçimine çevrilmiş hali.
+  assert.equal(r.doc.irsaliyeNo, 'BT10042');
   assert.equal(r.doc.cariKodu, 'M51001');
   assert.equal(r.doc.tarih, '2026-08-05');
   assert.equal(r.doc.islemTipi, CEOMED_ISLEM_TIPI);
@@ -216,4 +218,61 @@ test('çözülemeyen tarih null döner ve işi bloklar', () => {
 test('tarih Ceomed maskesine çevrilir', () => {
   assert.equal(formatTarihForCeomed('2026-08-05'), '05/08/2026');
   assert.equal(formatTarihForCeomed('2026-08-05', '.'), '05.08.2026');
+});
+
+// --- İrsaliye No dönüşümü -----------------------------------------------------
+// Kural ÖLÇÜLMÜŞTÜR (ORACLE-IRSALIYE.md → Ölçüm 5-6):
+//   * uygulama uyarısı: "ilk 2 karakterinden sonrası, sadece rakam olmalıdır"
+//   * alan 8 karakterde SESSİZCE kesiyor ('AB1234567890…' → 'AB123456')
+
+test('Qore form numarası Ceomed biçimine çevrilir', () => {
+  assert.equal(ceomedIrsaliyeNo('BT-T0042'), 'BT10042');
+  assert.equal(ceomedIrsaliyeNo('BT-A0042'), 'BT20042');
+});
+
+test('form tipi harfi rakama çevrilir — harf kalırsa uygulama reddeder', () => {
+  // 'BT-T0042' → tire silinse 'BTT0042' olurdu: ilk 2 karakterden sonra 'T' harfi
+  // var, uygulama bunu kabul etmiyor.
+  const sonuc = ceomedIrsaliyeNo('BT-T0042');
+  assert.ok(sonuc);
+  assert.match(sonuc as string, /^[A-Z]{2}\d+$/);
+});
+
+test('2 harften uzun personel kodu ilk 2 harfe indirilir', () => {
+  // "Ahmet Mehmet Yılmaz" → AMY. 'AMYT0042' olsaydı 3. karakter harf kalırdı.
+  assert.equal(ceomedIrsaliyeNo('AMY-T0042'), 'AM10042');
+});
+
+test('tek harflik personel kodu X ile tamamlanır', () => {
+  assert.equal(ceomedIrsaliyeNo('B-T0042'), 'BX10042');
+});
+
+test('8 karaktere sığmayan numara null döner — sessiz kesilmeye izin verilmez', () => {
+  // Alan fazlasını uyarısızca atıyor; kesilmiş numara muhasebeye yanlış kayıt olur.
+  assert.equal(ceomedIrsaliyeNo('BT-T123456'), null);
+  assert.equal(ceomedIrsaliyeNo('BT-T9999999'), null);
+  // Tam sınır 8 karakter: kabul edilir.
+  assert.equal(ceomedIrsaliyeNo('BT-T12345'), 'BT112345');
+});
+
+test('tanınmayan form numarası biçimi null döner', () => {
+  assert.equal(ceomedIrsaliyeNo('BTT0042'), null);
+  assert.equal(ceomedIrsaliyeNo('BT-X0042'), null);
+  assert.equal(ceomedIrsaliyeNo('BT-T'), null);
+  assert.equal(ceomedIrsaliyeNo(''), null);
+});
+
+test('çevrilemeyen form numarası işi bloklar, tahmin edilmez', () => {
+  const r = buildIrsaliyeGirisDoc({ ...baseInput, formNo: 'BT-T123456' });
+  assert.equal(r.outcome, 'blocked');
+  if (r.outcome !== 'blocked') return;
+  assert.equal(r.doc.blockedReason, 'form_no_ceomed_formatina_uymuyor');
+});
+
+test('doc.irsaliyeNo çevrilmiş değeri taşır, ham form numarasını değil', () => {
+  const r = buildIrsaliyeGirisDoc(baseInput);
+  assert.equal(r.outcome, 'ready');
+  if (r.outcome !== 'ready') return;
+  assert.equal(r.doc.irsaliyeNo, 'BT10042');
+  assert.equal(r.doc.formNo, 'BT-T0042');
 });

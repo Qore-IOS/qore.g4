@@ -5,7 +5,7 @@
  *
  * 2026-08-06 keşfi (tutanak: `ORACLE-IRSALIYE.md` → "API keşfi") şunu buldu:
  *
- *   1. Masaüstü uygulaması (`ifrun60`, Informix 4GL çalışma zamanı) doğrudan
+ *   1. Masaüstü uygulaması (`ifrun60`, Oracle Forms 6i çalışma zamanı) doğrudan
  *      Oracle'a bağlanıyor — 192.168.1.5:1521. Araya HTTP servisi yok, yani
  *      isteğini yakalayıp taklit etmek mümkün değil.
  *   2. Aynı sunucudaki web Ceomed'in (:8081) TÜM API yüzeyi çıkarıldı: 187 uç

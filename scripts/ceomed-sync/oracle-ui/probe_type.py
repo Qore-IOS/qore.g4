@@ -292,7 +292,7 @@ def adimlari_coz(ifade: str) -> list[tuple[str, str]]:
 
 
 def alan_temizle(uzunluk: int = 40) -> None:
-    """END + BACKSPACE×N. Ctrl+A yerine bu: 4GL alanlarında seçim davranışı
+    """END + BACKSPACE×N. Ctrl+A yerine bu: Forms alanlarında seçim davranışı
     öngörülemez, ama END+BACKSPACE her metin alanında aynı işi yapar."""
     tus_gonder("END")
     time.sleep(0.05)
@@ -414,7 +414,7 @@ def main() -> int:
         bilgi = odak_bilgisi(mesaj_topla=True)
         bilgi["adim"] = etiket
 
-        # Odak kıpırdamadıysa uygulama değeri reddetmiştir: 4GL alandan çıkışta
+        # Odak kıpırdamadıysa uygulama değeri reddetmiştir: Forms alandan çıkışta
         # doğrulama yapıyor ve geçersiz değerde odağı bırakmıyor. Sürücü için
         # bedava hata sinyali; ölçümde de görünsün.
         if tur == "TUS" and deger in ("TAB", "ENTER") and bilgi["hwnd"] == onceki["hwnd"]:

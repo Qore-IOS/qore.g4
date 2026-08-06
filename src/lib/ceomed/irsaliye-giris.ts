@@ -94,7 +94,56 @@ export type BlockReason =
   | 'stok_kodu_eksik'
   | 'personel_adi_yok'
   | 'form_no_yok'
+  | 'form_no_ceomed_formatina_uymuyor'
   | 'tarih_gecersiz';
+
+/**
+ * Ceomed "İrsaliye No" alanının kabul ettiği biçim — ÖLÇÜLMÜŞTÜR, tahmin değil.
+ *
+ * Uygulama hatalı değerde şu uyarıyı veriyor:
+ *   "İrsaliye numarasının ilk 2 karakterinden sonrası, sadece rakam olmalıdır"
+ *
+ * Alan ayrıca 8 karakterde SESSİZCE kesiyor: 'AB12345678901234567890' yazıldığında
+ * alanda 'AB123456' kalıyor, hiçbir uyarı çıkmıyor. Bu yüzden sığmayan bir numarayı
+ * göndermeye çalışmak, muhasebeye YANLIŞ numara yazmak demektir — kesilmesine izin
+ * vermek yerine iş `blocked` damgalanır.
+ */
+const CEOMED_IRSALIYE_NO_DESENI = /^[A-Z]{2}\d{1,6}$/;
+
+/** Qore form numarası: `${personelKodu}-${T|A}${sıra}` (src/lib/form-number.ts). */
+const QORE_FORM_NO_DESENI = /^([A-Za-z]+)-([TA])(\d+)$/;
+
+/**
+ * Form tipi harfi rakama çevrilir. Ceomed ilk 2 karakterden sonrasının yalnızca
+ * rakam olmasını istediği için `T`/`A` olduğu gibi bırakılamaz: `BT-T0042` →
+ * `BTT0042` uygulamada reddedilir.
+ */
+const FORM_TIPI_RAKAMI: Record<string, string> = { T: '1', A: '2' };
+
+/**
+ * Qore form numarasını Ceomed İrsaliye No biçimine çevirir; çevrilemiyorsa null.
+ *
+ * `BT-T0042` → `BT10042`
+ *
+ * Personel kodu 2 harften kısaysa (tek isimli personel: "Batuhan" → `B`) `X` ile
+ * tamamlanır. Bu deterministiktir ama teorik bir çakışma kaynağıdır — numara
+ * tekilliği zaten açık bir ürün kararıdır (sayaç kullanıcı bazlı olduğu için aynı
+ * baş harfli iki personel aynı numarayı üretebiliyor), ayrıntı ORACLE-IRSALIYE.md.
+ */
+export function ceomedIrsaliyeNo(formNo: string): string | null {
+  const eslesme = QORE_FORM_NO_DESENI.exec(String(formNo || '').trim());
+  if (!eslesme) return null;
+
+  const [, personelKodu, formTipi, sira] = eslesme;
+  const rakam = FORM_TIPI_RAKAMI[formTipi];
+  if (!rakam) return null;
+
+  const onEk = personelKodu.toLocaleUpperCase('en-US').slice(0, 2).padEnd(2, 'X');
+  const aday = `${onEk}${rakam}${sira}`;
+
+  // Sığmıyorsa kesmek yerine reddet: sessiz kesilme muhasebeye yanlış numara yazar.
+  return CEOMED_IRSALIYE_NO_DESENI.test(aday) ? aday : null;
+}
 
 /** Yedek parça sayılan action tipleri. Hücre değişimi de stoktan parça tüketir. */
 const PART_ACTION_TYPES = new Set(['part_change', 'hucre_degisimi']);
@@ -225,6 +274,7 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
   });
 
   const formNo = text(input.formNo);
+  const irsaliyeNo = formNo ? ceomedIrsaliyeNo(formNo) : null;
   const cariKodu = text(input.cariKodu).toLocaleUpperCase('tr-TR');
   const personnelName = text(input.personnelName);
   const tarih = normalizeTarih(input.tarih);
@@ -235,6 +285,14 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     blocks.push({
       reason: 'form_no_yok',
       detail: 'Formun numarası üretilememiş; irsaliye no alanı doldurulamaz.',
+    });
+  } else if (!irsaliyeNo) {
+    blocks.push({
+      reason: 'form_no_ceomed_formatina_uymuyor',
+      detail:
+        `Form numarası "${formNo}" Ceomed irsaliye no biçimine çevrilemedi. ` +
+        'Alan 2 harf + en fazla 6 rakam kabul ediyor ve fazlasını sessizce kesiyor; ' +
+        'yanlış numara yazmamak için iş durduruldu.',
     });
   }
   if (!cariKodu) {
@@ -270,7 +328,7 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
   }
 
   const doc: IrsaliyeGirisDoc = {
-    irsaliyeNo: formNo,
+    irsaliyeNo: irsaliyeNo || '',
     cariKodu,
     tarih: tarih || '',
     islemTipi: CEOMED_ISLEM_TIPI,
