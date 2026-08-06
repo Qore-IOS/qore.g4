@@ -119,6 +119,42 @@ personel aynı numarayı üretebilir: "Batuhan Tubasar" ve "Burak Toprak" ikisi 
 Çözüm ya sıra numarasını şirket bazına çekmek ya da personele sabit 2 karakterlik
 kod atamaktır; ikisi de sürücünün değil ürünün kararıdır.
 
+> **Şirket bazına çekme denendi ve ÜRETİMİ BOZDU; geri alındı.**
+>
+> Şirket sayacı ilk kez oluşturulurken var olan numaralarla çakışmasın diye eski
+> kullanıcı sayaçlarının en büyüğünden tohumlanıyordu. Bu tohum bir **list
+> sorgusu** gerektiriyordu:
+>
+> ```ts
+> getDocs(query(collection(db, 'actionFormNumberCounters'),
+>   where('companyId', '==', ...), where('formTypeLetter', '==', ...)))
+> ```
+>
+> Firestore list sorgularını belge belge denetler; kural `inCompany()` içinde
+> `docCompany() == userCompany()` arıyor ve `userCompany()` bir custom claim
+> (`request.auth.token.companyId`). Filtre değeri claim ile birebir tutmazsa —
+> ya da `companyId` boşsa — sorgunun tamamı reddedilir.
+>
+> `reserveActionFormNumber` **form kaydetme yolunda** çağrıldığı için tek bir
+> reddedilen sorgu arıza raporu, teknik ve aplikasyon formlarının hepsini
+> "Missing or insufficient permissions" ile durdurdu. Üstelik tohumlama yalnızca
+> şirket sayacı yokken çalıştığından, değişiklik yayına çıktığı anda her
+> kullanıcı o yola girdi.
+>
+> **Tekrar denerken:**
+>
+> * List sorgusu kullanılacaksa kural tarafında bu koleksiyona şirket filtreli
+>   list izni açıkça verilmeli ve filtre değeri claim ile aynı kaynaktan gelmeli.
+> * Sorgusuz tohum (yalnızca kullanıcının kendi eski sayacını `getDoc` ile
+>   okumak) çakışmayı TAM çözmez: sayaç, henüz kayıt açmamış üçüncü bir
+>   kullanıcının eski numaralarının altında kalabilir.
+> * Var olan Qore form numaralarıyla çakışma **Ceomed açısından zararsızdır** —
+>   entegrasyon yeni olduğu için eski numaraların hiçbiri irsaliye olarak
+>   gönderilmedi. Kritik olan, bundan sonraki numaraların kendi aralarında tekil
+>   olması.
+> * Form kaydetme yolundaki bir değişiklik tüm form kapatmalarını
+>   durdurabiliyor. Kural etkileyen her değişiklik önce emülatörde denenmeli.
+
 ### LOT kuralının tek cümlesi
 
 > Seri no varsa seri no yazılır; yoksa lot yazılır.
