@@ -65,7 +65,15 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
     "miat":            (643, 266),
     "kt":              (719, 266),
     "miktar":          (754, 266),
+    # Sol alttaki Açıklama tablosunun ilk satırı. Prova 5 sonrasında
+    # alan elle odaklanarak MDI belgeye göre ölçüldü.
+    "aciklama":        (64, 667),
 }
+
+# Prova 5'te aynı Açıklama Edit'i ana Ceomed penceresine göre de ölçüldü.
+# Grid ile alt Açıklama alanı farklı iç MDI document'lere bağlanabildiği
+# için bu iki bölge arasındaki tıklama ana pencereye göre yapılır.
+ACIKLAMA_PENCERE_KONUMU = (70, 698)
 
 KONUM_TOLERANS = 18
 
@@ -182,8 +190,6 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
         time.sleep(0.5)
 
     o = ui60.odak()
-    geri_donuldu = False
-
     if not konum_eslesiyor(o["mdi_ici"], hedef):
         # Forms ilerletmiş; okumak için geri dön.
         ui60.tus("SHIFTTAB", bekle_ms=450)
@@ -194,7 +200,6 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
                 f"(odak {o['pencere_ici']}, beklenen {hedef}). "
                 "Değer doğrulanamadığı için gönderim yapılmayacak."
             )
-        geri_donuldu = True
 
     okunan = o["deger"]
     if okunan != deger:
@@ -205,9 +210,11 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
         )
     log.append(f"{ad}: geri okundu, {okunan!r} doğrulandı")
 
-    if geri_donuldu:
-        # İleri dön. Alandan çıkış LOV'u yeniden açabilir; değer artık çözülmüş
-        # olduğu için aynı satır seçilir.
+    if konum_eslesiyor(ui60.odak()["mdi_ici"], hedef):
+        # Geri okuma sonrası (veya Forms seçimden sonra ilerlemediyse) ileri
+        # dön. Alandan çıkış LOV'u yeniden açabilir; değer artık çözülmüş
+        # olduğu için aynı satır seçilir. Fonksiyonun sözleşmesi: döndüğünde
+        # odak bir sonraki alandadır.
         ui60.tus("ENTER", bekle_ms=600)
         if ui60.lov_acik_mi(ana_pencere) and not ui60.uyari_penceresi_mi(ana_pencere):
             ui60.lov_kabul_et(ana_pencere)
@@ -223,9 +230,21 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
         if ad == "stokKodu":
             return  # grid'e ulaşıldı
 
+        if ad == "anlasmaNo":
+            # Bu kurulumda boş Anlaşma No'dan ENTER ile çıkış kararlı
+            # değil: Prova 5'te grid'e geçti, Prova 6'da aynı alan odağı
+            # hapsetti. Boş alanı valide etmeye çalışmak yerine ölçülmüş
+            # Stok Kodu hücresini doğrulamalı tıkla.
+            log.append("anlasmaNo: dokunulmadı")
+            grid_stok_koduna_git(log)
+            return
+
         if ad and degerler.get(ad):
             if ad in LOV_ALANLARI:
                 lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
+                # Geri okuma için dönülen alandan sonraki alana yeniden
+                # lov_ile_yaz geçer; aşağıdaki ilerle ikinci kez geçmemeli.
+                continue
             else:
                 ui60.alan_yaz(degerler[ad], ad)
                 log.append(f"{ad}: {degerler[ad]!r} yazıldı ve geri okundu")
@@ -239,6 +258,23 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
     raise Durdu(
         f"{MAX_ADIM} adımda grid'e ulaşılamadı. Form beklenenden farklı; "
         "sessizce yanlış alana yazmamak için durduruldu."
+    )
+
+
+def grid_stok_koduna_git(log: list[str]) -> None:
+    """Başlıktan grid'in ilk Stok Kodu hücresine doğrulamalı geçer."""
+    hedef = ALAN_KONUMLARI["stokKodu"]
+    ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    o = ui60.odak()
+    if (alan_adi(o["mdi_ici"], grid_modu=True) != "stokKodu"
+            or o["sinif"] != "Edit"):
+        raise Durdu(
+            f"Grid Stok Kodu alanı odaklanamadı; odak {o['mdi_ici']} "
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. Yazılmadı."
+        )
+    log.append(
+        f"grid: Stok Kodu alanı tıklanarak odaklandı "
+        f"(mdi {o['mdi_ici']}, pencere {o['pencere_ici']})"
     )
 
 
@@ -268,8 +304,11 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
     for beklenen_sutun in GRID_SIRASI:
         o = ui60.odak()
         ad = alan_adi(o["mdi_ici"], grid_modu=True)
-        log.append(f"grid: {beklenen_sutun} bekleniyor, odak {o['pencere_ici']} "
-                   f"({ad or 'tanınmayan'})")
+        log.append(
+            f"grid: {beklenen_sutun} bekleniyor, "
+            f"mdi {o['mdi_ici']}, pencere {o['pencere_ici']} "
+            f"({ad or 'tanınmayan'})"
+        )
         if ad != beklenen_sutun:
             raise Durdu(
                 f"Grid'de {beklenen_sutun} bekleniyordu, odak {ad or o['pencere_ici']} "
@@ -286,8 +325,71 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
         else:
             log.append(f"{beklenen_sutun}: boş bırakıldı")
 
-        if beklenen_sutun != GRID_SIRASI[-1]:
+        if (beklenen_sutun != GRID_SIRASI[-1]
+                and beklenen_sutun not in LOV_ALANLARI):
             ilerle(beklenen_sutun)
+
+
+def irsaliye_numarasina_git(log: list[str]) -> None:
+    """Odağı İrsaliye No'ya getirir; var olan değeri yazma adımı siler."""
+    for adim in range(MAX_ADIM):
+        o = ui60.odak()
+        if alan_adi(o["mdi_ici"]) == "irsaliyeNo":
+            if adim:
+                log.append(f"başlangıç: İrsaliye No alanına {adim} geri adımda gelindi")
+            if o["deger"]:
+                log.append("başlangıç: mevcut İrsaliye No otomatik temizlenecek")
+            return
+
+        baslik_alani = alan_adi(o["mdi_ici"])
+        grid_alani = alan_adi(o["mdi_ici"], grid_modu=True)
+        if baslik_alani is None and grid_alani is None:
+            raise Durdu(
+                f"Başlangıç odağı tanınmıyor (mdi {o['mdi_ici']}, "
+                f"pencere {o['pencere_ici']}); "
+                "yanlış forma tuş göndermemek için durduruldu.",
+                retryable=True,
+            )
+        ui60.tus("SHIFTTAB", bekle_ms=250)
+
+    raise Durdu(
+        f"{MAX_ADIM} geri adımda İrsaliye No alanına ulaşılamadı.",
+        retryable=True,
+    )
+
+
+def aciklama_doldur(deger: str, ana_pencere: int, log: list[str]) -> None:
+    """Sol alttaki Açıklama ilk satırına personel adını yazar."""
+    if not deger.strip():
+        raise Durdu("Açıklama/personel adı boş; gönderim yapılmayacak.")
+
+    # Son satır doldurulduğunda odak Miktar'da olmalı. Başka bir yerden
+    # koordinatlı tıklamaya geçmek, yarım formu sessizce kabul etmek olur.
+    once = ui60.odak()
+    if alan_adi(once["mdi_ici"], grid_modu=True) != "miktar":
+        raise Durdu(
+            f"Açıklama öncesi Miktar alanı bekleniyordu; odak "
+            f"{once['mdi_ici']} konumunda. Tıklanmadı."
+        )
+
+    # Prova 7, grid odağındaki MDI kökünün Açıklama bölgesinin kökü
+    # olmadığını gösterdi. Aynı saha ölçümünün ana pencere karşılığını
+    # kullan; tıklama sonrası MDI konumunu yine geri okuyup doğrula.
+    hedef = ALAN_KONUMLARI["aciklama"]
+    tiklama = ui60.pencere_noktasina_tikla(
+        ana_pencere,
+        (ACIKLAMA_PENCERE_KONUMU[0] + 10, ACIKLAMA_PENCERE_KONUMU[1] + 8),
+    )
+    o = ui60.odak()
+    if alan_adi(o["mdi_ici"]) != "aciklama" or o["sinif"] != "Edit":
+        raise Durdu(
+            f"Açıklama alanı odaklanamadı; odak {o['mdi_ici']} "
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. "
+            f"Tıklama: {tiklama!r}. Yazılmadı."
+        )
+
+    ui60.alan_yaz(deger.strip(), "aciklama")
+    log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
 
 
 def main() -> int:
@@ -308,19 +410,6 @@ def main() -> int:
 
     if not sys.platform.startswith("win"):
         return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
-
-    try:
-        payload = json.load(sys.stdin)
-    except Exception as exc:
-        return fail(f"stdin JSON okunamadı: {exc}", retryable=True)
-
-    job = payload.get("job") or {}
-    job_id = str(payload.get("jobId") or "job")
-    header = job.get("header") or {}
-    rows = job.get("rows") or []
-
-    if not rows:
-        return fail("İşte yazılacak satır yok.", retryable=False)
 
     pencereler = ui60.pencere_bul(args.pencere)
     if not pencereler:
@@ -353,23 +442,34 @@ def main() -> int:
             "pencere_ici": list(o["pencere_ici"]),
             "mdi_baslik": o["mdi_baslik"],
             "taninan_alan": alan_adi(o["mdi_ici"]),
+            "taninan_grid_alani": alan_adi(o["mdi_ici"], grid_modu=True),
             "not": "Hiçbir şey yazılmadı. 'mdi_ici' beklenen konumla "
                    "eşleşmiyorsa ALAN_KONUMLARI güncellenmeli.",
         })
+
+    # Tanı modu salt-okunurdur ve stdin istemez. JSON'u bundan sonra okumak,
+    # `python fill_irsaliye.py --tani` komutunun PowerShell'de girdiyi sonsuza
+    # kadar beklemesini engeller.
+    try:
+        payload = json.load(sys.stdin)
+    except Exception as exc:
+        return fail(f"stdin JSON okunamadı: {exc}", retryable=True)
+
+    job = payload.get("job") or {}
+    job_id = str(payload.get("jobId") or "job")
+    header = job.get("header") or {}
+    rows = job.get("rows") or []
+
+    if not rows:
+        return fail("İşte yazılacak satır yok.", retryable=False)
 
     log: list[str] = []
     goruntu = None
 
     try:
-        # Formun YENİ ve BOŞ olduğunu doğrula: odak İrsaliye No'da olmalı.
-        o = ui60.odak()
-        if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
-            raise Durdu(
-                f"Form yeni/boş görünmüyor — odak {o['pencere_ici']} konumunda, "
-                "İrsaliye No bekleniyordu. Yarım kalmış bir forma yazmamak için "
-                "durduruldu.",
-                retryable=True,
-            )
+        # Ceomed odağı ve önceki numarayı koruyabiliyor. Kullanıcıya elle
+        # sildirmek yerine odağı kur; alan_yaz mevcut değeri temizleyecek.
+        irsaliye_numarasina_git(log)
 
         degerler = {
             "irsaliyeNo": str(header.get("irsaliyeNo") or ""),
@@ -385,6 +485,8 @@ def main() -> int:
             satir_doldur(satir, ana, log)
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
+
+        aciklama_doldur(str(job.get("aciklama") or ""), ana, log)
 
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
 
