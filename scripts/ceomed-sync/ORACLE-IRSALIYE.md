@@ -36,6 +36,31 @@ Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
 
 Bir formda birden çok yedek parça varsa **tek irsaliye, çok satır** açılır.
 
+### Açıklama alanının saha ölçümü
+
+Prova 5 sonrasında sol alttaki **Açıklama** ilk satırı elle odaklanarak
+ölçüldü: MDI belgeye göre `(64, 667)`, ana pencereye göre `(70, 698)` ve
+kontrol sınıfı `Edit`. Sürücü son ürün satırının Miktar alanında
+olduğunu doğruladıktan sonra bu hücrenin içine tıklar, personel adını
+yazar ve geri okur. Tıklama beklenen `Edit` alanını odaklamazsa hiçbir
+değer yazılmadan iş durdurulur.
+
+Prova 7'de grid içindeki geçici Edit'in ebeveyn zincirindeki ilk
+`ui60MDIdocument_W32` gerçek form belgesi olmadığı için Açıklama tıklaması
+başlıktaki bir butona kaydı. Belge kökü artık ebeveyn zincirindeki ilk
+document yerine, ana pencere altında odağı kapsayan ve **Çıkış İrsaliyesi**
+başlığını taşıyan MDI belgeden alınır. Başarısız tıklama hatası MDI
+başlığını, belge dikdörtgenini ve hesaplanan ekran noktasını da raporlar.
+
+### Başlıktan grid'e geçiş
+
+Boş **Anlaşma No** alanından `ENTER` ile çıkışın kararlı olmadığı
+sahada ölçüldü: Prova 5 grid'e ilerlerken Prova 6 aynı alanda odağı
+hapsetti. Sürücü bu alanı valide etmeye çalışmaz. Anlaşma No'ya
+dokunmadan, MDI belgeye göre ölçülmüş ilk **Stok Kodu** hücresini
+tıklar ve yazmadan önce odağın `Edit` sınıfında ve Stok Kodu
+konumunda olduğunu doğrular.
+
 ### İrsaliye No neden olduğu gibi yazılamıyor
 
 Alanın kuralı ölçülmüştür: **2 harf + en fazla 6 rakam, toplam 8 karakter.**
