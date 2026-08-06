@@ -69,7 +69,11 @@ function submit(job) {
   const plan = toKeystrokePlan(job, { dateSeparator: process.env.ORACLE_DATE_SEP || '/' });
 
   return new Promise((resolve) => {
-    const child = spawn(PYTHON, [SCRIPT, '--controls', CONTROLS], {
+    const args = [SCRIPT, '--controls', CONTROLS];
+    if (process.env.ORACLE_ALLOW_POST_QUANTITY_WARNING === '1') {
+      args.push('--miktar-uyarisini-onayla');
+    }
+    const child = spawn(PYTHON, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: false,
     });

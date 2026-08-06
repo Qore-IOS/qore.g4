@@ -54,6 +54,19 @@ Açıklama tıklaması sahada ölçülmüş ana pencere koordinatı `(70, 698)`
 üzerinden yapılır. Tıklama sonrası alan yine MDI koordinatı ve `Edit` sınıfı
 ile doğrulanır.
 
+Prova 9'da Açıklama tıklamasının doğru yere gittiği, fakat Miktar
+alanından çıkış validasyonunun "ürün eksi bakiyeye düşüyor" uyarısını
+açtığı görüldü. Forms uyarı metnini okunabilir bir Windows kontrolü
+olarak sunmadığı için sürücü bunu varsayılan olarak onaylamaz. Operatör
+ekran görüntüsünden uyarıyı kabul ettiğinde kuru prova şu bayrakla yapılır:
+
+```powershell
+python fill_irsaliye.py --miktar-uyarisini-onayla
+```
+
+Worker'da aynı tercih `ORACLE_ALLOW_POST_QUANTITY_WARNING=1` ile verilir.
+Bayrak yoksa iş, uyarı penceresi açıkken gönderime ilerlemeden durur.
+
 ### Başlıktan grid'e geçiş
 
 Boş **Anlaşma No** alanından `ENTER` ile çıkışın kararlı olmadığı

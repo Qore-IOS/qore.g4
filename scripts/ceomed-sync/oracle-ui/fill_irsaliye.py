@@ -358,7 +358,8 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
     )
 
 
-def aciklama_doldur(deger: str, ana_pencere: int, log: list[str]) -> None:
+def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
+                    miktar_uyarisini_onayla: bool = False) -> None:
     """Sol alttaki Açıklama ilk satırına personel adını yazar."""
     if not deger.strip():
         raise Durdu("Açıklama/personel adı boş; gönderim yapılmayacak.")
@@ -380,6 +381,29 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str]) -> None:
         ana_pencere,
         (ACIKLAMA_PENCERE_KONUMU[0] + 10, ACIKLAMA_PENCERE_KONUMU[1] + 8),
     )
+    if ui60.uyari_penceresi_mi(ana_pencere):
+        if not miktar_uyarisini_onayla:
+            raise Durdu(
+                "Miktar alanından çıkarken bir uyarı açıldı. Uyarı içeriği "
+                "Forms tuvalinden okunamadığı için otomatik onaylanmadı. Ekran "
+                "görüntüsündeki uyarı kabul edilecekse kuru provayı "
+                "--miktar-uyarisini-onayla ile tekrarlayın."
+            )
+        ui60.uyari_kabul_et(ana_pencere)
+        log.append("miktar sonrası uyarı: operatör tercihiyle onaylandı")
+        time.sleep(0.3)
+        o = ui60.odak()
+        if alan_adi(o["mdi_ici"]) != "aciklama":
+            tiklama = ui60.pencere_noktasina_tikla(
+                ana_pencere,
+                (ACIKLAMA_PENCERE_KONUMU[0] + 10,
+                 ACIKLAMA_PENCERE_KONUMU[1] + 8),
+            )
+            if ui60.uyari_penceresi_mi(ana_pencere):
+                raise Durdu(
+                    "Miktar sonrası uyarı onaylandı ancak Açıklama'ya "
+                    "geçerken yeniden açıldı; ikinci kez onaylanmadı."
+                )
     o = ui60.odak()
     if alan_adi(o["mdi_ici"]) != "aciklama" or o["sinif"] != "Edit":
         raise Durdu(
@@ -404,6 +428,13 @@ def main() -> int:
                         help="Hiçbir şey yazmadan odağın konumunu bildir. "
                              "Konum tablosu formun bu kurulumunda kaymışsa "
                              "gerçek değerleri öğrenmek için.")
+    parser.add_argument(
+        "--miktar-uyarisini-onayla",
+        action="store_true",
+        help="Miktar alanından çıkışta açılan uyarıyı Tamam ile onayla. "
+             "Yalnızca ekran görüntüsündeki uyarının kabul edilebilir olduğu "
+             "operatör tarafından doğrulandıysa kullanılmalıdır.",
+    )
     parser.add_argument("--goruntu-dizini", default=os.environ.get(
         "ORACLE_SCREENSHOT_DIR", os.path.join(os.path.dirname(__file__), "goruntuler")))
     args = parser.parse_args()
@@ -486,7 +517,12 @@ def main() -> int:
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
 
-        aciklama_doldur(str(job.get("aciklama") or ""), ana, log)
+        aciklama_doldur(
+            str(job.get("aciklama") or ""),
+            ana,
+            log,
+            miktar_uyarisini_onayla=args.miktar_uyarisini_onayla,
+        )
 
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
 

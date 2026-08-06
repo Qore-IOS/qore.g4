@@ -475,6 +475,29 @@ def uyari_penceresi_mi(ana_pencere: int) -> bool:
     return buton_bul(o["kok"], "Bul") == 0
 
 
+def uyari_kabul_et(ana_pencere: int, timeout_ms: int = 5000) -> None:
+    """Açık uyarı penceresindeki `Tamam` butonuna basıp kapanmayı bekler.
+
+    Bu fonksiyon uyarının içeriğini yorumlamaz. Çağıran, uyarının hangi
+    kontrollü geçişte açıldığını ve operatörün açık onay verdiğini
+    doğrulamadan bunu çağırmamalıdır.
+    """
+    if not uyari_penceresi_mi(ana_pencere):
+        raise AlanReddedildi("Onaylanacak uyarı penceresi bulunamadı.")
+    o = odak()
+    tamam = buton_bul(o["kok"], "Tamam")
+    if not tamam:
+        raise AlanReddedildi("Uyarı penceresinde Tamam butonu bulunamadı.")
+    user32.SendMessageW(tamam, BM_CLICK, 0, 0)
+
+    bitis = time.time() + timeout_ms / 1000.0
+    while time.time() < bitis:
+        if not uyari_penceresi_mi(ana_pencere):
+            return
+        time.sleep(0.1)
+    raise AlanReddedildi("Uyarı penceresi Tamam'dan sonra kapanmadı.")
+
+
 def lov_kabul_et(ana_pencere: int, timeout_ms: int = 5000) -> None:
     """Açık LOV penceresinde seçili satırı kabul eder ve kapanmasını bekler.
 
