@@ -46,6 +46,8 @@ WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
 INPUT_KEYBOARD = 1
 BM_CLICK = 0x00F5
 GA_ROOT = 2
@@ -360,6 +362,31 @@ def yaz(metin: str, karakter_ms: int = 25) -> None:
     for ch in metin:
         _gonder([_karakter_girdi(ch, False), _karakter_girdi(ch, True)])
         time.sleep(karakter_ms / 1000.0)
+
+
+def mdi_noktasina_tikla(mdi_ici: tuple[int, int], bekle_ms: int = 300) -> None:
+    """Etkin MDI belge içindeki ölçülmüş noktaya sol tıklar.
+
+    Oracle Forms alanlarını tuvale çizdiği için HWND ile odaklamak mümkün
+    değil. Ham ekran koordinatı da pencere taşınınca bozulur. Bu nedenle
+    saha ölçümünü MDI belge köküne göre ekrana çeviririz; çağıran taraf
+    tıklama sonrası odağın beklenen alana geldiğini doğrulamak zorundadır.
+    """
+    o = odak()
+    mdi = o.get("mdi") or 0
+    if not mdi:
+        raise AlanReddedildi("Etkin MDI belge penceresi bulunamadı; tıklanmadı.")
+    l, t, r, b = dikdortgen(mdi)
+    x, y = l + mdi_ici[0], t + mdi_ici[1]
+    if not (l <= x < r and t <= y < b):
+        raise AlanReddedildi(
+            f"MDI tıklama noktası belge dışında: {mdi_ici!r}."
+        )
+    if not user32.SetCursorPos(x, y):
+        raise AlanReddedildi(f"Fare {mdi_ici!r} konumuna taşınamadı.")
+    user32.mouse_event(MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0)
+    user32.mouse_event(MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    time.sleep(bekle_ms / 1000.0)
 
 
 def alan_temizle(uzunluk: int = 40) -> None:

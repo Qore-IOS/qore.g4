@@ -65,6 +65,9 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
     "miat":            (643, 266),
     "kt":              (719, 266),
     "miktar":          (754, 266),
+    # Sol alttaki Açıklama tablosunun ilk satırı. Prova 5 sonrasında
+    # alan elle odaklanarak MDI belgeye göre ölçüldü.
+    "aciklama":        (64, 667),
 }
 
 KONUM_TOLERANS = 18
@@ -323,6 +326,34 @@ def irsaliye_numarasina_git(log: list[str]) -> None:
     )
 
 
+def aciklama_doldur(deger: str, log: list[str]) -> None:
+    """Sol alttaki Açıklama ilk satırına personel adını yazar."""
+    if not deger.strip():
+        raise Durdu("Açıklama/personel adı boş; gönderim yapılmayacak.")
+
+    # Son satır doldurulduğunda odak Miktar'da olmalı. Başka bir yerden
+    # koordinatlı tıklamaya geçmek, yarım formu sessizce kabul etmek olur.
+    once = ui60.odak()
+    if alan_adi(once["mdi_ici"], grid_modu=True) != "miktar":
+        raise Durdu(
+            f"Açıklama öncesi Miktar alanı bekleniyordu; odak "
+            f"{once['mdi_ici']} konumunda. Tıklanmadı."
+        )
+
+    hedef = ALAN_KONUMLARI["aciklama"]
+    # Ölçüm aktif Edit'in sol üstü; kenarlığa değil hücrenin içine tıkla.
+    ui60.mdi_noktasina_tikla((hedef[0] + 10, hedef[1] + 8))
+    o = ui60.odak()
+    if alan_adi(o["mdi_ici"]) != "aciklama" or o["sinif"] != "Edit":
+        raise Durdu(
+            f"Açıklama alanı odaklanamadı; odak {o['mdi_ici']} "
+            f"({o['sinif'] or 'sınıfsız'}) konumunda. Yazılmadı."
+        )
+
+    ui60.alan_yaz(deger.strip(), "aciklama")
+    log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--controls", required=False,
@@ -416,6 +447,8 @@ def main() -> int:
             satir_doldur(satir, ana, log)
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
+
+        aciklama_doldur(str(job.get("aciklama") or ""), log)
 
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
 

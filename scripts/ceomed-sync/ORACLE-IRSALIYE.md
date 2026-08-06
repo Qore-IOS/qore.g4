@@ -38,20 +38,12 @@ Bir formda birden çok yedek parça varsa **tek irsaliye, çok satır** açılı
 
 ### Açıklama alanının saha ölçümü
 
-Grid doldurma provası başarılı olsa da sol alttaki **Açıklama** alanının
-Oracle Forms odak konumu henüz ölçülmedi. Personel adını ekran
-görüntüsünden tahmin edilen koordinata yazmak muhasebe kaydı için kabul
-edilemez. Ölçüm için kuru doldurulmuş formda Açıklama ilk satırına
-tıklayıp şunu çalıştırın:
-
-```powershell
-python fill_irsaliye.py --tani
-```
-
-Tanı modu stdin istemez ve hiçbir tuş göndermez. Çıktıdaki `mdi_ici`,
-`pencere_ici`, `sinif` ve `deger` bilgileri Açıklama alanını haritaya
-eklemek için kullanılır. Bu alan haritalanıp geri okuma ile doğrulanmadan
-`--gercek` kullanılmamalıdır.
+Prova 5 sonrasında sol alttaki **Açıklama** ilk satırı elle odaklanarak
+ölçüldü: MDI belgeye göre `(64, 667)`, ana pencereye göre `(70, 698)` ve
+kontrol sınıfı `Edit`. Sürücü son ürün satırının Miktar alanında
+olduğunu doğruladıktan sonra bu hücrenin içine tıklar, personel adını
+yazar ve geri okur. Tıklama beklenen `Edit` alanını odaklamazsa hiçbir
+değer yazılmadan iş durdurulur.
 
 ### İrsaliye No neden olduğu gibi yazılamıyor
 
