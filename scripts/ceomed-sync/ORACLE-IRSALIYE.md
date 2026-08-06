@@ -36,6 +36,57 @@ Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
 
 Bir formda birden çok yedek parça varsa **tek irsaliye, çok satır** açılır.
 
+### Açıklama alanının saha ölçümü
+
+Prova 5 sonrasında sol alttaki **Açıklama** ilk satırı elle odaklanarak
+ölçüldü: MDI belgeye göre `(64, 667)`, ana pencereye göre `(70, 698)` ve
+kontrol sınıfı `Edit`. Sürücü son ürün satırının Miktar alanında
+olduğunu doğruladıktan sonra bu hücrenin içine tıklar, personel adını
+yazar ve geri okur. Tıklama beklenen `Edit` alanını odaklamazsa hiçbir
+değer yazılmadan iş durdurulur.
+
+Prova 7, grid ile alt Açıklama bölgesinin aynı iç MDI document kökünü
+paylaşmadığını gösterdi; grid köküne göre Açıklama tıklaması başlıktaki
+bir butona kaydı. Prova 8'de MDI kökünü global olarak değiştirmek ise daha
+başlangıçtaki İrsaliye No alan tanımasını bozdu. Bu nedenle normal alan
+tanıma için kanıtlanmış MDI davranışı korunur; yalnızca bölgeler arasındaki
+Açıklama tıklaması sahada ölçülmüş ana pencere koordinatı `(70, 698)`
+üzerinden yapılır. Tıklama sonrası alan yine MDI koordinatı ve `Edit` sınıfı
+ile doğrulanır.
+
+Prova 9'da Açıklama tıklamasının doğru yere gittiği, fakat Miktar
+alanından çıkış validasyonunun "ürün eksi bakiyeye düşüyor" uyarısını
+açtığı görüldü. Forms uyarı metnini okunabilir bir Windows kontrolü
+olarak sunmadığı için sürücü bunu varsayılan olarak onaylamaz. Operatör
+ekran görüntüsünden uyarıyı kabul ettiğinde kuru prova şu bayrakla yapılır:
+
+```powershell
+python fill_irsaliye.py --miktar-uyarisini-onayla
+```
+
+Worker'da aynı tercih `ORACLE_ALLOW_POST_QUANTITY_WARNING=1` ile verilir.
+Bayrak yoksa iş, uyarı penceresi açıkken gönderime ilerlemeden durur.
+
+### Başlıktan grid'e geçiş
+
+Boş **Anlaşma No** alanından `ENTER` ile çıkışın kararlı olmadığı
+sahada ölçüldü: Prova 5 grid'e ilerlerken Prova 6 aynı alanda odağı
+hapsetti. Prova 10 ayrıca başlık MDI köküne göre yapılan grid tıklamasının
+odağı Anlaşma No'da bırakabildiğini gösterdi. Header ile grid farklı iç MDI
+köklerine bağlanabildiğinden bu bölgeler arasındaki geçiş, sahada ölçülmüş
+ana pencere koordinatı `(14, 297)` üzerinden yapılır. Tıklama sonrası odak
+yine MDI koordinatı `(8, 266)` ve `Edit` sınıfıyla doğrulanır; doğrulanmazsa
+stok kodu yazılmaz.
+
+### Gönder butonu kuru doğrulaması
+
+Prova 11'de başlık, grid, miktar uyarısı ve Açıklama geri okumayla
+tamamlandı. Bir sonraki emniyet kapısı, **E-İRSALİYE GÖNDER** kontrolünün
+koordinatla değil okunabilir buton yazısıyla bulunmasıdır. Kuru çalışma
+artık butonu arar, kontrol sınıfının `Button` olduğunu doğrular ve
+dikdörtgenini loglar; fakat butona basmaz. Bu kontrol geçmeden `--gercek`
+kullanılmamalıdır.
+
 ### İrsaliye No neden olduğu gibi yazılamıyor
 
 Alanın kuralı ölçülmüştür: **2 harf + en fazla 6 rakam, toplam 8 karakter.**
@@ -112,12 +163,57 @@ Mevcut `scripts/ceomed-sync/.env` dosyasına ekleyin:
 ```env
 # --- Ceomed yazma worker'ı ---
 ORACLE_DRY_RUN=1          # 0 = GERÇEKTEN GÖNDER. Önce 1'de doğrulayın.
+ORACLE_FILL_ONLY=0        # 1 = Oracle formunu doldur, gönderme; incelemede beklet
 ORACLE_DRIVER=ui          # ui | api
 ORACLE_MAX_ATTEMPTS=3     # bir işin en fazla deneme sayısı
 ORACLE_MAX_PER_DAY=200    # günlük gönderim tavanı (otomasyon çıldırırsa emniyet)
 ORACLE_STALE_CLAIM_MIN=15 # takılı kalan işi kaç dk sonra kurtar
 ORACLE_PYTHON=python      # UI sürücüsü için Python yorumlayıcısı
 ```
+
+### Canlı form-doldur testi (gönderimsiz)
+
+Qore'da kapanan gerçek teknik/aplikasyon formlarının Ceomed ekranına
+yazılması, fakat **E-İRSALİYE GÖNDER** butonuna basılmaması için:
+
+```env
+ORACLE_FILL_ONLY=1
+ORACLE_DRY_RUN=1
+ORACLE_DRIVER=ui
+ORACLE_ALLOW_POST_QUANTITY_WARNING=1
+```
+
+Bu mod klasik `ORACLE_DRY_RUN=1` modundan farklıdır: klasik kuru mod yalnızca
+planı loglar; `ORACLE_FILL_ONLY=1` Python sürücüsünü gerçekten çalıştırıp
+Oracle formunu doldurur, ancak `--gercek` vermediği için göndermez.
+
+Bu sürücü `oracle-ui/controls.json` istemez. Eski kontrol haritası,
+pywinauto tabanlı ilk taslaktan kalmadır; Oracle Forms alanları gerçek Windows
+kontrolleri olmadığı için kullanımdan kaldırılmıştır. Worker başlangıcında
+`Kontrol haritası yok` hatası alınması güncel olmayan `uiDriver.js`
+çalıştırıldığını gösterir.
+
+Güncel worker başlangıç logunda `build=fill-only-v2-no-controls` yazar.
+Logda bunun yerine `kuru_çalışma=AÇIK` görülüyorsa eski Node süreci veya
+eski checkout çalışıyordur. Windows PowerShell 5'te Türkçe karakterleri
+doğru okumak için logu şu komutla izleyin:
+
+```powershell
+Get-Content .\oracle-worker.log -Encoding UTF8 -Wait -Tail 50
+```
+
+Tek masaüstü formu aynı anda yalnızca bir işi taşıyabilir. Bu nedenle ilk
+iş doldurulunca durumu `awaiting_review` olur ve arkadan gelen işler `pending`
+olarak sırada kalır; boşa düşmez ve mevcut ekranı ezmez. Operatör:
+
+1. Ceomed ekranındaki doldurulmuş formu kontrol eder.
+2. Ceomed'de yeni ve boş bir **Çıkış İrsaliyesi** formu açar.
+3. Qore'daki Ceomed kuyruğunda **Test tamam, sıradakine geç** butonuna basar.
+4. İncelenen iş `previewed` olur; worker sıradaki en eski `pending` işi doldurur.
+
+Worker veya bilgisayar kapanırsa `pending` işler Firestore kuyruğunda kalır.
+Yeniden başlatıldığında sıradan devam eder. `awaiting_review` iş operatör
+tamamlamadan sonraki kayıt işlenmez.
 
 `GOOGLE_APPLICATION_CREDENTIALS`, `FIREBASE_PROJECT_ID` ve `CEOMED_COMPANY_ID`
 zaten okuma worker'ı için tanımlı olmalı; aynıları kullanılır.
