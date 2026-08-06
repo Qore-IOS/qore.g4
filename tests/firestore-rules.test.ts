@@ -707,3 +707,58 @@ test('arıza raporunun alt koleksiyonu hâlâ erişilebilir', async () => {
   });
   await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'deviceFaultReports', 'fA2', 'notes')));
 });
+
+// ============================================================================
+// Alt koleksiyon kuralları
+//
+// Firestore kuralları alt koleksiyonlara İNMEZ. Üst belgede `allow write`
+// olması alt koleksiyonu kapsamaz; kuralı yazılmamış yol varsayılan olarak
+// REDDEDİLİR. Bu üretimde total verimlilik panelinde "ara kayıt" ve "ana
+// kayıt"ın ikisini birden kırdı: satır kümesi 850 KB'ı aşınca parçalara
+// bölünüp `rowChunks` alt koleksiyonuna yazılıyor, o yolun kuralı yoktu.
+// ============================================================================
+
+test('totalEfficiencyRecords/rowChunks yazılabilir (ara + ana kayıt)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'totalEfficiencyRecords', 'rec1'), { companyId: 'companyA' });
+  });
+  await assertSucceeds(setDoc(
+    doc(authedAsCompanyA(), 'totalEfficiencyRecords', 'rec1', 'rowChunks', '0000'),
+    { index: 0, rows: [1, 2] },
+  ));
+});
+
+test('totalEfficiencyRecords/rowChunks okunabilir (kayıt yükleme)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'totalEfficiencyRecords', 'rec2'), { companyId: 'companyA', rowsChunked: true });
+    await setDoc(doc(db, 'totalEfficiencyRecords', 'rec2', 'rowChunks', '0000'), { index: 0, rows: [1] });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'totalEfficiencyRecords', 'rec2', 'rowChunks')));
+});
+
+test('hospitals/hakEdisDefinitions okunabilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'hospitals', 'hosp1'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'hospitals', 'hosp1', 'hakEdisDefinitions', 'k1'), { sutKodu: 'A1' });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'hospitals', 'hosp1', 'hakEdisDefinitions')));
+});
+
+test('yedekParcaDepoMinMax/minMaxRules okunabilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'yedekParcaDepoMinMax', 'y1'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'yedekParcaDepoMinMax', 'y1', 'minMaxRules', 'm1'), { min: 1 });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'yedekParcaDepoMinMax', 'y1', 'minMaxRules')));
+});
+
+test('kullanıcı kendi pushTokens kaydını yazabilir', async () => {
+  await assertSucceeds(setDoc(doc(authedAsCompanyA(), 'users', 'userA', 'pushTokens', 't1'), { token: 'x' }));
+});
+
+test('kullanıcı BAŞKASININ pushTokens kaydını yazamaz', async () => {
+  await assertFails(setDoc(doc(authedAsCompanyA(), 'users', 'userB', 'pushTokens', 't1'), { token: 'x' }));
+});

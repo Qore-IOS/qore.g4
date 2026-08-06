@@ -48,6 +48,27 @@ const num = (v, def) => {
   return Number.isFinite(n) && n > 0 ? n : def;
 };
 
+// .env, `run-oracle-worker.bat` içinde `set "%A=%B"` ile yükleniyor; değer
+// tırnaklı yazılmışsa TIRNAK DEĞERİN PARÇASI olur. Sahada FIREBASE_PROJECT_ID
+// `"invpilot"` diye yüklendi, worker o adda bir proje arayıp
+// `PERMISSION_DENIED` aldı ve hata mesajındaki tırnaklar Google'ın
+// biçimlendirmesi sanıldığı için sebep uzun süre görünmedi.
+//
+// Yapılandırma değerlerinin hiçbiri meşru olarak tırnakla başlayıp bitmez,
+// dolayısıyla soymak güvenlidir.
+for (const anahtar of [
+  'FIREBASE_PROJECT_ID', 'CEOMED_COMPANY_ID', 'GOOGLE_APPLICATION_CREDENTIALS',
+  'ORACLE_DRY_RUN', 'ORACLE_FILL_ONLY', 'ORACLE_DRIVER', 'ORACLE_PYTHON',
+  'ORACLE_MAX_ATTEMPTS', 'ORACLE_MAX_PER_DAY', 'ORACLE_STALE_CLAIM_MIN',
+  'ORACLE_POLL_SEC', 'ORACLE_ALLOW_POST_QUANTITY_WARNING', 'ORACLE_DATE_SEP',
+  'ORACLE_UI_TIMEOUT_SEC', 'ORACLE_SCREENSHOT_DIR',
+]) {
+  const ham = process.env[anahtar];
+  if (ham && /^(".*"|'.*')$/.test(ham.trim())) {
+    process.env[anahtar] = ham.trim().slice(1, -1);
+  }
+}
+
 const DRY_RUN = process.env.ORACLE_DRY_RUN !== '0';
 const FILL_ONLY = process.env.ORACLE_FILL_ONLY === '1';
 const DRIVER_NAME = (process.env.ORACLE_DRIVER || 'ui').toLowerCase();
@@ -132,6 +153,73 @@ async function markSent(db, job, result) {
     screenshotPath: result.screenshotPath || null,
     driver: DRIVER_NAME,
   });
+}
+
+async function markAwaitingReview(db, job, result) {
+  await db.collection(COLLECTION).doc(job.id).update({
+    status: 'awaiting_review',
+    previewedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    lastError: null,
+    screenshotPath: result.screenshotPath || null,
+    driver: DRIVER_NAME,
+  });
+}
+
+async function hasAwaitingReview(db) {
+  let q = db.collection(COLLECTION).where('status', '==', 'awaiting_review');
+  if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
+  const snap = await q.limit(1).get();
+  return !snap.empty;
+}
+
+/**
+ * Başarılı gönderimde push bildirimi yazar.
+ *
+ * Doğrudan FCM'e göndermek yerine `notifications` koleksiyonuna belge yazıyoruz:
+ * mevcut Cloud Function (`notifications/{id}` onCreate) hedef kitleyi çözüp
+ * dağıtımı zaten yapıyor. Kitle çözümleme mantığını burada tekrarlamak, iki
+ * yerde ayrışacak bir kopya demek olurdu.
+ *
+ * Hedef `audience:all`: her push jetonu bu anahtarı taşır
+ * (`buildMembershipKeysFromProfile`), Function da `companyId` ile aynı şirkete
+ * daraltır.
+ *
+ * HATASI İŞİ BOZMAZ: e-irsaliye gönderilmiştir. Bildirim yazılamadı diye işi
+ * başarısız saymak, tekrar denemeye ve MÜKERRER İRSALİYEYE yol açar.
+ */
+async function bildirimYaz(db, job, result) {
+  const metin = (v) => (v == null ? '' : String(v).trim());
+  try {
+    const satirSayisi = Array.isArray(job.satirlar) ? job.satirlar.length : 0;
+    await db.collection('notifications').add({
+      type: 'ceomed_irsaliye_olusturuldu',
+      title: 'Ceomed irsaliyesi oluşturuldu',
+      message:
+        `${metin(job.irsaliyeNo)} · ${metin(job.cariKodu)} · ${satirSayisi} kalem yedek parça` +
+        `${job.labName ? ` · ${metin(job.labName)}` : ''}`,
+      href: '/dosya-yonetimi',
+      targets: ['audience:all'],
+      actor: { uid: 'ceomed-worker', name: 'Ceomed Otomasyonu' },
+      channel: 'push',
+      readBy: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      ...(job.companyId ? { companyId: job.companyId } : {}),
+      meta: {
+        jobId: job.id,
+        irsaliyeNo: metin(job.irsaliyeNo),
+        cariKodu: metin(job.cariKodu),
+        formNo: metin(job.formNo),
+        formId: metin(job.formId),
+        satirSayisi,
+        ceomedIrsaliyeNo: (result && result.ceomedIrsaliyeNo) || null,
+      },
+    });
+    log('bildirim', `${metin(job.irsaliyeNo)} için push bildirimi kuyruğa yazıldı.`);
+  } catch (e) {
+    // Yalnızca logla; gönderim geri alınamaz, iş başarılı kalmalı.
+    errLog('bildirim', `Push bildirimi yazılamadı (gönderim etkilenmedi): ${e.message || e}`);
+  }
 }
 
 async function markAwaitingReview(db, job, result) {
@@ -253,6 +341,7 @@ async function processJob(db, driver, jobId) {
 
   dailyCounter.adet += 1;
   await markSent(db, job, result);
+  await bildirimYaz(db, job, result);
   log('ok', `${ozet} — e-irsaliye gönderildi${result.ceomedIrsaliyeNo ? ` (Ceomed no: ${result.ceomedIrsaliyeNo})` : ''}`);
 }
 
