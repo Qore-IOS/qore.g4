@@ -78,6 +78,15 @@ ana pencere koordinatı `(14, 297)` üzerinden yapılır. Tıklama sonrası odak
 yine MDI koordinatı `(8, 266)` ve `Edit` sınıfıyla doğrulanır; doğrulanmazsa
 stok kodu yazılmaz.
 
+### Gönder butonu kuru doğrulaması
+
+Prova 11'de başlık, grid, miktar uyarısı ve Açıklama geri okumayla
+tamamlandı. Bir sonraki emniyet kapısı, **E-İRSALİYE GÖNDER** kontrolünün
+koordinatla değil okunabilir buton yazısıyla bulunmasıdır. Kuru çalışma
+artık butonu arar, kontrol sınıfının `Button` olduğunu doğrular ve
+dikdörtgenini loglar; fakat butona basmaz. Bu kontrol geçmeden `--gercek`
+kullanılmamalıdır.
+
 ### İrsaliye No neden olduğu gibi yazılamıyor
 
 Alanın kuralı ölçülmüştür: **2 harf + en fazla 6 rakam, toplam 8 karakter.**

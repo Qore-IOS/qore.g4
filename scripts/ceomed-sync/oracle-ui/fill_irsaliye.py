@@ -427,6 +427,22 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
     log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
 
 
+def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:
+    """E-İRSALİYE GÖNDER butonunu yazısından bulur; tıklamaz."""
+    gonder = ui60.buton_bul(ana_pencere, "E-IRSALIYE GÖNDER")
+    if not gonder:
+        raise Durdu("E-İRSALİYE GÖNDER butonu bulunamadı.", retryable=True)
+    if ui60.sinif_adi(gonder) != "Button":
+        raise Durdu(
+            "E-İRSALİYE GÖNDER eşleşmesi bir Button kontrolü değil; "
+            "tıklanmayacak."
+        )
+    metin = ui60.pencere_metni(gonder)
+    rect = ui60.dikdortgen(gonder)
+    log.append(f"gonder: buton bulundu ve doğrulandı ({metin!r}, rect {rect})")
+    return gonder
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--controls", required=False,
@@ -535,6 +551,10 @@ def main() -> int:
             miktar_uyarisini_onayla=args.miktar_uyarisini_onayla,
         )
 
+        # Kuru prova da kapanış kontrolünü kapsamalı: butonun ancak gerçek
+        # modda aranması, saha provası geçtiği halde ilk canlı işte tıkanabilir.
+        gonder = gonder_butonunu_dogrula(ana, log)
+
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-dolu")
 
         if not args.gercek:
@@ -546,10 +566,6 @@ def main() -> int:
                 "not": "Form dolduruldu ve doğrulandı; E-İRSALİYE GÖNDER'e "
                        "BASILMADI. Gerçek gönderim için --gercek gerekir.",
             })
-
-        gonder = ui60.buton_bul(ana, "E-IRSALIYE GÖNDER")
-        if not gonder:
-            raise Durdu("E-İRSALİYE GÖNDER butonu bulunamadı.", retryable=True)
 
         ui60.user32.SendMessageW(gonder, ui60.BM_CLICK, 0, 0)
         time.sleep(2.0)
