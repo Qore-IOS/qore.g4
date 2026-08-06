@@ -56,6 +56,23 @@ GEZINME_TUSLARI = {
     "DELETE": 0x2E, "BACKSPACE": 0x08,
 }
 
+GA_ROOT = 2
+
+# Pencereye GÖRE alan konumları (sol üst köşeden). Ham ekran koordinatları
+# pencere konumuna bağlı olduğu için kullanılamaz; bunlar sabittir.
+#
+# Ölçümden: pencere kökü (-1929, -62), İrsaliye No (-1806, 51)
+#   → pencereye göre (123, 113)
+BASLANGIC_BOLGELERI = {
+    "irsaliyeno": (123, 113),
+    "tarih":      (246, 113),
+    "carikodu":   (123, 132),
+    "islemtipi":  (855, 149),
+    "depo":       (855, 169),
+    "grid":       (14, 297),
+}
+BOLGE_TOLERANS = 30
+
 # Odak bu metinlerden birini taşıyan bir butondayken tuş göndermek, belge
 # göndermek/silmek/kaydetmek anlamına gelebilir. 'Tamam' bilerek listede DEĞİL:
 # arama penceresini onaylamak için gerekli ve geri alınabilir bir işlem.
@@ -187,17 +204,48 @@ def foreground_title() -> str:
     return buf.value
 
 
-def odak_bilgisi() -> dict:
+ENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+
+def pencere_metinleri(kok: int) -> list[str]:
+    """Bir pencerenin içindeki tüm okunabilir metinleri toplar.
+
+    Uyarı pencerelerinin mesajını almak için: sürücü bir doğrulama hatasında
+    işi neden başarısız damgaladığını loglayabilmeli. 'Bir uyarı çıktı' yetmez.
+    """
+    bulunan: list[str] = []
+
+    def geri_cagri(hwnd, _lparam):
+        t = window_text(hwnd)
+        if t and t.strip():
+            bulunan.append(t.strip())
+        return True
+
+    user32.EnumChildWindows(kok, ENUMPROC(geri_cagri), 0)
+    return bulunan
+
+
+def odak_bilgisi(mesaj_topla: bool = False) -> dict:
     hwnd = focused_hwnd()
     if not hwnd:
-        return {"hwnd": 0, "class_name": "(odak yok)", "rect": None, "deger": ""}
+        return {"hwnd": 0, "class_name": "(odak yok)", "rect": None, "deger": "",
+                "pencere_ici": (0, 0)}
     r = rect_of(hwnd)
-    return {
+    kok = user32.GetAncestor(hwnd, GA_ROOT)
+    kr = rect_of(kok) if kok else (0, 0, 0, 0)
+    bilgi = {
         "hwnd": hwnd,
         "class_name": class_name(hwnd),
         "rect": {"left": r[0], "top": r[1], "right": r[2], "bottom": r[3]},
+        "pencere_ici": (r[0] - kr[0], r[1] - kr[1]),
         "deger": window_text(hwnd),
     }
+    # Odak bir butondaysa büyük ihtimalle bir uyarı/onay penceresindeyiz;
+    # mesajı da kaydet.
+    if mesaj_topla and bilgi["class_name"] == "Button" and kok:
+        bilgi["pencere_basligi"] = window_text(kok)
+        bilgi["pencere_metinleri"] = pencere_metinleri(kok)
+    return bilgi
 
 
 def tehlikeli_mi(bilgi: dict) -> str | None:
@@ -228,12 +276,14 @@ def adimlari_coz(ifade: str) -> list[tuple[str, str]]:
             adimlar.append(("YAZ", metin))
         elif parca.upper().startswith("BEKLE:"):
             adimlar.append(("BEKLE", parca[6:]))
+        elif parca.upper() == "TEMIZLE":
+            adimlar.append(("TEMIZLE", ""))
         else:
             ad = parca.upper()
             if ad not in GEZINME_TUSLARI:
                 raise ValueError(
-                    f"'{parca}' anlaşılmadı. Tuşlar: {', '.join(sorted(GEZINME_TUSLARI))}; "
-                    "metin için 'YAZ:...' kullanın."
+                    f"'{parca}' anlaşılmadı. Tuşlar: {', '.join(sorted(GEZINME_TUSLARI))}, "
+                    "TEMIZLE; metin için 'YAZ:...' kullanın."
                 )
             adimlar.append(("TUS", ad))
     if not adimlar:
@@ -241,10 +291,24 @@ def adimlari_coz(ifade: str) -> list[tuple[str, str]]:
     return adimlar
 
 
+def alan_temizle(uzunluk: int = 40) -> None:
+    """END + BACKSPACE×N. Ctrl+A yerine bu: 4GL alanlarında seçim davranışı
+    öngörülemez, ama END+BACKSPACE her metin alanında aynı işi yapar."""
+    tus_gonder("END")
+    time.sleep(0.05)
+    for _ in range(uzunluk):
+        tus_gonder("BACKSPACE")
+        time.sleep(0.01)
+
+
 def yazdir(sira: int, adim: str, bilgi: dict) -> None:
     r = bilgi["rect"]
     konum = f"({r['left']},{r['top']},{r['right']},{r['bottom']})" if r else "-"
-    print(f"{sira:>3}  {adim:<22} {bilgi['class_name']:<16} {konum:<28} {bilgi['deger']!r}")
+    px, py = bilgi.get("pencere_ici", (0, 0))
+    print(f"{sira:>3}  {adim:<22} {bilgi['class_name']:<16} {konum:<28} "
+          f"pen({px},{py}){'':<3} {bilgi['deger']!r}")
+    for metin in bilgi.get("pencere_metinleri", []) or []:
+        print(f"       ↳ pencere metni: {metin!r}")
 
 
 def main() -> int:
@@ -255,6 +319,9 @@ def main() -> int:
                    help="Bu bayrak olmadan hiçbir şey gönderilmez")
     p.add_argument("--bekleme-ms", type=int, default=500)
     p.add_argument("--pencere", default="CEOMED")
+    p.add_argument("--baslangic", choices=sorted(BASLANGIC_BOLGELERI),
+                   help="Beklenen başlangıç alanı; odak orada değilse hiçbir şey "
+                        "gönderilmez. Yanlış alandan başlayan ölçüm boşa gider.")
     p.add_argument("--json", dest="json_path")
     args = p.parse_args()
 
@@ -291,11 +358,26 @@ def main() -> int:
         return 1
 
     print(f"Pencere: {baslik[:80]}\n")
-    print(f"{'#':>3}  {'ADIM':<22} {'SINIF':<16} {'KONUM':<28} DEĞER")
-    print("-" * 108)
+
+    bilgi = odak_bilgisi(mesaj_topla=True)
+
+    if args.baslangic:
+        bx, by = BASLANGIC_BOLGELERI[args.baslangic]
+        px, py = bilgi["pencere_ici"]
+        if abs(px - bx) > BOLGE_TOLERANS or abs(py - by) > BOLGE_TOLERANS:
+            print(f"HATA: '{args.baslangic}' alanından başlanması bekleniyordu "
+                  f"(pencere içi ~{bx},{by}).", file=sys.stderr)
+            print(f"      Odak şu an ({px},{py}) konumunda — yanlış alan.",
+                  file=sys.stderr)
+            print("      Hiçbir şey gönderilmedi. Doğru alana tıklayıp tekrar deneyin.",
+                  file=sys.stderr)
+            return 1
+        print(f"Başlangıç doğrulandı: {args.baslangic}\n")
+
+    print(f"{'#':>3}  {'ADIM':<22} {'SINIF':<16} {'KONUM':<28} {'PENCERE İÇİ':<14} DEĞER")
+    print("-" * 120)
 
     kayitlar = []
-    bilgi = odak_bilgisi()
     bilgi["adim"] = "(başlangıç)"
     kayitlar.append(bilgi)
     yazdir(0, "(başlangıç)", bilgi)
@@ -317,15 +399,26 @@ def main() -> int:
         elif tur == "BEKLE":
             time.sleep(int(deger) / 1000.0)
             etiket = f"BEKLE {deger}ms"
+        elif tur == "TEMIZLE":
+            alan_temizle()
+            etiket = "TEMIZLE"
         else:
             tus_gonder(deger)
             etiket = deger
 
         time.sleep(args.bekleme_ms / 1000.0)
-        bilgi = odak_bilgisi()
+        bilgi = odak_bilgisi(mesaj_topla=True)
         bilgi["adim"] = etiket
+
+        # Odak kıpırdamadıysa uygulama değeri reddetmiştir: 4GL alandan çıkışta
+        # doğrulama yapıyor ve geçersiz değerde odağı bırakmıyor. Sürücü için
+        # bedava hata sinyali; ölçümde de görünsün.
+        if tur == "TUS" and deger in ("TAB", "ENTER") and bilgi["hwnd"] == onceki["hwnd"]:
+            bilgi["uyari"] = "odak ilerlemedi — değer reddedilmiş olabilir"
         kayitlar.append(bilgi)
         yazdir(i, etiket, bilgi)
+        if bilgi.get("uyari"):
+            print(f"       ↳ {bilgi['uyari']}")
 
     print("\nBitti. Hiçbir butona tıklanmadı.")
     print("Test formunu KAYDETMEDEN kapatın.")

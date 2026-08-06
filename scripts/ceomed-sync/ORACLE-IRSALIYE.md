@@ -390,6 +390,81 @@ Tamamlandı`, `SIL`, `Ref No Güncelle`, `İrsaliye Yazdır`, `Fatura Kopyala` b
 
 Ölçüm formunu her zaman KAYDETMEDEN kapatın.
 
+### Ölçüm 5 sonucu — yazma davranışı ve doğrulama penceresi
+
+`probe_type.py` turları dört şey gösterdi:
+
+**1. Alan temizlenmeden yazılırsa değer BİRLEŞİYOR.**
+
+```
+0  (başlangıç)         'm51016'      ← alan zaten doluydu
+1  YAZ '120.01.001'    'm5101612'    ← üstüne eklendi, 8 karakterde kesildi
+2  TAB                 'm5101612'    ← odak ilerlemedi
+```
+
+Sürücü **her alanı yazmadan önce temizlemek zorundadır**. Aksi halde muhasebeye
+`m5101612` gibi uydurma cari kodları gider. `probe_type.py` bunun için `TEMIZLE`
+adımı sunar (END + BACKSPACE×40; 4GL alanlarında seçim davranışı öngörülemez
+olduğu için Ctrl+A tercih edilmedi).
+
+**2. Geçersiz değer odağı hapsediyor.** Yukarıdaki turda TAB odağı ilerletmedi.
+4GL alandan çıkışta doğrulama yapıyor ve değer geçersizse bırakmıyor. Bu bedava
+bir hata sinyalidir: *TAB'dan sonra odak aynı kontroldeyse değer reddedilmiştir.*
+`probe_type.py` bu durumu artık kendisi işaretler.
+
+**3. Yazma davranışı odağın nasıl geldiğine bağlı.** Aynı alanda aynı komut iki
+farklı sonuç verdi — bir turda yazı hiç girmedi (`'SI007788'` kaldı), başka bir
+turda değeri tamamen değiştirdi (`'TEST'` oldu). Fark, tıklamanın metni seçili
+bırakıp bırakmamasında. Bu belirsizlik tek başına yaz-sonra-geri-oku
+doğrulamasını zorunlu kılar.
+
+**4. Doğrulama hatası MODAL pencere açıyor.**
+
+```
+2  ENTER   Button  (925,593,1001,628)  '&Tamam'
+```
+> İrsaliye numarasının ilk 2 karakterinden sonrası, sadece rakam olmalıdır!!!
+
+Sürücü bu pencereyi tanımazsa sonraki tuşlar oraya gider ve form yarım kalır.
+`probe_type.py` artık odak bir butondayken pencerenin tüm metinlerini toplar —
+sürücü işi `failed` damgalarken hatanın kendisini loglayabilsin diye. "Bir uyarı
+çıktı" yetmez.
+
+### ⚠ Alan eşlemesinde düzeltme gerekiyor: İrsaliye No
+
+Uyarı mesajı formatı ele veriyor: **ilk 2 karakter harf, gerisi rakam**
+(`SI007787` → `SI007788`). Numarayı **uygulama kendisi üretiyor.**
+
+Bu belgenin başındaki eşleme tablosunda "İrsaliye No ← form numarası (`formNo`)"
+yazıyor. **Bu yanlıştır:** Qore form numarasını oraya yazmak hem formatı bozar
+hem uygulamanın numara sırasını kırar.
+
+Doğrusu: İrsaliye No'ya **hiç dokunmamak**, Qore form numarasını Açıklama veya
+Ref No alanına koymak. Hangisi olacağı muhasebeyle teyit edilmelidir; teyit
+gelene kadar sürücü İrsaliye No'ya dokunmaz.
+
+### Başlangıç alanı doğrulaması
+
+Ölçümlerin üçü, yanlış alandan başlandığı için boşa gitti (grid hücresi yerine
+İrsaliye No'ya tıklanmıştı). `probe_type.py` artık `--baslangic` ile bunu
+engeller:
+
+```powershell
+python probe_type.py --baslangic grid --adimlar "TEMIZLE,YAZ:TEST,RIGHT" --onayla
+```
+
+Odak beklenen alanda değilse **hiçbir şey gönderilmeden** durur. Konumlar ham
+ekran koordinatı değil pencereye göre tutulur (pencere taşınınca bozulmasın):
+
+| Ad | Pencere içi (x, y) |
+|---|---|
+| `irsaliyeno` | (123, 113) |
+| `tarih` | (246, 113) |
+| `carikodu` | (123, 132) |
+| `islemtipi` | (855, 149) |
+| `depo` | (855, 169) |
+| `grid` | (14, 297) |
+
 ---
 
 ## UI sürücüsü (API bulunamazsa)
