@@ -36,26 +36,35 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ui60  # noqa: E402
 
 
-# Ölçülmüş alan konumları — pencerenin sol üst köşesine GÖRE (ham ekran
-# koordinatı değil: pencere taşınınca bozulmasın). Tutanak: ORACLE-IRSALIYE.md
+# Ölçülmüş alan konumları — MDI BELGE penceresinin sol üst köşesine göre.
+#
+# Neden ana pencereye göre değil: Ceomed bir MDI uygulaması, form ana pencerenin
+# içinde ayrı bir alt pencerede duruyor. Ana pencereye göre ölçmek kırılgan —
+# provada İrsaliye No (123,113) yerine (9,100)'de göründü ve sürücü "form yarıda
+# kalmış" sanıp durdu. MDI belge penceresine göre konum, ana pencere boyutundan
+# bağımsız.
+#
+# Ham ölçüm ana pencere kökü (-1929,-62), MDI belge kökü (-1923,-31) ile
+# yapıldı; aradaki (-6,-31) farkı aşağıdaki değerlere işlenmiştir.
+# Tutanak: ORACLE-IRSALIYE.md
 ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
     # Başlık
-    "irsaliyeNo":      (123, 113),
-    "tarih":           (246, 113),
-    "fiiliSevkTarihi": (444, 110),
-    "cariKodu":        (123, 132),
-    "sevkAdresi":      (123, 174),
-    "islemTipi":       (855, 149),
-    "depo":            (855, 169),
-    "teslimEden":      (855, 189),
-    "teslimAlan":      (855, 209),
-    "anlasmaNo":       (855, 229),
+    "irsaliyeNo":      (117, 82),
+    "tarih":           (240, 82),
+    "fiiliSevkTarihi": (438, 79),
+    "cariKodu":        (117, 101),
+    "sevkAdresi":      (117, 143),
+    "islemTipi":       (849, 118),
+    "depo":            (849, 138),
+    "teslimEden":      (849, 158),
+    "teslimAlan":      (849, 178),
+    "anlasmaNo":       (849, 198),
     # Grid ilk satır (y sabit; sonraki satırlarda y artar, eşleştirme x'e bakar)
-    "stokKodu":        (14, 297),
-    "lot":             (575, 297),
-    "miat":            (649, 297),
-    "kt":              (725, 297),
-    "miktar":          (760, 297),
+    "stokKodu":        (8, 266),
+    "lot":             (569, 266),
+    "miat":            (643, 266),
+    "kt":              (719, 266),
+    "miktar":          (754, 266),
 }
 
 KONUM_TOLERANS = 18
@@ -119,8 +128,14 @@ def ilerle(etiket: str) -> None:
     kimlik = ui60.odak_kimligi()
     ui60.tus("ENTER", bekle_ms=350)
     if not ui60.odak_ilerledi_mi(kimlik):
+        ipucu = ""
+        if etiket == "irsaliyeNo":
+            # Provada görüldü: aynı numara ikinci kez denendiğinde Forms alandan
+            # çıkmaya izin vermiyor. Uygulamanın kendi mükerrer koruması.
+            ipucu = (" Bu numara zaten kullanılmış olabilir — uygulama mükerrer "
+                     "irsaliye numarasını reddediyor.")
         raise Durdu(
-            f"{etiket} alanından çıkılamadı — uygulama değeri reddetti. "
+            f"{etiket} alanından çıkılamadı — uygulama değeri reddetti.{ipucu} "
             "Formun alt mesaj satırında bir hata olabilir (ör. WHEN-VALIDATE-ITEM). "
             "Ekran görüntüsüne bakın."
         )
@@ -169,11 +184,11 @@ def lov_ile_yaz(ad: str, deger: str, ana_pencere: int, log: list[str]) -> None:
     o = ui60.odak()
     geri_donuldu = False
 
-    if not konum_eslesiyor(o["pencere_ici"], hedef):
+    if not konum_eslesiyor(o["mdi_ici"], hedef):
         # Forms ilerletmiş; okumak için geri dön.
         ui60.tus("SHIFTTAB", bekle_ms=450)
         o = ui60.odak()
-        if not konum_eslesiyor(o["pencere_ici"], hedef):
+        if not konum_eslesiyor(o["mdi_ici"], hedef):
             raise Durdu(
                 f"{ad}: seçim sonrası alana geri dönülemedi "
                 f"(odak {o['pencere_ici']}, beklenen {hedef}). "
@@ -203,7 +218,7 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
     """Başlık alanlarını konumdan tanıyarak doldurur, grid'e varınca durur."""
     for _ in range(MAX_ADIM):
         o = ui60.odak()
-        ad = alan_adi(o["pencere_ici"])
+        ad = alan_adi(o["mdi_ici"])
 
         if ad == "stokKodu":
             return  # grid'e ulaşıldı
@@ -252,7 +267,7 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
 
     for beklenen_sutun in GRID_SIRASI:
         o = ui60.odak()
-        ad = alan_adi(o["pencere_ici"], grid_modu=True)
+        ad = alan_adi(o["mdi_ici"], grid_modu=True)
         log.append(f"grid: {beklenen_sutun} bekleniyor, odak {o['pencere_ici']} "
                    f"({ad or 'tanınmayan'})")
         if ad != beklenen_sutun:
@@ -283,6 +298,10 @@ def main() -> int:
                         help="E-İRSALİYE GÖNDER'e bas. Verilmezse form doldurulur "
                              "ve doğrulanır ama GÖNDERİLMEZ.")
     parser.add_argument("--pencere", default="CEOMED")
+    parser.add_argument("--tani", action="store_true",
+                        help="Hiçbir şey yazmadan odağın konumunu bildir. "
+                             "Konum tablosu formun bu kurulumunda kaymışsa "
+                             "gerçek değerleri öğrenmek için.")
     parser.add_argument("--goruntu-dizini", default=os.environ.get(
         "ORACLE_SCREENSHOT_DIR", os.path.join(os.path.dirname(__file__), "goruntuler")))
     args = parser.parse_args()
@@ -323,13 +342,28 @@ def main() -> int:
         return fail("Ceomed penceresi öne getirilemedi (oturum kilitli olabilir).",
                     retryable=True)
 
+    if args.tani:
+        o = ui60.odak()
+        return emit({
+            "ok": True,
+            "tani": True,
+            "sinif": o["sinif"],
+            "deger": o["deger"],
+            "mdi_ici": list(o["mdi_ici"]),
+            "pencere_ici": list(o["pencere_ici"]),
+            "mdi_baslik": o["mdi_baslik"],
+            "taninan_alan": alan_adi(o["mdi_ici"]),
+            "not": "Hiçbir şey yazılmadı. 'mdi_ici' beklenen konumla "
+                   "eşleşmiyorsa ALAN_KONUMLARI güncellenmeli.",
+        })
+
     log: list[str] = []
     goruntu = None
 
     try:
         # Formun YENİ ve BOŞ olduğunu doğrula: odak İrsaliye No'da olmalı.
         o = ui60.odak()
-        if alan_adi(o["pencere_ici"]) != "irsaliyeNo":
+        if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
             raise Durdu(
                 f"Form yeni/boş görünmüyor — odak {o['pencere_ici']} konumunda, "
                 "İrsaliye No bekleniyordu. Yarım kalmış bir forma yazmamak için "

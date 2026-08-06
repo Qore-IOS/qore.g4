@@ -173,6 +173,26 @@ def odak_hwnd() -> int:
     return gti.hwndFocus or 0
 
 
+MDI_BELGE_SINIFI = "ui60MDIdocument_W32"
+
+
+def mdi_belge_kokü(hwnd: int) -> int:
+    """Kontrolü içeren MDI belge penceresi (yoksa 0).
+
+    Ceomed bir MDI uygulaması: form, ana pencerenin içinde ayrı bir alt
+    pencerede duruyor. Konumları ANA pencereye göre ölçmek kırılgan — ana
+    pencere yeniden boyutlanınca ya da form penceresi içeride kayınca tüm
+    ölçümler bozulur. Provada tam bu oldu: İrsaliye No (123,113) yerine
+    (9,100)'de göründü ve sürücü "form yarıda kalmış" sanıp durdu.
+    """
+    h = hwnd
+    while h:
+        if sinif_adi(h) == MDI_BELGE_SINIFI:
+            return h
+        h = user32.GetParent(h)
+    return 0
+
+
 def odak() -> dict:
     """Odaktaki kontrolün tam tarifi."""
     hwnd = odak_hwnd()
@@ -182,12 +202,20 @@ def odak() -> dict:
     r = dikdortgen(hwnd)
     kok = user32.GetAncestor(hwnd, GA_ROOT)
     kr = dikdortgen(kok) if kok else (0, 0, 0, 0)
+    mdi = mdi_belge_kokü(hwnd)
+    taban = mdi or kok
+    tr = dikdortgen(taban) if taban else (0, 0, 0, 0)
     return {
         "hwnd": hwnd,
         "sinif": sinif_adi(hwnd),
         "deger": pencere_metni(hwnd),
         "kok": kok,
         "kok_baslik": baslik(kok),
+        "mdi": mdi,
+        "mdi_baslik": baslik(mdi) if mdi else "",
+        # Alan eşleştirmesi BUNU kullanır: MDI belge penceresine göre konum,
+        # ana pencere boyutundan bağımsızdır.
+        "mdi_ici": (r[0] - tr[0], r[1] - tr[1]),
         "pencere_ici": (r[0] - kr[0], r[1] - kr[1]),
         "rect": r,
     }
