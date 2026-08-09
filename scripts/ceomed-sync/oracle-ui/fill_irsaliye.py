@@ -427,6 +427,27 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
     log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
 
 
+def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
+    """F6 ile formu temizleyip yeni boş forma geçer.
+
+    Ceomed'de E-İRSALİYE GÖNDER'den sonra form KAPANMIYOR: kayıt bilgileriyle
+    ekranda kalıyor ve operatör F6'ya basarak yeni boş form açıyor. Sürücü bunu
+    kendisi yapmazsa sıradaki iş dolu bir formun üstüne yazmaya çalışır.
+
+    İşin BAŞINDA da çağrılır: form önceki işten (ya da elle yapılmış bir
+    denemeden) dolu kalmış olabilir. Böylece worker gözetimsiz çalışırken
+    operatörün her seferinde elle boş form açması gerekmez.
+    """
+    if ui60.lov_acik_mi(ana_pencere):
+        raise Durdu(
+            "Form yenilenemedi: ekranda açık bir pencere var (uyarı ya da arama "
+            "penceresi). F6 bu durumda çalışmaz; pencere kapatılmalı.",
+            retryable=True,
+        )
+    ui60.tus("F6", bekle_ms=1500)
+    log.append(f"F6 ile form yenilendi ({sebep})")
+
+
 def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:
     """E-İRSALİYE GÖNDER butonunu yazısından bulur; tıklamaz."""
     gonder = ui60.buton_bul(ana_pencere, "E-IRSALIYE GÖNDER")
@@ -530,6 +551,11 @@ def main() -> int:
     goruntu = None
 
     try:
+        # Önceki iş formu kayıt bilgileriyle ekranda bırakmış olabilir; F6 temiz
+        # sayfa getirir. Operatörün her seferinde elle boş form açması gerekmesin.
+        if not args.f6_yenileme_yok:
+            form_yenile(ana, log, "işe başlamadan önce temiz form")
+
         # Ceomed odağı ve önceki numarayı koruyabiliyor. Kullanıcıya elle
         # sildirmek yerine odağı kur; alan_yaz mevcut değeri temizleyecek.
         irsaliye_numarasina_git(log)

@@ -1003,3 +1003,62 @@ firebase deploy --only firestore:rules
 kuyruk hiç dolmaz (artık form kaydını düşürmez, ama otomasyon da çalışmaz).
 Geçici güvenlik ağı olan `match /{col}/{docId}` bloğu Faz 7'de kaldırıldığı
 için kuralı olmayan koleksiyon doğrudan reddedilir.
+
+---
+
+## Kötü birleştirmenin sessizce düşürdüğü üç şey
+
+`1232ebc` (acil kapatma), `613fbdd`'den ÖNCE dallanmış bir daldan
+`oracleIrsaliyeWorker.js` ve `fill_irsaliye.py` dosyalarını toptan yeniden
+yazdı. Sonuç: iki fonksiyonun **çağrısı kaldı, tanımı gitti** — statik olarak
+görünmeyen, ancak çalışma anında patlayan bir hasar.
+
+| Kayıp | Nerede | Ne olurdu |
+|---|---|---|
+| `bildirimYaz()` | worker | İlk başarılı e-irsaliyede `ReferenceError` — hem de `markSent`'ten SONRA |
+| `form_yenile()` | sürücü | Gönderim sonrası F6 satırında `NameError`; ayrıca iş başındaki temiz-form yenilemesi hiç yoktu |
+| `--gercek` bayrağı | uiDriver | **En tehlikelisi** — aşağıda |
+
+### `--gercek` bayrağı: sessiz sahte başarı
+
+`fill_irsaliye.py`, `--gercek` almadıkça E-İRSALİYE GÖNDER'e basmaz; formu
+doldurup `{ok: true, kuru: true}` döner. `uiDriver.js` bu bayrağı **hiç
+geçmiyordu** ve `kuru` alanını da worker'a taşımıyordu.
+
+Gerçek modda zincir şöyle işlerdi: sürücü `ok: true` döner → worker `markSent`
+çağırır → iş `sent` olur → "e-irsaliye gönderildi" bildirimi gider. **Hiçbir şey
+gönderilmemişken.** İş `sent` olduğu için bir daha denenmez; eksik irsaliye
+ancak muhasebe fark ederse ortaya çıkar.
+
+İki yerden birden kapatıldı:
+
+- `uiDriver.js` gerçek modda `--gercek` geçer, ve Python yine de kuru dönerse
+  bunu **başarısızlık** sayar (`retryable: false` — sebebi bilinmeden tekrar
+  denemek mükerrer riski taşır).
+- `oracleIrsaliyeWorker.js` `result.kuru === true` görürse `markSent`
+  çağırmaz. Sürücü ileride yine regresyona uğrarsa ikinci kapı tutar.
+
+Gerçek gönderim koşulu (üçü birden):
+
+```
+ORACLE_INTEGRATION_ENABLED=1
+ORACLE_DRY_RUN=0
+ORACLE_FILL_ONLY=   (boş ya da 0)
+```
+
+Env semantiği güvenli tarafa düşer: `ORACLE_DRY_RUN` açıkça `0` yazılmadıkça
+kuru kabul edilir.
+
+### Ders
+
+Bu üçü de test edilemeyen yollarda (Windows'a bağlı sürücü, gerçek gönderim)
+olduğu için hiçbir test yakalayamadı. Ceomed dosyalarını yeniden yazan her
+birleştirmeden sonra en az şu iki kontrol yapılmalı:
+
+```
+node --check scripts/ceomed-sync/oracleIrsaliyeWorker.js
+python -m py_compile scripts/ceomed-sync/oracle-ui/fill_irsaliye.py
+```
+
+…ve çağrı/tanım dengesi gözle doğrulanmalı: `--check` ve `py_compile`
+sözdizimine bakar, **tanımsız fonksiyon çağrısını yakalamaz**.

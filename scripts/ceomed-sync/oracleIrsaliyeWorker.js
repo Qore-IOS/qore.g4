@@ -321,6 +321,19 @@ async function processJob(db, driver, jobId) {
     return;
   }
 
+  // Sürücü "başarılı ama göndermedim" diyorsa bu BAŞARI DEĞİLDİR. Sahada bir
+  // süre `--gercek` bayrağı hiç geçilmedi; sürücü formu doldurup kuru dönüyor,
+  // burası işi `sent` işaretliyordu. Gönderilmemiş iş 'sent' olursa bir daha
+  // denenmez ve eksik sessizce kaybolur.
+  if (result.kuru === true) {
+    const mesaj = 'Sürücü gerçek modda kuru sonuç döndü: E-İRSALİYE GÖNDER\'e '
+                + 'basılmadı. İş GÖNDERİLMEDİ. ORACLE_INTEGRATION_ENABLED=1, '
+                + 'ORACLE_DRY_RUN=0 ve ORACLE_FILL_ONLY boş olmalı.';
+    await markFailure(db, job, mesaj, false);
+    errLog('hata', `${ozet}: ${mesaj} — ELLE MÜDAHALE GEREKİR`);
+    return;
+  }
+
   dailyCounter.adet += 1;
   await markSent(db, job, result);
   await bildirimYaz(db, job, result);
