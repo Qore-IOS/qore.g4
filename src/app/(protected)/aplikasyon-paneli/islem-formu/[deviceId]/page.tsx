@@ -2324,8 +2324,8 @@ export default function AplikasyonIslemFormuPage() {
             toast({
               title: 'Ceomed irsaliyesi kuyruğa alınamadı',
               description:
-                'Form kaydedildi, muhasebe irsaliyesi otomatik oluşturulmayacak. ' +
-                'Dosya Yönetimi → Ceomed kuyruğundan elle ekleyin. Sebep: ' +
+                'Form kaydedildi. Ancak muhasebe irsaliyesi otomatik ' +
+                'oluşturulmayacak; Ceomed’de elle kesilmesi gerekiyor. Sebep: ' +
                 Array.from(new Set(yazilamayanlar)).join(' '),
               variant: 'destructive',
               duration: 15000,

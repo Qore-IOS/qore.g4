@@ -985,8 +985,13 @@ kuyruğa alınabilir, mükerrer üretmez. Tersi (kuyrukta iş var, form yok) hâ
 imkânsız.
 
 **Kullanıcı ne görür.** Kuyruk yazısı düşerse form yine kaydedilir ve
-"Ceomed irsaliyesi kuyruğa alınamadı — Dosya Yönetimi → Ceomed kuyruğundan elle
-ekleyin" uyarısı çıkar. Sessiz kayıp yok.
+"Ceomed irsaliyesi kuyruğa alınamadı — Ceomed'de elle kesilmesi gerekiyor"
+uyarısı çıkar. Sessiz kayıp yok.
+
+> Kuyruk paneli yalnızca **var olan** işi yeniden kuyruğa alabiliyor; hiç
+> yazılamamış bir işi panelden eklemek mümkün değil. Uyarı metni bu yüzden
+> paneli değil, Ceomed'de elle kesmeyi işaret ediyor. Panelden "eksik işi
+> ekle" özelliği eklenirse metin de güncellenmeli.
 
 ### Yayın öncesi ZORUNLU adım
 
