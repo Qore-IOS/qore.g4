@@ -961,3 +961,40 @@ Buna ek olarak:
   `controls.json`'a eklenip cari kodu ile aynı değer yazılmalı.
 - UI sürücüsü çalışırken makinede **başka bir şey yapılmamalı**: tuş vuruşları
   odaktaki pencereye gider.
+
+---
+
+## Kuyruk köprüsü: neden batch dışında?
+
+**Olay.** Teknik servis ve aplikasyon işlem formları bir gün kapatılamaz oldu;
+her kayıtta `Missing or insufficient permissions` çıktı. Sebep kuyruk yazısının
+form kaydıyla **aynı `WriteBatch`** içinde olmasıydı: `ceomedIrsaliyeGirisJobs`
+kuralı canlıya çıkmamıştı, yazım reddedildi, batch atomik olduğu için formun
+tamamı geri alındı. Kuyruk köprüsü acil olarak kaldırıldı.
+
+**Kalıcı çözüm.** Köprü geri getirildi ama tasarımı değişti:
+
+- `enqueueIrsaliyeGirisAyri()` — `batch.commit()`'ten **sonra** çalışan, ayrı
+  ve **asla throw etmeyen** bir `setDoc`.
+- `enqueueIrsaliyeGiris()` (batch sürümü) duruyor ama form yolunda
+  kullanılmıyor; dosyada bu açıkça yazılı.
+
+**Ne kaybettik.** Atomikliği. Form kaydedilip kuyruk yazısı düşebilir. Bu
+kurtarılabilir: doküman kimliği form kimliği olduğu için iş panelden yeniden
+kuyruğa alınabilir, mükerrer üretmez. Tersi (kuyrukta iş var, form yok) hâlâ
+imkânsız.
+
+**Kullanıcı ne görür.** Kuyruk yazısı düşerse form yine kaydedilir ve
+"Ceomed irsaliyesi kuyruğa alınamadı — Dosya Yönetimi → Ceomed kuyruğundan elle
+ekleyin" uyarısı çıkar. Sessiz kayıp yok.
+
+### Yayın öncesi ZORUNLU adım
+
+```
+firebase deploy --only firestore:rules
+```
+
+`firestore.rules` içindeki `ceomedIrsaliyeGirisJobs` kuralı **canlıda yoksa**
+kuyruk hiç dolmaz (artık form kaydını düşürmez, ama otomasyon da çalışmaz).
+Geçici güvenlik ağı olan `match /{col}/{docId}` bloğu Faz 7'de kaldırıldığı
+için kuralı olmayan koleksiyon doğrudan reddedilir.

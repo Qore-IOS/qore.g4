@@ -32,6 +32,8 @@ import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFo
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { reserveActionFormNumber } from '@/lib/form-number';
+import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import type { BuildIrsaliyeGirisInput } from '@/lib/ceomed/irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -1935,6 +1937,10 @@ export default function IslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'teknikServisActionForms')) : null;
         const createdFormsData: any[] = [];
+        // Ceomed irsaliye işleri BATCH'E YAZILMAZ; commit'ten sonra ayrı yazılır.
+        // Aynı batch'te yazmak, kuyruk tarafındaki bir sorunda formun tamamını
+        // düşürüyordu (bkz. enqueue-irsaliye-giris.ts).
+        const irsaliyeGirisleri: BuildIrsaliyeGirisInput[] = [];
 
         // Parallel PDF generation and DB writing start here
         const formNumberPromises: Promise<string>[] = [];
@@ -2036,6 +2042,25 @@ export default function IslemFormuPage() {
              device: currentDevice,
              hospital: hospital,
              actionRecord: { id: formRef.id, ...formEntries }
+          });
+
+          // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa almak
+          // üzere biriktir. Yazım commit'ten SONRA yapılır.
+          irsaliyeGirisleri.push({
+            formId: formRef.id,
+            formNo,
+            formType: 'teknik_servis',
+            tarih: baslangicTarihi,
+            hospitalId: currentDevice.hospitalId,
+            cariKodu: hospital?.ceomedCariKodu,
+            labName: hospital?.name,
+            deviceId: currentDeviceId,
+            cihazAdi: currentDevice.cihazAdi || currentDevice.model,
+            seriNumarasi: currentDevice.seriNumarasi,
+            personnelName: currentUserProfile?.name,
+            personnelUid: currentUserProfile?.uid,
+            companyId: currentCompanyId,
+            actions: deviceActions,
           });
 
           if (!isLabMode) {
@@ -2293,6 +2318,43 @@ export default function IslemFormuPage() {
         await batch.commit();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
+
+        // Form KAYDEDİLDİ. Ceomed irsaliyesi buradan sonra, ayrı yazımlarla
+        // kuyruğa alınır; buradaki bir hata formu etkilemez.
+        if (irsaliyeGirisleri.length > 0) {
+          const bekleyenler: string[] = [];
+          const yazilamayanlar: string[] = [];
+          for (const girdi of irsaliyeGirisleri) {
+            const sonuc = await enqueueIrsaliyeGirisAyri(db, girdi);
+            // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve
+            // bu modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.
+            if (sonuc.enqueued === true && sonuc.status === 'blocked') {
+              bekleyenler.push(sonuc.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
+            } else if (sonuc.enqueued === false && sonuc.reason === 'yazilamadi') {
+              yazilamayanlar.push(sonuc.hata || 'bilinmeyen hata');
+            }
+          }
+          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
+          if (bekleyenler.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi beklemede',
+              description: Array.from(new Set(bekleyenler)).join(' '),
+              variant: 'destructive',
+              duration: 12000,
+            });
+          }
+          if (yazilamayanlar.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi kuyruğa alınamadı',
+              description:
+                'Form kaydedildi, muhasebe irsaliyesi otomatik oluşturulmayacak. ' +
+                'Dosya Yönetimi → Ceomed kuyruğundan elle ekleyin. Sebep: ' +
+                Array.from(new Set(yazilamayanlar)).join(' '),
+              variant: 'destructive',
+              duration: 15000,
+            });
+          }
+        }
 
         queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
