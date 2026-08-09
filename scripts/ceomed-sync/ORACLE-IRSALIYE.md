@@ -8,13 +8,16 @@ gönderilmesi.
 ```
 Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
    │
-   ├─ Qore aynı batch'te kuyruk kaydı yazar
+   ├─ batch.commit()  ← form KAYDEDİLDİ, bu noktadan sonrası formu etkilemez
+   │
+   ├─ Qore AYRI bir yazımla kuyruk kaydı ekler
    │     ceomedIrsaliyeGirisJobs/{formId}   status: pending | blocked
+   │     (batch'e DEĞİL — sebebi aşağıda "Kuyruk köprüsü: neden batch dışında?")
    │
    └─> on-prem worker (oracleIrsaliyeWorker.js)
           ├─ işi atomik olarak sahiplenir (status: processing)
           ├─ ikinci kez doğrular
-          ├─ sürücüyle yazar:  api (tercih) | ui (pywinauto)
+          ├─ sürücüyle yazar:  ui (Win32/ctypes — Ceomed API onayı vermedi)
           └─ status: sent | failed | blocked
 ```
 
