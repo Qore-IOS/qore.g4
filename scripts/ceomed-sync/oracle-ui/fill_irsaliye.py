@@ -387,7 +387,6 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
     # Prova 7, grid odağındaki MDI kökünün Açıklama bölgesinin kökü
     # olmadığını gösterdi. Aynı saha ölçümünün ana pencere karşılığını
     # kullan; tıklama sonrası MDI konumunu yine geri okuyup doğrula.
-    hedef = ALAN_KONUMLARI["aciklama"]
     tiklama = ui60.pencere_noktasina_tikla(
         ana_pencere,
         (ACIKLAMA_PENCERE_KONUMU[0] + 10, ACIKLAMA_PENCERE_KONUMU[1] + 8),
