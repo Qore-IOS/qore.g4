@@ -419,7 +419,22 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
               {selectedMaintenance !== 'all' && <MaintenanceHistoryList title={`${selectedMaintenance} Geçmişi (${selectedMaintenanceHistory.length})`} rows={selectedMaintenanceHistory} />}
               <section className="rounded-3xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] p-4 shadow-[var(--dashboard-raised-soft)]">
                 <div className="mb-3 font-mono text-xs uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">Bakım Takip Kaynağı — Lab Tanım Listesi</div>
-                <div className="overflow-x-auto">
+                <div className="space-y-3 md:hidden">
+                  {definitionRows.map((row) => (
+                    <article key={row.hospital.id} className="min-w-0 rounded-2xl border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] p-4 font-mono">
+                      <div className="flex min-w-0 items-start justify-between gap-3">
+                        <h3 className="min-w-0 break-words text-sm font-bold leading-5">{String(row.hospital.name || row.hospital.ad || 'Lab')}</h3>
+                        <span className="shrink-0 rounded-full border border-[var(--dashboard-stroke)] px-2.5 py-1 text-xs">{row.cihazSayisi} cihaz</span>
+                      </div>
+                      <div className="mt-3 flex min-w-0 flex-wrap gap-2">
+                        {row.tanimlar.length > 0 ? row.tanimlar.map((tanim) => (
+                          <span key={tanim} className="max-w-full break-words rounded-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface)] px-3 py-1.5 text-xs leading-4">{tanim}</span>
+                        )) : <span className="text-xs text-[var(--dashboard-muted)]">Bakım tanımı yok</span>}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+                <div className="hidden overflow-x-auto md:block">
                   <table className="w-full min-w-[620px] border-collapse font-mono text-sm">
                     <thead><tr className="border-b border-[var(--dashboard-stroke)] text-left text-[11px] uppercase tracking-[0.25em] text-[var(--dashboard-muted)]"><th className="px-3 py-3">Lab</th><th className="px-3 py-3">Cihaz</th><th className="px-3 py-3">Tanımlı Bakımlar</th></tr></thead>
                     <tbody>{definitionRows.map((row) => <tr key={row.hospital.id} className="border-b border-[var(--dashboard-stroke)]/70"><td className="px-3 py-3 font-semibold">{String(row.hospital.name || row.hospital.ad || 'Lab')}</td><td className="px-3 py-3">{row.cihazSayisi}</td><td className="px-3 py-3"><div className="flex flex-wrap gap-2">{row.tanimlar.map((tanim) => <span key={tanim} className="rounded-full border border-[var(--dashboard-stroke)] bg-[var(--dashboard-surface-2)] px-3 py-1 text-xs">{tanim}</span>)}</div></td></tr>)}</tbody>
