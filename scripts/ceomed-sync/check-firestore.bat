@@ -12,6 +12,7 @@ REM ============================================================================
 
 setlocal
 cd /d %~dp0
+chcp 65001 >nul 2>&1
 
 set ENV_LOADED=
 if exist set-env.bat (
@@ -24,8 +25,20 @@ if exist .env (
 )
 if not defined ENV_LOADED (
   echo [HATA] set-env.bat veya .env bulunamadi.
+  echo Bu betik scripts\ceomed-sync klasorunden calismalidir.
+  pause >nul
   exit /b 1
 )
 
-node check-firestore.js
-endlocal
+REM Cikti hem ekrana hem dosyaya: pencere kapanirsa ya da hata uzunsa geriye
+REM bakilacak bir yer kalsin. Cift tiklamayla calistirildiginda pencere is biter
+REM bitmez kapaniyordu ve operator hicbir sey goremiyordu.
+set "LOG=%~n0.log"
+node check-firestore.js %* > "%LOG%" 2>&1
+set RC=%ERRORLEVEL%
+type "%LOG%"
+echo.
+echo ---- Bu cikti "%~dp0%LOG%" dosyasina da yazildi.
+echo ---- Kapatmak icin bir tusa basin.
+pause >nul
+endlocal & exit /b %RC%

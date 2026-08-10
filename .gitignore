@@ -27,8 +27,10 @@
 .DS_Store
 *.pem
 scripts/ceomed-sync/set-env.bat
-scripts/ceomed-sync/sync.log
-scripts/ceomed-sync/sync-depo.log
+# Ceomed makinesinde uretilen calisma ciktilari. Operator araclari her kosuda
+# <betik-adi>.log yaziyor; bunlar makineye ozgu ve cogu zaman ortam bilgisi
+# (yol, proje kimligi, servis hesabi e-postasi) iceriyor — repoya girmemeli.
+scripts/ceomed-sync/*.log
 scripts/ceomed-sync/.sync-state.json
 
 # debug
