@@ -303,11 +303,19 @@ test('AÇIK RİSK: aynı baş harf + aynı sıra = aynı irsaliye numarası', ()
 
 
 // ---------------------------------------------------------------------------
-// İrsaliye numarası tekilliği
+// İrsaliye numarası tekilliği — HENÜZ ÇÖZÜLMEDİ, testler HEDEFİ tanımlıyor.
 //
-// Sahada açık kalan riskti: aynı baş harfli iki personel aynı numarayı üretiyor
-// ve Ceomed mükerreri reddediyor. Tek kişiyle test ederken hiç görünmüyor, o
-// yüzden testle sabitleniyor.
+// DİKKAT: aşağıdaki testlerin yeşil olması sorunun çözüldüğü anlamına GELMEZ.
+// `ceomedNumaraAlani` doğru anahtarı üretiyor ama `reserveActionFormNumber`
+// henüz onu KULLANMIYOR: sayaç hâlâ kullanıcı bazlı.
+//
+// Kullanmayı denedik (#1825) ve üretim durdu. Yeni sayaç dokümanı hiçbir
+// kullanıcıda mevcut olmadığı için ilk okuma `permission-denied` aldı;
+// `inCompany()` kuralı var olmayan belgeye okuma izni vermiyor. #1837 ile geri
+// alındı. Devam etmek için önce firestore.rules'da var olmayan belgeye get izni
+// verilmeli ve o kural CANLIYA ÇIKMALI.
+//
+// Bu testler o gün gelene kadar hedefi ve nedenini yaşatıyor.
 // ---------------------------------------------------------------------------
 
 test('Ceomed ön eki personel kodunun ilk 2 harfidir', () => {
