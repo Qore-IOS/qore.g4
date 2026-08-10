@@ -44,6 +44,23 @@ function fail(message) {
 }
 
 /**
+ * Bir paket yöneticisi bu makinede kurulu mu?
+ *
+ * ÖNCEDEN sorulur, çünkü kurulu olmayan `pnpm`'i doğrudan çalıştırmak
+ * PowerShell'de "The term 'pnpm' is not recognized…" diye korkutucu bir
+ * hata bloğu basıyor. Betik zaten npm'e düşecek olsa bile kullanıcı bunu
+ * derlemenin çöktüğü sanıyor.
+ */
+function isAvailable(command) {
+  const probe = spawnSync(command, ['--version'], {
+    cwd: REPO_ROOT,
+    stdio: 'ignore',
+    shell: IS_WINDOWS,
+  });
+  return !probe.error && probe.status === 0;
+}
+
+/**
  * Uzak kip açıkça istenmişse arayüz paketi gereksizdir.
  *
  * `QORE_TERMINAL_URL` verildiğinde uygulama zaten yayındaki siteyi yükler;
@@ -55,23 +72,24 @@ if (process.env.QORE_TERMINAL_URL) {
   process.exit(0);
 }
 
-console.log('[qore-terminal] Arayüz paketi üretiliyor (pnpm build:terminal)…');
+// Depo pnpm ile yönetiliyor ama zorunlu değil: `build:terminal` betiği
+// kökteki package.json'da tanımlı ve npm ile de aynı işi yapar.
+const manager = isAvailable('pnpm') ? 'pnpm' : 'npm';
+const managerArgs = manager === 'pnpm' ? ['build:terminal'] : ['run', 'build:terminal'];
 
-let result = run('pnpm', ['build:terminal']);
+console.log(`[qore-terminal] Arayüz paketi üretiliyor (${manager} build:terminal)…`);
 
-// pnpm kurulu değilse npm ile dene — script kökteki package.json'da tanımlı.
-if (result.error || result.status !== 0) {
-  console.warn('[qore-terminal] pnpm ile üretilemedi, npm deneniyor…');
-  result = run('npm', ['run', 'build:terminal']);
-}
+const result = run(manager, managerArgs);
 
 if (result.error || result.status !== 0) {
   fail(
     'Arayüz paketi üretilemedi.\n\n' +
       'Repo kökünde şunu elle çalıştırıp hatayı görün:\n' +
-      '  pnpm build:terminal\n\n' +
-      'En sık sebep: kökteki .env.local dosyasında Firebase anahtarlarının\n' +
-      'eksik olması (apphosting.yaml içindekilerle aynı NEXT_PUBLIC_FIREBASE_* değerleri).',
+      `  ${manager === 'pnpm' ? 'pnpm build:terminal' : 'npm run build:terminal'}\n\n` +
+      'En sık iki sebep:\n' +
+      '  • Kökte bağımlılıklar kurulu değil → önce `npm install`\n' +
+      '  • .env.local dosyasında Firebase anahtarları eksik\n' +
+      '    (apphosting.yaml içindekilerle aynı NEXT_PUBLIC_FIREBASE_* değerleri)',
   );
 }
 
