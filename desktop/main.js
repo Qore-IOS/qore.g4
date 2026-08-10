@@ -1,17 +1,19 @@
 /**
  * Qore Terminal — Electron ana süreci.
  *
- * Bu kabuk kendi arayüzünü ÇİZMEZ. Web uygulamasının `/terminal` rotasını
- * yükler ve ona masaüstünde gerçekten değerli olan şeyleri kazandırır:
+ * İKİ ÇALIŞMA KİPİ VAR:
  *
- *   1. Tam ekran, adres çubuğu ve sekmesi olmayan tek işlik bir pencere
- *   2. Aynı anda tek örnek çalışma garantisi
- *   3. Yazıcıya diyalogsuz basım
+ *   1. GÖMÜLÜ (varsayılan) — arayüz `desktop/renderer-dist` içinde, uygulamayla
+ *      birlikte kurulur ve `app://` protokolünden sunulur. İnternet olmadan
+ *      açılır; Firestore'un kalıcı önbelleğinden okur, yazımları kuyruğa alır.
  *
- * Kimlik doğrulama, veri ve yetkiler tamamen web uygulamasından gelir; burada
- * saklanan bir kimlik bilgisi ya da ayrı bir Firebase yapılandırması YOKTUR.
- * Oturum, Electron'un kalıcı çerez/IndexedDB deposunda tutulur, dolayısıyla
- * uygulama her açılışta yeniden giriş istemez.
+ *   2. UZAK — arayüz yayındaki web uygulamasından (`/terminal`) yüklenir.
+ *      Gömülü paket yoksa ya da `QORE_TERMINAL_URL` verilmişse bu kip
+ *      çalışır. Geliştirmede ve arayüzü yeniden paketlemeden denemek için.
+ *
+ * Kimlik doğrulama, veri ve yetkiler her iki kipte de Firebase'den gelir;
+ * burada saklanan bir kimlik bilgisi YOKTUR. Oturum, Electron'un kalıcı
+ * IndexedDB deposunda tutulur — bu yüzden çevrimdışı açılışta korunur.
  */
 
 'use strict';
@@ -20,11 +22,34 @@ const { app, BrowserWindow, shell, ipcMain, dialog, globalShortcut } = require('
 const path = require('node:path');
 
 const { getTerminalUrl, setTerminalUrl } = require('./config');
+const {
+  SCHEME,
+  hasEmbeddedRenderer,
+  registerRendererScheme,
+  serveEmbeddedRenderer,
+  embeddedEntryUrl,
+} = require('./renderer');
 
 let mainWindow = null;
 
-/** Sadece yapılandırılmış terminalin kaynağına gezinmeye izin verilir. */
+/**
+ * Gömülü paket mi kullanılacak?
+ *
+ * `QORE_TERMINAL_URL` verildiyse uzak kip kazanır — geliştirici bilerek
+ * yayındaki sürüme bakmak istemiştir ve bunu sessizce yok saymak kafa
+ * karıştırıcı olurdu.
+ */
+function useEmbedded() {
+  return !process.env.QORE_TERMINAL_URL && hasEmbeddedRenderer();
+}
+
+// Şema kaydı `whenReady`'den ÖNCE olmak zorunda.
+if (hasEmbeddedRenderer()) registerRendererScheme();
+
+/** Gezinmeye izin verilen kaynaklar. */
 function isAllowedNavigation(targetUrl) {
+  if (targetUrl.startsWith(`${SCHEME}://`)) return true;
+  if (targetUrl.startsWith('file://')) return true; // kurulum sayfası
   const terminalUrl = getTerminalUrl();
   if (!terminalUrl) return false;
   try {
@@ -37,14 +62,20 @@ function isAllowedNavigation(targetUrl) {
 /**
  * Pencereye ne yükleneceğine karar verir.
  *
- * Adres yapılandırılmamışsa kurulum formu gösterilir. Boş bir pencere ya da
- * sessizce yanlış bir adrese bağlanmak kabul edilebilir değil: yanlış ortama
- * bağlanan bir depo terminali, yanlış veritabanına yazmak demektir.
+ * Uzak kipte adres yapılandırılmamışsa kurulum formu gösterilir. Boş bir
+ * pencere ya da sessizce yanlış bir adrese bağlanmak kabul edilebilir değil:
+ * yanlış ortama bağlanan bir depo terminali, yanlış veritabanına yazmak
+ * demektir.
  */
 function loadTerminalOrSetup() {
   if (!mainWindow) return;
-  const terminalUrl = getTerminalUrl();
 
+  if (useEmbedded()) {
+    mainWindow.loadURL(embeddedEntryUrl());
+    return;
+  }
+
+  const terminalUrl = process.env.QORE_TERMINAL_URL || getTerminalUrl();
   if (terminalUrl) mainWindow.loadURL(terminalUrl);
   else mainWindow.loadFile(path.join(__dirname, 'setup.html'));
 }
@@ -55,7 +86,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    backgroundColor: '#09090b', // /terminal arka planı — açılışta beyaz flaş olmasın
+    backgroundColor: '#09090b', // terminal arka planı — açılışta beyaz flaş olmasın
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -81,16 +112,21 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
-    if (url.startsWith('file://')) return; // kurulum sayfası
     if (!isAllowedNavigation(url)) {
       event.preventDefault();
       shell.openExternal(url);
     }
   });
 
-  // Ağ koptuğunda beyaz ekran yerine ne olduğunu ve nasıl döneceğini göster.
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return; // kullanıcı iptali — normal
+
+    // Gömülü kipte ağ hatası pencereyi ETKİLEMEZ: sayfa zaten diskten yüklenir,
+    // başarısız olan yalnızca Firebase'e giden veri istekleridir ve onları
+    // arayüzdeki bağlantı göstergesi anlatır. Buraya bir uyarı kutusu koymak
+    // her çevrimdışı vardiyada kullanıcının önüne modal çıkarırdı.
+    if (useEmbedded()) return;
+
     dialog
       .showMessageBox(mainWindow, {
         type: 'warning',
@@ -130,10 +166,11 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(() => {
+    if (hasEmbeddedRenderer()) serveEmbeddedRenderer();
     createWindow();
 
-    // Adresi sonradan değiştirmenin yolu. Menü çubuğu gizli olduğu için
-    // (depoda dikkat dağıtmasın diye) tek erişim noktası bu kısayol.
+    // Uzak kipte adresi sonradan değiştirmenin yolu. Menü çubuğu gizli olduğu
+    // için (depoda dikkat dağıtmasın diye) tek erişim noktası bu kısayol.
     globalShortcut.register('CommandOrControl+Shift+U', () => {
       if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'setup.html'));
     });

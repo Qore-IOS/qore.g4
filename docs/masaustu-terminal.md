@@ -67,31 +67,94 @@ sorunsuz çalışır.
 - Okutma yolunda ağ turu yok: depo stoğu önbellekten okunur, aksi hâlde
   saniyede birkaç kutu okutan kullanıcı her okutmada beklerdi
 
-## Masaüstünün getirdikleri
+## Çevrimdışı çalışma
 
-- **Offline dayanıklılık:** `persistentLocalCache` Electron'da da aktif; bağlantı
-  kesildiğinde yazımlar yerelde birikir ve bağlantı gelince senkronize olur
+Masaüstü uygulaması iki kipten birinde çalışır:
+
+| Kip | Arayüz nereden gelir | İnternetsiz açılır mı |
+| --- | --- | --- |
+| **Gömülü** (varsayılan) | `desktop/renderer-dist`, uygulamayla birlikte kurulur | **Evet** |
+| **Uzak** | Yayındaki `/terminal` adresinden | Hayır |
+
+`QORE_TERMINAL_URL` verilmişse uzak kip kazanır (geliştirme için); aksi hâlde
+gömülü paket varsa o kullanılır.
+
+### Gömülü kip nasıl çalışır
+
+Paket `app://terminal` özel protokolünden sunulur — `file://` DEĞİL. Sebebi
+kritik: Chromium'da `file://` opak bir kaynaktır ve orada IndexedDB güvenilir
+biçimde çalışmaz. Terminalin çevrimdışılığı tamamen IndexedDB'ye bağlıdır;
+Firestore'un kalıcı önbelleği ve Firebase Auth oturumu orada durur. `file://`
+ile açılan bir paket her açılışta oturumu ve önbelleği kaybederdi.
+
+Çevrimdışıyken:
+
+- **Okumalar** Firestore'un kalıcı önbelleğinden gelir (ürün kodları, barkod
+  formatları, depolar, laboratuvarlar, depo stoğu). Veri en az bir kez
+  çevrimiçi çekilmiş olmalıdır.
+- **Yazımlar** yerel önbelleğe uygulanır ve kuyruğa girer; bağlantı gelince
+  SDK kendisi gönderir.
+- **Oturum** cihazda saklıdır. İLK giriş internet gerektirir (Firebase Auth
+  parolayı sunucuda doğrular); sonrasında çevrimdışı açılışta korunur.
+
+### `batch.commit()` tuzağı
+
+Firestore Web SDK'sında `writeBatch().commit()` sözü SUNUCU onayında çözülür.
+Çevrimdışıyken bu onay hiç gelmez — söz ne çözülür ne reddedilir. `await`
+edilirse ekran "Kaydediliyor…" konumunda sonsuza kadar kilitlenir.
+
+`src/lib/offline-write.ts` bunu çözer: commit kısa bir zaman aşımıyla
+yarıştırılır, zaman aşımı kazanırsa işlem `'pending'` sayılır (yerelde yazıldı)
+ve bekleyen sayacı artar. Özgün söz bırakılmaz, arka planda izlenir.
+
+**Yeni bir terminal yazma yolu eklerken `await batch.commit()` YAZMAYIN**,
+`commitLocalFirst(batch.commit())` kullanın.
+
+### Bağlantı göstergesi
+
+Her terminal ekranının üst şeridinde bağlantı ve kuyruk durumu durur
+(`src/components/terminal/connection-badge.tsx`). Çevrimdışı çalışabilen bir
+uygulamada en tehlikeli şey, kullanıcının çevrimdışı olduğunu bilmemesidir.
+
+## Masaüstünün diğer getirdikleri
+
 - **Barkod okuyucu:** HID okuyucular global `keydown` ile yakalanır; "input'a
   odak vermeyi unuttum, tarama kayboldu" sorunu ortadan kalkar
 - **Yazıcı:** `window.qoreDesktop.print({ silent: true })` ile etiket/irsaliye
   yazıcısına diyalogsuz basım
 
-## Kurulum
+## Gömülü paket nasıl üretilir
 
-Bkz. [`desktop/README.md`](../desktop/README.md).
+Arayüz, web uygulamasının `src/` ağacını olduğu gibi kullanan ayrı bir Vite
+paketidir (`terminal-app/`). Ekranlar KOPYALANMAZ — `src/app/terminal/**`
+altındaki aynı bileşenler import edilir. Next'e özgü üç bağımlılık
+`vite.config.terminal.ts` içinde kesilir:
 
-Özet:
+| Bağımlılık | Nasıl çözülür |
+| --- | --- |
+| `next/navigation` | Hash tabanlı router shim'i (`terminal-app/shims/next-navigation.tsx`) |
+| `@/actions/stokActions` | Web SDK karşılıkları (`terminal-app/shims/stok-actions.ts` → `src/lib/master-data.ts`) |
+| `process.env.NEXT_PUBLIC_*` | Derleme zamanında sabit değer (`define`) |
 
 ```bash
+# Firebase anahtarları .env.local içinde olmalı (apphosting.yaml ile aynı değerler)
+pnpm build:terminal          # → desktop/renderer-dist
 cd desktop && npm install
-QORE_TERMINAL_URL=http://localhost:9002/terminal npm start   # geliştirme
-npm run dist:win                                              # Windows kurulumu
+npm start                    # gömülü paketi açar
+npm run dist:win             # .exe içine gömülü paketle birlikte
 ```
+
+Ayrıntı: [`desktop/README.md`](../desktop/README.md)
 
 ## Sınırlar ve sonraki adımlar
 
 - Terminal yalnızca **seri numaralı** kalemleri işler. Seri numarası olmayan
   lot/adet takipli ürünler için web paneli kullanılmalıdır.
+- Gömülü kipte arayüz güncellemesi için **yeni `.exe` gerekir** — web deploy'u
+  yetmez. Uzak kipte tersi geçerlidir. Kurumda hangi kipin kullanıldığı bu
+  yüzden operasyonel bir karardır.
+- İlk giriş internet gerektirir; tamamen çevrimdışı bir makineye kurulup hiç
+  bağlanmadan kullanılamaz.
 - Sipariş toplama devredilmiş durumdadır; terminale özel sade bir toplama
   ekranı istenirse, `/siparisler/[orderId]/toplama` içindeki yazma mantığı da
   önce `src/lib/` altına çıkarılmalıdır — terminalin geri kalanında izlenen

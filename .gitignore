@@ -29,6 +29,8 @@ desktop/package-lock.json
 # Kuruma özel terminal adresi; paketleme öncesi config.example.json'dan
 # türetilir ve makineye/kuruma bağlı olduğu için repoda tutulmaz.
 desktop/config.json
+# Vite'ın ürettiği gömülü terminal paketi — `pnpm build:terminal` çıktısı.
+desktop/renderer-dist/
 
 # misc
 .DS_Store

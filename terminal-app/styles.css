@@ -1,0 +1,27 @@
+/**
+ * Terminal paketinin stilleri.
+ *
+ * Web uygulamasının `globals.css` dosyası TEKRAR YAZILMAZ, olduğu gibi
+ * içeri alınır — Tailwind katmanları, tema değişkenleri ve ShadCN token'ları
+ * iki uygulamada da aynı kalsın diye.
+ *
+ * NOT: `globals.css` Google Fonts'tan iki yazı tipi @import eder. Çevrimdışı
+ * açılışta bu istekler başarısız olur ve tarayıcı sistem yazı tipine düşer —
+ * arayüz çalışmaya devam eder, yalnızca tipografi değişir. Terminalde bu
+ * kabul edilebilir; yazı tiplerini pakete gömmek, kazanacağından çok boyut
+ * getirirdi.
+ */
+
+@import '../src/app/globals.css';
+
+/* Terminal her zaman karanlık: depo aydınlatmasında yüksek kontrast gerekir
+   ve kullanıcının tema seçmesi için bir yer yok. */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: #09090b;
+}
