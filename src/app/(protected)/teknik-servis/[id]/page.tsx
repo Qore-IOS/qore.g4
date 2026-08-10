@@ -151,7 +151,7 @@ export default function TeknikServisDetayPage() {
     }
     const deviceIds = new Set(devicesByHospital.map(d => d.id));
     const qFaults = query(
-      collection(db, 'deviceFaultReports'),
+      scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
       where('status', 'in', ['atama_bekliyor', 'mudahale_bekliyor', 'mudahale_ediliyor', 'open'])
     );
     const unsub = onSnapshot(qFaults, (snap) => {
@@ -193,7 +193,7 @@ export default function TeknikServisDetayPage() {
         try {
           // Query without orderBy to avoid composite index requirement
           const q = query(
-            collection(db, 'deviceFaultReports'),
+            scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
             where('deviceId', '==', device.id),
             where('status', '==', 'closed')
           );
@@ -253,7 +253,7 @@ export default function TeknikServisDetayPage() {
       try {
         // Fetch maintenance plans for this device
         const plansQ = query(
-          collection(db, 'maintenancePlans'),
+          scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', device.id)
         );
         const plansSnap = await getDocs(plansQ);
@@ -261,7 +261,7 @@ export default function TeknikServisDetayPage() {
 
         // Fetch maintenance logs for this device
         const logsQ = query(
-          collection(db, 'maintenanceLogs'),
+          scopedQuery('maintenanceLogs', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', device.id)
         );
         const logsSnap = await getDocs(logsQ);
@@ -432,7 +432,7 @@ export default function TeknikServisDetayPage() {
     setPersonalStockLoading(true);
     try {
       const q = query(
-        collection(db, 'personalStock'),
+        scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
         where('ownerUid', '==', currentUser.uid),
         where('status', '==', 'in_stock')
       );

@@ -14,6 +14,7 @@ import type { User, AppView } from '@/lib/types';
 import { LEGACY_COMPANY_ID } from '@/lib/types';
 import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 type ThemePreference = 'light' | 'dark' | 'system';
 
@@ -404,7 +405,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     // Listen to user's personnel groups for autoLogoutTime changes (realtime)
     const groupsQuery = query(
-      collection(db, 'personelGruplari'),
+      scopedQuery('personelGruplari', currentCompanyId, isSuperAdmin),
       where('memberIds', 'array-contains', currentUser.uid)
     );
 

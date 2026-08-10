@@ -33,6 +33,8 @@ import type { SignaturePadRef } from '@/components/SignaturePad';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { reserveActionFormNumber } from '@/lib/form-number';
+import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import type { BuildIrsaliyeGirisInput } from '@/lib/ceomed/irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -92,6 +94,8 @@ type ActionItem = {
   poolWarehouseId?: string;
   poolWarehouseName?: string;
   serialNumber?: string;
+  /** Kaynak stok kaydından taşınan lot numarası — Ceomed irsaliye girişi lot alanı için. */
+  lotNumber?: string;
   hucreNumarasi?: string;
   removedHucreNumarasi?: string;
   channelSelections?: ('CH1' | 'CH2')[];
@@ -450,7 +454,7 @@ export default function AplikasyonIslemFormuPage() {
     (async () => {
       try {
         const q = query(
-          collection(db, 'personalStock'),
+          scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -990,6 +994,7 @@ export default function AplikasyonIslemFormuPage() {
         stokKodu: matchingStockItem.stokKodu,
         stokAdi: matchingStockItem.stokAdi,
         serialNumber: matchingStockItem.serialNumber,
+        lotNumber: matchingStockItem.lotNumber,
         personalStockId: matchingStockItem.id,
         quantity: 1,
         periodicPartChangeId: partChangeId,
@@ -1361,6 +1366,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedStockItem.stokAdi,
         anaBirim: (selectedStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedStockItem.serialNumber,
+        lotNumber: selectedStockItem.lotNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
         removedPartStokKodu: matchingPeriodic?.stokKodu || '',
@@ -1395,6 +1401,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedPoolStockItem.stokAdi,
         anaBirim: (selectedPoolStockItem as any).anaBirim || 'Adet',
         serialNumber: selectedPoolStockItem.serialNumber,
+        lotNumber: selectedPoolStockItem.lotNumber,
         poolStockId: selectedPoolStockItem.id,
         poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
         poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
@@ -1430,6 +1437,7 @@ export default function AplikasyonIslemFormuPage() {
         stokAdi: selectedDepotStockItem.stokAdi,
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
+        lotNumber: selectedDepotStockItem.lotNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
         depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
@@ -1671,7 +1679,7 @@ export default function AplikasyonIslemFormuPage() {
     // Case 2: No ID or remaining quantity for grouped items (Quantity tracked)
     if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
-        collection(db, 'yedekParcaDepoStok'),
+        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
         where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
@@ -1894,7 +1902,11 @@ export default function AplikasyonIslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'aplikasyonActionForms')) : null;
         const createdFormsData: any[] = [];
-        
+        // Ceomed irsaliye işleri BATCH'E YAZILMAZ; commit'ten sonra ayrı yazılır.
+        // Aynı batch'te yazmak, kuyruk tarafındaki bir sorunda formun tamamını
+        // düşürüyordu (bkz. enqueue-irsaliye-giris.ts).
+        const irsaliyeGirisleri: BuildIrsaliyeGirisInput[] = [];
+
         for (const currentDevice of devicesToProcess) {
             if (!currentDevice) continue;
             const deviceSpecificActions = previousActions.filter(action => {
@@ -1974,6 +1986,25 @@ export default function AplikasyonIslemFormuPage() {
                 actionRecord: { id: formRef.id, ...formData }
             });
 
+            // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa almak
+            // üzere biriktir. Yazım commit'ten SONRA yapılır.
+            irsaliyeGirisleri.push({
+                formId: formRef.id,
+                formNo,
+                formType: 'aplikasyon',
+                tarih: baslangicTarihi,
+                hospitalId: hospital?.id || currentDevice.hospitalId || '',
+                cariKodu: hospital?.ceomedCariKodu,
+                labName: hospital?.name,
+                deviceId: currentDevice.id,
+                cihazAdi: currentDevice.cihazAdi || currentDevice.model,
+                seriNumarasi: currentDevice.seriNumarasi,
+                personnelName: currentUserProfile?.name,
+                personnelUid: currentUserProfile?.uid,
+                companyId: currentCompanyId,
+                actions: deviceSpecificActions,
+            });
+
             if (!isLabMode) createdFormIds.push(formRef.id);
 
             if (!isLabMode) {
@@ -1995,7 +2026,7 @@ export default function AplikasyonIslemFormuPage() {
                 const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
                 const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-                batch.set(faultReportRef, {
+                batch.set(faultReportRef, withCompanyScope({
                     deviceId: currentDevice.id,
                     hospitalId: hospital?.id,
                     labName: hospital?.name,
@@ -2028,7 +2059,7 @@ export default function AplikasyonIslemFormuPage() {
                     relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
                     isCustomFault: isCustomFault || false,
                     createdFromActionForm: true,
-                });
+                }, currentCompanyId));
 
                 const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
                 batch.set(historyOpenedRef, {
@@ -2059,7 +2090,7 @@ export default function AplikasyonIslemFormuPage() {
 
                 if (removedSerial && removedSerial !== installedSerial) {
                     const duplicateRemovedPartSnap = await getDocs(query(
-                        collection(db, 'yedekParcaDepoStok'),
+                        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
                         where('stokKodu', '==', removedStokKodu),
                         where('serialNumber', '==', removedSerial)
                     ));
@@ -2264,6 +2295,43 @@ export default function AplikasyonIslemFormuPage() {
         await batch.commit();
 
         queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] });
+
+        // Form KAYDEDİLDİ. Ceomed irsaliyesi buradan sonra, ayrı yazımlarla
+        // kuyruğa alınır; buradaki bir hata formu etkilemez.
+        if (irsaliyeGirisleri.length > 0) {
+          const bekleyenler: string[] = [];
+          const yazilamayanlar: string[] = [];
+          for (const girdi of irsaliyeGirisleri) {
+            const sonuc = await enqueueIrsaliyeGirisAyri(db, girdi);
+            // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve
+            // bu modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.
+            if (sonuc.enqueued === true && sonuc.status === 'blocked') {
+              bekleyenler.push(sonuc.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
+            } else if (sonuc.enqueued === false && sonuc.reason === 'yazilamadi') {
+              yazilamayanlar.push(sonuc.hata || 'bilinmeyen hata');
+            }
+          }
+          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
+          if (bekleyenler.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi beklemede',
+              description: Array.from(new Set(bekleyenler)).join(' '),
+              variant: 'destructive',
+              duration: 12000,
+            });
+          }
+          if (yazilamayanlar.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi kuyruğa alınamadı',
+              description:
+                'Form kaydedildi. Ancak muhasebe irsaliyesi otomatik ' +
+                'oluşturulmayacak; Ceomed’de elle kesilmesi gerekiyor. Sebep: ' +
+                Array.from(new Set(yazilamayanlar)).join(' '),
+              variant: 'destructive',
+              duration: 15000,
+            });
+          }
+        }
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['aplikasyonActionForms'] });
         queryClient.invalidateQueries({ queryKey: ['deviceFaultReports'] });
@@ -3252,6 +3320,7 @@ export default function AplikasyonIslemFormuPage() {
               depotStockId: row.stockSourceTab === 'depot' ? selectedItem.id : undefined,
               isDepotSelection: row.stockSourceTab === 'depot',
               serialNumber: selectedItem.serialNumber,
+              lotNumber: (selectedItem as any).lotNumber,
               hucreNumarasi: selectedItem.hucreNumarasi || '',
               removedHucreNumarasi: removedHn,
               channelSelections: row.selectedChannel ? [row.selectedChannel] : [],

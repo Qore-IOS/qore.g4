@@ -68,6 +68,7 @@ import {
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 import { playNotificationSound } from "@/lib/utils";
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 export type NotificationItem = { id: string } & NotificationDoc;
 
@@ -336,7 +337,7 @@ const subItemMap: Record<string, DockSubItem[]> = {
 };
 
 export function useDock() {
-  const { currentUser, currentUserProfile, logout } = useAuth();
+  const { currentUser, currentUserProfile, logout, currentCompanyId, isSuperAdmin } = useAuth();
   const pathname = usePathname();
   const router = useRouter();
   const isMobile = useIsMobile();
@@ -432,7 +433,7 @@ export function useDock() {
     trackListener("useDock-notifications", "create");
 
     const q = query(
-      collection(db, "notifications"),
+      scopedQuery('notifications', currentCompanyId, isSuperAdmin),
       where("targets", "array-contains-any", keysArray),
       orderBy("createdAt", "desc"),
       fsLimit(40)

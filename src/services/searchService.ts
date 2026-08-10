@@ -221,7 +221,7 @@ export async function searchProductLedger(
       // fetch depoStok by stokKodu and lotNumarasi to show mal kabul records
       depoStokSnap = await getDocs(
         query(
-          collection(db, 'depoStok'),
+          scopedQuery('depoStok', companyId, isSuperAdmin),
           where('stokKodu', '==', uniqueStockCodes[0]),
           where('lotNumarasi', '==', targetLotNumarasi)
         )

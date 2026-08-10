@@ -970,6 +970,7 @@ declare module "@/lib/types" {
     stokAdi: string;
     address?: string;
     serialNumber?: string;
+    lotNumber?: string;
     source: PersonalStockSource;
     sourceDeviceId?: string;
     sourceDeviceName?: string;
@@ -1060,6 +1061,7 @@ declare module "@/lib/types" {
     stokAdi: string;
     address?: string;
     serialNumber?: string;
+    lotNumber?: string;
     quantity: number;
     cihazGrubu?: string;
     createdAt: Date;

@@ -14,6 +14,8 @@ export interface DepotSelectableStockItem {
   stokAdi: string;
   anaBirim?: string;
   serialNumber?: string;
+  /** Kaynak stok kaydından taşınan lot numarası — Ceomed irsaliye girişi lot alanı için. */
+  lotNumber?: string;
   hucreNumarasi?: string;
   address?: string;
   totalQuantity: number;
@@ -53,6 +55,7 @@ export function buildDepotSelectableItems(
         stokAdi: item.stokAdi,
         anaBirim: item.anaBirim,
         serialNumber: normalizedSerialNumber,
+        lotNumber: item.lotNumber,
         hucreNumarasi: normalizedHucreNumarasi,
         address: item.address,
         totalQuantity: 1,
@@ -73,6 +76,7 @@ export function buildDepotSelectableItems(
         stokAdi: item.stokAdi,
         anaBirim: item.anaBirim,
         serialNumber: normalizedSerialNumber,
+        lotNumber: item.lotNumber,
         address: item.address,
         totalQuantity: 1,
         trackingType: 'serial',
@@ -92,6 +96,9 @@ export function buildDepotSelectableItems(
       existing.totalQuantity += item.quantity || 0;
       existing.sourceEntryIds.push(item.id);
     } else {
+      // Adet bazlı gruplanmış satırlarda lot BİLEREK taşınmaz: grup birden çok
+      // giriş kaydını birleştirir ve bunların lotları farklı olabilir. Birini
+      // seçmek tahmin olurdu; Ceomed irsaliyesinde lot alanı boş kalır.
       grouped.set(key, {
         productCodeId: item.productCodeId,
         stokKodu: item.stokKodu,

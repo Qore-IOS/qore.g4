@@ -30,6 +30,7 @@ import {
 import { archiveCompletedOrderInBatch } from "@/lib/orders-archive";
 import type { Order } from "@/lib/types";
 import { emitOrderReconciled } from "@/lib/notifications";
+import { scopedQuery } from '@/lib/firestore-helpers';
 import {
   planReconciliation,
   type AcceptedItem,
@@ -43,6 +44,9 @@ export interface ReconcileIrsaliyeOptions {
   accepted: AcceptedItem[];
   irsaliye?: { fileId?: string; fileName?: string };
   actor: { uid: string; name: string };
+  // Kural gereği `list` sorguları companyId ile filtrelenmek zorunda.
+  companyId?: string | null;
+  isSuperAdmin?: boolean;
 }
 
 export interface ReconcileSummary {
@@ -178,7 +182,7 @@ export async function reconcileIrsaliyeAcceptance(
   // Fetch all peripheral, "Hazırlanan" orders for this lab.
   const ordersSnap = await getDocs(
     query(
-      collection(db, "orders"),
+      scopedQuery('orders', options.companyId, options.isSuperAdmin),
       where("isPeripheral", "==", true),
       where("labId", "==", options.hospitalId),
       where("status", "==", "toplaniyor")
