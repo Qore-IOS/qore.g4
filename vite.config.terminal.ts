@@ -10,6 +10,7 @@
  *   3. `process.env.NEXT_PUBLIC_*` → derleme zamanında sabit değerler
  */
 
+import { execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
@@ -80,6 +81,22 @@ const PUBLIC_ENV_KEYS = [
 /** Electron kabuğunun paketlediği çıktı klasörü. */
 const OUT_DIR = path.join(ROOT, 'desktop/renderer-dist');
 
+/**
+ * Kısa git revizyonu — paket damgası için.
+ *
+ * Git yoksa (ör. kaynak arşivinden derleme) damga yalnızca zaman bilgisiyle
+ * gösterilir; derlemeyi bunun için durdurmak anlamsız olurdu.
+ */
+function gitRevision(): string {
+  try {
+    return execSync('git rev-parse --short HEAD', { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ROOT, '');
 
@@ -97,6 +114,9 @@ export default defineConfig(({ mode }) => {
   }
 
   const define: Record<string, string> = {
+    // Paket damgası: kurulu uygulamanın hangi derleme olduğu ekranda görünsün.
+    __TERMINAL_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+    __TERMINAL_BUILD_REV__: JSON.stringify(gitRevision()),
     // `src/lib/firebase.ts` ve birkaç modül `process.env.NODE_ENV` de okur.
     'process.env.NODE_ENV': JSON.stringify(mode === 'development' ? 'development' : 'production'),
   };

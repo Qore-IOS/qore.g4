@@ -96,15 +96,27 @@ $env:QORE_TERMINAL_URL="http://localhost:9002/terminal"; npm start
 ## Paketleme (.exe / .dmg / AppImage)
 
 ```bash
-# önce arayüz paketi (repo kökünde)
-pnpm build:terminal
-
 cd desktop
 npm install
 npm run dist:win     # Windows kurulumu (NSIS)
 npm run dist:mac     # macOS (dmg)
 npm run dist:linux   # Linux (AppImage)
 ```
+
+Arayüz paketi **otomatik üretilir** — `dist:*` betikleri önce
+`scripts/ensure-renderer.js` çalıştırır, o da repo kökündeki
+`pnpm build:terminal`'i tetikler. Üretilemezse paketleme durur.
+
+Bu bilinçli: arayüz paketi olmadan üretilen bir `.exe`, gömülü paketi
+bulamadığı için sessizce uzak kipe düşer ve yayındaki (çoğu zaman eski)
+siteyi açar. Sahada tam olarak bu yaşandı ve sebebi hiçbir yerde
+görünmüyordu.
+
+### Hangi derlemeyi çalıştırdığımı nasıl anlarım
+
+Terminal ana ekranının altında paket damgası yazar: derleme zamanı ve kısa
+git revizyonu (ör. `paket 10.08.2026 15:42 · c4152f1`). Damga yoksa uygulama
+gömülü paketle değil, uzak kipte çalışıyordur.
 
 Çıktılar `desktop/dist/` altına düşer.
 
