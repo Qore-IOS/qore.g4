@@ -1,37 +1,43 @@
 /**
- * @fileoverview Terminal önyükleme — tüm çalışma verisini yerele indirir ve
- * canlı tutar.
+ * @fileoverview Terminal önyükleme — tüm çalışma verisini yerele indirir,
+ * BELLEKTE TUTAR ve canlı günceller.
  *
  * NEDEN VAR
  *
- * Terminalin hiçbir ekranı, bir işlem sırasında ağ beklememelidir. Barkod
- * okutan bir kullanıcı saniyede birkaç kutu geçirir; araya giren tek bir ağ
- * turu bile akışı durdurur. Depoda bağlantı saatlerce gitmiş de olabilir.
+ * Terminalin hiçbir ekranı, ne açılışta ne de bir işlem sırasında ağ
+ * beklememelidir. Barkod okutan bir kullanıcı saniyede birkaç kutu geçirir;
+ * araya giren tek bir ağ turu bile akışı durdurur. Depoda bağlantı saatlerce
+ * gitmiş de olabilir.
  *
- * Çözüm, veriyi işlem anında değil GİRİŞTE indirmek: uygulama açılır açılmaz
- * ürün kodları, barkod formatları, depolar, laboratuvarlar ve seçili deponun
- * stoğu Firestore'un kalıcı önbelleğine yazılır. Sonrasında ekranlar bu
- * önbellekten okur ve anında açılır.
+ * VERİ NEDEN BURADA TUTULUYOR
  *
- * CANLI TUTMA
+ * İlk sürümde bu modül yalnızca "kaç belge indi" sayardı; ekranlar veriyi
+ * kendi TanStack sorgularıyla (`useDepots`, `useProductCodes` …) çekiyordu.
+ * O sorgular `getDocs` kullanır ve 5 dakikalık tazelik süresi dolduktan sonra
+ * her ekran açılışında yeniden çalışır.
  *
- * Tek seferlik indirme yetmez: bir ürün kodu değiştiğinde ya da başka bir
- * kullanıcı stok girdiğinde terminal bunu görmelidir. Bu yüzden indirme
- * `onSnapshot` dinleyicileriyle yapılır — ilk anlık görüntü indirmedir,
- * sonraki her değişiklik önbelleği kendiliğinden günceller. Dinleyiciler
- * kapandığında bile veri diskte kalır ve çevrimdışı açılışta oradan okunur.
+ * Çevrimdışıyken bu ÖLÜMCÜLDÜ: ağ arayüzü "bağlı" görünüp internet olmadığı
+ * durumda (depoda tipik olan hâl) `getDocs` sunucu yanıtını zaman aşımına
+ * kadar bekler ve arayüz donar. Kullanıcının gördüğü şey buydu: "panel
+ * değiştiriyorum, uygulama donuyor."
+ *
+ * Çözüm, veriyi indirmekle kalmayıp BURADA TUTMAK. `onSnapshot` dinleyicileri
+ * zaten açık; ekranlar bu bellekten okuyunca panel geçişinde tek bir sorgu
+ * bile atılmaz — çevrimdışıyken de anında açılır.
  *
  * MALİYET NOTU
  *
- * Dinleyiciler yalnızca DEĞİŞEN belgeler için okuma üretir; ilk yüklemeden
- * sonra terminal başına maliyet, veri değişim hızıyla orantılıdır. Depo
- * stoğu depo bazında dinlenir (tüm şirketin stoğu değil), çünkü bir terminal
- * tek bir depoda durur.
+ * Dinleyiciler yalnızca DEĞİŞEN belgeler için okuma üretir. Depo stoğu depo
+ * bazında dinlenir (tüm şirketin stoğu değil), çünkü bir terminal tek bir
+ * depoda durur.
  */
 
-import { onSnapshot, where, type Unsubscribe } from 'firebase/firestore';
+import { onSnapshot, where, type DocumentData, type Unsubscribe } from 'firebase/firestore';
 
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { withLegacyBarcodeFormat } from '@/hooks/useSafeBarcodeFormats';
+import type { BarcodeFormat } from '@/lib/barcode';
+import type { DepoStokItem, Depot, Hospital, Order, ProductCode } from '@/lib/types';
 
 /** Tek bir koleksiyonun önyükleme durumu. */
 export type PrefetchStage = {
@@ -45,35 +51,69 @@ export type PrefetchStage = {
   error?: string;
 };
 
+/** Ekranların okuduğu, bellekte tutulan çalışma verisi. */
+export type TerminalData = {
+  depots: Depot[];
+  hospitals: Hospital[];
+  productCodes: ProductCode[];
+  barcodeFormats: BarcodeFormat[];
+  depotStock: DepoStokItem[];
+  orders: Order[];
+};
+
 export type PrefetchState = {
   stages: PrefetchStage[];
   /** Tüm koleksiyonların ilk anlık görüntüsü geldi mi? */
   ready: boolean;
   /** Yerele inen toplam belge sayısı. */
   total: number;
+  data: TerminalData;
+};
+
+export const EMPTY_TERMINAL_DATA: TerminalData = {
+  depots: [],
+  hospitals: [],
+  productCodes: [],
+  barcodeFormats: [],
+  depotStock: [],
+  orders: [],
 };
 
 type Listener = (state: PrefetchState) => void;
 
+type CollectionSpec = {
+  key: keyof TerminalData;
+  collection: string;
+  label: string;
+  /** Yalnızca seçili depo için dinlenir. */
+  depotScoped?: boolean;
+};
+
 /**
- * Şirket kapsamında, depodan bağımsız koleksiyonlar.
- *
  * `productCodes` ve `barcodeFormats` barkod çözümlemesinin ön koşuludur:
  * bunlar olmadan okutulan hiçbir barkod ürüne bağlanamaz. `depots` ve
- * `hospitals` ise kaynak/hedef seçimleri için gerekir.
+ * `hospitals` kaynak/hedef seçimleri için gerekir.
  */
-const GLOBAL_COLLECTIONS: Array<{ key: string; label: string }> = [
-  { key: 'productCodes', label: 'Stok kartları' },
-  { key: 'barcodeFormats', label: 'Barkod formatları' },
-  { key: 'depots', label: 'Depolar' },
-  { key: 'hospitals', label: 'Laboratuvarlar' },
+const COLLECTIONS: CollectionSpec[] = [
+  { key: 'productCodes', collection: 'productCodes', label: 'Stok kartları' },
+  { key: 'barcodeFormats', collection: 'barcodeFormats', label: 'Barkod formatları' },
+  { key: 'depots', collection: 'depots', label: 'Depolar' },
+  { key: 'hospitals', collection: 'hospitals', label: 'Laboratuvarlar' },
+  { key: 'depotStock', collection: 'depoStok', label: 'Depo stoğu', depotScoped: true },
+  { key: 'orders', collection: 'orders', label: 'Siparişler', depotScoped: true },
 ];
 
-/** Depoya bağlı koleksiyonlar — yalnızca seçili depo için dinlenir. */
-const DEPOT_COLLECTIONS: Array<{ key: string; label: string }> = [
-  { key: 'depoStok', label: 'Depo stoğu' },
-  { key: 'orders', label: 'Siparişler' },
-];
+/**
+ * Sevk edilmiş ya da tükenmiş kalemler depo stoğu sayılmaz.
+ *
+ * `useUnshippedDepoStokByDepot` ile aynı ölçüt: ekranlar artık o hook yerine
+ * buradan okuduğu için filtre de burada uygulanmalıdır.
+ */
+function isAvailableStock(item: DepoStokItem): boolean {
+  if (item.isShipped) return false;
+  const adet = (item as { adet?: number }).adet;
+  return adet === undefined || adet > 0;
+}
 
 export type PrefetchOptions = {
   companyId: string | null | undefined;
@@ -91,14 +131,12 @@ export type PrefetchOptions = {
 export function startTerminalPrefetch(options: PrefetchOptions): Unsubscribe {
   const { companyId, isSuperAdmin, depotId, onChange } = options;
 
-  const planned = [
-    ...GLOBAL_COLLECTIONS,
-    ...(depotId ? DEPOT_COLLECTIONS : []),
-  ];
+  const planned = COLLECTIONS.filter(spec => !spec.depotScoped || depotId);
 
   const stages = new Map<string, PrefetchStage>(
-    planned.map(c => [c.key, { key: c.key, label: c.label, count: 0, ready: false }]),
+    planned.map(spec => [spec.key, { key: spec.key, label: spec.label, count: 0, ready: false }]),
   );
+  const data: TerminalData = { ...EMPTY_TERMINAL_DATA };
 
   const emit = () => {
     const list = Array.from(stages.values());
@@ -106,6 +144,8 @@ export function startTerminalPrefetch(options: PrefetchOptions): Unsubscribe {
       stages: list,
       ready: list.every(s => s.ready),
       total: list.reduce((n, s) => n + s.count, 0),
+      // Yeni nesne: React'in referans karşılaştırması değişikliği görsün.
+      data: { ...data },
     });
   };
 
@@ -113,23 +153,39 @@ export function startTerminalPrefetch(options: PrefetchOptions): Unsubscribe {
 
   const unsubscribers: Unsubscribe[] = [];
 
-  const listen = (key: string, depotScoped: boolean) => {
-    const query = depotScoped && depotId
-      ? scopedQuery(key, companyId, isSuperAdmin, where('depotId', '==', depotId))
-      : scopedQuery(key, companyId, isSuperAdmin);
+  const listen = (spec: CollectionSpec) => {
+    const query = spec.depotScoped && depotId
+      ? scopedQuery(spec.collection, companyId, isSuperAdmin, where('depotId', '==', depotId))
+      : scopedQuery(spec.collection, companyId, isSuperAdmin);
 
     const unsubscribe = onSnapshot(
       query,
       snapshot => {
-        const stage = stages.get(key);
-        if (!stage) return;
-        stage.count = snapshot.size;
-        stage.ready = true;
-        stage.error = undefined;
+        const rows = snapshot.docs.map(d => ({ id: d.id, ...(d.data() as DocumentData) }));
+
+        if (spec.key === 'depotStock') {
+          data.depotStock = (rows as DepoStokItem[]).filter(isAvailableStock);
+        } else if (spec.key === 'barcodeFormats') {
+          // Etkin olmayan formatlar elenir, gömülü Roche formatı eklenir —
+          // web tarafındaki `useSafeBarcodeFormats` ile aynı davranış.
+          const active = (rows as Array<BarcodeFormat & { active?: boolean; priority?: number }>)
+            .filter(f => f.active !== false)
+            .sort((a, b) => (a.priority ?? 10) - (b.priority ?? 10));
+          data.barcodeFormats = withLegacyBarcodeFormat(active);
+        } else {
+          (data[spec.key] as unknown[]) = rows;
+        }
+
+        const stage = stages.get(spec.key);
+        if (stage) {
+          stage.count = snapshot.size;
+          stage.ready = true;
+          stage.error = undefined;
+        }
         emit();
       },
       error => {
-        const stage = stages.get(key);
+        const stage = stages.get(spec.key);
         if (!stage) return;
         // Hata da "hazır" sayılır: aksi hâlde tek bir izin sorunu yüzünden
         // önyükleme ekranı sonsuza kadar açık kalır ve kullanıcı hiçbir işe
@@ -143,8 +199,7 @@ export function startTerminalPrefetch(options: PrefetchOptions): Unsubscribe {
     unsubscribers.push(unsubscribe);
   };
 
-  GLOBAL_COLLECTIONS.forEach(c => listen(c.key, false));
-  if (depotId) DEPOT_COLLECTIONS.forEach(c => listen(c.key, true));
+  planned.forEach(listen);
 
   return () => unsubscribers.forEach(u => u());
 }

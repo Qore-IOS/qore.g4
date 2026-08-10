@@ -19,6 +19,7 @@
 import React, { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { subscribeToPendingWrites } from '@/lib/offline-write';
+import { countPendingOperations, subscribeToPendingOperations } from '@/lib/pending-operations';
 
 /** Tarayıcının çevrimiçi durumunu izler. */
 function useOnlineStatus(): boolean {
@@ -47,7 +48,21 @@ export function ConnectionBadge() {
 
   useEffect(() => subscribeToPendingWrites(setPending), []);
 
-  const tone = !online ? 'offline' : pending > 0 ? 'syncing' : 'online';
+  /**
+   * Defterdeki bekleyen kayıtlar da sayılır.
+   *
+   * `subscribeToPendingWrites` yalnızca BU OTURUMDA başlatılan yazımları
+   * bilir. Uygulama kapanıp açıldığında Firestore kuyruğu dolu olabilir ve o
+   * sayaç sıfır görünürdü — kullanıcı da her şeyin gittiğini sanırdı.
+   */
+  const [pendingOps, setPendingOps] = useState(0);
+  useEffect(
+    () => subscribeToPendingOperations(ops => setPendingOps(countPendingOperations(ops))),
+    [],
+  );
+
+  const waiting = Math.max(pending, pendingOps);
+  const tone = !online ? 'offline' : waiting > 0 ? 'syncing' : 'online';
 
   const styles = {
     online: 'border-border text-muted-foreground',
@@ -62,11 +77,11 @@ export function ConnectionBadge() {
   } as const;
 
   const label = !online
-    ? pending > 0
-      ? `Çevrimdışı · ${pending} bekliyor`
+    ? waiting > 0
+      ? `Çevrimdışı · ${waiting} bekliyor`
       : 'Çevrimdışı'
-    : pending > 0
-      ? `${pending} kayıt gönderiliyor`
+    : waiting > 0
+      ? `${waiting} kayıt gönderiliyor`
       : 'Bağlı';
 
   return (

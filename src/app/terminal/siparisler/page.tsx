@@ -13,16 +13,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { limit, onSnapshot, where } from 'firebase/firestore';
-import { Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { siparislerLogger } from '@/lib/logger';
-import type { Order } from '@/lib/types';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import {
   TerminalButton,
   TerminalSelect,
@@ -32,17 +30,13 @@ import {
 
 /** Terminalde yalnızca toplanmayı bekleyen siparişler gösterilir. */
 const OPEN_STATUSES = new Set(['pending', 'toplaniyor']);
-const ORDER_LISTEN_LIMIT = 200;
 
 export default function TerminalSiparislerPage() {
   const router = useRouter();
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
-  const { data: depots = [] } = useDepots();
+  const { depots, orders: allOrders } = useTerminalData();
   const [depotId, setDepotId] = useTerminalDepot();
 
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const sourceDepots = useMemo(
     () => filterOperationalSourceDepots(depots, currentUserProfile),
@@ -50,40 +44,23 @@ export default function TerminalSiparislerPage() {
   );
   const depotName = sourceDepots.find(d => d.id === depotId)?.name || '';
 
-  useEffect(() => {
-    if (!depotId) {
-      setOrders([]);
-      return;
-    }
-    setIsLoading(true);
-    setError(null);
-
-    const unsubscribe = onSnapshot(
-      scopedQuery(
-        'orders',
-        currentCompanyId,
-        isSuperAdmin,
-        where('depotId', '==', depotId),
-        limit(ORDER_LISTEN_LIMIT),
-      ),
-      snap => {
-        const rows = snap.docs
-          .map(d => ({ id: d.id, ...d.data() }) as Order)
+  /**
+   * Açık siparişler önyükleme deposundan süzülür.
+   *
+   * Burada AYRI bir `onSnapshot` YOK: depo zaten seçili deponun siparişlerini
+   * canlı dinliyor. İkinci bir dinleyici hem gereksiz okuma üretir hem de
+   * ekran her açıldığında yeniden kurulup çevrimdışıyken bekleme yaratırdı.
+   */
+  const orders = useMemo(
+    () =>
+      allOrders.filter(
+        o =>
           // Perifer siparişler ofis lojistiğinden yürür; depo terminalinde
-          // toplanmazlar, bu yüzden listeye alınmazlar.
-          .filter(o => !o.isPeripheral && OPEN_STATUSES.has(String(o.status)));
-        setOrders(rows);
-        setIsLoading(false);
-      },
-      err => {
-        siparislerLogger.error('Terminal sipariş dinleyicisi düştü', err, { depotId });
-        setError('Siparişler yüklenemedi. Bağlantıyı kontrol edip tekrar deneyin.');
-        setIsLoading(false);
-      },
-    );
-
-    return () => unsubscribe();
-  }, [depotId, currentCompanyId, isSuperAdmin]);
+          // toplanmazlar.
+          !o.isPeripheral && OPEN_STATUSES.has(String(o.status)),
+      ),
+    [allOrders],
+  );
 
   return (
     <TerminalShell
@@ -103,18 +80,8 @@ export default function TerminalSiparislerPage() {
           />
         </div>
 
-        {error ? (
-          <p className="shrink-0 rounded-xl border border-red-600 bg-red-500/10 px-6 py-4 text-red-700 dark:text-red-200">
-            {error}
-          </p>
-        ) : null}
-
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
-          {isLoading ? (
-            <div className="flex h-full items-center justify-center gap-3 text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" /> Siparişler yükleniyor…
-            </div>
-          ) : !depotId ? (
+          {!depotId ? (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               Önce depo seçin.
             </div>

@@ -6,12 +6,15 @@
 
 import React, { useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { ClipboardList, PackagePlus, Search, Truck } from 'lucide-react';
+import { ClipboardList, CloudUpload, PackagePlus, Search, Truck } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import { TerminalSelect, TerminalShell, TerminalTile } from '@/components/terminal/shell';
 import { getTerminalBuildInfo } from '@/lib/terminal-build';
 
@@ -40,12 +43,18 @@ const TILES = [
     description: 'Okuttuğun ürün nerede, hangi durumda?',
     icon: <Search className="h-10 w-10" />,
   },
+  {
+    href: '/terminal/bekleyen',
+    title: 'Bekleyen İşlemler',
+    description: 'Gönderilmeyi bekleyenleri gör.',
+    icon: <CloudUpload className="h-10 w-10" />,
+  },
 ] as const;
 
 export default function TerminalHomePage() {
   const router = useRouter();
   const { currentUserProfile, currentUser } = useAuth();
-  const { data: depots = [] } = useDepots();
+  const { depots } = useTerminalData();
   const [depotId, setDepotId] = useTerminalDepot();
 
   // Kullanıcı profili ŞART: bu yardımcı, yetkili roller dışındaki kullanıcıları

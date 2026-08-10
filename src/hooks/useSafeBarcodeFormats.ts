@@ -46,6 +46,17 @@ export function useSafeBarcodeFormats(): State {
   return state;
 }
 
+/**
+ * Gömülü Roche formatını listeye ekler (yoksa).
+ *
+ * DIŞA AÇIK: masaüstü terminali barkod formatlarını bu hook üzerinden değil,
+ * önyükleme deposundan okur — ama aynı yedek formatı eklemek zorundadır,
+ * yoksa o formatla basılmış eski barkodlar terminalde okunamaz.
+ */
+export function withLegacyBarcodeFormat(list: BarcodeFormat[]): BarcodeFormat[] {
+  return withLegacy(list);
+}
+
 function withLegacy(list: BarcodeFormat[]): BarcodeFormat[] {
   const hasLegacy = list.some((f: any) => f.strategy === 'legacy_roche' || f.id === 'legacy_roche');
   return hasLegacy

@@ -21,6 +21,7 @@ import TerminalTransferPage from '@/app/terminal/transfer/page';
 import TerminalSiparislerPage from '@/app/terminal/siparisler/page';
 import TerminalSorguPage from '@/app/terminal/sorgu/page';
 import TerminalToplamaPage from '@/app/terminal/toplama/page';
+import TerminalBekleyenPage from '@/app/terminal/bekleyen/page';
 import LoginPage from '@/app/login/page';
 
 /** Hash yolundan ekrana eşleme. */
@@ -31,6 +32,7 @@ const ROUTES: Record<string, React.ComponentType> = {
   '/terminal/siparisler': TerminalSiparislerPage,
   '/terminal/sorgu': TerminalSorguPage,
   '/terminal/toplama': TerminalToplamaPage,
+  '/terminal/bekleyen': TerminalBekleyenPage,
 };
 
 function FullScreenMessage({ title, detail }: { title: string; detail?: string }) {

@@ -18,15 +18,34 @@ import { Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
-import { startTerminalPrefetch, type PrefetchState } from '@/lib/terminal-prefetch';
+import {
+  EMPTY_TERMINAL_DATA,
+  startTerminalPrefetch,
+  type PrefetchState,
+  type TerminalData,
+} from '@/lib/terminal-prefetch';
 
-const EMPTY: PrefetchState = { stages: [], ready: false, total: 0 };
+const EMPTY: PrefetchState = { stages: [], ready: false, total: 0, data: EMPTY_TERMINAL_DATA };
 
 const PrefetchContext = createContext<PrefetchState>(EMPTY);
 
 /** Önyükleme durumunu okur — ekranlar "veri hazır mı" diye sorabilir. */
 export function useTerminalPrefetch(): PrefetchState {
   return useContext(PrefetchContext);
+}
+
+/**
+ * Terminalin çalışma verisi — ekranların TEK veri kaynağı.
+ *
+ * Ekranlar BİLEREK `useDepots` / `useProductCodes` gibi TanStack hook'larını
+ * kullanmaz: onlar `getDocs` ile sorgu atar ve çevrimdışıyken (ağ arayüzü
+ * bağlı görünüp internet yokken) sunucu yanıtını zaman aşımına kadar bekler.
+ * Panel geçişinde yaşanan donmanın sebebi buydu.
+ *
+ * Buradaki veri `onSnapshot` ile canlı tutulur; okumak bedavadır.
+ */
+export function useTerminalData(): TerminalData {
+  return useContext(PrefetchContext).data;
 }
 
 export function TerminalPrefetchProvider({ children }: { children: React.ReactNode }) {

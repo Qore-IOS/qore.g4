@@ -20,20 +20,18 @@ import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import {
-  useDepots,
-  useHospitals,
-  useProductCodes,
-  useUnshippedDepoStokByDepot,
-  useInvalidateQueries,
-  touchStockMetadata,
-} from '@/hooks/useFirebaseQueries';
+import { parseAndResolveBarcode } from '@/lib/barcode';
+import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData, useTerminalPrefetch } from '@/components/terminal/prefetch-provider';
 import { playFeedback } from '@/lib/utils';
 import { withCompanyScope } from '@/lib/company-scope';
 import { queueWrite } from '@/lib/offline-write';
+import { recordOperation } from '@/lib/pending-operations';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
@@ -89,11 +87,14 @@ export default function TerminalTransferPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
-  const { data: depots = [] } = useDepots();
-  const { data: hospitals = [] } = useHospitals();
-  const { data: productCodes = [] } = useProductCodes();
-  // Tipli ayrıştırma yolu — bkz. mal kabul ekranındaki not.
-  const { formats, parseAndResolveBarcode } = useBarcodeParser();
+  const { depots, hospitals, productCodes, barcodeFormats: formats, depotStock } = useTerminalData();
+  /**
+   * Depo değiştirildiğinde önyükleme yeniden başlar ve yeni deponun stoğu bir
+   * an için elde olmaz. Açılış ekranı bu durumda gösterilmediği için uyarı
+   * burada verilir — aksi hâlde kullanıcı okutur ve depodaki ürüne "bu depoda
+   * değil" cevabını alır.
+   */
+  const stockPending = !useTerminalPrefetch().stages.find(s => s.key === 'depotStock')?.ready;
   const { invalidateDepoStok } = useInvalidateQueries();
 
   const [depotId, setDepotId] = useTerminalDepot();
@@ -103,10 +104,6 @@ export default function TerminalTransferPage() {
   const [lastTransfer, setLastTransfer] = useState<LastTransfer | null>(null);
   const [tutanakBusy, setTutanakBusy] = useState(false);
 
-
-  const { data: depotStock = [], isPending: stockPending } = useUnshippedDepoStokByDepot(
-    depotId || null,
-  );
 
   const sourceDepots = useMemo(
     () => filterOperationalSourceDepots(depots, currentUserProfile),
@@ -191,7 +188,7 @@ export default function TerminalTransferPage() {
       });
       playFeedback();
     },
-    [depotId, labId, parseAndResolveBarcode, formats, productCodes, stockBySerial],
+    [depotId, labId, formats, productCodes, stockBySerial],
   );
 
   useHidScanner({ onScan: handleScan });
@@ -277,7 +274,16 @@ export default function TerminalTransferPage() {
       })),
     });
 
-    queueWrite(batch.commit());
+    queueWrite(
+      batch.commit(),
+      undefined,
+      recordOperation({
+        id: transferRef.id,
+        kind: 'transfer',
+        summary: `${depotName} → ${ctx.targetName} · ${totalShippedAdet} adet`,
+        itemCount: totalShippedAdet,
+      }),
+    );
 
     // Defter yazımı stok yazımından AYRI ve beklenmez; hata olsa bile
     // transfer geri alınmaz (ürünler gerçekten taşındı) ve defter yönetim
