@@ -762,3 +762,62 @@ test('kullanıcı kendi pushTokens kaydını yazabilir', async () => {
 test('kullanıcı BAŞKASININ pushTokens kaydını yazamaz', async () => {
   await assertFails(setDoc(doc(authedAsCompanyA(), 'users', 'userB', 'pushTokens', 't1'), { token: 'x' }));
 });
+
+// ============================================================================
+// users — şirket admini kullanıcı yönetimi
+//
+// Okuma "aynı şirket" diyordu ama yazma yalnızca "kendisi veya süper admin"
+// idi. Bu asimetri yüzünden şirket admini `/yonetim/kullanicilar` ekranından
+// başka bir kullanıcıyı kaydedemiyordu — ekran düzenlenen kullanıcının
+// belgesine yazar, kendi belgesine değil.
+// ============================================================================
+
+function authedAsAdminA() {
+  return testEnv
+    .authenticatedContext('adminA', { companyId: 'companyA', isSuperAdmin: false })
+    .firestore();
+}
+
+test.beforeEach(async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'users', 'adminA'), {
+      name: 'Admin A', role: 'admin', companyId: 'companyA',
+    });
+  });
+});
+
+test('şirket admini aynı şirketteki kullanıcıyı kaydedebilir', async () => {
+  await assertSucceeds(setDoc(
+    doc(authedAsAdminA(), 'users', 'userA'),
+    { name: 'Yeni Ad', role: 'user', companyId: 'companyA' },
+    { merge: true },
+  ));
+});
+
+test('şirket admini aynı şirketteki kullanıcıyı silebilir', async () => {
+  await assertSucceeds(deleteDoc(doc(authedAsAdminA(), 'users', 'userA')));
+});
+
+test('şirket admini BAŞKA şirketin kullanıcısını kaydedemez', async () => {
+  await assertFails(setDoc(
+    doc(authedAsAdminA(), 'users', 'userB'),
+    { name: 'X', companyId: 'companyB' },
+    { merge: true },
+  ));
+});
+
+test('şirket admini kullanıcıyı başka şirkete taşıyamaz', async () => {
+  await assertFails(setDoc(
+    doc(authedAsAdminA(), 'users', 'userA'),
+    { companyId: 'companyB' },
+    { merge: true },
+  ));
+});
+
+test('admin olmayan kullanıcı başkasının belgesini kaydedemez', async () => {
+  await assertFails(setDoc(
+    doc(authedAsCompanyA(), 'users', 'adminA'),
+    { name: 'X' },
+    { merge: true },
+  ));
+});
