@@ -1,0 +1,42 @@
+{
+  "name": "qore-terminal",
+  "productName": "Qore Terminal",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Qore depo terminali — mal kabul, direkt transfer, sipariş toplama ve stok sorgu için masaüstü kabuğu.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.qore.terminal",
+    "productName": "Qore Terminal",
+    "files": ["main.js", "preload.js", "package.json"],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.business"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "category": "Office"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

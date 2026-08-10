@@ -1,10 +1,24 @@
 'use client';
-import { useState, type FormEvent, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { Suspense, useState, type FormEvent, useEffect } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import { Mail, Lock, Eye, EyeOff, Check, ArrowRight, Loader2 } from 'lucide-react';
 import { LOJISTIK_HOME_PATH } from '@/lib/lojistik/navigation';
+
+/**
+ * `?next=` hedefini güvenli hâle getirir.
+ *
+ * Yalnızca tek eğik çizgiyle başlayan, uygulama içi göreli yollar kabul
+ * edilir. `//kotu.site` ve `https://kotu.site` gibi değerler tarayıcı
+ * tarafından MUTLAK adres olarak yorumlanır; filtrelenmezse giriş sayfası
+ * açık yönlendirme (open redirect) aracına dönüşür.
+ */
+function safeNextPath(raw: string | null): string | null {
+  if (!raw) return null;
+  if (!raw.startsWith('/') || raw.startsWith('//')) return null;
+  return raw;
+}
 
 const RIBBON_TURN_DURATION_MS = 480;
 const RIBBON_LAYER_STAGGER_MS = 120;
@@ -131,7 +145,7 @@ const Ribbons = ({
   </svg>
 );
 
-export default function LoginPage() {
+function LoginPageInner() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -142,6 +156,7 @@ export default function LoginPage() {
   const [shake, setShake] = useState(0);
 
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { login, currentUser, isLoadingAuth, currentUserProfile } = useAuth();
   const { toast } = useToast();
 
@@ -160,12 +175,18 @@ export default function LoginPage() {
   useEffect(() => {
     if (isLoadingAuth || isLoading || !currentUser || !currentUserProfile) return;
 
+    // `?next=` role göre varsayılan hedefin ÖNÜNE geçer: korumalı bir sayfaya
+    // (ör. /terminal) gelip giriş ekranına yönlendirilen kullanıcı, giriş
+    // yaptıktan sonra gitmek istediği yere dönmelidir.
+    const requestedNext = safeNextPath(searchParams?.get('next') ?? null);
+
     const target =
-      currentUserProfile.role === 'lojistik_sorumlusu'
+      requestedNext ??
+      (currentUserProfile.role === 'lojistik_sorumlusu'
         ? LOJISTIK_HOME_PATH
         : currentUserProfile.role === 'sarf_dagitim_personeli'
           ? '/sarf-teslimat'
-          : '/dashboard';
+          : '/dashboard');
 
     // Existing sessions redirect immediately; fresh logins wait for the six ribbon turns.
     if (!success || successAnimationComplete) {
@@ -289,5 +310,21 @@ export default function LoginPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * `useSearchParams()` istemci tarafında okunur; Next.js bu kancayı kullanan
+ * bir sayfayı ön-render ederken Suspense sınırı ZORUNLU kılar (aksi hâlde
+ * `next build` "should be wrapped in a suspense boundary" ile düşer).
+ *
+ * Yedek içerik bilerek boştur: giriş ekranı zaten kendi animasyonlu kabuğunu
+ * çiziyor ve araya bir yükleniyor katmanı koymak açılışta göz kırpma yaratır.
+ */
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }

@@ -65,6 +65,17 @@ import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 // Logging & Validation
 import { malKabulLogger, createCorrelationId } from '@/lib/logger';
 import { sanitizeBarcode, sanitizeStockCode, securityCheck } from '@/lib/mal-kabul/validation';
+// Yazma katmanı TEK KAYNAK: bu yardımcılar `src/lib/mal-kabul/write.ts`'te
+// yaşar ve masaüstü terminali (`/terminal/mal-kabul`) ile paylaşılır. Buradaki
+// yerel kopyaları kaldırıldı — belge şeması iki yolda da aynı kalsın diye.
+import {
+  buildDepoStokDocData,
+  buildTransactionLines,
+  collectSerialPairs,
+  stripUndefined,
+  toFsTimestamp,
+  type DepoStokDocContext,
+} from '@/lib/mal-kabul/write';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { formatQuantityWithUnit, formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 import { matchesCompanyScope, normalizeCompanyId, withCompanyScope } from '@/lib/company-scope';
@@ -278,19 +289,9 @@ const PENDING_CEOMED_DURUM_SET = new Set([
 // UTILITY FUNCTIONS
 // =============================================================================
 
-/**
- * Convert a Date or unknown value to Firestore Timestamp
- * @param d - Date value or undefined
- * @returns Firestore Timestamp
- */
-const toFsTimestamp = (d?: Date | unknown): Timestamp => {
-  try {
-    if (d instanceof Date && !isNaN(d.getTime())) return Timestamp.fromDate(d);
-  } catch {
-    malKabulLogger.warn('Failed to convert date to Timestamp', { date: String(d) });
-  }
-  return Timestamp.now();
-};
+// `toFsTimestamp` ve `stripUndefined` artık `@/lib/mal-kabul/write`'ten gelir
+// (yukarıdaki import). Terminal ile ortak kullanıldıkları için tek kopyaları
+// orada tutulur.
 
 /**
  * Convert value to string safely
@@ -305,25 +306,6 @@ const safeStr = (v: unknown): string => (v === undefined || v === null ? '' : St
  * @returns Value or null
  */
 const safeNullable = <T,>(v: T | undefined): T | null => (v === undefined ? null : v);
-
-/**
- * Remove undefined values from object recursively
- * @description Firestore doesn't accept undefined values, this strips them
- * @param val - Object or array to clean
- * @returns Cleaned object without undefined values
- */
-const stripUndefined = (val: unknown): unknown => {
-  if (Array.isArray(val)) return val.map(stripUndefined).filter(v => v !== undefined);
-  if (val && typeof val === 'object') {
-    const out: Record<string, unknown> = {};
-    Object.keys(val).forEach(k => {
-      const v = stripUndefined((val as Record<string, unknown>)[k]);
-      if (v !== undefined) out[k] = v;
-    });
-    return out;
-  }
-  return val === undefined ? undefined : val;
-};
 
 // =============================================================================
 // GROUPED ROW MANAGEMENT
@@ -610,47 +592,9 @@ const enqueueSerialLedger = async (
   }
 };
 
-/** Bir kabul listesindeki tüm `ürün kodu + seri no` çiftlerini toplar. */
-const collectSerialPairs = (rows: ScanRow[]): Array<{ serial: string; stokKodu: string }> => {
-  const pairs: Array<{ serial: string; stokKodu: string }> = [];
-  rows.forEach(item => {
-    if (!item.stokKodu) return;
-    if (!item.isGroup && item.seriNumarasi) {
-      pairs.push({ serial: item.seriNumarasi, stokKodu: item.stokKodu });
-    } else if (item.isGroup && item.scannedSerials) {
-      item.scannedSerials.forEach(s => {
-        if (s) pairs.push({ serial: s, stokKodu: item.stokKodu! });
-      });
-    }
-  });
-  return pairs;
-};
-
-// Tek bir depoStok belgesinin gövdesini üretir. Hem manuel "Mal Kabul" akışı hem
-// de Oto Kabul arka plan worker'ı bu fonksiyonu kullanır; böylece iki yolda da
-// belge şeması birebir aynıdır (companyId çağıran tarafça eklenir).
-type DepoStokDocContext = {
-  depotId: string;
-  depotName: string;
-  createdByName: string;
-  createdByUid: string | null;
-};
-const buildDepoStokDocData = (item: ScanRow, serial: string, ctx: DepoStokDocContext) => ({
-  depotId: ctx.depotId,
-  depotName: ctx.depotName,
-  stokKodu: item.stokKodu || '',
-  stokAdi: item.stokAdi || '',
-  lotNumarasi: item.lotNumarasi || '',
-  miad: item.miad ? normalizeMiad(item.miad) : '',
-  seriNumarasi: serial,
-  rafAdresi: item.rafAdresi || '',
-  irsaliyeNumarasi: item.irsaliyeNumarasi || '',
-  eklenmeTarihi: toFsTimestamp(item.timestamp),
-  isShipped: false,
-  createdByName: ctx.createdByName,
-  createdByUid: ctx.createdByUid,
-});
-
+// `collectSerialPairs`, `buildDepoStokDocData` ve `DepoStokDocContext` artık
+// `@/lib/mal-kabul/write`'te. Manuel kabul, Oto Kabul worker'ı ve masaüstü
+// terminali aynı belge gövdesini üretsin diye tek kopya orada tutulur.
 
 // Stable empty reference for the depot serial index so that, while the query is
 // loading (data === undefined), the fallback doesn't allocate a new Map every
@@ -1417,33 +1361,7 @@ export default function AnaPanel(props: AnaPanelProps) {
     return (p?.marka || p?.brand || name.split(' ')[0] || '').toString();
   };
 
-  const buildTransactionLines = (rows: ScanRow[]): MalKabulLine[] => {
-    const map = new Map<string, MalKabulLine>();
-    for (const r of rows) {
-      const key = `${r.stokKodu}||${r.lotNumarasi || ''}||${r.miad || ''}`;
-      
-      if (!map.has(key)) {
-        map.set(key, {
-          stokKodu: r.stokKodu || '',
-          stokAdi: r.stokAdi || '',
-          lotNumarasi: r.lotNumarasi || '',
-          miad: r.miad || '',
-          adet: 0,
-          serials: [],
-        });
-      }
-      
-      const entry = map.get(key)!;
-      entry.adet += (r.adet || 1);
-      if (!r.isGroup && r.seriNumarasi) {
-        entry.serials.push(r.seriNumarasi);
-      }
-    }
-    return Array.from(map.values()).map(l => ({
-      ...l,
-      serials: Array.from(new Set(l.serials || [])).filter(Boolean),
-    }));
-  };
+  // `buildTransactionLines` @/lib/mal-kabul/write'ten import edilir.
 
   const recordMalKabulTransaction = async (
     rows: ScanRow[],
