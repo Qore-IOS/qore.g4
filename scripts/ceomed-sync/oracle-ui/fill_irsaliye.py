@@ -494,8 +494,23 @@ def main() -> int:
     if not sys.platform.startswith("win"):
         return fail("Bu betik yalnızca Windows'ta çalışır.", retryable=False)
 
-    pencereler = ui60.pencere_bul(args.pencere)
+    # Sınıf filtresi ZORUNLU. Yalnızca başlığa bakmak, adında "ceomed" geçen
+    # her pencereyi (Dosya Gezgini klasörü, worker'ın konsolu, bir Not Defteri)
+    # aday yapıyor ve otomasyon "2 Ceomed penceresi eşleşti" diyip duruyordu.
+    # Gerçek Oracle Forms ana penceresinin sınıfı ui60MDIroot_W32'dir.
+    pencereler = ui60.pencere_bul(args.pencere, sinif=ui60.MDI_KOK_SINIFI)
     if not pencereler:
+        # Sınıf filtresi yüzünden mi eleniyor, yoksa uygulama kapalı mı?
+        # İkisi çok farklı düzeltmeler gerektiriyor; ayırt edilebilir olmalı.
+        filtresiz = ui60.pencere_bul(args.pencere)
+        if filtresiz:
+            return fail(
+                f"'{args.pencere}' başlığıyla {len(filtresiz)} pencere var ama hiçbiri "
+                f"Oracle Forms penceresi değil (beklenen sınıf {ui60.MDI_KOK_SINIFI}, "
+                f"bulunanlar: {', '.join(repr(ui60.sinif_adi(h)) for h in filtresiz)}). "
+                "Ceomed masaüstü uygulaması açık mı?",
+                retryable=True,
+            )
         return fail(
             f"'{args.pencere}' başlıklı Ceomed penceresi açık değil. "
             "Uygulamaya giriş yapıp Çıkış İrsaliyesi formunu açın.",
