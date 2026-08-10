@@ -7063,3 +7063,106 @@ body > main,
   --tw-gradient-from: var(--qc-surface-hi) !important;
   --tw-gradient-to: var(--qc-surface2) !important;
 }
+
+/* ==========================================================================
+   ÇİFT ARKA PLAN — kesin çözüm.
+   Panel kökleri (.ml-root, .pl-root, .mg-root, .cari-shell …) `min-height:100vh`
+   ile KENDİ tam sayfa zeminini boyuyordu. Global zemin html'de olduğu için bu
+   ikinci bir katman oluşturuyor ve panel içeriği bitince altındaki html zemini
+   görünerek "çift arka plan" / kutu kenarı yaratıyordu.
+   Önceki turda yalnızca renkleri temaya çekmiştim; asıl sorun çift boyamaydı.
+   Artık sayfa kökü olan hiçbir sarmalayıcı zemin boyamaz — yalnızca html boyar.
+   ========================================================================== */
+.ml-root,
+.pl-root,
+.mg-root,
+.cari-shell,
+.cihaz-shell,
+.clay-shell,
+.device-map-shell,
+.dt-shell,
+.fault-clay-page,
+.loj-shell,
+.lt-shell,
+.mk-shell,
+.qdock-flat-shell,
+.qore-technic-shell,
+.satin-alma-fluid-shell,
+.sp-shell,
+.page-shell {
+  background: transparent !important;
+}
+/* Bu köklerin sabit backdrop katmanları da global zemine bağlı olsun */
+.lt-bg { background: var(--qc-app-bg) !important; }
+
+/* ==========================================================================
+   MOBİL DÜZELTME PAKETİ (global — tüm paneller).
+   Bildirilen sorunlar: buton/KPI kartı en-boy orantısızlığı, etkileşimli
+   alanların taşması/kesilmesi, alt navigasyonun içeriği kapatması.
+   ========================================================================== */
+@media (max-width: 640px) {
+  /* 1) Yatay taşma: mobilde hiçbir panel sayfayı yana kaydırmasın */
+  html, body { max-width: 100%; overflow-x: hidden; }
+
+  /* 2) TAŞMA YERİNE SARMA.
+        Daha önce buradaki toptan `min-width:0` kuralı, flex öğelerinin
+        içeriklerinin altına ezilmesine izin veriyordu: "Geri Dön" harf harf alt
+        alta iniyor, adım etiketleri ("Bağlam", "Ürün Ekle") kırpılıyordu.
+        Doğru çözüm ezmek değil, satırı alt satıra sarmak. */
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, [style*="display:flex"], [style*="display: flex"]) {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* 2b) Kontroller ve etiketler içeriğinin altına ezilmez, metinleri bölünmez. */
+  button, [role="button"], [role="tab"], a[class*="btn"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"] {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  /* 2c) İç etiketler de küçülmez: kontrol küçülmese bile içindeki metin span'i
+         flex item olduğu için küçülüp "Bağlam" → "ğlam" gibi kırpılıyordu. */
+  :is(button, [role="button"], [role="tab"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"]) > * {
+    flex-shrink: 0;
+  }
+
+  /* 3) Dokunma hedefi: yüksekliği açıkça verilmemiş butonlar ezilmesin */
+  button:not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) { min-height: 42px; }
+
+  /* 4) İkon butonlar kare kalsın (en-boy orantısızlığı) */
+  button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
+    padding-inline: 0;
+  }
+
+  /* 5) KPI kartları ve içindeki sayılar: taşma yerine küçülme */
+  [class*="grid-cols-"] > * { min-width: 0; }
+  [style*="grid-template-columns"] > * { min-width: 0; overflow-wrap: anywhere; }
+
+  /* 5b) Sabit sütunlu ızgaralar mobilde kesilmesin — otomatik sarsın.
+         `repeat(N, …)` içeren inline ızgaralar hedeflenir; `1fr` veya
+         `minmax(0,1.5fr) minmax(0,1fr)` gibi elle yazılmış düzenler korunur.
+         minmax(min(100%,96px),1fr) sayesinde tek sütuna kadar inebilir ve
+         hiçbir zaman ekranı taşırmaz. */
+  [style*="grid-template-columns"][style*="repeat("] {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  }
+  /* Tailwind ızgaraları: 3 ve üzeri sütunlar sarsın (1-2 sütun zaten mobil uyumlu) */
+  [class*="grid-cols-"]:not([class*="grid-cols-1"]):not([class*="grid-cols-2"]) {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  }
+
+  /* 6) Yatay kaydırılabilir buton/sekme şeritleri kesilmesin */
+  [style*="overflow-x"], .overflow-x-auto { scrollbar-width: none; }
+  [style*="overflow-x"]::-webkit-scrollbar, .overflow-x-auto::-webkit-scrollbar { display: none; }
+
+  /* 7) Alt navigasyon içeriği kapatmasın */
+  main, .page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+  .ml-root, .pl-root, .mg-root {
+    padding-bottom: calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* 8) Uzun metin/sayılar kutuyu patlatmasın */
+  h1, h2, h3, td, th { overflow-wrap: anywhere; }
+}

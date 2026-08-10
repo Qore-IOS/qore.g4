@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -30,6 +31,7 @@ import {
 import { format, parseISO } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import Link from 'next/link';
 
 // Accent color (neumorphic)
@@ -42,6 +44,7 @@ const PAGE_SIZE = 20;
 type TaskTypeFilter = 'all' | string;
 
 export default function TumIslemlerPanel() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const [tasks, setTasks] = useState<PurchasingTask[]>([]);
   const [personnel, setPersonnel] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,7 +63,7 @@ export default function TumIslemlerPanel() {
   // Fetch tasks
   useEffect(() => {
     const q = query(
-      collection(db, 'purchasingTasks'),
+      scopedQuery('purchasingTasks', currentCompanyId, isSuperAdmin),
       orderBy('date', 'desc')
     );
     const unsub = onSnapshot(

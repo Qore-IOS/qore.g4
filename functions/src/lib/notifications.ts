@@ -17,6 +17,7 @@ type NotificationType =
   | 'fault_reminder'
   | 'maintenance_reminder'
   | 'external_stock_usage'
+  | 'ceomed_irsaliye_olusturuldu'
   | 'custom';
 
 export type ResourceType =

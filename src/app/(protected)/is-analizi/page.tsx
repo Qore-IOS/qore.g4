@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useState, useMemo, useEffect, useCallback, ChangeEvent } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import type { DateRange } from 'react-day-picker';
 import {
     Users, Microscope, AlertCircle, RefreshCcw, Clock, Building, Upload, Filter, Info, History, Save, Settings, X, ChevronDown, ChevronUp, Trash2, Database, Zap
@@ -209,9 +210,19 @@ export default function IsAnaliziPage() {
         setFilters, loadHospitalDefinitions, resetFilters, loadDataFromFirestore, resetAnalysisData,
         showAllData, loadAllDataFromFirestore, processingProgress, viewMode, setViewMode,
         // Yeni summary-based state
-        useSummaryMode, dashboardData, filterOptions: storeFilterOptions, loadFilterOptionsFromFirestore
+        useSummaryMode, dashboardData, filterOptions: storeFilterOptions, loadFilterOptionsFromFirestore,
+        setCompanyScope
     } = useLbysDataStore();
     const { toast } = useToast();
+    const { currentCompanyId, isSuperAdmin } = useAuth();
+
+    // Store bir React bileşeni olmadığı için useAuth() çağıramaz; şirket
+    // kapsamını buradan veriyoruz. Bu YAPILMAZSA companyId null kalır,
+    // normalizeCompanyId onu '__legacy__'ye çevirir, scopedQuery filtresiz
+    // sorgu üretir ve kurallar sorguyu reddeder.
+    useEffect(() => {
+        setCompanyScope({ companyId: currentCompanyId ?? null, isSuperAdmin: isSuperAdmin ?? false });
+    }, [currentCompanyId, isSuperAdmin, setCompanyScope]);
 
     const [detailModalOpen, setDetailModalOpen] = useState(false);
     const [detailModalData, setDetailModalData] = useState<{ title: string; data: Record<string, number>, type: 'service' | 'test' } | null>(null);
@@ -227,7 +238,7 @@ export default function IsAnaliziPage() {
         if (filters.dateRange.from && filters.dateRange.to) {
             loadDataFromFirestore({ from: filters.dateRange.from, to: filters.dateRange.to });
         }
-    }, [loadHospitalDefinitions, loadFilterOptionsFromFirestore, loadDataFromFirestore]);
+    }, [loadHospitalDefinitions, loadFilterOptionsFromFirestore, loadDataFromFirestore, currentCompanyId, isSuperAdmin]);
 
     // This effect triggers a re-fetch whenever the date range filter changes.
     useEffect(() => {

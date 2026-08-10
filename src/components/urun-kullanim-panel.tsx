@@ -1014,7 +1014,7 @@ export default function UrunKullanimPanel() {
       fiveMinutesAgo.setMinutes(fiveMinutesAgo.getMinutes() - 5);
 
       const q = query(
-        collection(db, 'tuketimKayitlari'),
+        scopedQuery('tuketimKayitlari', currentCompanyId, isSuperAdmin),
         where('stokKodu', '==', stokKodu),
         where('seriNumarasi', '==', seriNumarasi),
         where('consumptionTimestamp', '>=', Timestamp.fromDate(fiveMinutesAgo))

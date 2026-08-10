@@ -78,7 +78,7 @@ export default function LojistikTamamlananPanel() {
         } as Order;
       });
     const unsubLive = onSnapshot(
-      query(collection(db, 'orders'), where('isPeripheral', '==', true), where('status', '==', 'completed')),
+      query(scopedQuery('orders', currentCompanyId, isSuperAdmin), where('isPeripheral', '==', true), where('status', '==', 'completed')),
       (snap) => { setLiveCompleted(mapDocs(snap)); setLoading(false); }
     );
     const unsubArchive = onSnapshot(

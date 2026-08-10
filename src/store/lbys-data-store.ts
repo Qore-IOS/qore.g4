@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
 import { collection, getDocs, writeBatch, doc, query, setDoc, where, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
 import {
@@ -129,6 +130,14 @@ interface LbysStore {
 
   // Yeni flag: summary mode aktif mi
   useSummaryMode: boolean;
+  /**
+   * Oturumun şirket kapsamı. Firestore kuralları `list` sorgularında companyId
+   * filtresi zorunlu kıldığı için store'un da bunu bilmesi gerekiyor; store bir
+   * React bileşeni olmadığından `useAuth()` çağıramaz, bu yüzden kapsam
+   * dışarıdan bir kez set edilir.
+   */
+  companyScope: { companyId: string | null; isSuperAdmin: boolean };
+  setCompanyScope: (scope: { companyId: string | null; isSuperAdmin: boolean }) => void;
 
   setViewMode: (mode: ViewMode) => void;
   loadDataFromFirestore: (dateRange: { from: Date; to: Date }) => Promise<void>;
@@ -263,9 +272,14 @@ export const useLbysDataStore = create<LbysStore>()(
         }
       },
 
+      companyScope: { companyId: null, isSuperAdmin: false },
+
+      setCompanyScope: (scope) => set({ companyScope: scope }),
+
+
       loadHospitalDefinitions: async () => {
         try {
-          const snap = await getDocs(collection(db, 'config_hospitals'));
+          const snap = await getDocs(scopedQuery('config_hospitals', get().companyScope.companyId, get().companyScope.isSuperAdmin));
           const defs: Record<string, string> = {};
           snap.forEach(d => { defs[d.id] = d.data().name });
           set({ hospitalDefinitions: defs });
@@ -369,7 +383,7 @@ export const useLbysDataStore = create<LbysStore>()(
             const endDate = format(dateRange.to, 'yyyy-MM-dd');
 
             const q = query(
-                collection(db, 'analysis_results'),
+                scopedQuery('analysis_results', get().companyScope.companyId, get().companyScope.isSuperAdmin),
                 where('date', '>=', startDate),
                 where('date', '<=', endDate)
             );
@@ -411,7 +425,7 @@ export const useLbysDataStore = create<LbysStore>()(
             const startDate = format(ninetyDaysAgo, 'yyyy-MM-dd');
 
             const q = query(
-                collection(db, 'analysis_results'),
+                scopedQuery('analysis_results', get().companyScope.companyId, get().companyScope.isSuperAdmin),
                 where('date', '>=', startDate)
             );
 
@@ -888,7 +902,7 @@ export const useLbysDataStore = create<LbysStore>()(
             return dates;
           } else {
             // Legacy mode: analysis_results'tan unique tarihleri al
-            const snapshot = await getDocs(collection(db, 'analysis_results'));
+            const snapshot = await getDocs(scopedQuery('analysis_results', get().companyScope.companyId, get().companyScope.isSuperAdmin));
             const dateSet = new Set<string>();
             snapshot.forEach((doc) => {
               const data = doc.data();

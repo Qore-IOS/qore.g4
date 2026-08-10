@@ -9,6 +9,7 @@ import { Loader2, DatabaseZap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 export default function AdminBackfillHedefKurumId() {
   const [busy, setBusy] = useState(false);
@@ -23,8 +24,8 @@ export default function AdminBackfillHedefKurumId() {
     setBusy(true);
     try {
       const [labsSnap, stokSnap] = await Promise.all([
-        getDocs(collection(db, 'hospitals')),
-        getDocs(query(collection(db, 'depoStok'), where('isShipped', '==', true), where('hedefKurumId', '==', null))),
+        getDocs(scopedQuery('hospitals', currentCompanyId, isSuperAdmin)),
+        getDocs(query(scopedQuery('depoStok', currentCompanyId, isSuperAdmin), where('isShipped', '==', true), where('hedefKurumId', '==', null))),
       ]);
       const labs: Hospital[] = filterByCompanyScope(
         labsSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),

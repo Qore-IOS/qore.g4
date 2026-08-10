@@ -32,6 +32,8 @@ import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFo
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { reserveActionFormNumber } from '@/lib/form-number';
+import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import type { BuildIrsaliyeGirisInput } from '@/lib/ceomed/irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   useProductCodes,
@@ -79,6 +81,8 @@ type ActionItem = {
   poolWarehouseId?: string;
   poolWarehouseName?: string;
   serialNumber?: string;
+  /** Kaynak stok kaydından taşınan lot numarası — Ceomed irsaliye girişi lot alanı için. */
+  lotNumber?: string;
   hucreNumarasi?: string;           // Hücre numarası (takılan)
   removedHucreNumarasi?: string;    // Çıkan hücre numarası
   channelSelections?: ('CH1' | 'CH2')[];
@@ -466,7 +470,7 @@ export default function IslemFormuPage() {
     (async () => {
       try {
         const q = query(
-          collection(db, 'personalStock'),
+          scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
           where('ownerUid', '==', currentUserProfile.uid),
           where('status', '==', 'in_stock')
         );
@@ -1010,6 +1014,7 @@ export default function IslemFormuPage() {
         stokKodu: matchingStockItem.stokKodu,
         stokAdi: matchingStockItem.stokAdi,
         serialNumber: matchingStockItem.serialNumber,
+        lotNumber: matchingStockItem.lotNumber,
         personalStockId: matchingStockItem.id,
         quantity: 1,
         periodicPartChangeId: partChangeId,
@@ -1381,6 +1386,7 @@ export default function IslemFormuPage() {
         stokAdi: selectedStockItem.stokAdi,
         anaBirim: selectedStockItem.anaBirim || 'Adet',
         serialNumber: selectedStockItem.serialNumber,
+        lotNumber: selectedStockItem.lotNumber,
         personalStockId: selectedStockItem.id,
         quantity: 1, // Personal stock items are individual
         removedPartStokKodu: installedPartDefaults.stokKodu,
@@ -1415,6 +1421,7 @@ export default function IslemFormuPage() {
         stokAdi: selectedPoolStockItem.stokAdi,
         anaBirim: selectedPoolStockItem.anaBirim || 'Adet',
         serialNumber: selectedPoolStockItem.serialNumber,
+        lotNumber: selectedPoolStockItem.lotNumber,
         poolStockId: selectedPoolStockItem.id,
         poolWarehouseId: selectedPoolStockItem.poolWarehouseId,
         poolWarehouseName: selectedPoolStockItem.poolWarehouseName,
@@ -1450,6 +1457,7 @@ export default function IslemFormuPage() {
         stokAdi: selectedDepotStockItem.stokAdi,
         anaBirim: selectedDepotStockItem.anaBirim || 'Adet',
         serialNumber: selectedDepotStockItem.serialNumber,
+        lotNumber: selectedDepotStockItem.lotNumber,
         hucreNumarasi: selectedDepotStockItem.hucreNumarasi,
         depotStockId: getDepotSelectionKey(selectedDepotStockItem),
         isDepotSelection: true,
@@ -1706,7 +1714,7 @@ export default function IslemFormuPage() {
 
     if (remainingToConsume > 0 && !isGroupedDepotKey) {
       const q = query(
-        collection(db, 'yedekParcaDepoStok'),
+        scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
         where('stokKodu', '==', partChange.stokKodu)
       );
       const snapshot = await getDocs(q);
@@ -1929,6 +1937,10 @@ export default function IslemFormuPage() {
         }> = [];
         const labMasterFormRef = isLabMode ? doc(collection(db, 'teknikServisActionForms')) : null;
         const createdFormsData: any[] = [];
+        // Ceomed irsaliye işleri BATCH'E YAZILMAZ; commit'ten sonra ayrı yazılır.
+        // Aynı batch'te yazmak, kuyruk tarafındaki bir sorunda formun tamamını
+        // düşürüyordu (bkz. enqueue-irsaliye-giris.ts).
+        const irsaliyeGirisleri: BuildIrsaliyeGirisInput[] = [];
 
         // Parallel PDF generation and DB writing start here
         const formNumberPromises: Promise<string>[] = [];
@@ -2032,6 +2044,25 @@ export default function IslemFormuPage() {
              actionRecord: { id: formRef.id, ...formEntries }
           });
 
+          // Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesini kuyruğa almak
+          // üzere biriktir. Yazım commit'ten SONRA yapılır.
+          irsaliyeGirisleri.push({
+            formId: formRef.id,
+            formNo,
+            formType: 'teknik_servis',
+            tarih: baslangicTarihi,
+            hospitalId: currentDevice.hospitalId,
+            cariKodu: hospital?.ceomedCariKodu,
+            labName: hospital?.name,
+            deviceId: currentDeviceId,
+            cihazAdi: currentDevice.cihazAdi || currentDevice.model,
+            seriNumarasi: currentDevice.seriNumarasi,
+            personnelName: currentUserProfile?.name,
+            personnelUid: currentUserProfile?.uid,
+            companyId: currentCompanyId,
+            actions: deviceActions,
+          });
+
           if (!isLabMode) {
             const deviceFormRef = doc(collection(db, 'deviceActionForms'), formRef.id);
             batch.set(deviceFormRef, formEntries);
@@ -2048,7 +2079,7 @@ export default function IslemFormuPage() {
             const supportPerson = previousEslikEdenPersonel.length > 0 ? previousEslikEdenPersonel[0] : null;
 
             const faultReportRef = doc(collection(db, 'deviceFaultReports'));
-            batch.set(faultReportRef, {
+            batch.set(faultReportRef, withCompanyScope({
               deviceId: currentDeviceId,
               hospitalId: currentDevice.hospitalId,
               labName: hospital?.name,
@@ -2081,7 +2112,7 @@ export default function IslemFormuPage() {
               relatedTests: previousSelectedTests.length > 0 ? previousSelectedTests : null,
               isCustomFault: isCustomFault || false,
               createdFromActionForm: true,
-            });
+            }, currentCompanyId));
 
             const historyOpenedRef = doc(collection(db, 'deviceFaultReports', faultReportRef.id, 'history'));
             batch.set(historyOpenedRef, {
@@ -2287,6 +2318,43 @@ export default function IslemFormuPage() {
         await batch.commit();
 
         if (currentDraftId) await deleteDoc(doc(db, 'draftActionForms', currentDraftId));
+
+        // Form KAYDEDİLDİ. Ceomed irsaliyesi buradan sonra, ayrı yazımlarla
+        // kuyruğa alınır; buradaki bir hata formu etkilemez.
+        if (irsaliyeGirisleri.length > 0) {
+          const bekleyenler: string[] = [];
+          const yazilamayanlar: string[] = [];
+          for (const girdi of irsaliyeGirisleri) {
+            const sonuc = await enqueueIrsaliyeGirisAyri(db, girdi);
+            // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve
+            // bu modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.
+            if (sonuc.enqueued === true && sonuc.status === 'blocked') {
+              bekleyenler.push(sonuc.blockedDetail || 'Ceomed irsaliyesi eksik veri nedeniyle bekliyor.');
+            } else if (sonuc.enqueued === false && sonuc.reason === 'yazilamadi') {
+              yazilamayanlar.push(sonuc.hata || 'bilinmeyen hata');
+            }
+          }
+          // Sessizce geçmek, eksiğin haftalar sonra fark edilmesi demek.
+          if (bekleyenler.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi beklemede',
+              description: Array.from(new Set(bekleyenler)).join(' '),
+              variant: 'destructive',
+              duration: 12000,
+            });
+          }
+          if (yazilamayanlar.length > 0) {
+            toast({
+              title: 'Ceomed irsaliyesi kuyruğa alınamadı',
+              description:
+                'Form kaydedildi. Ancak muhasebe irsaliyesi otomatik ' +
+                'oluşturulmayacak; Ceomed’de elle kesilmesi gerekiyor. Sebep: ' +
+                Array.from(new Set(yazilamayanlar)).join(' '),
+              variant: 'destructive',
+              duration: 15000,
+            });
+          }
+        }
 
         queryClient.invalidateQueries({ queryKey: ['maintenanceLogs', 'forDevice', deviceId] });
         queryClient.invalidateQueries({ queryKey: ['maintenancePlans', 'forDevice', deviceId] });
@@ -3384,6 +3452,7 @@ export default function IslemFormuPage() {
               depotStockId: row.stockSourceTab === 'depot' ? selectedItem.id : undefined,
               isDepotSelection: row.stockSourceTab === 'depot',
               serialNumber: selectedItem.serialNumber,
+              lotNumber: (selectedItem as any).lotNumber,
               hucreNumarasi: selectedItem.hucreNumarasi || '',
               removedHucreNumarasi: removedHn,
               channelSelections: row.selectedChannel ? [row.selectedChannel] : [],
