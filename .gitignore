@@ -23,6 +23,10 @@
 # production
 /build
 
+# electron masaüstü kabuğu (desktop/) — paketleme çıktıları
+desktop/dist/
+desktop/package-lock.json
+
 # misc
 .DS_Store
 *.pem
