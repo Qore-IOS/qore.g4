@@ -62,6 +62,14 @@ export type TransferWriteContext = {
   actorName: string | null;
   /** `stokKodu → { anaBirim, ambalajDegeri }` — irsaliye satırı için. */
   productMetaByCode?: Map<string, { anaBirim?: string; ambalajDegeri?: number | null }>;
+  /**
+   * Bu sevkiyat bir siparişi karşılıyorsa siparişin kimliği.
+   *
+   * Verildiğinde defter olayı `transfer` yerine `siparis_karsilama` tipiyle
+   * yazılır ve `refs.orderId` doldurulur — sipariş karşılama ile serbest
+   * transfer, geçmişte birbirinden ayırt edilebilmelidir.
+   */
+  orderId?: string | null;
 };
 
 /** Tek bir kalemin yazımından dönen, çağıranın ihtiyaç duyduğu bilgiler. */
@@ -208,7 +216,7 @@ export function applyTransferItemWrites(
     });
 
     ledgerEvents.push({
-      type: ctx.isBorcMode ? 'borc' : 'transfer',
+      type: ctx.isBorcMode ? 'borc' : ctx.orderId ? 'siparis_karsilama' : 'transfer',
       stokKodu: item.stokKodu,
       stokAdi: item.stokAdi,
       seriNumarasi: item.seriNumarasi,
@@ -222,7 +230,11 @@ export function applyTransferItemWrites(
       location: ctx.isBorcMode
         ? { locationType: 'borc', locationId: ctx.targetBorcDepotId || '', locationName: ctx.targetName }
         : { locationType: 'lab', locationId: ctx.targetHospitalId || '', locationName: ctx.targetName },
-      refs: { transferId: ctx.transferRef.id, depoStokId: targetDocId },
+      refs: {
+        transferId: ctx.transferRef.id,
+        depoStokId: targetDocId,
+        ...(ctx.orderId ? { orderId: ctx.orderId } : {}),
+      },
       actorUid: ctx.actorUid,
       actorName: ctx.actorName,
       details: { adet: transferQty, company: ctx.isBorcMode ? ctx.company ?? null : null },
@@ -242,7 +254,10 @@ export function applyTransferItemWrites(
           locationId: ctx.targetHospitalId || '',
           locationName: ctx.targetName,
         },
-        refs: { transferId: ctx.transferRef.id },
+        refs: {
+          transferId: ctx.transferRef.id,
+          ...(ctx.orderId ? { orderId: ctx.orderId } : {}),
+        },
         actorUid: ctx.actorUid,
         actorName: ctx.actorName,
         details: { reason: 'hedefte_tuketim_takibi_kapali' },

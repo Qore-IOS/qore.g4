@@ -10,12 +10,52 @@
  *   3. `process.env.NEXT_PUBLIC_*` → derleme zamanında sabit değerler
  */
 
+import fs from 'node:fs';
 import path from 'node:path';
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const ROOT = path.resolve(__dirname);
 const TERMINAL_ROOT = path.join(ROOT, 'terminal-app');
+
+/**
+ * Tutanak PDF'inin ihtiyaç duyduğu varlıklar.
+ *
+ * `loadClayKit()` bunları çalışma anında `/fonts/...`, `/invlogo.png` gibi
+ * MUTLAK yollardan çeker. Paket çevrimdışı çalıştığı için dosyaların
+ * uygulamayla birlikte gelmesi gerekir; aksi hâlde jsPDF Helvetica'ya düşer
+ * ve Türkçe karakterler bozulur.
+ *
+ * `public/` klasörünün TAMAMI kopyalanmaz — orası 175 MB ve içinde terminalin
+ * kullanmadığı görseller/videolar var.
+ */
+const PDF_ASSETS = [
+  'fonts/Nunito-SemiBold.ttf',
+  'fonts/Nunito-ExtraBold.ttf',
+  'fonts/Nunito-Black.ttf',
+  'invlogo.png',
+  'blk.png',
+];
+
+/** Yalnızca gerekli public varlıklarını çıktı klasörüne kopyalar. */
+function copyPdfAssets(outDir: string): Plugin {
+  return {
+    name: 'qore-terminal-pdf-assets',
+    apply: 'build',
+    closeBundle() {
+      PDF_ASSETS.forEach(rel => {
+        const from = path.join(ROOT, 'public', rel);
+        const to = path.join(outDir, rel);
+        if (!fs.existsSync(from)) {
+          this.warn(`[terminal] PDF varlığı bulunamadı: public/${rel}`);
+          return;
+        }
+        fs.mkdirSync(path.dirname(to), { recursive: true });
+        fs.copyFileSync(from, to);
+      });
+    },
+  };
+}
 
 /**
  * Web uygulamasının okuduğu `NEXT_PUBLIC_*` değişkenleri.
@@ -36,6 +76,9 @@ const PUBLIC_ENV_KEYS = [
   'NEXT_PUBLIC_FIREBASE_VAPID_KEY',
   'NEXT_PUBLIC_FB_FUNCTION_REGION',
 ] as const;
+
+/** Electron kabuğunun paketlediği çıktı klasörü. */
+const OUT_DIR = path.join(ROOT, 'desktop/renderer-dist');
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ROOT, '');
@@ -66,7 +109,7 @@ export default defineConfig(({ mode }) => {
     // Varlıklar `app://` özel protokolünden göreli yollarla yüklenir; kök
     // ('/') tabanı orada 404 verir.
     base: './',
-    plugins: [react()],
+    plugins: [react(), copyPdfAssets(OUT_DIR)],
     define,
     resolve: {
       alias: [
@@ -86,7 +129,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       // Electron kabuğu bu klasörü paketler.
-      outDir: path.join(ROOT, 'desktop/renderer-dist'),
+      outDir: OUT_DIR,
       emptyOutDir: true,
       // Kaynak haritaları çevrimdışı hata ayıklamayı gerçekten kolaylaştırır
       // ve paket zaten kullanıcıya değil, kurum içi makinelere gider.

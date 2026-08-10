@@ -46,18 +46,49 @@ Electron'da `signInWithEmailAndPassword` sorunsuz çalışır. Google ile giriş
 | `/terminal` | Başlangıç ekranı, depo seçimi | Depo seçimi cihazda hatırlanır (`useTerminalDepot`) |
 | `/terminal/mal-kabul` | Barkod okut → raf/irsaliye ata → stoğa al | **Seri numaralı** kalemler. Lot/adet grupları, irsaliye OCR'ı, Excel içe aktarma ve toplu QR devri web panelinde kalır |
 | `/terminal/transfer` | Depodan laboratuvara sevk | **Seri numaralı** kalemler. Borç modu, FEFO kısmi tahsis, şablonlar ve tutanak basımı web panelinde kalır |
-| `/terminal/siparisler` | Açık siparişleri listeler | Toplama, mevcut `/siparisler/[orderId]/toplama` ekranına devredilir — bkz. aşağıdaki not |
+| `/terminal/siparisler` | Açık siparişleri listeler | Toplama `/terminal/toplama` ekranında |
+| `/terminal/toplama` | Sipariş toplama (FEFO önerili) | **Seri numaralı** kalemler; `?order=<id>` ile açılır |
 | `/terminal/sorgu` | Barkod okut → ürün nerede | Salt okunur |
 
-### Sipariş toplama neden yeniden yazılmadı
+### Sipariş toplama nasıl ortaklaştırıldı
 
-`/siparisler/[orderId]/toplama`, gerekçeli FEFO aşımı, karışık lot/seri takip
-modları, kurum bazlı özel ürün tanımları, eksik/kısmi kapanış ve sevk kaydı
-oluşturmayı içeren, üretimde oturmuş büyük bir akıştır. Terminale ikinci bir
-kopyasını yazmak, iki uygulamanın sevkiyatı farklı kurallarla kapatması
-demekti. Terminal siparişleri sade biçimde listeler ve toplamayı mevcut ekrana
-devreder; o ekran zaten HID okuyucu odaklıdır ve masaüstü penceresinde
-sorunsuz çalışır.
+Terminal toplama ekranı SADE bir sürümdür ama ikinci bir yazma yolu açmaz:
+
+- Stok hareketi `applyTransferItemWrites` ile yazılır — direkt transferin
+  kullandığı fonksiyonun aynısı. Sipariş bağlamı `orderId` alanıyla verilir;
+  o zaman defter olayı `siparis_karsilama` tipiyle yazılır.
+- Siparişin kapanışı `applyOrderCompletionWrite` ile yapılır: tam
+  karşılandıysa `ordersArchive`'a taşınır, kısmiyse kalan kalemler yazılıp
+  durum `kismi` olur. Bu kural web ekranından çıkarılmıştır.
+
+Terminalde bilerek YOKTUR: gerekçeli FEFO aşımı (burada FEFO bir öneridir,
+engel değil), kurum bazlı özel ürün sıralaması, iki adımlı doğrulama. Bu
+durumlar için web toplama ekranı kullanılmalıdır.
+
+## Önyükleme: veri girişte iner
+
+Terminal açılırken tüm çalışma verisi yerele indirilir (`src/lib/terminal-prefetch.ts`):
+stok kartları, barkod formatları, depolar, laboratuvarlar ve seçili deponun
+stoğu + siparişleri. İndirme `onSnapshot` ile yapılır — ilk anlık görüntü
+indirmedir, sonraki değişiklikler önbelleği kendiliğinden günceller.
+
+Amaç, beklemeyi İŞLEM ANINDAN alıp açılışa taşımaktır. Açılış ekranı yalnızca
+ilk indirmede görünür; sonraki açılışlarda veri diskte olduğu için göz kırpar
+gibi geçer.
+
+## İşlemler beklemez
+
+Terminaldeki hiçbir düğme sunucu yanıtı beklemez:
+
+- `queueWrite()` yazımı kuyruğa alır ve ANINDA döner. Firestore veriyi yerel
+  önbelleğe senkron uyguladığı için sonuç zaten doğrudur.
+- Liste, yazım gönderilmeden önce temizlenir; kullanıcı bir sonraki işe geçer.
+- Gönderim durumu üst şeritteki bağlantı göstergesinden izlenir.
+
+Mal kabulde **geçmiş seri kontrolü okutma anında, arka planda** yapılır —
+kaydetme anında değil. Böylece hem düğme beklemez, hem de kullanıcı sorunu
+kutuyu elindeyken görür. Engelli seriler satırda işaretlenir ve kaydetmede
+atlanır.
 
 ## Arayüz ilkeleri
 
@@ -122,6 +153,31 @@ uygulamada en tehlikeli şey, kullanıcının çevrimdışı olduğunu bilmemesi
   odak vermeyi unuttum, tarama kayboldu" sorunu ortadan kalkar
 - **Yazıcı:** `window.qoreDesktop.print({ silent: true })` ile etiket/irsaliye
   yazıcısına diyalogsuz basım
+
+## Transfer tutanağı
+
+Direkt transfer tamamlandığında sağ üstte "Tutanağı indir" kartı belirir. PDF,
+transfer geçmişi detay sayfasının kullandığı `generateTransferTutanakPDF`
+üreticisiyle oluşturulur — tasarım birebir aynıdır, ikinci bir şablon yoktur.
+
+Tutanak verisi Firestore'dan DEĞİL, işlem anında saklanan bellekten gelir:
+transfer henüz kuyrukta olabilir ve çevrimdışıyken sunucudan okunamaz. PDF'in
+fontları ve logoları pakete gömülür (`vite.config.terminal.ts` → `copyPdfAssets`),
+aksi hâlde çevrimdışı basımda Türkçe karakterler bozulurdu.
+
+## Açık / koyu tema
+
+Terminal her iki temada da çalışır; anahtar üst şeritte. Tercih **makineye**
+aittir (kullanıcı profiline değil) ve `localStorage`'da saklanır — aynı hesapla
+giren iki terminalden biri güneş alan bir rampada, diğeri loş bir depoda
+olabilir.
+
+Tema React yüklenmeden `theme-boot.js` ile uygulanır; ayrı dosya olmasının
+sebebi CSP'nin satır içi betiğe izin vermemesidir.
+
+Zemin BİLEREK `body`'ye verilmez: `globals.css` `body`'yi
+`background: transparent !important` ile saydam bırakıp zemini `html` üzerinde
+boyar. Terminal stillerine bir `body` kuralı yazmak sessizce etkisiz kalır.
 
 ## Gömülü paket nasıl üretilir
 

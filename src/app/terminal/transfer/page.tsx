@@ -14,7 +14,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { Loader2, Trash2 } from 'lucide-react';
+import { FileDown, Loader2, Trash2 } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -33,7 +33,7 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 import { playFeedback } from '@/lib/utils';
 import { withCompanyScope } from '@/lib/company-scope';
-import { commitLocalFirst } from '@/lib/offline-write';
+import { queueWrite } from '@/lib/offline-write';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
@@ -43,6 +43,9 @@ import {
 } from '@/lib/direkt-transfer/write';
 import { getStockItemQuantity } from '@/lib/stock-quantity';
 import type { DepoStokItem } from '@/lib/types';
+// Tutanak, transfer geçmişi detay sayfasının kullandığı ÜRETİCİNİN AYNISIYLA
+// oluşturulur — tasarım birebir aynı olsun diye ikinci bir şablon yazılmadı.
+import { generateTransferTutanakPDF } from '@/components/exports/TransferTutanakPDFButton';
 import {
   ScanFeedbackBar,
   TerminalButton,
@@ -56,6 +59,30 @@ const IDLE: ScanFeedback = {
   tone: 'idle',
   title: 'Okutmaya hazır',
   detail: 'Sevk edilecek ürünü okutun.',
+};
+
+/**
+ * Tutanak için saklanan son transfer.
+ *
+ * Firestore'dan yeniden okumak yerine bellekte tutulur: transfer henüz
+ * kuyrukta olabilir ve çevrimdışıyken sunucudan okunamaz. Tutanağın
+ * çevrimdışı da basılabilmesi gerekir.
+ */
+type LastTransfer = {
+  transferId: string;
+  depotName: string;
+  labName: string;
+  at: Date;
+  items: Array<{
+    stokKodu: string;
+    urun: string;
+    lot?: string;
+    miad?: string;
+    adet: number;
+    anaBirim?: string;
+    ambalajDegeri?: number | null;
+    seriNo?: string;
+  }>;
 };
 
 export default function TerminalTransferPage() {
@@ -73,7 +100,9 @@ export default function TerminalTransferPage() {
   const [labId, setLabId] = useState('');
   const [items, setItems] = useState<DepoStokItem[]>([]);
   const [feedback, setFeedback] = useState<ScanFeedback>(IDLE);
-  const [isSaving, setIsSaving] = useState(false);
+  const [lastTransfer, setLastTransfer] = useState<LastTransfer | null>(null);
+  const [tutanakBusy, setTutanakBusy] = useState(false);
+
 
   const { data: depotStock = [], isPending: stockPending } = useUnshippedDepoStokByDepot(
     depotId || null,
@@ -165,16 +194,21 @@ export default function TerminalTransferPage() {
     [depotId, labId, parseAndResolveBarcode, formats, productCodes, stockBySerial],
   );
 
-  useHidScanner({ enabled: !isSaving, onScan: handleScan });
+  useHidScanner({ onScan: handleScan });
 
   const removeItem = (id: string) => {
     pickedIds.current.delete(id);
     setItems(prev => prev.filter(i => i.id !== id));
   };
 
-  const handleCommit = async () => {
-    if (items.length === 0 || !depotId || !labId || !currentUser || isSaving) return;
-    setIsSaving(true);
+  /**
+   * Transferi tamamla — BEKLEMEDEN.
+   *
+   * Liste anında temizlenir; Firestore yazımı yerel önbelleğe senkron
+   * uygulandığı için veri o an doğrudur ve gönderim arka planda yürür.
+   */
+  const handleCommit = () => {
+    if (items.length === 0 || !depotId || !labId || !currentUser) return;
 
     const transferRef = doc(collection(db, 'transfers'));
     const ctx: TransferWriteContext = {
@@ -195,68 +229,105 @@ export default function TerminalTransferPage() {
       ),
     };
 
-    try {
-      const batch = writeBatch(db);
-      const ledgerEvents: SerialEventInput[] = [];
-      let totalShippedAdet = 0;
+    let batch;
+    const ledgerEvents: SerialEventInput[] = [];
+    let totalShippedAdet = 0;
 
+    try {
+      batch = writeBatch(db);
       items.forEach(item => {
         const result = applyTransferItemWrites(batch, item, ctx, currentCompanyId);
         ledgerEvents.push(...result.ledgerEvents);
         totalShippedAdet += result.transferQty;
       });
-
       batch.set(
         transferRef,
         withCompanyScope(buildTransferHeader(ctx, totalShippedAdet, serverTimestamp()), currentCompanyId),
       );
-
-      // `await batch.commit()` DEĞİL: çevrimdışıyken o söz hiç çözülmez ve
-      // buton sonsuza kadar "Sevk ediliyor…" kalır. Yazım yerele uygulanır,
-      // bağlantı gelince SDK kendisi gönderir.
-      const outcome = await commitLocalFirst(batch.commit());
-
-      // Defter yazımı stok yazımından SONRA ve AYRI gelir; burada bir hata
-      // olursa transfer geri alınmaz (ürünler gerçekten taşındı). Defter
-      // türetilmiş bir dizindir, yönetim panelinden yeniden kurulabilir.
-      // Beklenmez: çevrimdışıyken kuyruğa girer ve kullanıcıyı oyalamamalı.
-      void appendSerialEvents(ledgerEvents, currentCompanyId).catch(() => {
-        /* stok doğru; defter sonradan doldurulabilir */
-      });
-
-      void touchStockMetadata();
-      invalidateDepoStok();
-
-      setItems([]);
-      pickedIds.current.clear();
-
-      const pending = outcome === 'pending';
-      setFeedback({
-        tone: pending ? 'warning' : 'success',
-        title: `${totalShippedAdet} adet sevk edildi`,
-        detail: pending
-          ? 'Bağlantı yok — kayıt cihazda, internet gelince gönderilecek.'
-          : `Hedef: ${ctx.targetName}`,
-      });
-      toast({
-        title: pending ? 'Sevk kaydedildi (senkron bekliyor)' : 'Transfer tamamlandı',
-        description:
-          `${totalShippedAdet} adet ürün ${ctx.targetName} kurumuna transfer edildi.` +
-          (pending ? ' Bağlantı geldiğinde otomatik gönderilecek.' : ''),
-      });
     } catch (error) {
+      // Yalnızca yazım HAZIRLANIRKEN oluşan hatalar (geçersiz veri gibi).
+      // Ağ sorunları buraya düşmez; onlar kuyrukta bekler.
       toast({
-        title: 'Transfer başarısız',
+        title: 'Transfer hazırlanamadı',
         description: error instanceof Error ? error.message : 'Beklenmeyen bir hata oluştu.',
         variant: 'destructive',
       });
-      setFeedback({
-        tone: 'error',
-        title: 'Transfer başarısız',
-        detail: 'Liste korundu, tekrar deneyin.',
+      setFeedback({ tone: 'error', title: 'Transfer hazırlanamadı', detail: 'Liste korundu.' });
+      return;
+    }
+
+    // Tutanak için gereken her şey ŞİMDİ saklanır: liste birazdan
+    // temizlenecek ve kullanıcı tutanağı sonradan indirmek isteyebilir.
+    setLastTransfer({
+      transferId: transferRef.id,
+      depotName,
+      labName: ctx.targetName,
+      at: new Date(),
+      items: items.map(item => ({
+        stokKodu: item.stokKodu,
+        urun: item.stokAdi,
+        lot: item.lotNumarasi || '',
+        miad: typeof item.miad === 'string' ? item.miad : '',
+        // `getStockItemQuantity` gevşek tipli bir kayıttan okuduğu için
+        // `unknown` dönebiliyor; tutanak satırı sayı bekler.
+        adet: Number(item.transferAdet ?? getStockItemQuantity(item)) || 0,
+        anaBirim: ctx.productMetaByCode?.get(item.stokKodu || '')?.anaBirim,
+        ambalajDegeri: ctx.productMetaByCode?.get(item.stokKodu || '')?.ambalajDegeri ?? null,
+        seriNo: item.seriNumarasi || '',
+      })),
+    });
+
+    queueWrite(batch.commit());
+
+    // Defter yazımı stok yazımından AYRI ve beklenmez; hata olsa bile
+    // transfer geri alınmaz (ürünler gerçekten taşındı) ve defter yönetim
+    // panelinden yeniden kurulabilir.
+    void appendSerialEvents(ledgerEvents, currentCompanyId).catch(() => {});
+    void touchStockMetadata();
+    invalidateDepoStok();
+
+    setItems([]);
+    pickedIds.current.clear();
+    setFeedback({
+      tone: 'success',
+      title: `${totalShippedAdet} adet sevk edildi`,
+      detail: `Hedef: ${ctx.targetName} · Tutanak sağ üstten indirilebilir.`,
+    });
+    toast({
+      title: 'Transfer tamamlandı',
+      description: `${totalShippedAdet} adet ürün ${ctx.targetName} kurumuna transfer edildi.`,
+    });
+  };
+
+  /**
+   * Son transferin tutanağını indirir.
+   *
+   * Veri Firestore'dan DEĞİL, işlem anında saklanan bellekten gelir —
+   * çevrimdışıyken de çalışması gerekir.
+   */
+  const handleDownloadTutanak = async () => {
+    if (!lastTransfer || tutanakBusy) return;
+    setTutanakBusy(true);
+    try {
+      await generateTransferTutanakPDF(
+        {
+          shipmentId: lastTransfer.transferId,
+          depotName: lastTransfer.depotName,
+          kurumAdi: lastTransfer.labName,
+          tarih: lastTransfer.at.toLocaleDateString('tr-TR'),
+          saat: lastTransfer.at.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
+          olusturan: currentUserProfile?.name || currentUser?.email || '',
+        },
+        lastTransfer.items,
+      );
+    } catch (error) {
+      toast({
+        title: 'Tutanak oluşturulamadı',
+        description: error instanceof Error ? error.message : 'Beklenmeyen bir hata oluştu.',
+        variant: 'destructive',
       });
     } finally {
-      setIsSaving(false);
+      setTutanakBusy(false);
     }
   };
 
@@ -265,7 +336,31 @@ export default function TerminalTransferPage() {
       title="Direkt Transfer"
       subtitle={depotName ? `${depotName} → ${targetLab?.name || 'hedef seçilmedi'}` : 'Depo seçilmedi'}
       onBack={() => router.push('/terminal')}
-      right={<TerminalStat label="Kalem" value={items.length} />}
+      right={
+        <div className="flex items-center gap-3">
+          {lastTransfer ? (
+            <button
+              type="button"
+              onClick={handleDownloadTutanak}
+              disabled={tutanakBusy}
+              className="flex items-center gap-3 rounded-xl border border-primary/40 bg-primary/10 px-5 py-3 text-left transition hover:bg-primary/20 disabled:opacity-60"
+            >
+              {tutanakBusy ? (
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              ) : (
+                <FileDown className="h-5 w-5 text-primary" />
+              )}
+              <span>
+                <span className="block text-xs uppercase tracking-wide text-muted-foreground">
+                  Son işlem
+                </span>
+                <span className="block text-sm font-semibold">Tutanağı indir</span>
+              </span>
+            </button>
+          ) : null}
+          <TerminalStat label="Kalem" value={items.length} />
+        </div>
+      }
     >
       <div className="flex h-full min-h-0 flex-col gap-4 p-6">
         <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-2">
@@ -290,7 +385,7 @@ export default function TerminalTransferPage() {
         </div>
 
         {depotId && stockPending ? (
-          <p className="shrink-0 text-sm text-amber-300">
+          <p className="shrink-0 text-sm text-amber-700 dark:text-amber-300">
             Depo stoğu yükleniyor — okutmaya başlamadan önce bekleyin, aksi hâlde
             depodaki ürünler «bu depoda değil» görünür.
           </p>
@@ -298,14 +393,14 @@ export default function TerminalTransferPage() {
 
         <ScanFeedbackBar feedback={feedback} />
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-zinc-800">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
           {items.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-muted-foreground">
               Henüz kalem okutulmadı.
             </div>
           ) : (
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-zinc-900 text-xs uppercase tracking-wide text-zinc-500">
+              <thead className="sticky top-0 bg-card text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Ürün</th>
                   <th className="px-4 py-3">Seri</th>
@@ -317,15 +412,15 @@ export default function TerminalTransferPage() {
               </thead>
               <tbody>
                 {items.map(item => (
-                  <tr key={item.id} className="border-t border-zinc-800">
+                  <tr key={item.id} className="border-t border-border">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-100">{item.stokAdi}</div>
-                      <div className="text-xs text-zinc-500">{item.stokKodu}</div>
+                      <div className="font-medium text-foreground">{item.stokAdi}</div>
+                      <div className="text-xs text-muted-foreground">{item.stokKodu}</div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-zinc-300">{item.seriNumarasi}</td>
-                    <td className="px-4 py-3 text-zinc-400">{item.lotNumarasi || '—'}</td>
-                    <td className="px-4 py-3 text-zinc-400">{item.rafAdresi || '—'}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-zinc-300">
+                    <td className="px-4 py-3 font-mono text-foreground/80">{item.seriNumarasi}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{item.lotNumarasi || '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{item.rafAdresi || '—'}</td>
+                    <td className="px-4 py-3 text-right tabular-nums text-foreground/80">
                       {getStockItemQuantity(item)}
                     </td>
                     <td className="px-4 py-3 text-right">
@@ -333,7 +428,7 @@ export default function TerminalTransferPage() {
                         type="button"
                         onClick={() => removeItem(item.id)}
                         aria-label="Satırı sil"
-                        className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                        className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-red-400"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -353,17 +448,13 @@ export default function TerminalTransferPage() {
               pickedIds.current.clear();
               setFeedback(IDLE);
             }}
-            disabled={items.length === 0 || isSaving}
+            disabled={items.length === 0}
           >
             Listeyi temizle
           </TerminalButton>
 
-          <TerminalButton
-            onClick={handleCommit}
-            disabled={items.length === 0 || !depotId || !labId || isSaving}
-          >
-            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-            {isSaving ? 'Sevk ediliyor…' : `Transfer et (${items.length})`}
+          <TerminalButton onClick={handleCommit} disabled={items.length === 0 || !depotId || !labId}>
+            {`Transfer et (${items.length})`}
           </TerminalButton>
         </div>
       </div>

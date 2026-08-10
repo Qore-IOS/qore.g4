@@ -20,6 +20,7 @@ import TerminalMalKabulPage from '@/app/terminal/mal-kabul/page';
 import TerminalTransferPage from '@/app/terminal/transfer/page';
 import TerminalSiparislerPage from '@/app/terminal/siparisler/page';
 import TerminalSorguPage from '@/app/terminal/sorgu/page';
+import TerminalToplamaPage from '@/app/terminal/toplama/page';
 import LoginPage from '@/app/login/page';
 
 /** Hash yolundan ekrana eşleme. */
@@ -29,13 +30,14 @@ const ROUTES: Record<string, React.ComponentType> = {
   '/terminal/transfer': TerminalTransferPage,
   '/terminal/siparisler': TerminalSiparislerPage,
   '/terminal/sorgu': TerminalSorguPage,
+  '/terminal/toplama': TerminalToplamaPage,
 };
 
 function FullScreenMessage({ title, detail }: { title: string; detail?: string }) {
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-2 bg-zinc-950 text-zinc-300">
+    <div className="flex h-screen flex-col items-center justify-center gap-2 bg-background text-muted-foreground">
       <p className="text-lg font-medium">{title}</p>
-      {detail ? <p className="text-sm text-zinc-500">{detail}</p> : null}
+      {detail ? <p className="text-sm text-muted-foreground">{detail}</p> : null}
     </div>
   );
 }

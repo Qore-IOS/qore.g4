@@ -50,9 +50,9 @@ export function ConnectionBadge() {
   const tone = !online ? 'offline' : pending > 0 ? 'syncing' : 'online';
 
   const styles = {
-    online: 'border-zinc-700 text-zinc-400',
-    syncing: 'border-amber-600 bg-amber-950/50 text-amber-100',
-    offline: 'border-red-600 bg-red-950/50 text-red-100',
+    online: 'border-border text-muted-foreground',
+    syncing: 'border-amber-600 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+    offline: 'border-red-600 bg-red-500/10 text-red-700 dark:text-red-200',
   } as const;
 
   const dot = {

@@ -14,7 +14,7 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, Trash2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -65,7 +65,14 @@ export default function TerminalMalKabulPage() {
   const [irsaliyeNumarasi, setIrsaliyeNumarasi] = useState('');
   const [rows, setRows] = useState<MalKabulWriteRow[]>([]);
   const [feedback, setFeedback] = useState<ScanFeedback>(IDLE);
-  const [isSaving, setIsSaving] = useState(false);
+  /**
+   * Seri No Defteri'nde "kabul edilemez" görünen seriler ve gerekçeleri.
+   *
+   * Kontrol OKUTMA ANINDA, arka planda yapılır — kaydetme anında değil.
+   * Sebebi iki yönlü: kullanıcı sorunu kutuyu elindeyken öğrenir (rafa
+   * koyduktan sonra değil), ve "Stoğa al" düğmesi hiçbir ağ turu beklemez.
+   */
+  const [blockedSerials, setBlockedSerials] = useState<Map<string, string>>(new Map());
 
   const sourceDepots = useMemo(
     () => filterOperationalSourceDepots(depots, currentUserProfile),
@@ -149,11 +156,24 @@ export default function TerminalMalKabulPage() {
         detail: `Seri ${serial}${parsed.lotNumarasi ? ` · Lot ${parsed.lotNumarasi}` : ''}`,
       });
       playFeedback();
+
+      // Geçmiş seri kontrolü ARKA PLANDA. Okutma yolunu bloke etmez; sonuç
+      // gelince satır işaretlenir. Çevrimdışıysa istek sessizce başarısız
+      // olur ve kabul engellenmez — defter koruyucu bir ek, kritik yol değil.
+      void getSerialLedgerEntries([{ stokKodu: product.stokKodu, seriNumarasi: serial }], currentCompanyId)
+        .then(ledger => {
+          const entry = ledger.get(`${product.stokKodu}||${serial}`);
+          if (!entry || canReceiveSerial(entry)) return;
+          setBlockedSerials(prev => new Map(prev).set(key, describeSerialBlock(entry)));
+        })
+        .catch(() => {
+          /* defter okunamadı — kabul engellenmez */
+        });
     },
-    [depotId, parseAndResolveBarcode, formats, productCodes, rafAdresi, irsaliyeNumarasi],
+    [depotId, parseAndResolveBarcode, formats, productCodes, rafAdresi, irsaliyeNumarasi, currentCompanyId],
   );
 
-  useHidScanner({ enabled: !isSaving, onScan: handleScan });
+  useHidScanner({ onScan: handleScan });
 
   const removeRow = (id: string) => {
     setRows(prev => {
@@ -165,92 +185,68 @@ export default function TerminalMalKabulPage() {
     });
   };
 
-  const handleCommit = async () => {
-    if (rows.length === 0 || !depotId || isSaving) return;
-    setIsSaving(true);
+  /**
+   * Kaydet — BEKLEMEDEN.
+   *
+   * Liste anında temizlenir ve kullanıcı bir sonraki irsaliyeye geçebilir.
+   * Firestore yazımı yerel önbelleğe senkron uygulandığı için veri o an
+   * zaten doğrudur; sunucuya gönderim arka planda yürür ve üst şeritteki
+   * göstergeden izlenir.
+   *
+   * `async` DEĞİL: içinde beklenen hiçbir şey yok. Bir `await` eklenecekse,
+   * önce onun okutma akışını durdurup durdurmayacağı düşünülmelidir.
+   */
+  const handleCommit = () => {
+    if (rows.length === 0 || !depotId) return;
 
-    try {
-      // Geçmiş seri kontrolü — web paneliyle aynı kaynak (Seri No Defteri).
-      // Daha önce tüketilmiş/imha edilmiş bir seri sessizce yeniden stoğa
-      // girerse, o serinin geçmişi iki kere "kabul" görür ve sayım tutmaz.
-      const blocked = new Map<string, string>();
-      try {
-        const ledger = await getSerialLedgerEntries(
-          collectSerialPairs(rows).map(({ serial, stokKodu }) => ({
-            stokKodu,
-            seriNumarasi: serial,
-          })),
-          currentCompanyId,
-        );
-        ledger.forEach((entry, key) => {
-          if (!canReceiveSerial(entry)) blocked.set(key, describeSerialBlock(entry));
-        });
-      } catch {
-        // Defter okunamadıysa kabul engellenmez: stok yazımı kritik yoldur,
-        // defter kontrolü ise koruyucu bir ek. Web paneli de böyle davranır.
-      }
+    const accepted = rows.filter(r => !blockedSerials.has(`${r.stokKodu}||${r.seriNumarasi}`));
+    const skipped = rows.length - accepted.length;
 
-      const accepted = rows.filter(
-        r => !blocked.has(`${r.stokKodu}||${r.seriNumarasi}`),
-      );
-      const skipped = rows.length - accepted.length;
-
-      if (accepted.length === 0) {
-        toast({
-          title: 'Hiçbir kalem kabul edilemedi',
-          description: Array.from(new Set(blocked.values())).join(' ') || 'Seriler geçmişte işlem görmüş.',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const result = await commitMalKabul({
-        rows: accepted,
-        ctx: {
-          depotId,
-          depotName,
-          createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
-          createdByUid: currentUser?.uid || null,
-        },
-        companyId: currentCompanyId,
-      });
-
-      // `await` YOK: bu da bir Firestore yazımı ve çevrimdışıyken çözülmez.
-      // Stok metadata'sı yalnızca önbellek tazeleme sinyali; beklemeye değmez.
-      void touchStockMetadata();
-      invalidateDepoStok();
-
-      setRows([]);
-      scannedSerials.current.clear();
-
-      const pending = result.outcome === 'pending';
-      setFeedback({
-        tone: pending ? 'warning' : 'success',
-        title: `${result.writtenDocs} kalem stoğa alındı`,
-        detail: pending
-          ? 'Bağlantı yok — kayıt cihazda, internet gelince gönderilecek.'
-          : `İşlem no ${result.transactionId}`,
-      });
+    if (accepted.length === 0) {
       toast({
-        title: pending ? 'Kaydedildi (senkron bekliyor)' : 'Mal kabul tamamlandı',
+        title: 'Hiçbir kalem kabul edilemedi',
         description:
-          `${result.writtenDocs} kalem kaydedildi.` +
-          (skipped > 0 ? ` ${skipped} seri geçmişte işlem gördüğü için atlandı.` : '') +
-          (pending ? ' Bağlantı geldiğinde otomatik gönderilecek.' : ''),
-      });
-    } catch (error) {
-      // Rollback'e gerek yok: `commitMalKabul` başarısız olursa liste ekranda
-      // kalır, kullanıcı aynı listeyle tekrar deneyebilir. Belge kimlikleri
-      // satır kimliğinden türetildiği için tekrar deneme çift kayıt yaratmaz.
-      toast({
-        title: 'Kayıt başarısız',
-        description: error instanceof Error ? error.message : 'Beklenmeyen bir hata oluştu.',
+          Array.from(new Set(blockedSerials.values())).join(' ') ||
+          'Okutulan serilerin tamamı geçmişte işlem görmüş.',
         variant: 'destructive',
       });
-      setFeedback({ tone: 'error', title: 'Kayıt başarısız', detail: 'Liste korundu, tekrar deneyin.' });
-    } finally {
-      setIsSaving(false);
+      return;
     }
+
+    // Liste ÖNCE temizlenir: kullanıcı yazımın sonucunu beklemez.
+    setRows([]);
+    scannedSerials.current.clear();
+    setBlockedSerials(new Map());
+    setFeedback({
+      tone: 'success',
+      title: `${accepted.length} kalem stoğa alındı`,
+      detail: skipped > 0 ? `${skipped} seri atlandı (geçmişte işlem görmüş).` : 'Gönderim arka planda sürüyor.',
+    });
+
+    void commitMalKabul({
+      rows: accepted,
+      ctx: {
+        depotId,
+        depotName,
+        createdByName: currentUserProfile?.name || currentUser?.email || 'Unknown',
+        createdByUid: currentUser?.uid || null,
+      },
+      companyId: currentCompanyId,
+      sync: 'queue',
+    })
+      .then(() => {
+        void touchStockMetadata();
+        invalidateDepoStok();
+      })
+      .catch(error => {
+        // Buraya yalnızca yazım HAZIRLANIRKEN oluşan hatalar düşer (geçersiz
+        // veri gibi). Ağ sorunları kuyrukta beklediği için buraya gelmez.
+        toast({
+          title: 'Kayıt hazırlanamadı',
+          description: error instanceof Error ? error.message : 'Beklenmeyen bir hata oluştu.',
+          variant: 'destructive',
+        });
+      });
   };
 
   return (
@@ -283,21 +279,21 @@ export default function TerminalMalKabulPage() {
           />
         </div>
 
-        <p className="shrink-0 text-xs text-zinc-500">
+        <p className="shrink-0 text-xs text-muted-foreground">
           Raf ve irsaliye bilgisi, YAZILDIKTAN SONRA okutulan kalemlere işlenir.
           Önce bu alanları doldurun, sonra okutmaya başlayın.
         </p>
 
         <ScanFeedbackBar feedback={feedback} />
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-zinc-800">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
           {rows.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-muted-foreground">
               Henüz kalem okutulmadı.
             </div>
           ) : (
             <table className="w-full text-left text-sm">
-              <thead className="sticky top-0 bg-zinc-900 text-xs uppercase tracking-wide text-zinc-500">
+              <thead className="sticky top-0 bg-card text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3">Ürün</th>
                   <th className="px-4 py-3">Seri</th>
@@ -308,28 +304,37 @@ export default function TerminalMalKabulPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map(row => (
-                  <tr key={row.id} className="border-t border-zinc-800">
+                {rows.map(row => {
+                  const blockReason = blockedSerials.get(`${row.stokKodu}||${row.seriNumarasi}`);
+                  return (
+                  <tr key={row.id} className="border-t border-border">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-100">{row.stokAdi}</div>
-                      <div className="text-xs text-zinc-500">{row.stokKodu}</div>
+                      <div className="font-medium text-foreground">{row.stokAdi}</div>
+                      <div className="text-xs text-muted-foreground">{row.stokKodu}</div>
+                      {blockReason ? (
+                        <div className="mt-1 flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+                          <AlertTriangle className="h-3.5 w-3.5" />
+                          {blockReason} — bu satır kaydedilmeyecek
+                        </div>
+                      ) : null}
                     </td>
-                    <td className="px-4 py-3 font-mono text-zinc-300">{row.seriNumarasi}</td>
-                    <td className="px-4 py-3 text-zinc-400">{row.lotNumarasi || '—'}</td>
-                    <td className="px-4 py-3 text-zinc-400">{row.miad || '—'}</td>
-                    <td className="px-4 py-3 text-zinc-400">{row.rafAdresi || '—'}</td>
+                    <td className="px-4 py-3 font-mono text-foreground/80">{row.seriNumarasi}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.lotNumarasi || '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.miad || '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">{row.rafAdresi || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
                         onClick={() => removeRow(row.id)}
                         aria-label="Satırı sil"
-                        className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-800 hover:text-red-400"
+                        className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-red-400"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -343,14 +348,13 @@ export default function TerminalMalKabulPage() {
               scannedSerials.current.clear();
               setFeedback(IDLE);
             }}
-            disabled={rows.length === 0 || isSaving}
+            disabled={rows.length === 0}
           >
             Listeyi temizle
           </TerminalButton>
 
-          <TerminalButton onClick={handleCommit} disabled={rows.length === 0 || !depotId || isSaving}>
-            {isSaving ? <Loader2 className="h-5 w-5 animate-spin" /> : null}
-            {isSaving ? 'Kaydediliyor…' : `Stoğa al (${rows.length})`}
+          <TerminalButton onClick={handleCommit} disabled={rows.length === 0 || !depotId}>
+            {`Stoğa al (${rows.length})`}
           </TerminalButton>
         </div>
       </div>

@@ -128,26 +128,26 @@ export default function TerminalSorguPage() {
       <div className="flex h-full min-h-0 flex-col gap-4 p-6">
         <ScanFeedbackBar feedback={feedback} />
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-zinc-800 p-6">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border p-6">
           {isLoading ? (
-            <div className="flex h-full items-center justify-center gap-3 text-zinc-500">
+            <div className="flex h-full items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" /> Aranıyor…
             </div>
           ) : !result ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-muted-foreground">
               Sonuçlar burada görünecek.
             </div>
           ) : (
             <div className="space-y-6">
               <div>
-                <p className="text-3xl font-semibold text-zinc-100">{result.productName}</p>
-                <p className="text-zinc-500">
+                <p className="text-3xl font-semibold text-foreground">{result.productName}</p>
+                <p className="text-muted-foreground">
                   {result.stokKodu ? `${result.stokKodu} · ` : ''}Seri {result.serial}
                 </p>
               </div>
 
               {result.matches.length === 0 ? (
-                <p className="text-zinc-400">
+                <p className="text-muted-foreground">
                   Bu seri numarası için stok kaydı yok. Ürün henüz mal kabul
                   edilmemiş ya da tüketilmiş olabilir.
                 </p>
@@ -156,7 +156,7 @@ export default function TerminalSorguPage() {
                   {result.matches.map(item => (
                     <div
                       key={item.id}
-                      className="rounded-xl border border-zinc-800 bg-zinc-900 p-5"
+                      className="rounded-xl border border-border bg-card p-5"
                     >
                       <div className="flex flex-wrap items-baseline justify-between gap-3">
                         <p className="text-xl font-semibold">
@@ -164,7 +164,7 @@ export default function TerminalSorguPage() {
                             ? `Sevk edildi → ${item.hedefKurum || 'bilinmeyen kurum'}`
                             : `Depoda → ${item.depotName || 'bilinmeyen depo'}`}
                         </p>
-                        <span className="text-sm text-zinc-500">
+                        <span className="text-sm text-muted-foreground">
                           {item.isShipped ? 'Laboratuvar stoğu' : 'Merkez depo stoğu'}
                         </span>
                       </div>
@@ -192,8 +192,8 @@ export default function TerminalSorguPage() {
 function Detail({ label, value }: { label: string; value?: string }) {
   return (
     <div>
-      <dt className="text-xs uppercase tracking-wide text-zinc-500">{label}</dt>
-      <dd className="text-zinc-200">{value || '—'}</dd>
+      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="text-foreground">{value || '—'}</dd>
     </div>
   );
 }

@@ -77,6 +77,38 @@ export function subscribeToPendingWrites(listener: PendingListener): () => void 
 }
 
 /**
+ * Bir yazımı BEKLEMEDEN kuyruğa alır.
+ *
+ * `commitLocalFirst`'ten farkı, çağıranın hiç beklememesidir: Firestore
+ * yazımı yerel önbelleğe SENKRON uygular, dolayısıyla veri o an zaten
+ * doğrudur ve arayüz sonucu beklemeden ilerleyebilir.
+ *
+ * Terminal ekranları bunu kullanır — depoda barkod okutan bir kullanıcının
+ * "Kaydediliyor…" görmesi için hiçbir sebep yok. Sunucu onayı gelene kadar
+ * işlem bekleyen sayaca yazılır ve üst şeritteki göstergede görünür.
+ *
+ * @param onSettled Sunucu sonucu geldiğinde çağrılır (arka planda).
+ */
+export function queueWrite(
+  commit: Promise<unknown>,
+  onSettled?: (result: { ok: boolean; error?: unknown }) => void,
+): void {
+  setPending(pendingCount + 1);
+  commit.then(
+    () => {
+      setPending(pendingCount - 1);
+      onSettled?.({ ok: true });
+    },
+    (error: unknown) => {
+      setPending(pendingCount - 1);
+      // Gerçek bir ret (kural ihlali, geçersiz belge) sessizce kaybolmamalı.
+      console.error('[offline-write] Kuyruktaki yazım reddedildi:', error);
+      onSettled?.({ ok: false, error });
+    },
+  );
+}
+
+/**
  * Bir Firestore yazımını "önce yerel" mantığıyla tamamlar.
  *
  * @param commit Yazımı başlatan söz — ör. `batch.commit()`.

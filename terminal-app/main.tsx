@@ -13,6 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { AuthProvider } from '@/contexts/auth-context';
 import { QueryProvider } from '@/contexts/query-context';
 import { Toaster } from '@/components/ui/toaster';
+import { TerminalPrefetchProvider } from '@/components/terminal/prefetch-provider';
 
 import { TerminalRouterProvider } from './shims/next-navigation';
 import App from './App';
@@ -28,7 +29,11 @@ createRoot(container).render(
     <TerminalRouterProvider>
       <AuthProvider>
         <QueryProvider>
-          <App />
+          {/* Tüm çalışma verisi girişte yerele iner; ekranlar sonra hiç
+              beklemez. */}
+          <TerminalPrefetchProvider>
+            <App />
+          </TerminalPrefetchProvider>
           <Toaster />
         </QueryProvider>
       </AuthProvider>
