@@ -118,6 +118,44 @@ function createWindow() {
     }
   });
 
+  /**
+   * HTTP hata sayfalarını yakala (404, 403, 500 …).
+   *
+   * NEDEN AYRI BİR DİNLEYİCİ: `did-fail-load` YALNIZCA ağ seviyesindeki
+   * hatalarda çalışır. Bir 404, Chromium açısından BAŞARILI bir yüklemedir —
+   * sunucu gövde döndürmüştür. Yani yanlış adres girilmiş bir terminal,
+   * sunucunun 404 sayfasını gösterip orada kalıyordu: ne uyarı çıkıyordu ne de
+   * "Adresi değiştir" düğmesi, çünkü hiçbir hata olayı tetiklenmiyordu.
+   *
+   * Kullanıcının tek çıkışı `Ctrl+Shift+U` kısayolunu bilmekti; bilmiyorsa
+   * uygulamayı kaldırıp yeniden kurmak bile işe yaramaz (adres, kaldırmada
+   * silinmeyen kullanıcı verisinde saklanır).
+   */
+  mainWindow.webContents.on('did-navigate', (_event, url, httpResponseCode, httpStatusText) => {
+    if (useEmbedded()) return;
+    if (!httpResponseCode || httpResponseCode < 400) return;
+
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Terminal sayfası bulunamadı',
+        message: `Sunucu ${httpResponseCode} döndürdü.`,
+        detail:
+          `${url}\n${httpStatusText || ''}\n\n` +
+          'Bu genellikle iki şeyden biridir:\n' +
+          '  • Adres yanlış (sonu /terminal ile bitmeli)\n' +
+          '  • Uygulamanın yeni sürümü henüz yayınlanmadı\n\n' +
+          'Adresi tarayıcıda açıp deneyebilirsiniz; orada da hata veriyorsa ' +
+          'sorun adreste değil, yayında.',
+        buttons: ['Adresi değiştir', 'Yeniden dene', 'Kapat'],
+        defaultId: 0,
+      })
+      .then(({ response }) => {
+        if (response === 0) mainWindow.loadFile(path.join(__dirname, 'setup.html'));
+        else if (response === 1) mainWindow.reload();
+      });
+  });
+
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return; // kullanıcı iptali — normal
 
@@ -186,6 +224,14 @@ if (!app.requestSingleInstanceLock()) {
     if (process.platform !== 'darwin') app.quit();
   });
 }
+
+/**
+ * Kayıtlı adresi döndürür — kurulum formu bunu alana önceden doldurur.
+ *
+ * Yanlış bir adres girildiğinde kullanıcının ilk ihtiyacı NE girdiğini
+ * görmektir; boş bir forma yeniden yazmak, aynı hatayı tekrarlamayı kolaylaştırır.
+ */
+ipcMain.handle('qore:get-url', async () => getTerminalUrl() || '');
 
 /** Kurulum formundan gelen adresi kaydeder ve terminale geçer. */
 ipcMain.handle('qore:set-url', async (_event, url) => {

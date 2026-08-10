@@ -34,6 +34,9 @@ contextBridge.exposeInMainWorld('qoreDesktop', {
 });
 
 contextBridge.exposeInMainWorld('qoreSetup', {
+  /** Kayıtlı adres — form bunu alana önceden doldurur. */
+  current: () => ipcRenderer.invoke('qore:get-url'),
+
   /**
    * Terminal adresini kalıcı olarak kaydeder.
    * @returns {Promise<{ ok: boolean, error?: string }>}

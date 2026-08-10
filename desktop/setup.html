@@ -65,6 +65,10 @@
     <main>
       <h1>Terminal adresi</h1>
       <p>Bu bilgisayarın bağlanacağı Qore adresini girin. Bir kez girilir, sonra hatırlanır.</p>
+      <p class="hint" style="margin-bottom:24px">
+        Adres bu bilgisayarda saklanır ve uygulamayı <strong>kaldırıp yeniden
+        kurmak onu silmez</strong> — düzeltmek için buradan değiştirin.
+      </p>
 
       <form id="form">
         <label for="url">Adres</label>
@@ -92,6 +96,15 @@
       const input = document.getElementById('url');
       const submit = document.getElementById('submit');
       const error = document.getElementById('error');
+
+      // Kayıtlı adres varsa alana doldur: kullanıcı neyin yanlış olduğunu
+      // görmeden düzeltemez.
+      window.qoreSetup.current().then(current => {
+        if (current) {
+          input.value = current;
+          input.select();
+        }
+      });
 
       form.addEventListener('submit', async event => {
         event.preventDefault();
