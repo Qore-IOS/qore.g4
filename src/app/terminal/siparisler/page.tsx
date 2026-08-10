@@ -1,18 +1,12 @@
 /**
  * @fileoverview Terminal — Siparişler (açık sipariş listesi).
  *
- * KAPSAM KARARI — TOPLAMA EKRANI BURADA YENİDEN YAZILMAZ.
+ * Açık siparişleri listeler; toplama `/terminal/toplama` ekranında yapılır.
  *
- * Sipariş toplama (`/siparisler/[orderId]/toplama`) FEFO doğrulaması ve
- * gerekçeli aşımı, lot/seri karışık takip modlarını, kurum bazlı özel ürün
- * tanımlarını, eksik/kısmi kapanışı ve sevk kaydı oluşturmayı içeren, üretimde
- * oturmuş ~2000 satırlık bir akıştır. Terminale ikinci bir kopyasını yazmak,
- * iki uygulamanın sevkiyatı farklı kurallarla kapatması demekti — bu, arayüz
- * sadeliği için ödenecek bir bedel değil.
- *
- * Bu yüzden terminal, açık siparişleri sade ve büyük bir listede gösterir ve
- * toplamayı mevcut ekrana devreder. Toplama ekranı zaten HID okuyucu odaklıdır
- * ve masaüstü penceresinde sorunsuz çalışır.
+ * Toplama ekranı terminale özgü ve SADE bir sürümdür, ama yazma yolu ortaktır:
+ * stok hareketi `applyTransferItemWrites`, siparişin kapanışı
+ * `applyOrderCompletionWrite` ile yürür — yani web ekranıyla aynı belgeler ve
+ * aynı kapanış kuralı üretilir.
  */
 
 'use client';
@@ -28,7 +22,6 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { siparislerLogger } from '@/lib/logger';
-import { isEmbeddedTerminal } from '@/lib/terminal-runtime';
 import type { Order } from '@/lib/types';
 import {
   TerminalButton,
@@ -48,15 +41,6 @@ export default function TerminalSiparislerPage() {
   const [depotId, setDepotId] = useTerminalDepot();
 
   const [orders, setOrders] = useState<Order[]>([]);
-  /**
-   * Toplama ekranı (`/siparisler/[orderId]/toplama`) web uygulamasının bir
-   * rotasıdır ve masaüstüne gömülü statik pakete DÂHİL DEĞİLDİR — o akış
-   * bilerek çoğaltılmadı (bkz. dosya başlığı). Gömülü kipte bu yüzden
-   * butonu etkin göstermek yanıltıcı olur: tıklayan kullanıcı hiçbir yere
-   * gitmez.
-   */
-  const [embedded, setEmbedded] = useState(false);
-  useEffect(() => setEmbedded(isEmbeddedTerminal()), []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -120,43 +104,42 @@ export default function TerminalSiparislerPage() {
         </div>
 
         {error ? (
-          <p className="shrink-0 rounded-xl border border-red-700 bg-red-950/50 px-6 py-4 text-red-100">
+          <p className="shrink-0 rounded-xl border border-red-600 bg-red-500/10 px-6 py-4 text-red-700 dark:text-red-200">
             {error}
           </p>
         ) : null}
 
-        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-zinc-800">
+        <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
           {isLoading ? (
-            <div className="flex h-full items-center justify-center gap-3 text-zinc-500">
+            <div className="flex h-full items-center justify-center gap-3 text-muted-foreground">
               <Loader2 className="h-5 w-5 animate-spin" /> Siparişler yükleniyor…
             </div>
           ) : !depotId ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-muted-foreground">
               Önce depo seçin.
             </div>
           ) : orders.length === 0 ? (
-            <div className="flex h-full items-center justify-center text-zinc-600">
+            <div className="flex h-full items-center justify-center text-muted-foreground">
               Bu depoda toplanmayı bekleyen sipariş yok.
             </div>
           ) : (
-            <ul className="divide-y divide-zinc-800">
+            <ul className="divide-y divide-border">
               {orders.map(order => (
                 <li
                   key={order.id}
                   className="flex flex-wrap items-center justify-between gap-4 px-6 py-5"
                 >
                   <div className="min-w-0">
-                    <p className="truncate text-xl font-semibold text-zinc-100">
+                    <p className="truncate text-xl font-semibold text-foreground">
                       {order.kurumAdi}
                     </p>
-                    <p className="text-sm text-zinc-500">
+                    <p className="text-sm text-muted-foreground">
                       {order.items?.length ?? 0} kalem ·{' '}
                       {order.status === 'toplaniyor' ? 'Toplanıyor' : 'Yeni'}
                     </p>
                   </div>
                   <TerminalButton
-                    onClick={() => router.push(`/siparisler/${order.id}/toplama`)}
-                    disabled={embedded}
+                    onClick={() => router.push(`/terminal/toplama?order=${encodeURIComponent(order.id)}`)}
                   >
                     Toplamaya başla
                   </TerminalButton>
@@ -166,10 +149,10 @@ export default function TerminalSiparislerPage() {
           )}
         </div>
 
-        <p className="shrink-0 text-xs text-zinc-600">
-          {embedded
-            ? 'Bu liste çevrimdışı da görünür, ancak toplama masaüstü paketinde yer almaz: FEFO kontrolü ve sevk kaydı tek bir yerde, web uygulamasının toplama ekranında yürür. Toplamak için tarayıcıdan girin.'
-            : 'Toplama, web uygulamasının mevcut toplama ekranında açılır — FEFO kontrolü ve sevk kaydı orada, tek bir yerde yürür.'}
+        <p className="shrink-0 text-xs text-muted-foreground">
+          Toplama ekranı çevrimdışı da çalışır. Karmaşık durumlar (gerekçeli FEFO
+          aşımı, kurum bazlı özel ürün sıralaması) için web uygulamasındaki
+          ayrıntılı toplama ekranı kullanılmalıdır.
         </p>
       </div>
     </TerminalShell>

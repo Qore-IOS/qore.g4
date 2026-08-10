@@ -14,14 +14,14 @@
 
 @import '../src/app/globals.css';
 
-/* Terminal her zaman karanlık: depo aydınlatmasında yüksek kontrast gerekir
-   ve kullanıcının tema seçmesi için bir yer yok. */
 html,
 body,
 #root {
   height: 100%;
 }
 
-body {
-  background: #09090b;
-}
+/* Zemin BİLEREK `body`'ye verilmez: `globals.css` `body`'yi
+   `background: transparent !important` ile saydam bırakır ve zemini `html`
+   üzerinde boyar. Buraya bir `body` kuralı yazmak sessizce etkisiz kalırdı —
+   ölçüldü ve öyle olduğu görüldü. Tema, `html.dark` sınıfı üzerinden
+   `globals.css` değişkenleriyle yürür. */

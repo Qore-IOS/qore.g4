@@ -16,10 +16,15 @@
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
+import { useTerminalTheme } from '@/hooks/useTerminalTheme';
+import { TerminalPrefetchProvider } from '@/components/terminal/prefetch-provider';
 
 export default function TerminalLayout({ children }: { children: React.ReactNode }) {
   const { currentUser, isLoadingAuth } = useAuth();
   const router = useRouter();
+  // Tema tercihini kök <html> üzerine uygular. Terminal, web uygulamasının
+  // tema sağlayıcısını kullanmaz — tercih kullanıcıya değil MAKİNEYE aittir.
+  useTerminalTheme();
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
@@ -29,11 +34,11 @@ export default function TerminalLayout({ children }: { children: React.ReactNode
 
   if (isLoadingAuth || !currentUser) {
     return (
-      <div className="flex h-screen items-center justify-center bg-zinc-950 text-zinc-400">
+      <div className="flex h-screen items-center justify-center bg-background text-muted-foreground">
         <p className="text-lg">Oturum kontrol ediliyor…</p>
       </div>
     );
   }
 
-  return <div className="dark">{children}</div>;
+  return <TerminalPrefetchProvider>{children}</TerminalPrefetchProvider>;
 }

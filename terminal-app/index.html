@@ -39,17 +39,30 @@
       "
     />
     <!--
-      Terminal karanlık temaya sabitlenmiştir: `class="dark"` kökte durur ve
-      hiçbir yerde kaldırılmaz. Depo aydınlatmasında yüksek kontrast gerekir
-      ve kullanıcının tema seçebileceği bir ekran yok.
+      Kökteki `dark` sınıfı yalnızca VARSAYILAN. Kayıtlı tercih varsa
+      aşağıdaki `theme-boot.js` bunu ilk boyamadan önce düzeltir.
     -->
     <style>
       html,
       body {
         margin: 0;
+      }
+      /* Kayıtlı tercih okunana kadarki ilk kare. Koyu varsayılan olduğu için
+         koyu zemin verilir; açık tercih eden makinelerde aşağıdaki betik bunu
+         ilk boyamadan ÖNCE düzeltir. */
+      html {
         background: #09090b;
       }
+      html:not(.dark) {
+        background: #efeae0;
+      }
     </style>
+    <!--
+      Tema, React yüklenmeden uygulanır; aksi hâlde her açılışta kısa bir
+      siyah/beyaz sıçrama olur. Ayrı dosya, çünkü CSP satır içi betiğe izin
+      vermiyor (bkz. theme-boot.js).
+    -->
+    <script src="./theme-boot.js"></script>
   </head>
   <body>
     <div id="root"></div>

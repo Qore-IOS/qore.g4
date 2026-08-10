@@ -91,13 +91,13 @@ export default function TerminalHomePage() {
     >
       <div className="mx-auto flex h-full max-w-5xl flex-col justify-center gap-6 px-8">
         {!depotId ? (
-          <p className="rounded-xl border border-amber-700 bg-amber-950/50 px-6 py-4 text-amber-100">
+          <p className="rounded-xl border border-amber-600 bg-amber-500/10 px-6 py-4 text-amber-800 dark:text-amber-200">
             Başlamadan önce sağ üstten bulunduğun depoyu seç. Seçim bu makinede
             hatırlanır.
           </p>
         ) : (
-          <p className="text-lg text-zinc-400">
-            Aktif depo: <span className="font-semibold text-zinc-100">{depotName}</span>
+          <p className="text-lg text-muted-foreground">
+            Aktif depo: <span className="font-semibold text-foreground">{depotName}</span>
           </p>
         )}
 
@@ -114,7 +114,7 @@ export default function TerminalHomePage() {
           ))}
         </div>
 
-        <p className="text-center text-sm text-zinc-600">
+        <p className="text-center text-sm text-muted-foreground">
           Rakam tuşlarıyla aç · Esc ile geri dön
         </p>
       </div>

@@ -15,11 +15,36 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import { Moon, Sun } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { ConnectionBadge } from '@/components/terminal/connection-badge';
+import { useTerminalTheme } from '@/hooks/useTerminalTheme';
 
 /** Terminal ekranlarının ortak dış çerçevesi. */
+/**
+ * Açık/koyu tema anahtarı.
+ *
+ * Rampada güneş alan bir terminalde koyu tema okunmaz, loş depoda açık tema
+ * göz yorar — bu yüzden tercih makine başında, tek tıkla değişebilir olmalı.
+ */
+function ThemeToggle() {
+  const [theme, setTheme] = useTerminalTheme();
+  const next = theme === 'dark' ? 'light' : 'dark';
+
+  return (
+    <button
+      type="button"
+      onClick={() => setTheme(next)}
+      aria-label={next === 'light' ? 'Açık temaya geç' : 'Koyu temaya geç'}
+      title={next === 'light' ? 'Açık tema' : 'Koyu tema'}
+      className="rounded-lg border border-border p-2.5 text-muted-foreground hover:bg-muted"
+    >
+      {theme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+    </button>
+  );
+}
+
 export function TerminalShell({
   title,
   subtitle,
@@ -51,12 +76,12 @@ export function TerminalShell({
   }, [onBack, router]);
 
   return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-zinc-800 px-6 py-4">
+    <div className="flex h-screen flex-col bg-background text-foreground">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
           {subtitle ? (
-            <p className="truncate text-sm text-zinc-400">{subtitle}</p>
+            <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
@@ -64,12 +89,13 @@ export function TerminalShell({
               bilmeyen kullanıcı, kaydın gittiğini sanıp devam eder. */}
           <ConnectionBadge />
           {right}
+          <ThemeToggle />
           <button
             type="button"
             onClick={() => (onBack ? onBack() : router.push('/terminal'))}
-            className="rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800"
+            className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-foreground/80 hover:bg-muted"
           >
-            Geri <kbd className="ml-1 text-xs text-zinc-500">Esc</kbd>
+            Geri <kbd className="ml-1 text-xs text-muted-foreground">Esc</kbd>
           </button>
         </div>
       </header>
@@ -101,20 +127,20 @@ export function TerminalTile({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'group flex flex-col items-start gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 p-8 text-left transition',
+        'group flex flex-col items-start gap-3 rounded-2xl border border-border bg-card p-8 text-left transition',
         disabled
           ? 'cursor-not-allowed opacity-40'
-          : 'hover:border-zinc-600 hover:bg-zinc-800 focus:outline-none focus:ring-2 focus:ring-sky-500',
+          : 'hover:border-foreground/30 hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary',
       )}
     >
       <div className="flex w-full items-center justify-between">
-        <span className="text-sky-400">{icon}</span>
-        <kbd className="rounded border border-zinc-700 px-2 py-0.5 text-sm text-zinc-500">
+        <span className="text-primary">{icon}</span>
+        <kbd className="rounded border border-border px-2 py-0.5 text-sm text-muted-foreground">
           {index}
         </kbd>
       </div>
       <span className="text-2xl font-semibold">{title}</span>
-      <span className="text-sm text-zinc-400">{description}</span>
+      <span className="text-sm text-muted-foreground">{description}</span>
     </button>
   );
 }
@@ -125,11 +151,19 @@ export type ScanFeedback = {
   detail?: string;
 };
 
+/**
+ * Geri bildirim tonları.
+ *
+ * Renkler hem açık hem koyu temada okunur olmalı: bu yüzden zemin `/10`
+ * saydamlıkla, metin ise `-700 dark:-200` çiftiyle verilir. Koyu temaya özel
+ * sabit bir zemin (ör. `bg-emerald-950`) açık temada siyah bir blok gibi
+ * görünürdü.
+ */
 const FEEDBACK_TONE: Record<ScanFeedback['tone'], string> = {
-  success: 'border-emerald-600 bg-emerald-950/60 text-emerald-100',
-  error: 'border-red-600 bg-red-950/60 text-red-100',
-  warning: 'border-amber-600 bg-amber-950/60 text-amber-100',
-  idle: 'border-zinc-800 bg-zinc-900 text-zinc-400',
+  success: 'border-emerald-600 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200',
+  error: 'border-red-600 bg-red-500/10 text-red-700 dark:text-red-200',
+  warning: 'border-amber-600 bg-amber-500/10 text-amber-800 dark:text-amber-200',
+  idle: 'border-border bg-card text-muted-foreground',
 };
 
 /**
@@ -161,8 +195,8 @@ export function ScanFeedbackBar({ feedback }: { feedback: ScanFeedback }) {
 /** Sayaç kutusu — "kaç kalem okutuldu" gibi tek sayılık göstergeler. */
 export function TerminalStat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900 px-5 py-3">
-      <p className="text-xs uppercase tracking-wide text-zinc-500">{label}</p>
+    <div className="rounded-xl border border-border bg-card px-5 py-3">
+      <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className="text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
@@ -185,10 +219,10 @@ export function TerminalButton({
   type?: 'button' | 'submit';
 }) {
   const variants = {
-    primary: 'bg-sky-600 text-white hover:bg-sky-500 disabled:bg-zinc-800 disabled:text-zinc-500',
+    primary: 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:bg-muted disabled:text-muted-foreground',
     ghost:
-      'border border-zinc-700 text-zinc-300 hover:bg-zinc-800 disabled:text-zinc-600 disabled:hover:bg-transparent',
-    danger: 'bg-red-600 text-white hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-500',
+      'border border-border text-foreground/80 hover:bg-muted disabled:text-muted-foreground disabled:hover:bg-transparent',
+    danger: 'bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:bg-muted disabled:text-muted-foreground',
   } as const;
 
   return (
@@ -223,13 +257,13 @@ export function TerminalField({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide text-zinc-500">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <input
         value={value}
         onChange={e => onChange(e.target.value)}
         placeholder={placeholder}
         autoFocus={autoFocus}
-        className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-lg text-zinc-100 placeholder:text-zinc-600 focus:border-sky-500 focus:outline-none"
+        className="rounded-xl border border-border bg-card px-4 py-3 text-lg text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-none"
       />
     </label>
   );
@@ -251,11 +285,11 @@ export function TerminalSelect<T extends { id: string; name?: string }>({
 }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-xs uppercase tracking-wide text-zinc-500">{label}</span>
+      <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
       <select
         value={value}
         onChange={e => onChange(e.target.value)}
-        className="rounded-xl border border-zinc-700 bg-zinc-900 px-4 py-3 text-lg text-zinc-100 focus:border-sky-500 focus:outline-none"
+        className="rounded-xl border border-border bg-card px-4 py-3 text-lg text-foreground focus:border-primary focus:outline-none"
       >
         <option value="">{placeholder}</option>
         {options.map(o => (

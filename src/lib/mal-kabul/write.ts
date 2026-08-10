@@ -31,7 +31,7 @@ import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { sanitizeFsId } from '@/lib/sync/idle-scheduler';
 import { generateId } from '@/lib/utils';
-import { commitLocalFirst, type CommitOutcome } from '@/lib/offline-write';
+import { commitLocalFirst, queueWrite, type CommitOutcome } from '@/lib/offline-write';
 import type { MalKabulHeader, MalKabulLine, VerificationMode } from './types';
 
 /**
@@ -306,8 +306,18 @@ export async function commitMalKabul(params: {
   mode?: VerificationMode;
   /** Marka çözümleyici; verilmezse başlıkta `brands` boş kalır. */
   resolveBrand?: (stokKodu: string, stokAdi: string) => string;
+  /**
+   * Sunucu onayı beklensin mi?
+   *
+   * `'queue'` (terminal): yazımlar kuyruğa alınır ve fonksiyon ANINDA döner.
+   * Firestore veriyi yerel önbelleğe senkron uyguladığı için sonuç zaten
+   * doğrudur; arayüzün beklemesi için bir sebep yoktur.
+   *
+   * `'wait'` (varsayılan, web paneli): mevcut davranış korunur.
+   */
+  sync?: 'wait' | 'queue';
 }): Promise<MalKabulCommitResult> {
-  const { rows, ctx, companyId, mode = 'unverified', resolveBrand } = params;
+  const { rows, ctx, companyId, mode = 'unverified', resolveBrand, sync = 'wait' } = params;
 
   const transactionId = `MK-${generateId()}`;
   const txRef = doc(db, 'malKabulTransactions', transactionId);
@@ -364,7 +374,12 @@ export async function commitMalKabul(params: {
     // `await batch.commit()` DEĞİL: çevrimdışıyken o söz hiç çözülmez ve
     // ekran "Kaydediliyor…" konumunda kilitlenir. Yazım yerel önbelleğe anında
     // uygulanır; sunucu onayı gelmezse işlem kuyrukta beklemeye devam eder.
-    if ((await commitLocalFirst(batch.commit())) === 'pending') outcome = 'pending';
+    if (sync === 'queue') {
+      queueWrite(batch.commit());
+      outcome = 'pending';
+    } else if ((await commitLocalFirst(batch.commit())) === 'pending') {
+      outcome = 'pending';
+    }
   }
 
   // 2) İşlem başlığı ve satırları — stok yazımından SONRA.
@@ -410,7 +425,12 @@ export async function commitMalKabul(params: {
         ),
       );
     });
-    if ((await commitLocalFirst(batch.commit())) === 'pending') outcome = 'pending';
+    if (sync === 'queue') {
+      queueWrite(batch.commit());
+      outcome = 'pending';
+    } else if ((await commitLocalFirst(batch.commit())) === 'pending') {
+      outcome = 'pending';
+    }
   }
 
   return { transactionId, writtenDocs, totalAdet, outcome };
