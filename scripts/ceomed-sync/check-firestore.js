@@ -154,6 +154,58 @@ async function main() {
         bilgi('DİKKAT: "awaiting_review" durumunda iş var. FILL_ONLY modunda worker');
         bilgi('yeni işleri BEKLETİR. Panelden "Testi tamamla" ile serbest bırakın.');
       }
+
+      // --- 5. Son işler, GEREKÇELERİYLE ---------------------------------------
+      // Yalnızca durum sayısı basmak yetmiyor: "blocked: 3" görüp de neden
+      // engellendiğini bilmeyince bir adım ileri gidilemiyor. Asıl aranan bilgi
+      // blockedDetail/lastError alanlarında ve sadece burada görünüyor.
+      //
+      // Sıralama BELLEKTE yapılıyor. Firestore'da `where(companyId) +
+      // orderBy(createdAt)` bileşik indeks ister; kurulu değilse sorgu hata
+      // verir ve tanı aracının kendisi çuvallar. Kuyruk küçük, bellekte sıralamak
+      // hem indekse bağımlılığı hem o hata sınıfını tamamen ortadan kaldırıyor.
+      const zaman = (d) => {
+        const t = d.createdAt;
+        if (t && typeof t.toDate === 'function') return t.toDate().getTime();
+        return 0;
+      };
+      const kisalt = (s, n) => {
+        const t = String(s || '').replace(/\s+/g, ' ').trim();
+        return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+      };
+
+      const kayitlar = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => zaman(b) - zaman(a))
+        .slice(0, 10);
+
+      console.log('\n=== 5. Son işler (en yeni önce) ===');
+      for (const k of kayitlar) {
+        const ms = zaman(k);
+        // Sütunlar hizalı kalsın: tarihsiz kayıt satırı kaydırmasın.
+        const ne = (ms ? new Date(ms).toISOString().slice(0, 16).replace('T', ' ') : '(tarihsiz)').padEnd(16);
+        const kim = k.formNo || k.irsaliyeNo || k.id;
+        const etiket = k.test ? ' [test]' : '';
+        bilgi(`${ne}  ${String(k.status || '?').padEnd(15)} ${kim}${etiket}`);
+
+        // Engelli işlerde tek işe yarar bilgi bu; onsuz "eksik veri" demek
+        // operatöre hangi alanı dolduracağını söylemiyor.
+        const sebep = k.blockedDetail || k.lastError;
+        if (sebep) bilgi(`                 └─ ${kisalt(sebep, 150)}`);
+      }
+      if (snap.size > kayitlar.length) {
+        bilgi(`(${snap.size} kaydın ${kayitlar.length} tanesi gösterildi)`);
+      }
+
+      if (!sayac.pending && !sayac.processing) {
+        console.log('');
+        bilgi('Kuyrukta işlenmeyi bekleyen (pending) iş YOK.');
+        bilgi('Qore\'da yedek parçalı bir form kapattıysanız ve burada yeni bir');
+        bilgi('kayıt görünmüyorsa, sorun worker\'da değil köprüde demektir:');
+        bilgi('  * firestore.rules canlıya çıktı mı? (firebase deploy --only firestore:rules)');
+        bilgi('  * web uygulaması merge sonrası yeniden yayınlandı mı?');
+        bilgi('  * kullanılan aksiyon tipi part_change veya hucre_degisimi mi?');
+      }
     }
   } catch (e) {
     hata(`Kuyruk okunamadı: ${e.message}`);
