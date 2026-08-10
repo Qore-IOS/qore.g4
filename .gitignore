@@ -23,12 +23,21 @@
 # production
 /build
 
+# electron masaüstü kabuğu (desktop/) — paketleme çıktıları
+desktop/dist/
+desktop/package-lock.json
+# Kuruma özel terminal adresi; paketleme öncesi config.example.json'dan
+# türetilir ve makineye/kuruma bağlı olduğu için repoda tutulmaz.
+desktop/config.json
+
 # misc
 .DS_Store
 *.pem
 scripts/ceomed-sync/set-env.bat
-scripts/ceomed-sync/sync.log
-scripts/ceomed-sync/sync-depo.log
+# Ceomed makinesinde uretilen calisma ciktilari. Operator araclari her kosuda
+# <betik-adi>.log yaziyor; bunlar makineye ozgu ve cogu zaman ortam bilgisi
+# (yol, proje kimligi, servis hesabi e-postasi) iceriyor — repoya girmemeli.
+scripts/ceomed-sync/*.log
 scripts/ceomed-sync/.sync-state.json
 
 # debug
@@ -63,3 +72,10 @@ qore-studio-work
 .env*.local
 
 scripts/ceomed-sync/sevkiyat-watcher.log
+
+# Ceomed yazma worker'ı (scripts/ceomed-sync)
+scripts/ceomed-sync/oracle-worker.log
+scripts/ceomed-sync/oracle-ui/controls.json
+scripts/ceomed-sync/oracle-ui/screenshots/
+scripts/ceomed-sync/oracle-ui/agac.json
+scripts/ceomed-sync/oracle-ui/__pycache__/

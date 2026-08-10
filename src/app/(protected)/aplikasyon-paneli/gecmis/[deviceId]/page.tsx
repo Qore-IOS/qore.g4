@@ -1,5 +1,6 @@
 'use client';
 import React, { useState, useEffect } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import { useParams, useRouter } from 'next/navigation';
 import { db } from '@/lib/firebase';
 import { doc, getDoc, collection, query, where, orderBy, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
@@ -17,6 +18,7 @@ import { tr } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { cn } from '@/lib/utils';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import PostClosurePartChangeButton from '@/components/PostClosurePartChangeButton';
 
 // Operation types
@@ -109,6 +111,7 @@ const CIHAZ_DURUMU_LABELS: Record<CihazDurumu, string> = {
 const PAGE_SIZE = 10;
 
 export default function AplikasyonGecmisPage() {
+  const { currentCompanyId, isSuperAdmin } = useAuth();
   const params = useParams();
   const deviceId = params ? (Array.isArray(params.deviceId) ? params.deviceId[0] : params.deviceId as string) : '';
   const router = useRouter();
@@ -167,7 +170,7 @@ export default function AplikasyonGecmisPage() {
     (async () => {
       try {
         const q = query(
-          collection(db, 'deviceActionForms'),
+          scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', deviceId),
           where('formType', '==', 'aplikasyon')
         );
@@ -187,7 +190,7 @@ export default function AplikasyonGecmisPage() {
       let q;
       if (page === 1) {
         q = query(
-          collection(db, 'deviceActionForms'),
+          scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', deviceId),
           where('formType', '==', 'aplikasyon'),
           orderBy('createdAt', 'desc'),
@@ -198,7 +201,7 @@ export default function AplikasyonGecmisPage() {
         if (!lastDoc) {
           // Need to fetch from beginning up to the page
           q = query(
-            collection(db, 'deviceActionForms'),
+            scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin),
             where('deviceId', '==', deviceId),
             where('formType', '==', 'aplikasyon'),
             orderBy('createdAt', 'desc'),
@@ -222,7 +225,7 @@ export default function AplikasyonGecmisPage() {
           return;
         }
         q = query(
-          collection(db, 'deviceActionForms'),
+          scopedQuery('deviceActionForms', currentCompanyId, isSuperAdmin),
           where('deviceId', '==', deviceId),
           where('formType', '==', 'aplikasyon'),
           orderBy('createdAt', 'desc'),

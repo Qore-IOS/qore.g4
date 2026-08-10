@@ -373,7 +373,8 @@ const FAZ7_COLLECTIONS = [
   'routeRequests', 'routeSequences', 'lotNfcDefinitions', 'lot_tags',
   'labTransferDates', 'labManualSerialSnapshots', 'depoSayimBackfillLogs',
   'yedekParcaDepoMinMax', 'ceomedDepoStok', 'ceomedSevkiyatRequests',
-  'ceomedSevkiyatResults', 'isAnaliziVerileri', 'analysis_results',
+  'ceomedSevkiyatResults', 'ceomedIrsaliyeGirisJobs',
+  'isAnaliziVerileri', 'analysis_results',
   'actionFormNumberCounters', 'qoreCalculationPeriodCounters',
   'notificationLogs', 'ordersArchive', 'appSettings', 'settings',
   'config_hospitals',
@@ -633,4 +634,131 @@ test('total verimlilik panelinin okuduğu koleksiyonlarda da __legacy__ sorgusu 
   for (const col of ['efficiencyPools', 'labPools', 'depots', 'kumulatifHesaplamaGecmisi', 'cihazUstuGecmisi']) {
     await assertSucceeds(getDocs(query(collection(db, col), where('companyId', '==', '__legacy__'))));
   }
+});
+
+// ============================================================================
+// Liste (query) kuralları — companyId filtresi zorunlu
+//
+// Firestore `list` kurallarını dönen belgelere bakarak değil, SORGUNUN
+// KISITLARINDAN ispatlanabilirlik üzerinden değerlendirir. Sonuçta yalnızca
+// kendi şirketinin belgeleri gelecek olsa bile, filtre sorguda yoksa istek
+// reddedilir. Bu yüzden panellerin "filtresiz çek, istemcide ayıkla" deseni
+// çalışmaz — üretimde direkt transfer bu yüzden sonsuz loading'de kalmıştı.
+// ============================================================================
+
+test('companyId filtreli liste sorgusu geçer', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'depoStok', 'q1'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K1' });
+  });
+  await assertSucceeds(getDocs(query(
+    collection(authedAsCompanyA(), 'depoStok'),
+    where('companyId', '==', 'companyA'),
+    where('depotId', '==', 'D1'),
+  )));
+});
+
+test('companyId filtresi olmayan liste sorgusu reddedilir — belgeler kendi şirketine ait olsa bile', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'depoStok', 'q2'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K1' });
+    await setDoc(doc(db, 'depoStok', 'q3'), { companyId: 'companyA', depotId: 'D1', stokKodu: 'K2' });
+  });
+  await assertFails(getDocs(query(
+    collection(authedAsCompanyA(), 'depoStok'),
+    where('depotId', '==', 'D1'),
+  )));
+});
+
+// REGRESYON — özyinelemeli joker kiracı izolasyonunu deliyordu.
+//
+// `match /deviceFaultReports/{id} { match /{path=**} { ... isSignedIn() } }`
+// yazımında joker SIFIR segment de eşleştiği için üst belgenin KENDİSİNİ de
+// kapsıyor ve `isSignedIn()`'i `inCompany()` ile OR'luyordu. Sonuç: başka
+// şirketin arıza raporu okunabiliyor/yazılabiliyordu.
+test('başka şirketin arıza raporu okunamaz (özyinelemeli joker sızdırmamalı)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fB'), { companyId: 'companyB', deviceId: 'd1' });
+  });
+  await assertFails(getDoc(doc(authedAsCompanyA(), 'deviceFaultReports', 'fB')));
+});
+
+test('başka şirketin arıza raporu yazılamaz', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fB2'), { companyId: 'companyB', deviceId: 'd1' });
+  });
+  await assertFails(setDoc(doc(authedAsCompanyA(), 'deviceFaultReports', 'fB2'), { companyId: 'companyB', note: 'x' }));
+});
+
+test('arıza raporu filtresiz listelenemez', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'deviceFaultReports', 'fA'), { companyId: 'companyA', deviceId: 'd1' });
+  });
+  await assertFails(getDocs(query(
+    collection(authedAsCompanyA(), 'deviceFaultReports'),
+    where('deviceId', '==', 'd1'),
+  )));
+});
+
+test('arıza raporunun alt koleksiyonu hâlâ erişilebilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'deviceFaultReports', 'fA2'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'deviceFaultReports', 'fA2', 'notes', 'n1'), { text: 'not' });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'deviceFaultReports', 'fA2', 'notes')));
+});
+
+// ============================================================================
+// Alt koleksiyon kuralları
+//
+// Firestore kuralları alt koleksiyonlara İNMEZ. Üst belgede `allow write`
+// olması alt koleksiyonu kapsamaz; kuralı yazılmamış yol varsayılan olarak
+// REDDEDİLİR. Bu üretimde total verimlilik panelinde "ara kayıt" ve "ana
+// kayıt"ın ikisini birden kırdı: satır kümesi 850 KB'ı aşınca parçalara
+// bölünüp `rowChunks` alt koleksiyonuna yazılıyor, o yolun kuralı yoktu.
+// ============================================================================
+
+test('totalEfficiencyRecords/rowChunks yazılabilir (ara + ana kayıt)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'totalEfficiencyRecords', 'rec1'), { companyId: 'companyA' });
+  });
+  await assertSucceeds(setDoc(
+    doc(authedAsCompanyA(), 'totalEfficiencyRecords', 'rec1', 'rowChunks', '0000'),
+    { index: 0, rows: [1, 2] },
+  ));
+});
+
+test('totalEfficiencyRecords/rowChunks okunabilir (kayıt yükleme)', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'totalEfficiencyRecords', 'rec2'), { companyId: 'companyA', rowsChunked: true });
+    await setDoc(doc(db, 'totalEfficiencyRecords', 'rec2', 'rowChunks', '0000'), { index: 0, rows: [1] });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'totalEfficiencyRecords', 'rec2', 'rowChunks')));
+});
+
+test('hospitals/hakEdisDefinitions okunabilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'hospitals', 'hosp1'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'hospitals', 'hosp1', 'hakEdisDefinitions', 'k1'), { sutKodu: 'A1' });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'hospitals', 'hosp1', 'hakEdisDefinitions')));
+});
+
+test('yedekParcaDepoMinMax/minMaxRules okunabilir', async () => {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await setDoc(doc(db, 'yedekParcaDepoMinMax', 'y1'), { companyId: 'companyA' });
+    await setDoc(doc(db, 'yedekParcaDepoMinMax', 'y1', 'minMaxRules', 'm1'), { min: 1 });
+  });
+  await assertSucceeds(getDocs(collection(authedAsCompanyA(), 'yedekParcaDepoMinMax', 'y1', 'minMaxRules')));
+});
+
+test('kullanıcı kendi pushTokens kaydını yazabilir', async () => {
+  await assertSucceeds(setDoc(doc(authedAsCompanyA(), 'users', 'userA', 'pushTokens', 't1'), { token: 'x' }));
+});
+
+test('kullanıcı BAŞKASININ pushTokens kaydını yazamaz', async () => {
+  await assertFails(setDoc(doc(authedAsCompanyA(), 'users', 'userB', 'pushTokens', 't1'), { token: 'x' }));
 });

@@ -444,7 +444,7 @@ export default function YedekParcaTransferPage() {
           where('status', '==', 'pending')
         );
         const borrowedQuery = query(
-          collection(db, 'borrowedSpareParts'),
+          scopedQuery('borrowedSpareParts', currentCompanyId, isSuperAdmin),
           where('status', '==', 'pending')
         );
 
@@ -737,11 +737,11 @@ export default function YedekParcaTransferPage() {
     setExpandedPersonnelStokKodu(null);
     try {
       const stockQuery = query(
-        collection(db, 'personalStock'),
+        scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
         where('ownerUid', '==', uid)
       );
       const usageLogQuery = query(
-        collection(db, 'sparePartTransferLogs'),
+        scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin),
         where('action', '==', 'use_on_device')
       );
       // Stok ve kullanım logları birbirinden bağımsız — paralel çek (waterfall yok).
@@ -800,7 +800,7 @@ export default function YedekParcaTransferPage() {
       // beklemeyen ürünler stoğa sayılmamalı (personel onaylamadığı ürünleri kendisine
       // ait saymıyor).
       const personalQuery = query(
-        collection(db, 'personalStock'),
+        scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
         where('status', '==', 'in_stock')
       );
       // Havuz depo stoğu - bu sayede ilgili ürünü depoya / havuza transfer eden

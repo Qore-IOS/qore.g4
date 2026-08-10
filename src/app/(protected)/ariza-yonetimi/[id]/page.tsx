@@ -418,7 +418,7 @@ export default function FaultDetailPage() {
       try {
         const stockSnap = await getDocs(
           query(
-            collection(db, 'personalStock'),
+            scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
             where('ownerUid', '==', currentUser.uid),
             where('status', '==', 'in_stock')
           )
@@ -762,6 +762,8 @@ export default function FaultDetailPage() {
         .map((p) => ({ uid: p.uid, name: p.name || '' }));
 
       await closeDeviceFaultReport(fault.id, {
+        companyId: currentCompanyId,
+        isSuperAdmin,
         closedByUid: currentUser?.uid || '',
         closedByName: currentUserProfile?.name || '',
         closeDescription,
@@ -783,7 +785,7 @@ export default function FaultDetailPage() {
         await resolveEjectedKitFault(fault.id, resolution, {
             uid: currentUser?.uid || '',
             name: currentUserProfile?.name || ''
-        }, closeDescription);
+        }, closeDescription, currentCompanyId, isSuperAdmin);
         setIsCloseDialogOpen(false);
         setCloseDescription('');
         toast({ title: 'Arıza Çözüldü', description: `Kit durumu "${resolution === 'imha' ? 'imha' : 'tekrar kullanım'}" olarak güncellendi.` });
@@ -974,7 +976,7 @@ export default function FaultDetailPage() {
 
       if (removedHn) {
         const duplicateRemovedHucreSnap = await getDocs(query(
-          collection(db, 'yedekParcaDepoStok'),
+          scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
           where('stokKodu', '==', item.stokKodu),
           where('hucreNumarasi', '==', removedHn)
         ));
@@ -1265,7 +1267,7 @@ export default function FaultDetailPage() {
 
       if (removedSerial && removedSerial !== (resolvedSerialNumber || '').trim()) {
         const duplicateSnap = await getDocs(query(
-          collection(db, 'yedekParcaDepoStok'),
+          scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
           where('stokKodu', '==', removedStokKoduValue),
           where('serialNumber', '==', removedSerial)
         ));

@@ -1,0 +1,70 @@
+name: Ceomed Otomasyon — Tanımsız İsim Kontrolü
+
+# NEDEN VAR: Ceomed UI otomasyonu Python + Node karışımı ve hiçbir testi yok
+# (Windows + açık Oracle Forms penceresi gerektiriyor). Kötü bir birleştirme,
+# sözdizimi geçerli kaldığı için hiçbir kontrolün yakalamadığı DÖRT ayrı
+# fonksiyon/sabit tanımını düşürdü:
+#
+#   bildirimYaz()  — ilk başarılı e-irsaliyede ReferenceError
+#   form_yenile()  — gönderim sonrası F6 satırında NameError
+#   --gercek       — sessiz sahte başarı (en tehlikelisi)
+#   ODAK_BOS       — her işte NameError, iş ELLE MÜDAHALE durumuna düşüyordu
+#
+# Dördü de sahada, gerçek bir iş sırasında ortaya çıktı; her biri bir tur
+# kaybettirdi. Bu iş akışı tam olarak bu sınıfı yakalar: tanımlanmamış isim.
+#
+# Kapsam bilinçli olarak DAR. Amaç stil denetimi değil; "çalışma anında
+# patlayacak isim var mı" sorusunu yanıtlamak. Geniş bir linter kurup gürültü
+# üretmek, kısa sürede herkesin görmezden geldiği kırmızı bir rozete dönüşürdü.
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/ceomed-sync/**'
+      - '.github/workflows/ceomed-otomasyon-kontrol.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ceomed-sync/**'
+      - '.github/workflows/ceomed-otomasyon-kontrol.yml'
+
+jobs:
+  tanimsiz-isim:
+    name: Python + Node tanımsız isim taraması
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Sürüm sabitlendi: sabitlenmemiş bir linter, kod değişmeden bir gün
+      # yeni kural getirip job'ı kırar. Bu iş akışının değeri güvenilirliğinde.
+      - name: ruff kur
+        run: pip install ruff==0.6.9
+
+      # F821 tanımsız isim, F822 __all__ içinde olmayan isim.
+      # Python dosyaları Windows'a özgü (ctypes.windll) olduğu için import
+      # edilerek denenemez; statik tarama tek yol.
+      - name: Python — tanımsız isim (F821/F822)
+        run: ruff check --select F821,F822 --no-cache scripts/ceomed-sync/
+
+      - name: Node — tanımsız isim (no-undef)
+        run: |
+          npx --yes eslint@8.57.1 \
+            --no-eslintrc \
+            --env node,es2022 \
+            --parser-options ecmaVersion:2022 \
+            --rule '{"no-undef":"error"}' \
+            'scripts/ceomed-sync/**/*.js'
+
+      # Sözdizimi zaten yukarıdakilerin ön koşulu ama ayrı adım olarak durması
+      # hatanın hangi katmanda olduğunu log'dan tek bakışta gösteriyor.
+      - name: Python — derleme
+        run: python -m compileall -q scripts/ceomed-sync/

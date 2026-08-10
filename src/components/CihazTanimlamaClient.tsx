@@ -396,7 +396,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
     try {
       // Bakım planlarını getir
       const plansQuery = query(
-        collection(db, 'maintenancePlans'),
+        scopedQuery('maintenancePlans', currentCompanyId, isSuperAdmin),
         where('deviceId', '==', device.id)
       );
       const plansSnap = await getDocs(plansQuery);

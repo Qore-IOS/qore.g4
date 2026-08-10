@@ -16,6 +16,7 @@
     "tests/**/*.test.ts",
     "src/lib/utils.ts",
     "src/lib/mal-kabul/**/*.ts",
+    "src/lib/ceomed/**/*.ts",
     "src/lib/lojistik/**/*.ts",
     "src/lib/lab-period/**/*.ts",
     "src/lib/logger.ts",

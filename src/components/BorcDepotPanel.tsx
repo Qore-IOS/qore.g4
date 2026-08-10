@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { useAuth } from '@/contexts/auth-context';
 import { db } from '@/lib/firebase';
 import {
   collection,
@@ -44,6 +45,7 @@ import {
 } from '@/components/ui/accordion';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 // Types
 interface BorcTransfer {
@@ -88,12 +90,13 @@ export default function BorcDepotPanel({
     Record<string, Record<string, number>>
   >({});
   const { toast } = useToast();
+  const { currentCompanyId, isSuperAdmin } = useAuth();
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
       const tQ = query(
-        collection(db, 'borcTransfers'),
+        scopedQuery('borcTransfers', currentCompanyId, isSuperAdmin),
         where('fromDepotId', '==', fromDepotId)
       );
       const [tSnap] = await Promise.all([getDocs(tQ)]);

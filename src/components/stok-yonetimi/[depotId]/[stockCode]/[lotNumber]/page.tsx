@@ -19,6 +19,7 @@ import { filterByCompanyScope } from '@/lib/company-scope';
 import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { cn, playFeedback } from '@/lib/utils';
 import { parseBarcode as parseRocheBarcode } from '@/lib/utils';
+import { scopedQuery } from '@/lib/firestore-helpers';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
@@ -157,7 +158,7 @@ export default function StockDetailPage() {
     setLoading(true);
     try {
       const q = query(
-        collection(db, 'depoStok'),
+        scopedQuery('depoStok', currentCompanyId, isSuperAdmin),
         where('depotId', '==', depotId),
         where('stokKodu', '==', decodeURIComponent(stockCode as string)),
         where('lotNumarasi', '==', decodeURIComponent(lotNumber as string)),

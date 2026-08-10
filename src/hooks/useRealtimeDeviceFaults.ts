@@ -7,6 +7,7 @@ import { db } from '@/lib/firebase';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { ACTIVE_DEVICE_FAULT_STATUSES } from '@/lib/device-faults';
 import type { DeviceFaultReport } from '@/lib/types';
+import { scopedQuery } from '@/lib/firestore-helpers';
 
 export function useRealtimeOpenDeviceFaultReports(): DeviceFaultReport[] {
   const { currentCompanyId, isSuperAdmin } = useAuth();
@@ -14,7 +15,7 @@ export function useRealtimeOpenDeviceFaultReports(): DeviceFaultReport[] {
 
   useEffect(() => {
     const faultsQuery = query(
-      collection(db, 'deviceFaultReports'),
+      scopedQuery('deviceFaultReports', currentCompanyId, isSuperAdmin),
       where('status', 'in', [...ACTIVE_DEVICE_FAULT_STATUSES]),
     );
 

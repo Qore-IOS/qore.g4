@@ -17,6 +17,12 @@ import { decodeBulkSerialQrPayload } from '@/lib/barcode';
 
 // Type imports from direkt-transfer module
 import type { TransferRow, FefoViolation, ScanSource } from '@/lib/direkt-transfer/types';
+// Yazma katmanı TEK KAYNAK — masaüstü terminali de bu fonksiyonları çağırır.
+import {
+  applyTransferItemWrites,
+  buildTransferHeader,
+  type TransferWriteContext,
+} from '@/lib/direkt-transfer/write';
 
 // Logging integration
 import { direktTransferLogger } from '@/lib/logger';
@@ -1378,155 +1384,37 @@ export default function DirektTransferPanel() {
 
         const targetHospitalId = isBorcMode ? null : selectedLabId;
 
+        // Kalem başına yazımlar `@/lib/direkt-transfer/write` içinde TEK
+        // KAYNAK olarak yaşar; masaüstü terminali (`/terminal/transfer`) de
+        // aynı fonksiyonu çağırır, böylece iki uygulama stoğu birebir aynı
+        // şekilde günceller.
+        const writeCtx: TransferWriteContext = {
+          transferRef,
+          sourceDepotId: selectedDepotId,
+          sourceDepotName: depotName,
+          targetHospitalId,
+          targetName,
+          isBorcMode,
+          targetBorcDepotId: selectedBorcDepotId,
+          company: isBorcMode ? selectedCompany : null,
+          trackingDisabled,
+          actorUid: currentUser.uid ?? null,
+          actorName: currentUserProfile.name ?? currentUser.email ?? null,
+          productMetaByCode,
+        };
+
         itemsToShip.forEach((item: DepoStokItem & { transferAdet?: number }) => {
-          const transferQty = item.transferAdet ?? getStockItemQuantity(item);
-          const originalQty = getStockItemQuantity(item);
-          const isPartial = transferQty < originalQty;
-
-          // Target Reference (If partial, we need a new ID for the target document)
-          const targetRef = isPartial ? doc(collection(db, 'depoStok')) : doc(db, 'depoStok', item.id);
-          const targetDocId = targetRef.id;
-
-          if (isPartial) {
-            // 1. UPDATE SOURCE: Subtract quantity
-            const sourceRef = doc(db, 'depoStok', item.id);
-            batch.update(sourceRef, {
-              adet: originalQty - transferQty
-            });
-
-            // 2. CREATE TARGET: New document for shipped portion
-            const targetData = {
-              ...item,
-              id: targetDocId,
-              adet: transferQty,
-              isShipped: true,
-              sevkTarihi: Timestamp.now(),
-              hedefKurum: targetName,
-              hedefKurumId: targetHospitalId,
-              transferId: transferRef.id,
-              sourceDepotId: selectedDepotId,
-              sourceDepotName: depotName,
-            };
-            delete (targetData as any).transferAdet;
-            
-            if (trackingDisabled) {
-              // If tracking is disabled at target, just record consumption
-              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-                stokKodu: item.stokKodu,
-                stokAdi: item.stokAdi,
-                lotNumarasi: item.lotNumarasi || '',
-                miad: item.miad as any,
-                seriNumarasi: item.seriNumarasi || '',
-                laboratoryId: selectedLabId || '',
-                laboratoryName: targetName,
-                consumptionTimestamp: new Date(),
-                consumptionType: 'normal_kullanim' as const,
-                userId: currentUser.uid ?? 'unknown',
-                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
-              };
-              batch.set(doc(collection(db, 'tuketimKayitlari')), withCompanyScope(consumptionRecord, currentCompanyId));
-            } else {
-              batch.set(targetRef, targetData);
-            }
-          } else {
-            // FULL TRANSFER: Just update existing doc
-            if (trackingDisabled) {
-              batch.delete(targetRef);
-              const consumptionRecord: Omit<ConsumptionRecord, 'id'> = {
-                stokKodu: item.stokKodu,
-                stokAdi: item.stokAdi,
-                lotNumarasi: item.lotNumarasi || '',
-                miad: item.miad as any,
-                seriNumarasi: item.seriNumarasi || '',
-                laboratoryId: selectedLabId || '',
-                laboratoryName: targetName,
-                consumptionTimestamp: new Date(),
-                consumptionType: 'normal_kullanim' as const,
-                userId: currentUser.uid ?? 'unknown',
-                userName: currentUserProfile.name ?? currentUser.email ?? 'Unknown User',
-              };
-              batch.set(doc(collection(db, 'tuketimKayitlari')), withCompanyScope(consumptionRecord, currentCompanyId));
-            } else {
-              batch.set(targetRef, {
-                isShipped: true, 
-                sevkTarihi: Timestamp.now(), 
-                hedefKurum: targetName,
-                hedefKurumId: targetHospitalId,
-                transferId: transferRef.id,
-                sourceDepotId: selectedDepotId, 
-                sourceDepotName: depotName,
-              }, { merge: true });
-            }
-          }
-
-          if (isBorcMode) {
-            const borcRef = doc(collection(db, 'borcTransfers'));
-            batch.set(borcRef, withCompanyScope({
-              fromDepotId: selectedDepotId, toBorcDepotId: selectedBorcDepotId,
-              company: selectedCompany, stokKodu: item.stokKodu, stokAdi: item.stokAdi,
-              lot: item.lotNumarasi, miad: item.miad, seriNumarasi: item.seriNumarasi,
-              isReturned: false, timestamp: Timestamp.now(),
-              adet: transferQty
-            }, currentCompanyId));
-          }
-
-          if (item.seriNumarasi) {
-            const histRef = doc(collection(db, `serialHistory/${item.seriNumarasi}/events`));
-            batch.set(histRef, { type: 'transfer', transferId: transferRef.id, details: { sourceDepotId: selectedDepotId, sourceDepotName: depotName, targetName, targetHospitalId, stokKodu: item.stokKodu, stokAdi: item.stokAdi, lotNumarasi: item.lotNumarasi, miad: item.miad, adet: transferQty }, timestamp: Timestamp.now() });
-            ledgerEvents.push({
-              type: isBorcMode ? 'borc' : 'transfer',
-              stokKodu: item.stokKodu,
-              stokAdi: item.stokAdi,
-              seriNumarasi: item.seriNumarasi,
-              lotNumarasi: item.lotNumarasi || '',
-              miad: typeof item.miad === 'string' ? item.miad : '',
-              source: { locationType: 'depot', locationId: selectedDepotId, locationName: depotName },
-              location: isBorcMode
-                ? { locationType: 'borc', locationId: selectedBorcDepotId || '', locationName: targetName }
-                : { locationType: 'lab', locationId: targetHospitalId || '', locationName: targetName },
-              refs: { transferId: transferRef.id, depoStokId: targetDocId },
-              actorUid: currentUser.uid ?? null,
-              actorName: currentUserProfile.name ?? currentUser.email ?? null,
-              details: { adet: transferQty, company: isBorcMode ? selectedCompany : null },
-            });
-            // Hedefte tüketim takibi kapalıysa transfer aynı anda tüketimdir.
-            if (trackingDisabled) {
-              ledgerEvents.push({
-                type: 'tuketim',
-                stokKodu: item.stokKodu,
-                stokAdi: item.stokAdi,
-                seriNumarasi: item.seriNumarasi,
-                lotNumarasi: item.lotNumarasi || '',
-                miad: typeof item.miad === 'string' ? item.miad : '',
-                source: { locationType: 'lab', locationId: selectedLabId || '', locationName: targetName },
-                refs: { transferId: transferRef.id },
-                actorUid: currentUser.uid ?? null,
-                actorName: currentUserProfile.name ?? currentUser.email ?? null,
-                details: { reason: 'hedefte_tuketim_takibi_kapali' },
-              });
-            }
-          }
-          
-          const itemRef = doc(db, 'transfers', transferRef.id, 'items', targetDocId);
-          batch.set(itemRef, { 
-            stokKodu: item.stokKodu, 
-            stokAdi: item.stokAdi, 
-            lotNumarasi: item.lotNumarasi || '', 
-            miad: item.miad || '', 
-            seriNumarasi: item.seriNumarasi || '', 
-            adet: transferQty,
-            anaBirim: productMetaByCode.get(item.stokKodu || '')?.anaBirim || 'Adet', 
-            ambalajDegeri: productMetaByCode.get(item.stokKodu || '')?.ambalajDegeri ?? null 
-          });
+          const result = applyTransferItemWrites(batch, item, writeCtx, currentCompanyId);
+          ledgerEvents.push(...result.ledgerEvents);
         });
 
-        batch.set(transferRef, withCompanyScope({
-          id: transferRef.id, timestamp: serverTimestamp(), sourceDepotId: selectedDepotId,
-          sourceDepotName: depotName, targetName, targetHospitalId: targetId || null,
-          mode: isBorcMode ? 'borc' : 'lab', company: isBorcMode ? selectedCompany : null,
-          itemCount: totalShippedAdet, createdByUid: currentUser.uid ?? '',
-          createdByName: currentUserProfile.name ?? currentUser.email ?? '',
-        }, currentCompanyId));
+        batch.set(
+          transferRef,
+          withCompanyScope(
+            buildTransferHeader(writeCtx, totalShippedAdet, serverTimestamp()),
+            currentCompanyId,
+          ),
+        );
 
         await batch.commit();
 

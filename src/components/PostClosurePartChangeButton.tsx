@@ -365,7 +365,7 @@ export default function PostClosurePartChangeButton({
 
       if (removedSerial && removedSerial !== resolvedSerialNumber.trim()) {
         const duplicateSnap = await getDocs(query(
-          collection(db, 'yedekParcaDepoStok'),
+          scopedQuery('yedekParcaDepoStok', currentCompanyId, isSuperAdmin),
           where('stokKodu', '==', removedStokKoduValue),
           where('serialNumber', '==', removedSerial)
         ));
