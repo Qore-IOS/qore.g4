@@ -31,6 +31,7 @@ import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';
 import { sanitizeFsId } from '@/lib/sync/idle-scheduler';
 import { generateId } from '@/lib/utils';
+import { commitLocalFirst, type CommitOutcome } from '@/lib/offline-write';
 import type { MalKabulHeader, MalKabulLine, VerificationMode } from './types';
 
 /**
@@ -275,6 +276,14 @@ export type MalKabulCommitResult = {
   writtenDocs: number;
   /** Toplam adet (lot satırlarında `adet` alanı dâhil). */
   totalAdet: number;
+  /**
+   * Yazımın sunucuya işlenip işlenmediği.
+   *
+   * `'pending'` bir HATA DEĞİLDİR: kalemler yerel önbellekte, bağlantı
+   * gelince kendiliğinden gönderilecek. Arayüz bunu kullanıcıya "senkron
+   * bekliyor" olarak göstermeli, "kaydedilemedi" olarak değil.
+   */
+  outcome: CommitOutcome;
 };
 
 /**
@@ -304,6 +313,9 @@ export async function commitMalKabul(params: {
   const txRef = doc(db, 'malKabulTransactions', transactionId);
 
   let writtenDocs = 0;
+  // Partilerden herhangi biri sunucu onayı almadıysa işlemin tamamı
+  // "bekliyor" sayılır — kullanıcıya en kötü durumu göstermek doğrusu.
+  let outcome: CommitOutcome = 'synced';
   const totalAdet = rows.reduce((n, r) => n + Math.max(1, r.adet ?? 1), 0);
 
   // 1) Stok yazımı — partiler hâlinde.
@@ -349,7 +361,10 @@ export async function commitMalKabul(params: {
       }
     }
 
-    await batch.commit();
+    // `await batch.commit()` DEĞİL: çevrimdışıyken o söz hiç çözülmez ve
+    // ekran "Kaydediliyor…" konumunda kilitlenir. Yazım yerel önbelleğe anında
+    // uygulanır; sunucu onayı gelmezse işlem kuyrukta beklemeye devam eder.
+    if ((await commitLocalFirst(batch.commit())) === 'pending') outcome = 'pending';
   }
 
   // 2) İşlem başlığı ve satırları — stok yazımından SONRA.
@@ -395,8 +410,8 @@ export async function commitMalKabul(params: {
         ),
       );
     });
-    await batch.commit();
+    if ((await commitLocalFirst(batch.commit())) === 'pending') outcome = 'pending';
   }
 
-  return { transactionId, writtenDocs, totalAdet };
+  return { transactionId, writtenDocs, totalAdet, outcome };
 }

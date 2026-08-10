@@ -1,22 +1,39 @@
 # Qore Terminal (masaüstü)
 
-Depo terminali için Electron kabuğu. Web uygulamasının `/terminal` rotasını
-tam ekran, tek işlik bir pencerede açar.
+Depo terminali için Electron kabuğu. Terminal arayüzünü tam ekran, tek işlik
+bir pencerede açar.
+
+## İki çalışma kipi
+
+| Kip | Arayüz nereden gelir | İnternetsiz açılır mı | Güncelleme |
+| --- | --- | --- | --- |
+| **Gömülü** (varsayılan) | `renderer-dist/`, uygulamayla kurulur | **Evet** | Yeni `.exe` gerekir |
+| **Uzak** | Yayındaki `/terminal` adresinden | Hayır | Web deploy'u yeter |
+
+`QORE_TERMINAL_URL` verilmişse uzak kip kazanır. Aksi hâlde `renderer-dist/`
+varsa gömülü kip çalışır; o da yoksa kurulum formu adres sorar.
+
+Depoda internet kesiliyorsa **gömülü kipi** kullanın: uygulama internetsiz
+açılır, Firestore'un yerel önbelleğinden okur ve yazımları bağlantı gelene
+kadar kuyrukta tutar.
 
 ## Ne yapar, ne yapmaz
 
 **Yapar**
 
-- `/terminal` rotasını adres çubuğu ve sekme olmadan gösterir
+- Terminal arayüzünü adres çubuğu ve sekme olmadan gösterir
+- Gömülü paketi `app://terminal` özel protokolünden sunar (IndexedDB'nin
+  çalışması için gerçek bir kaynak gerekir; `file://` bunu sağlamaz)
 - Oturumu kalıcı tutar (her açılışta yeniden giriş istemez)
 - Yazıcıya diyalogsuz basım imkânı verir (`window.qoreDesktop.print()`)
 - Aynı anda tek örnek çalışmasını garanti eder
 
 **Yapmaz**
 
-- Kendi arayüzünü çizmez — tüm ekranlar web uygulamasından gelir
+- Kendi ekranlarını yazmaz — arayüz, web uygulamasıyla AYNI bileşenlerden
+  üretilir (`terminal-app/`, `src/app/terminal/**` içeriğini import eder)
 - Kendi Firebase yapılandırmasını taşımaz, kimlik bilgisi saklamaz
-- Kendi veri kopyasını tutmaz
+- Kendi veri modelini tutmaz — yazımlar `src/lib/*/write.ts` üzerinden gider
 
 Bu ayrım bilinçli: masaüstü uygulaması ile web uygulaması **aynı Firestore
 koleksiyonlarına, aynı `src/lib/*/write.ts` modülleriyle** yazar. İkinci bir
@@ -46,13 +63,27 @@ Herkese aynı `.exe` dağıtacaksanız, paketlemeden önce
 `config.example.json` dosyasını `config.json` olarak kopyalayıp adresi
 doldurun — kurulan uygulama form göstermeden doğrudan bağlanır.
 
+## Gömülü paketi üretmek
+
+Arayüz paketi repo kökünden üretilir ve `desktop/renderer-dist` içine düşer:
+
+```bash
+# repo kökünde — .env.local içinde Firebase anahtarları olmalı
+pnpm build:terminal
+```
+
+Anahtarlar `apphosting.yaml` içindekilerle aynıdır (`NEXT_PUBLIC_FIREBASE_*`).
+Eksikse build açık bir hata ile durur — sessizce çalışmayan bir `.exe`
+üretmektense.
+
 ## Geliştirme
 
 ```bash
 cd desktop
 npm install
+npm start                    # gömülü paket varsa onu açar
 
-# Web uygulaması ayrı bir terminalde `pnpm dev` ile çalışıyor olmalı
+# Yayındaki siteye bakmak için (gömülü paketi yok sayar):
 QORE_TERMINAL_URL=http://localhost:9002/terminal npm start
 ```
 
@@ -65,6 +96,9 @@ $env:QORE_TERMINAL_URL="http://localhost:9002/terminal"; npm start
 ## Paketleme (.exe / .dmg / AppImage)
 
 ```bash
+# önce arayüz paketi (repo kökünde)
+pnpm build:terminal
+
 cd desktop
 npm install
 npm run dist:win     # Windows kurulumu (NSIS)

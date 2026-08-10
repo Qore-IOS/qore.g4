@@ -215,21 +215,28 @@ export default function TerminalMalKabulPage() {
         companyId: currentCompanyId,
       });
 
-      await touchStockMetadata();
+      // `await` YOK: bu da bir Firestore yazımı ve çevrimdışıyken çözülmez.
+      // Stok metadata'sı yalnızca önbellek tazeleme sinyali; beklemeye değmez.
+      void touchStockMetadata();
       invalidateDepoStok();
 
       setRows([]);
       scannedSerials.current.clear();
+
+      const pending = result.outcome === 'pending';
       setFeedback({
-        tone: 'success',
+        tone: pending ? 'warning' : 'success',
         title: `${result.writtenDocs} kalem stoğa alındı`,
-        detail: `İşlem no ${result.transactionId}`,
+        detail: pending
+          ? 'Bağlantı yok — kayıt cihazda, internet gelince gönderilecek.'
+          : `İşlem no ${result.transactionId}`,
       });
       toast({
-        title: 'Mal kabul tamamlandı',
+        title: pending ? 'Kaydedildi (senkron bekliyor)' : 'Mal kabul tamamlandı',
         description:
           `${result.writtenDocs} kalem kaydedildi.` +
-          (skipped > 0 ? ` ${skipped} seri geçmişte işlem gördüğü için atlandı.` : ''),
+          (skipped > 0 ? ` ${skipped} seri geçmişte işlem gördüğü için atlandı.` : '') +
+          (pending ? ' Bağlantı geldiğinde otomatik gönderilecek.' : ''),
       });
     } catch (error) {
       // Rollback'e gerek yok: `commitMalKabul` başarısız olursa liste ekranda

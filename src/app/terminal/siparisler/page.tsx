@@ -28,6 +28,7 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { siparislerLogger } from '@/lib/logger';
+import { isEmbeddedTerminal } from '@/lib/terminal-runtime';
 import type { Order } from '@/lib/types';
 import {
   TerminalButton,
@@ -47,6 +48,15 @@ export default function TerminalSiparislerPage() {
   const [depotId, setDepotId] = useTerminalDepot();
 
   const [orders, setOrders] = useState<Order[]>([]);
+  /**
+   * Toplama ekranı (`/siparisler/[orderId]/toplama`) web uygulamasının bir
+   * rotasıdır ve masaüstüne gömülü statik pakete DÂHİL DEĞİLDİR — o akış
+   * bilerek çoğaltılmadı (bkz. dosya başlığı). Gömülü kipte bu yüzden
+   * butonu etkin göstermek yanıltıcı olur: tıklayan kullanıcı hiçbir yere
+   * gitmez.
+   */
+  const [embedded, setEmbedded] = useState(false);
+  useEffect(() => setEmbedded(isEmbeddedTerminal()), []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -146,6 +156,7 @@ export default function TerminalSiparislerPage() {
                   </div>
                   <TerminalButton
                     onClick={() => router.push(`/siparisler/${order.id}/toplama`)}
+                    disabled={embedded}
                   >
                     Toplamaya başla
                   </TerminalButton>
@@ -156,8 +167,9 @@ export default function TerminalSiparislerPage() {
         </div>
 
         <p className="shrink-0 text-xs text-zinc-600">
-          Toplama, web uygulamasının mevcut toplama ekranında açılır — FEFO
-          kontrolü ve sevk kaydı orada, tek bir yerde yürür.
+          {embedded
+            ? 'Bu liste çevrimdışı da görünür, ancak toplama masaüstü paketinde yer almaz: FEFO kontrolü ve sevk kaydı tek bir yerde, web uygulamasının toplama ekranında yürür. Toplamak için tarayıcıdan girin.'
+            : 'Toplama, web uygulamasının mevcut toplama ekranında açılır — FEFO kontrolü ve sevk kaydı orada, tek bir yerde yürür.'}
         </p>
       </div>
     </TerminalShell>

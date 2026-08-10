@@ -33,6 +33,7 @@ import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 import { playFeedback } from '@/lib/utils';
 import { withCompanyScope } from '@/lib/company-scope';
+import { commitLocalFirst } from '@/lib/offline-write';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
@@ -210,30 +211,38 @@ export default function TerminalTransferPage() {
         withCompanyScope(buildTransferHeader(ctx, totalShippedAdet, serverTimestamp()), currentCompanyId),
       );
 
-      await batch.commit();
+      // `await batch.commit()` DEĞİL: çevrimdışıyken o söz hiç çözülmez ve
+      // buton sonsuza kadar "Sevk ediliyor…" kalır. Yazım yerele uygulanır,
+      // bağlantı gelince SDK kendisi gönderir.
+      const outcome = await commitLocalFirst(batch.commit());
 
       // Defter yazımı stok yazımından SONRA ve AYRI gelir; burada bir hata
       // olursa transfer geri alınmaz (ürünler gerçekten taşındı). Defter
       // türetilmiş bir dizindir, yönetim panelinden yeniden kurulabilir.
-      try {
-        await appendSerialEvents(ledgerEvents, currentCompanyId);
-      } catch {
+      // Beklenmez: çevrimdışıyken kuyruğa girer ve kullanıcıyı oyalamamalı.
+      void appendSerialEvents(ledgerEvents, currentCompanyId).catch(() => {
         /* stok doğru; defter sonradan doldurulabilir */
-      }
+      });
 
-      await touchStockMetadata();
+      void touchStockMetadata();
       invalidateDepoStok();
 
       setItems([]);
       pickedIds.current.clear();
+
+      const pending = outcome === 'pending';
       setFeedback({
-        tone: 'success',
+        tone: pending ? 'warning' : 'success',
         title: `${totalShippedAdet} adet sevk edildi`,
-        detail: `Hedef: ${ctx.targetName}`,
+        detail: pending
+          ? 'Bağlantı yok — kayıt cihazda, internet gelince gönderilecek.'
+          : `Hedef: ${ctx.targetName}`,
       });
       toast({
-        title: 'Transfer tamamlandı',
-        description: `${totalShippedAdet} adet ürün ${ctx.targetName} kurumuna transfer edildi.`,
+        title: pending ? 'Sevk kaydedildi (senkron bekliyor)' : 'Transfer tamamlandı',
+        description:
+          `${totalShippedAdet} adet ürün ${ctx.targetName} kurumuna transfer edildi.` +
+          (pending ? ' Bağlantı geldiğinde otomatik gönderilecek.' : ''),
       });
     } catch (error) {
       toast({

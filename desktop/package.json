@@ -19,19 +19,34 @@
   "build": {
     "appId": "com.qore.terminal",
     "productName": "Qore Terminal",
-    "files": ["main.js", "preload.js", "config.js", "setup.html", "config.json", "package.json"],
+    "files": [
+      "main.js",
+      "preload.js",
+      "config.js",
+      "renderer.js",
+      "setup.html",
+      "config.json",
+      "package.json",
+      "renderer-dist/**/*"
+    ],
     "directories": {
       "output": "dist"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.business"
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Office"
     },
     "nsis": {

@@ -17,6 +17,7 @@
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { ConnectionBadge } from '@/components/terminal/connection-badge';
 
 /** Terminal ekranlarının ortak dış çerçevesi. */
 export function TerminalShell({
@@ -59,6 +60,9 @@ export function TerminalShell({
           ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-3">
+          {/* Bağlantı durumu HER ekranda görünür — çevrimdışı olduğunu
+              bilmeyen kullanıcı, kaydın gittiğini sanıp devam eder. */}
+          <ConnectionBadge />
           {right}
           <button
             type="button"
