@@ -7,6 +7,8 @@ import {
   normalizeTarih,
   resolveLotValue,
   ceomedIrsaliyeNo,
+  ceomedNoOnEki,
+  ceomedNumaraAlani,
   selectPartActions,
   CEOMED_DEPO,
   CEOMED_ISLEM_TIPI,
@@ -299,3 +301,64 @@ test('AÇIK RİSK: aynı baş harf + aynı sıra = aynı irsaliye numarası', ()
   assert.equal(ceomedIrsaliyeNo('BT-T0042'), ceomedIrsaliyeNo('BT-T0042'));
 });
 
+
+// ---------------------------------------------------------------------------
+// İrsaliye numarası tekilliği
+//
+// Sahada açık kalan riskti: aynı baş harfli iki personel aynı numarayı üretiyor
+// ve Ceomed mükerreri reddediyor. Tek kişiyle test ederken hiç görünmüyor, o
+// yüzden testle sabitleniyor.
+// ---------------------------------------------------------------------------
+
+test('Ceomed ön eki personel kodunun ilk 2 harfidir', () => {
+  assert.equal(ceomedNoOnEki('BT'), 'BT');
+  assert.equal(ceomedNoOnEki('AMY'), 'AM');
+  assert.equal(ceomedNoOnEki('B'), 'BX');
+  assert.equal(ceomedNoOnEki(''), 'XX');
+});
+
+test('aynı ön eke düşen farklı personel kodları AYNI numara alanını paylaşır', () => {
+  // Çakışmanın asıl sebebi bu: sayaç bu kümeyle anahtarlanmazsa ikisi de
+  // 1'den başlar ve Ceomed'de aynı numarayı üretir.
+  assert.equal(
+    ceomedNumaraAlani('ISLAB2', 'AMY', 'T'),
+    ceomedNumaraAlani('ISLAB2', 'AMZ', 'T'),
+  );
+  // "Batuhan Tubasar" ve "Burak Tekin" — ikisi de BT.
+  assert.equal(
+    ceomedNumaraAlani('ISLAB2', 'BT', 'T'),
+    ceomedNumaraAlani('ISLAB2', 'BT', 'T'),
+  );
+});
+
+test('farklı ön ek, farklı şirket ve farklı form tipi AYRI alanlardır', () => {
+  const temel = ceomedNumaraAlani('ISLAB2', 'BT', 'T');
+  assert.notEqual(temel, ceomedNumaraAlani('ISLAB2', 'AK', 'T'));
+  assert.notEqual(temel, ceomedNumaraAlani('BASKA', 'BT', 'T'));
+  assert.notEqual(temel, ceomedNumaraAlani('ISLAB2', 'BT', 'A'));
+});
+
+test('şirketsiz kayıt global alana düşer ama şirketliyle karışmaz', () => {
+  assert.equal(ceomedNumaraAlani(null, 'BT', 'T'), ceomedNumaraAlani(undefined, 'BT', 'T'));
+  assert.notEqual(ceomedNumaraAlani(null, 'BT', 'T'), ceomedNumaraAlani('ISLAB2', 'BT', 'T'));
+});
+
+test('aynı alanda artan sıra numaraları FARKLI Ceomed numarası verir', () => {
+  // Sayacın paylaşılması ancak numaralar gerçekten ayrışıyorsa işe yarar.
+  const a = ceomedIrsaliyeNo('AMY-T0007');
+  const b = ceomedIrsaliyeNo('AMZ-T0008');
+  assert.equal(a, 'AM10007');
+  assert.equal(b, 'AM10008');
+  assert.notEqual(a, b);
+});
+
+test('paylaşılmayan sayaç mükerrer üretir — düzeltilen davranış budur', () => {
+  // Kullanıcı bazlı sayaçta ikisi de kendi sırasında 7'ye gelir:
+  const eskiDavranis = [ceomedIrsaliyeNo('AMY-T0007'), ceomedIrsaliyeNo('AMZ-T0007')];
+  assert.equal(eskiDavranis[0], eskiDavranis[1]); // ← Ceomed bunu reddediyordu
+  // Bu yüzden sayaç numara alanıyla anahtarlanmak ZORUNDA.
+  assert.equal(
+    ceomedNumaraAlani('ISLAB2', 'AMY', 'T'),
+    ceomedNumaraAlani('ISLAB2', 'AMZ', 'T'),
+  );
+});
