@@ -12,7 +12,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, onSnapshot, query, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
@@ -40,6 +40,8 @@ type JobRow = {
   status: IrsaliyeGirisStatus;
   irsaliyeNo?: string;
   cariKodu?: string;
+  /** Cari kodu sonradan girildiğinde işi kurtarabilmek için gerekli. */
+  hospitalId?: string;
   tarih?: string;
   aciklama?: string;
   labName?: string | null;
@@ -115,22 +117,53 @@ export default function CeomedIrsaliyeGirisKuyrugu() {
   /**
    * İşi yeniden kuyruğa alır. Yalnızca `blocked` ve `failed` için açıktır:
    * `sent` bir işi yeniden kuyruğa almak muhasebeye MÜKERRER irsaliye gönderir.
+   *
+   * CARİ KODU TAZE OKUNUR. İşin en sık engellenme sebebi laboratuvarın Ceomed
+   * cari kodunun boş olması. Kod iş dokümanına YAZILDIĞI AN donuyor; operatör
+   * Yönetim → Laboratuvarlar'dan kodu girse bile eski boş değer dokümanda
+   * kalıyor ve iş yeniden kuyruğa alındığında worker tam aynı sebeple geri
+   * çeviriyordu — yani kurtarma yolu hiç çalışmıyordu. Burada hastane
+   * dokümanından okuyup güncelliyoruz.
    */
   const yenidenKuyruga = async (job: JobRow) => {
     if (job.status !== 'blocked' && job.status !== 'failed') return;
     setRequeuing(job.id);
     try {
-      await updateDoc(doc(db, IRSALIYE_GIRIS_COLLECTION, job.id), {
+      const guncellemeler: Record<string, unknown> = {
         status: 'pending',
         attemptCount: 0,
         lastError: null,
         blockedReason: null,
         blockedDetail: null,
         updatedAt: serverTimestamp(),
-      });
+      };
+
+      let cariUyarisi: string | null = null;
+      if (!job.cariKodu && job.hospitalId) {
+        const hSnap = await getDoc(doc(db, 'hospitals', job.hospitalId));
+        const taze = String((hSnap.data() as any)?.ceomedCariKodu || '').trim().toUpperCase();
+        if (taze) {
+          guncellemeler.cariKodu = taze;
+        } else {
+          // Kodu girmeden yeniden denemek, işi aynı gerekçeyle tekrar blocked
+          // yapmaktan başka bir şey yapmaz. Denemeden söylemek daha dürüst.
+          cariUyarisi =
+            `"${job.labName || job.hospitalId}" laboratuvarında Ceomed cari kodu hâlâ boş. ` +
+            'Yönetim → Laboratuvarlar ekranından girip tekrar deneyin.';
+        }
+      }
+
+      if (cariUyarisi) {
+        toast({ title: 'Cari kodu eksik', description: cariUyarisi, variant: 'destructive', duration: 12000 });
+        return;
+      }
+
+      await updateDoc(doc(db, IRSALIYE_GIRIS_COLLECTION, job.id), guncellemeler);
       toast({
         title: 'Kuyruğa alındı',
-        description: `${job.irsaliyeNo || job.id} yeniden denenecek.`,
+        description: guncellemeler.cariKodu
+          ? `${job.irsaliyeNo || job.id} — cari kodu ${guncellemeler.cariKodu} olarak güncellendi, yeniden denenecek.`
+          : `${job.irsaliyeNo || job.id} yeniden denenecek.`,
       });
     } catch (e: any) {
       toast({ title: 'Hata', description: e?.message || 'Yeniden kuyruğa alınamadı.', variant: 'destructive' });

@@ -301,8 +301,11 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     blocks.push({
       reason: 'cari_kodu_tanimsiz',
       detail:
+        // "otomatik yeniden denenecek" YAZMAYIN: blocked işleri yeniden
+        // değerlendiren hiçbir mekanizma yok, operatör bekleyip durur.
         `"${text(input.labName) || input.hospitalId}" laboratuvarında Ceomed cari kodu tanımlı değil. ` +
-        'Yönetim → Laboratuvarlar ekranından cari kodunu girin; iş otomatik yeniden denenecektir.',
+        'Yönetim → Laboratuvarlar ekranından cari kodunu girin, sonra Ceomed kuyruk ' +
+        'panelinden bu işe "Yeniden kuyruğa al" deyin.',
     });
   }
   if (!tarih) {
