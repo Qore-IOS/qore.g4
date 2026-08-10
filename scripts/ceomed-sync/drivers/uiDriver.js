@@ -27,6 +27,21 @@ const PYTHON = process.env.ORACLE_PYTHON || 'python';
 const SCRIPT = path.join(__dirname, '..', 'oracle-ui', 'fill_irsaliye.py');
 const TIMEOUT_MS = (parseInt(process.env.ORACLE_UI_TIMEOUT_SEC, 10) || 180) * 1000;
 
+/**
+ * Python `--gercek` almadıkça E-İRSALİYE GÖNDER'e BASMAZ; formu doldurup
+ * `{ok: true, kuru: true}` döner. Bu bayrak bir süre hiç geçilmiyordu: gerçek
+ * modda worker `ok: true` görüp işi `sent` işaretliyor, "gönderildi" bildirimi
+ * yazıyordu — hiçbir şey gönderilmemişken. Sessiz başarı, başarısızlıktan
+ * beterdir: iş bir daha denenmez.
+ *
+ * Env semantiği worker ile AYNI ve güvenli tarafa düşer: `ORACLE_DRY_RUN`
+ * varsayılanı kurudur, açıkça '0' yazılmadıkça gönderim yok.
+ */
+const GERCEK_GONDERIM =
+  process.env.ORACLE_INTEGRATION_ENABLED === '1' &&
+  process.env.ORACLE_DRY_RUN === '0' &&
+  process.env.ORACLE_FILL_ONLY !== '1';
+
 async function init() {
   if (!fs.existsSync(SCRIPT)) {
     throw new Error(`UI sürücü betiği bulunamadı: ${SCRIPT}`);
@@ -67,6 +82,9 @@ function submit(job) {
     const args = [SCRIPT];
     if (process.env.ORACLE_ALLOW_POST_QUANTITY_WARNING === '1') {
       args.push('--miktar-uyarisini-onayla');
+    }
+    if (GERCEK_GONDERIM) {
+      args.push('--gercek');
     }
     const child = spawn(PYTHON, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -116,8 +134,27 @@ function submit(job) {
       }
 
       if (parsed && typeof parsed.ok === 'boolean') {
+        if (parsed.ok && GERCEK_GONDERIM && parsed.kuru === true) {
+          // Gönderim bekleniyordu ama Python kuru döndü. Bunu başarı saymak
+          // işi gönderilmemişken 'sent' yapardı. Yeniden denenebilir DEĞİL:
+          // sebebi bilinmeden tekrar denemek mükerrer riski taşır.
+          finish({
+            ok: false,
+            retryable: false,
+            error: 'Sürücü gerçek modda çalıştı ama Python E-İRSALİYE GÖNDER\'e '
+                 + 'basmadan döndü (kuru sonuç). İş GÖNDERİLMEDİ; Ceomed ekranını '
+                 + `elle kontrol edin: ${describeJob(job)}`,
+            screenshotPath: parsed.screenshotPath,
+          });
+          return;
+        }
         finish(parsed.ok
-          ? { ok: true, ceomedIrsaliyeNo: parsed.ceomedIrsaliyeNo, screenshotPath: parsed.screenshotPath }
+          ? {
+              ok: true,
+              kuru: parsed.kuru === true,
+              ceomedIrsaliyeNo: parsed.ceomedIrsaliyeNo,
+              screenshotPath: parsed.screenshotPath,
+            }
           : { ok: false, retryable: parsed.retryable !== false, error: parsed.error || 'UI otomasyonu başarısız.' });
         return;
       }

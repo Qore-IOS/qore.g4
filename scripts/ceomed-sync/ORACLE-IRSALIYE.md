@@ -8,13 +8,16 @@ gönderilmesi.
 ```
 Teknik/Aplikasyon formu kapanır (içinde yedek parça var)
    │
-   ├─ Qore aynı batch'te kuyruk kaydı yazar
+   ├─ batch.commit()  ← form KAYDEDİLDİ, bu noktadan sonrası formu etkilemez
+   │
+   ├─ Qore AYRI bir yazımla kuyruk kaydı ekler
    │     ceomedIrsaliyeGirisJobs/{formId}   status: pending | blocked
+   │     (batch'e DEĞİL — sebebi aşağıda "Kuyruk köprüsü: neden batch dışında?")
    │
    └─> on-prem worker (oracleIrsaliyeWorker.js)
           ├─ işi atomik olarak sahiplenir (status: processing)
           ├─ ikinci kez doğrular
-          ├─ sürücüyle yazar:  api (tercih) | ui (pywinauto)
+          ├─ sürücüyle yazar:  ui (Win32/ctypes — Ceomed API onayı vermedi)
           └─ status: sent | failed | blocked
 ```
 
@@ -961,3 +964,104 @@ Buna ek olarak:
   `controls.json`'a eklenip cari kodu ile aynı değer yazılmalı.
 - UI sürücüsü çalışırken makinede **başka bir şey yapılmamalı**: tuş vuruşları
   odaktaki pencereye gider.
+
+---
+
+## Kuyruk köprüsü: neden batch dışında?
+
+**Olay.** Teknik servis ve aplikasyon işlem formları bir gün kapatılamaz oldu;
+her kayıtta `Missing or insufficient permissions` çıktı. Sebep kuyruk yazısının
+form kaydıyla **aynı `WriteBatch`** içinde olmasıydı: `ceomedIrsaliyeGirisJobs`
+kuralı canlıya çıkmamıştı, yazım reddedildi, batch atomik olduğu için formun
+tamamı geri alındı. Kuyruk köprüsü acil olarak kaldırıldı.
+
+**Kalıcı çözüm.** Köprü geri getirildi ama tasarımı değişti:
+
+- `enqueueIrsaliyeGirisAyri()` — `batch.commit()`'ten **sonra** çalışan, ayrı
+  ve **asla throw etmeyen** bir `setDoc`.
+- `enqueueIrsaliyeGiris()` (batch sürümü) duruyor ama form yolunda
+  kullanılmıyor; dosyada bu açıkça yazılı.
+
+**Ne kaybettik.** Atomikliği. Form kaydedilip kuyruk yazısı düşebilir. Bu
+kurtarılabilir: doküman kimliği form kimliği olduğu için iş panelden yeniden
+kuyruğa alınabilir, mükerrer üretmez. Tersi (kuyrukta iş var, form yok) hâlâ
+imkânsız.
+
+**Kullanıcı ne görür.** Kuyruk yazısı düşerse form yine kaydedilir ve
+"Ceomed irsaliyesi kuyruğa alınamadı — Ceomed'de elle kesilmesi gerekiyor"
+uyarısı çıkar. Sessiz kayıp yok.
+
+> Kuyruk paneli yalnızca **var olan** işi yeniden kuyruğa alabiliyor; hiç
+> yazılamamış bir işi panelden eklemek mümkün değil. Uyarı metni bu yüzden
+> paneli değil, Ceomed'de elle kesmeyi işaret ediyor. Panelden "eksik işi
+> ekle" özelliği eklenirse metin de güncellenmeli.
+
+### Yayın öncesi ZORUNLU adım
+
+```
+firebase deploy --only firestore:rules
+```
+
+`firestore.rules` içindeki `ceomedIrsaliyeGirisJobs` kuralı **canlıda yoksa**
+kuyruk hiç dolmaz (artık form kaydını düşürmez, ama otomasyon da çalışmaz).
+Geçici güvenlik ağı olan `match /{col}/{docId}` bloğu Faz 7'de kaldırıldığı
+için kuralı olmayan koleksiyon doğrudan reddedilir.
+
+---
+
+## Kötü birleştirmenin sessizce düşürdüğü üç şey
+
+`1232ebc` (acil kapatma), `613fbdd`'den ÖNCE dallanmış bir daldan
+`oracleIrsaliyeWorker.js` ve `fill_irsaliye.py` dosyalarını toptan yeniden
+yazdı. Sonuç: iki fonksiyonun **çağrısı kaldı, tanımı gitti** — statik olarak
+görünmeyen, ancak çalışma anında patlayan bir hasar.
+
+| Kayıp | Nerede | Ne olurdu |
+|---|---|---|
+| `bildirimYaz()` | worker | İlk başarılı e-irsaliyede `ReferenceError` — hem de `markSent`'ten SONRA |
+| `form_yenile()` | sürücü | Gönderim sonrası F6 satırında `NameError`; ayrıca iş başındaki temiz-form yenilemesi hiç yoktu |
+| `--gercek` bayrağı | uiDriver | **En tehlikelisi** — aşağıda |
+
+### `--gercek` bayrağı: sessiz sahte başarı
+
+`fill_irsaliye.py`, `--gercek` almadıkça E-İRSALİYE GÖNDER'e basmaz; formu
+doldurup `{ok: true, kuru: true}` döner. `uiDriver.js` bu bayrağı **hiç
+geçmiyordu** ve `kuru` alanını da worker'a taşımıyordu.
+
+Gerçek modda zincir şöyle işlerdi: sürücü `ok: true` döner → worker `markSent`
+çağırır → iş `sent` olur → "e-irsaliye gönderildi" bildirimi gider. **Hiçbir şey
+gönderilmemişken.** İş `sent` olduğu için bir daha denenmez; eksik irsaliye
+ancak muhasebe fark ederse ortaya çıkar.
+
+İki yerden birden kapatıldı:
+
+- `uiDriver.js` gerçek modda `--gercek` geçer, ve Python yine de kuru dönerse
+  bunu **başarısızlık** sayar (`retryable: false` — sebebi bilinmeden tekrar
+  denemek mükerrer riski taşır).
+- `oracleIrsaliyeWorker.js` `result.kuru === true` görürse `markSent`
+  çağırmaz. Sürücü ileride yine regresyona uğrarsa ikinci kapı tutar.
+
+Gerçek gönderim koşulu (üçü birden):
+
+```
+ORACLE_INTEGRATION_ENABLED=1
+ORACLE_DRY_RUN=0
+ORACLE_FILL_ONLY=   (boş ya da 0)
+```
+
+Env semantiği güvenli tarafa düşer: `ORACLE_DRY_RUN` açıkça `0` yazılmadıkça
+kuru kabul edilir.
+
+### Ders
+
+Bu üçü de test edilemeyen yollarda (Windows'a bağlı sürücü, gerçek gönderim)
+olduğu için hiçbir test yakalayamadı. Ceomed dosyalarını yeniden yazan her
+birleştirmeden sonra en az şu iki kontrol yapılmalı:
+
+```
+node --check scripts/ceomed-sync/oracleIrsaliyeWorker.js
+python -m py_compile scripts/ceomed-sync/oracle-ui/fill_irsaliye.py
+```
+
+…ve çağrı/tanım dengesi gözle doğrulanmalı: `--check` ve `py_compile`
+sözdizimine bakar, **tanımsız fonksiyon çağrısını yakalamaz**.

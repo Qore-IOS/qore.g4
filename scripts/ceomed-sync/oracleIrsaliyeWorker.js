@@ -156,6 +156,54 @@ async function markSent(db, job, result) {
   });
 }
 
+/**
+ * Başarılı gönderim sonrası açık kullanıcılara push bildirimi yazar.
+ *
+ * NASIL ÇALIŞIR: `notifications` koleksiyonuna bir doküman yazılır;
+ * `onNotificationCreated` Cloud Function'ı bunu görüp `targets` ve `companyId`
+ * ile eşleşen push token'larına dağıtır. Worker'ın FCM ile doğrudan işi yok.
+ *
+ * ASLA THROW ETMEZ. İrsaliye ZATEN gönderildi ve `markSent` ile işaretlendi;
+ * buradaki bir hata işi `failed` yapmamalı — yapsaydı worker aynı irsaliyeyi
+ * bir daha göndermeye çalışır, muhasebeye mükerrer kayıt düşerdi. Bildirim
+ * kaybı, mükerrer irsaliyeden kat kat ucuz.
+ */
+async function bildirimYaz(db, job, result) {
+  try {
+    const companyId = job.companyId || COMPANY_ID || null;
+    if (!companyId) {
+      // Fonksiyon companyId'siz dokümanı "eski kayıt" sayıp firma filtresi
+      // uygulamadan dağıtır; kiracılar arası sızıntı olmasın diye yazmıyoruz.
+      log('bildirim', `${job.id}: companyId yok, bildirim yazılmadı.`);
+      return;
+    }
+
+    const no = result.ceomedIrsaliyeNo || job.irsaliyeNo || '';
+    const yer = job.labName ? ` — ${job.labName}` : '';
+
+    await db.collection('notifications').add({
+      type: 'ceomed_irsaliye_olusturuldu',
+      title: 'Ceomed irsaliyesi oluşturuldu',
+      message: `${no}${yer} için e-irsaliye gönderildi.`,
+      channel: 'push',
+      targets: ['audience:all'],
+      companyId,
+      actor: { uid: 'ceomed-worker', name: 'Ceomed Otomasyonu' },
+      meta: {
+        jobId: job.id,
+        formNo: job.formNo || null,
+        formId: job.formId || null,
+        irsaliyeNo: no || null,
+        cariKodu: job.cariKodu || null,
+      },
+      readBy: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  } catch (e) {
+    errLog('bildirim', `${job.id}: bildirim yazılamadı (irsaliye GÖNDERİLDİ): ${e.message || e}`);
+  }
+}
+
 async function markAwaitingReview(db, job, result) {
   await db.collection(COLLECTION).doc(job.id).update({
     status: 'awaiting_review',
@@ -270,6 +318,19 @@ async function processJob(db, driver, jobId) {
     const retryable = !result || result.retryable !== false;
     const tekrar = await markFailure(db, job, mesaj, retryable);
     errLog('hata', `${ozet}: ${mesaj}${tekrar ? ' — yeniden denenecek' : ' — ELLE MÜDAHALE GEREKİR'}`);
+    return;
+  }
+
+  // Sürücü "başarılı ama göndermedim" diyorsa bu BAŞARI DEĞİLDİR. Sahada bir
+  // süre `--gercek` bayrağı hiç geçilmedi; sürücü formu doldurup kuru dönüyor,
+  // burası işi `sent` işaretliyordu. Gönderilmemiş iş 'sent' olursa bir daha
+  // denenmez ve eksik sessizce kaybolur.
+  if (result.kuru === true) {
+    const mesaj = 'Sürücü gerçek modda kuru sonuç döndü: E-İRSALİYE GÖNDER\'e '
+                + 'basılmadı. İş GÖNDERİLMEDİ. ORACLE_INTEGRATION_ENABLED=1, '
+                + 'ORACLE_DRY_RUN=0 ve ORACLE_FILL_ONLY boş olmalı.';
+    await markFailure(db, job, mesaj, false);
+    errLog('hata', `${ozet}: ${mesaj} — ELLE MÜDAHALE GEREKİR`);
     return;
   }
 
