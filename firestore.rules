@@ -96,6 +96,16 @@ service cloud.firestore {
       );
     }
 
+    // Oturum açan kullanıcının rolü. `isSuperAdmin` bir token claim'i, ama
+    // 'admin' / 'admin_developer' rolleri claim'de taşınmıyor; bu yüzden kendi
+    // kullanıcı belgesinden okunuyor. `get()` kuralları atlar, ek maliyeti
+    // yazma başına 1 okuma.
+    function actorIsCompanyAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+          in ['admin', 'admin_developer', 'super_admin'];
+    }
+
     // -----------------------------
     // Users (kendi doc'u + admin + aynı şirket görebilir)
     // -----------------------------
@@ -105,9 +115,27 @@ service cloud.firestore {
         isSuperAdmin() ||
         (resource != null && resource.data.companyId == userCompany())
       );
+      // YAZMA — okuma "aynı şirket" diyordu ama yazma yalnızca "kendisi veya
+      // süper admin" idi. Bu asimetri yüzünden şirket admini, kullanıcı
+      // yönetimi ekranından BAŞKA bir kullanıcıyı kaydedemiyordu:
+      // `/yonetim/kullanicilar` düzenlenen kullanıcının belgesine yazar
+      // (setDoc(doc(db,'users', duzenlenen.uid))), kendi belgesine değil.
+      //
+      // Üçüncü dal eklendi: aynı şirketin admini, aynı şirketteki kullanıcıyı
+      // yazabilir/silebilir. Şirket sınırı iki yönlü korunuyor — hedefin
+      // MEVCUT companyId'si de, yazılacak SONUÇ companyId'si de admin'in
+      // şirketi olmak zorunda. Yani başka şirketin kullanıcısına dokunulamaz
+      // ve bir kullanıcı başka şirkete taşınamaz.
+      //
+      // Silmede `request.resource` null olur; o dal ayrıca ele alınıyor.
       allow write: if isSignedIn() && (
         request.auth.uid == uid ||
-        isSuperAdmin()
+        isSuperAdmin() ||
+        (
+          actorIsCompanyAdmin() &&
+          (resource == null || resource.data.companyId == userCompany()) &&
+          (request.resource == null || request.resource.data.companyId == userCompany())
+        )
       );
       // Push bildirim token'ları (src/lib/pushTokens.ts). Kuralı yoktu, yani
       // token kaydı sessizce reddediliyordu. Başkasının token'ına erişmek için
