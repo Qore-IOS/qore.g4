@@ -13,6 +13,7 @@ import { useDepots } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 import { TerminalSelect, TerminalShell, TerminalTile } from '@/components/terminal/shell';
+import { getTerminalBuildInfo } from '@/lib/terminal-build';
 
 const TILES = [
   {
@@ -55,6 +56,7 @@ export default function TerminalHomePage() {
     [depots, currentUserProfile],
   );
   const depotName = sourceDepots.find(d => d.id === depotId)?.name || '';
+  const buildLabel = useMemo(() => getTerminalBuildInfo().label, []);
 
   // Rakam tuşları: fareye dokunmadan akış seçimi.
   useEffect(() => {
@@ -117,6 +119,10 @@ export default function TerminalHomePage() {
         <p className="text-center text-sm text-muted-foreground">
           Rakam tuşlarıyla aç · Esc ile geri dön
         </p>
+        {/* Paket damgası: "yeni sürümü mü çalıştırıyorum?" sorusunu bakışta
+            cevaplar. Arayüz paketi üretilmeden paketlenmiş bir kurulum bunu
+            göstermez ve durum hemen anlaşılır. */}
+        <p className="text-center text-xs text-muted-foreground/70">{buildLabel}</p>
       </div>
     </TerminalShell>
   );
