@@ -26,6 +26,9 @@
 # electron masaüstü kabuğu (desktop/) — paketleme çıktıları
 desktop/dist/
 desktop/package-lock.json
+# Kuruma özel terminal adresi; paketleme öncesi config.example.json'dan
+# türetilir ve makineye/kuruma bağlı olduğu için repoda tutulmaz.
+desktop/config.json
 
 # misc
 .DS_Store

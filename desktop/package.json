@@ -19,7 +19,7 @@
   "build": {
     "appId": "com.qore.terminal",
     "productName": "Qore Terminal",
-    "files": ["main.js", "preload.js", "package.json"],
+    "files": ["main.js", "preload.js", "config.js", "setup.html", "config.json", "package.json"],
     "directories": {
       "output": "dist"
     },

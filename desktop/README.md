@@ -23,34 +23,60 @@ koleksiyonlarına, aynı `src/lib/*/write.ts` modülleriyle** yazar. İkinci bir
 yazma yolu olmadığı için iki uygulamanın stoğu farklı güncellemesi mümkün
 değildir.
 
-## Çalıştırma
+## Terminal adresi nasıl belirlenir
+
+Uygulama açılışta şu sırayla bakar, ilk bulduğunu kullanır:
+
+1. `QORE_TERMINAL_URL` ortam değişkeni — geliştirme ve geçici override
+2. Kullanıcı verisi altındaki `config.json` — **ilk açılışta çıkan formla yazılır**
+3. Uygulamayla paketlenen `config.json` — kurumsal dağıtımda önceden basılır
+
+Hiçbiri yoksa kurulum formu açılır ve adres sorulur. Adresi sonradan
+değiştirmek için **`Ctrl+Shift+U`**.
+
+Kullanıcı yapılandırmasının konumu:
+
+| İşletim sistemi | Yol |
+| --- | --- |
+| Windows | `%APPDATA%\Qore Terminal\config.json` |
+| macOS | `~/Library/Application Support/Qore Terminal/config.json` |
+| Linux | `~/.config/Qore Terminal/config.json` |
+
+Herkese aynı `.exe` dağıtacaksanız, paketlemeden önce
+`config.example.json` dosyasını `config.json` olarak kopyalayıp adresi
+doldurun — kurulan uygulama form göstermeden doğrudan bağlanır.
+
+## Geliştirme
 
 ```bash
 cd desktop
 npm install
 
-# Yerel geliştirme (web uygulaması ayrı terminalde `pnpm dev` ile çalışıyor olmalı)
+# Web uygulaması ayrı bir terminalde `pnpm dev` ile çalışıyor olmalı
 QORE_TERMINAL_URL=http://localhost:9002/terminal npm start
-
-# Dağıtılmış ortama bağlanmak için
-QORE_TERMINAL_URL=https://<alan-adiniz>/terminal npm start
 ```
 
-`QORE_TERMINAL_URL` verilmezse uygulama boş pencere göstermek yerine ne
-eksik olduğunu yazar. Bu bilinçli: yanlış ortama sessizce bağlanan bir depo
-terminali, yanlış veritabanına yazmak demektir.
+Windows PowerShell'de:
 
-## Paketleme
+```powershell
+$env:QORE_TERMINAL_URL="http://localhost:9002/terminal"; npm start
+```
+
+## Paketleme (.exe / .dmg / AppImage)
 
 ```bash
 cd desktop
+npm install
 npm run dist:win     # Windows kurulumu (NSIS)
 npm run dist:mac     # macOS (dmg)
 npm run dist:linux   # Linux (AppImage)
 ```
 
-Üretim kurulumlarında `QORE_TERMINAL_URL`'i kısayola ya da sistem ortam
-değişkenlerine yazın.
+Çıktılar `desktop/dist/` altına düşer.
+
+**Önemli:** Windows kurulumu **Windows üzerinde** üretilmelidir. `electron-builder`
+Linux'tan Windows hedefi için Wine ister; kurumsal bir makinede bunu kurmaktansa
+bir Windows makinede `npm run dist:win` çalıştırmak çok daha az sorunludur.
 
 ## Barkod okuyucu
 

@@ -1,0 +1,4 @@
+{
+  "_aciklama": "Bu dosyayı config.json olarak kopyalayıp adresi doldurun; paketlenen uygulama açılışta kurulum formu göstermeden doğrudan bu adrese bağlanır. Kurumsal dağıtımda (herkese aynı .exe) önerilen yol budur. Tek makinede kurulum formunu kullanmak da yeterlidir — bu dosya zorunlu değildir.",
+  "terminalUrl": "https://ornek-adresiniz/terminal"
+}
