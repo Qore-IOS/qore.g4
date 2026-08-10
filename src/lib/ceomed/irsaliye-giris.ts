@@ -123,14 +123,49 @@ const QORE_FORM_NO_DESENI = /^([A-Za-z]+)-([TA])(\d+)$/;
 const FORM_TIPI_RAKAMI: Record<string, string> = { T: '1', A: '2' };
 
 /**
+ * Personel kodundan Ceomed İrsaliye No ön ekini üretir: İLK 2 HARF.
+ *
+ * Ceomed alanı yalnızca 2 harf kabul ediyor, gerisi rakam olmak zorunda. Bu,
+ * Qore personel kodunun daraltıldığı ve BİLGİ KAYBEDİLDİĞİ yer:
+ *   "Batuhan Tubasar"      → BT  → BT
+ *   "Ahmet Mehmet Yılmaz"  → AMY → AM
+ *   "Ahmet Mehmet Zeybek"  → AMZ → AM   ← Qore'da farklı, Ceomed'de AYNI
+ *   "Batuhan"              → B   → BX   (X ile tamamlanır)
+ *
+ * NUMARA TEKİLLİĞİ BU FONKSİYONUN ÇIKTISINA GÖRE SAĞLANMALIDIR — personel
+ * koduna göre değil. Sayaç personel kodu bazlı olsaydı AMY ve AMZ ayrı sayaç
+ * alır, Ceomed'de aynı numarayı üretir ve uygulama mükerrer diye reddederdi.
+ * `reserveActionFormNumber` sayacı bu ön ekle anahtarlar.
+ */
+export function ceomedNoOnEki(personelKodu: string): string {
+  return String(personelKodu || '')
+    .toLocaleUpperCase('en-US')
+    .slice(0, 2)
+    .padEnd(2, 'X');
+}
+
+/**
+ * Numaraların birbiriyle ÇAKIŞABİLECEĞİ kümenin kimliği.
+ *
+ * İki form numarası ancak aynı kümedeyse Ceomed'de aynı irsaliye numarasına
+ * düşebilir. Sıra sayacı bu kimlikle anahtarlanmalıdır — daha dar bir anahtar
+ * (ör. kullanıcı) aynı kümede iki kez 1'den başlar ve mükerrer üretir.
+ *
+ * Küme = (şirket, Ceomed ön eki, form tipi). Personel kodu DEĞİL: "AMY" ve
+ * "AMZ" farklı personel kodu ama aynı Ceomed ön eki ("AM"), yani aynı kümede.
+ */
+export function ceomedNumaraAlani(
+  companyId: string | null | undefined,
+  personelKodu: string,
+  formTipi: 'T' | 'A',
+): string {
+  return `${companyId || 'global'}_pfx_${ceomedNoOnEki(personelKodu)}_${formTipi}`;
+}
+
+/**
  * Qore form numarasını Ceomed İrsaliye No biçimine çevirir; çevrilemiyorsa null.
  *
  * `BT-T0042` → `BT10042`
- *
- * Personel kodu 2 harften kısaysa (tek isimli personel: "Batuhan" → `B`) `X` ile
- * tamamlanır. Bu deterministiktir ama teorik bir çakışma kaynağıdır — numara
- * tekilliği zaten açık bir ürün kararıdır (sayaç kullanıcı bazlı olduğu için aynı
- * baş harfli iki personel aynı numarayı üretebiliyor), ayrıntı ORACLE-IRSALIYE.md.
  */
 export function ceomedIrsaliyeNo(formNo: string): string | null {
   const eslesme = QORE_FORM_NO_DESENI.exec(String(formNo || '').trim());
@@ -140,8 +175,7 @@ export function ceomedIrsaliyeNo(formNo: string): string | null {
   const rakam = FORM_TIPI_RAKAMI[formTipi];
   if (!rakam) return null;
 
-  const onEk = personelKodu.toLocaleUpperCase('en-US').slice(0, 2).padEnd(2, 'X');
-  const aday = `${onEk}${rakam}${sira}`;
+  const aday = `${ceomedNoOnEki(personelKodu)}${rakam}${sira}`;
 
   // Sığmıyorsa kesmek yerine reddet: sessiz kesilme muhasebeye yanlış numara yazar.
   return CEOMED_IRSALIYE_NO_DESENI.test(aday) ? aday : null;
