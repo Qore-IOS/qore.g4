@@ -1,10 +1,14 @@
 /**
  * Qore Terminal — preload köprüsü.
  *
- * Renderer'a açılan yüzey BİLEREK çok dar tutulur: yalnızca yazıcı işlemleri
- * ve "masaüstünde miyiz" bilgisi. Web uygulaması aynı kodla tarayıcıda da
- * çalıştığı için, sayfalar bu köprünün varlığını kontrol etmeli ve yoksa
- * tarayıcı davranışına düşmelidir.
+ * Renderer'a açılan yüzey BİLEREK çok dar tutulur. İki ayrı köprü vardır:
+ *
+ *   - `window.qoreDesktop` → web uygulamasının kullandığı yetenekler
+ *   - `window.qoreSetup`   → yalnızca ilk açılış formunun kullandığı kayıt
+ *
+ * Web uygulaması aynı kodla tarayıcıda da çalıştığı için, sayfalar
+ * `qoreDesktop`'ın varlığını kontrol etmeli ve yoksa tarayıcı davranışına
+ * düşmelidir.
  */
 
 'use strict';
@@ -27,4 +31,12 @@ contextBridge.exposeInMainWorld('qoreDesktop', {
 
   /** Sistemdeki yazıcıları listeler. */
   listPrinters: () => ipcRenderer.invoke('qore:printers'),
+});
+
+contextBridge.exposeInMainWorld('qoreSetup', {
+  /**
+   * Terminal adresini kalıcı olarak kaydeder.
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  save: url => ipcRenderer.invoke('qore:set-url', url),
 });

@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Qore Terminal — Kurulum</title>
+    <!--
+      İlk açılış ekranı.
+
+      Paketlenmiş uygulamada ortam değişkeni yoktur; depo görevlisinin adresi
+      girebileceği bir yer olmadan `.exe` kullanılamaz durumda kalır. Bu sayfa
+      o boşluğu doldurur ve adres bir kez girildikten sonra bir daha görünmez.
+
+      Stil gömülüdür: bu pencere ağa çıkmadan, uygulama açılışının ilk
+      saniyesinde çizilmek zorunda.
+    -->
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px;
+        background: #09090b;
+        color: #f4f4f5;
+        font: 15px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      main { width: 100%; max-width: 460px; }
+      h1 { margin: 0 0 8px; font-size: 22px; font-weight: 600; }
+      p { margin: 0 0 24px; color: #a1a1aa; }
+      label { display: block; margin-bottom: 8px; font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: #71717a; }
+      input {
+        width: 100%;
+        padding: 14px 16px;
+        font-size: 16px;
+        color: #f4f4f5;
+        background: #18181b;
+        border: 1px solid #3f3f46;
+        border-radius: 12px;
+        outline: none;
+      }
+      input:focus { border-color: #0ea5e9; }
+      button {
+        margin-top: 16px;
+        width: 100%;
+        padding: 14px 16px;
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+        background: #0284c7;
+        border: 0;
+        border-radius: 12px;
+        cursor: pointer;
+      }
+      button:hover { background: #0ea5e9; }
+      button:disabled { background: #27272a; color: #71717a; cursor: not-allowed; }
+      .hint { margin-top: 16px; font-size: 13px; color: #52525b; }
+      .hint code { color: #a1a1aa; }
+      .error { margin-top: 12px; color: #fca5a5; font-size: 14px; min-height: 20px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Terminal adresi</h1>
+      <p>Bu bilgisayarın bağlanacağı Qore adresini girin. Bir kez girilir, sonra hatırlanır.</p>
+
+      <form id="form">
+        <label for="url">Adres</label>
+        <input
+          id="url"
+          name="url"
+          type="url"
+          placeholder="https://ornek-adresiniz/terminal"
+          autocomplete="off"
+          autofocus
+          required
+        />
+        <p class="error" id="error" role="alert"></p>
+        <button type="submit" id="submit">Bağlan</button>
+      </form>
+
+      <p class="hint">
+        Adresin sonu <code>/terminal</code> ile bitmeli. Daha sonra değiştirmek için
+        <code>Ctrl+Shift+U</code>.
+      </p>
+    </main>
+
+    <script>
+      const form = document.getElementById('form');
+      const input = document.getElementById('url');
+      const submit = document.getElementById('submit');
+      const error = document.getElementById('error');
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        error.textContent = '';
+        submit.disabled = true;
+
+        const result = await window.qoreSetup.save(input.value);
+        if (!result.ok) {
+          error.textContent = result.error || 'Adres kaydedilemedi.';
+          submit.disabled = false;
+        }
+        // Başarılıysa ana süreç pencereyi terminale yönlendirir; burada
+        // yapılacak başka bir şey yok.
+      });
+    </script>
+  </body>
+</html>

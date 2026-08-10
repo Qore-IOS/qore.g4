@@ -2,11 +2,11 @@
  * Qore Terminal — Electron ana süreci.
  *
  * Bu kabuk kendi arayüzünü ÇİZMEZ. Web uygulamasının `/terminal` rotasını
- * yükler ve ona masaüstünde gerçekten değerli olan üç şeyi kazandırır:
+ * yükler ve ona masaüstünde gerçekten değerli olan şeyleri kazandırır:
  *
  *   1. Tam ekran, adres çubuğu ve sekmesi olmayan tek işlik bir pencere
- *   2. Uygulamanın kapanmasını zorlaştıran koruma (F11/kısayol dışında)
- *   3. Yazıcıya doğrudan basım (tarayıcı yazdırma diyaloğu olmadan)
+ *   2. Aynı anda tek örnek çalışma garantisi
+ *   3. Yazıcıya diyalogsuz basım
  *
  * Kimlik doğrulama, veri ve yetkiler tamamen web uygulamasından gelir; burada
  * saklanan bir kimlik bilgisi ya da ayrı bir Firebase yapılandırması YOKTUR.
@@ -16,31 +16,38 @@
 
 'use strict';
 
-const { app, BrowserWindow, shell, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, shell, ipcMain, dialog, globalShortcut } = require('electron');
 const path = require('node:path');
 
-/**
- * Terminalin bağlanacağı adres.
- *
- * Üretimde bu, dağıtılmış web uygulamasının adresidir. Geliştirmede
- * `QORE_TERMINAL_URL=http://localhost:9002/terminal` verilerek yerel sunucuya
- * bağlanılır. Varsayılanı boş bırakmak yerine açık bir hata vermek bilinçli:
- * yanlış ortama sessizce bağlanan bir depo terminali, yanlış veritabanına
- * yazmak demektir.
- */
-const TERMINAL_URL = process.env.QORE_TERMINAL_URL || '';
+const { getTerminalUrl, setTerminalUrl } = require('./config');
 
-/** Sadece bu kaynaklara gezinmeye izin verilir. */
+let mainWindow = null;
+
+/** Sadece yapılandırılmış terminalin kaynağına gezinmeye izin verilir. */
 function isAllowedNavigation(targetUrl) {
-  if (!TERMINAL_URL) return false;
+  const terminalUrl = getTerminalUrl();
+  if (!terminalUrl) return false;
   try {
-    return new URL(targetUrl).origin === new URL(TERMINAL_URL).origin;
+    return new URL(targetUrl).origin === new URL(terminalUrl).origin;
   } catch {
     return false;
   }
 }
 
-let mainWindow = null;
+/**
+ * Pencereye ne yükleneceğine karar verir.
+ *
+ * Adres yapılandırılmamışsa kurulum formu gösterilir. Boş bir pencere ya da
+ * sessizce yanlış bir adrese bağlanmak kabul edilebilir değil: yanlış ortama
+ * bağlanan bir depo terminali, yanlış veritabanına yazmak demektir.
+ */
+function loadTerminalOrSetup() {
+  if (!mainWindow) return;
+  const terminalUrl = getTerminalUrl();
+
+  if (terminalUrl) mainWindow.loadURL(terminalUrl);
+  else mainWindow.loadFile(path.join(__dirname, 'setup.html'));
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -64,23 +71,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow.show());
 
-  if (!TERMINAL_URL) {
-    // Yapılandırma eksikse sessizce boş pencere göstermek yerine ne yapılması
-    // gerektiğini söyle.
-    mainWindow.loadURL(
-      'data:text/html;charset=utf-8,' +
-        encodeURIComponent(`
-          <body style="background:#09090b;color:#e4e4e7;font:16px/1.6 system-ui;padding:48px">
-            <h1 style="font-size:24px">Terminal adresi tanımlı değil</h1>
-            <p><code>QORE_TERMINAL_URL</code> ortam değişkeni ayarlanmalı.</p>
-            <p style="color:#a1a1aa">Örnek: <code>QORE_TERMINAL_URL=https://app.example.com/terminal</code></p>
-          </body>
-        `),
-    );
-    return;
-  }
-
-  mainWindow.loadURL(TERMINAL_URL);
+  loadTerminalOrSetup();
 
   // Dış bağlantılar sistem tarayıcısında açılır; terminal penceresi asla
   // uygulama dışına gezinmez.
@@ -90,6 +81,7 @@ function createWindow() {
   });
 
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith('file://')) return; // kurulum sayfası
     if (!isAllowedNavigation(url)) {
       event.preventDefault();
       shell.openExternal(url);
@@ -99,16 +91,21 @@ function createWindow() {
   // Ağ koptuğunda beyaz ekran yerine ne olduğunu ve nasıl döneceğini göster.
   mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL) => {
     if (errorCode === -3) return; // kullanıcı iptali — normal
-    dialog.showMessageBox(mainWindow, {
-      type: 'warning',
-      title: 'Bağlantı kurulamadı',
-      message: 'Terminal yüklenemedi.',
-      detail: `${errorDescription} (${errorCode})\n${validatedURL}\n\nAğ bağlantısını kontrol edip yeniden deneyin.`,
-      buttons: ['Yeniden dene', 'Kapat'],
-      defaultId: 0,
-    }).then(({ response }) => {
-      if (response === 0) mainWindow.reload();
-    });
+    dialog
+      .showMessageBox(mainWindow, {
+        type: 'warning',
+        title: 'Bağlantı kurulamadı',
+        message: 'Terminal yüklenemedi.',
+        detail:
+          `${errorDescription} (${errorCode})\n${validatedURL}\n\n` +
+          'Ağ bağlantısını kontrol edin. Adres yanlışsa "Adresi değiştir" ile düzeltebilirsiniz.',
+        buttons: ['Yeniden dene', 'Adresi değiştir', 'Kapat'],
+        defaultId: 0,
+      })
+      .then(({ response }) => {
+        if (response === 0) mainWindow.reload();
+        else if (response === 1) mainWindow.loadFile(path.join(__dirname, 'setup.html'));
+      });
   });
 
   mainWindow.on('closed', () => {
@@ -135,15 +132,30 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(() => {
     createWindow();
 
+    // Adresi sonradan değiştirmenin yolu. Menü çubuğu gizli olduğu için
+    // (depoda dikkat dağıtmasın diye) tek erişim noktası bu kısayol.
+    globalShortcut.register('CommandOrControl+Shift+U', () => {
+      if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'setup.html'));
+    });
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
   });
 
+  app.on('will-quit', () => globalShortcut.unregisterAll());
+
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();
   });
 }
+
+/** Kurulum formundan gelen adresi kaydeder ve terminale geçer. */
+ipcMain.handle('qore:set-url', async (_event, url) => {
+  const result = setTerminalUrl(url);
+  if (result.ok) loadTerminalOrSetup();
+  return result;
+});
 
 /**
  * Sessiz basım — etiket/irsaliye yazıcıları için.
