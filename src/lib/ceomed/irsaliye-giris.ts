@@ -147,6 +147,12 @@ export function ceomedNoOnEki(personelKodu: string): string {
 /**
  * Numaraların birbiriyle ÇAKIŞABİLECEĞİ kümenin kimliği.
  *
+ * HENÜZ KULLANILMIYOR. `reserveActionFormNumber` sayacı hâlâ kullanıcı bazlı
+ * anahtarlıyor. Buraya geçmek denendi (#1825) ve üretimi durdurdu: yeni sayaç
+ * dokümanı hiçbir kullanıcıda mevcut olmadığı için ilk okuma
+ * `permission-denied` aldı — `inCompany()` var olmayan belgeye okuma izni
+ * vermiyor. Önce kural değişmeli ve canlıya çıkmalı.
+ *
  * İki form numarası ancak aynı kümedeyse Ceomed'de aynı irsaliye numarasına
  * düşebilir. Sıra sayacı bu kimlikle anahtarlanmalıdır — daha dar bir anahtar
  * (ör. kullanıcı) aynı kümede iki kez 1'den başlar ve mükerrer üretir.
