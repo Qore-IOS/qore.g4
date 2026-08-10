@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { calculateDeviceMaintenanceStatus } from '../src/lib/maintenance';
-import type { MaintenanceLog, MaintenancePlan } from '../src/lib/types';
+import { calculateDeviceMaintenanceStatus, resolveDeviceLabPool } from '../src/lib/maintenance';
+import type { Device, DeviceLabPool, MaintenanceLog, MaintenancePlan } from '../src/lib/types';
 
 const basePlan: MaintenancePlan = {
   id: 'plan-1',
@@ -58,4 +58,14 @@ test('tek bakım kaydındaki taskNames birden fazla planı güncel kabul eder', 
   const result = calculateDeviceMaintenanceStatus([basePlan, secondPlan], [log], new Date('2026-08-05T00:00:00Z'));
   assert.equal(result.status, 'guncel');
   assert.equal(result.planStatuses.every((item) => item.lastLog?.id === 'log-batch-1'), true);
+});
+
+test('cihazı cihaz tanımlamalarındaki laboratuvar grubu üyeliğine göre çözümler', () => {
+  const device: Device = { id: 'device-1', hospitalId: 'lab-2', brand: 'Roche', model: 'A', imageUrl: '' };
+  const pools = [
+    { id: 'pool-1', name: 'Merkez', memberIds: ['lab-1', 'lab-2'], active: true },
+    { id: 'pool-2', name: 'Perifer', memberIds: ['lab-3'], active: true },
+  ] as DeviceLabPool[];
+
+  assert.equal(resolveDeviceLabPool(device, pools)?.name, 'Merkez');
 });

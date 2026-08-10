@@ -5,7 +5,7 @@ import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firesto
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ArrowLeft, Plus, Search, User, X } from 'lucide-react';
-import type { Device, Hospital, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '@/lib/types';
+import type { Device, DeviceLabPool, Hospital, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '@/lib/types';
 import { db } from '@/lib/firebase';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
@@ -14,6 +14,7 @@ import {
   calculateDeviceMaintenanceStatus,
   getMaintenanceLogDate,
   periodToDays,
+  resolveDeviceLabPool,
   type BakimTakipStatus,
 } from '@/lib/maintenance';
 import { cn } from '@/lib/utils';
@@ -24,6 +25,7 @@ interface BakimTakipPanelProps {
   maintenancePlans: MaintenancePlan[];
   maintenanceLogs: MaintenanceLog[];
   maintenanceDefinitions: MaintenanceDefinition[];
+  deviceLabPools: DeviceLabPool[];
   onSaved?: () => Promise<void> | void;
 }
 
@@ -82,18 +84,10 @@ function getCategory(device: Device) {
   return String(device.cihazAdi || device.model || 'Biyokimya');
 }
 
-function isCentralLab(hospital?: Hospital) {
-  const name = (hospital?.name || hospital?.ad || '').toLocaleLowerCase('tr-TR');
-  return name.includes('göztepe merkez') || name.includes('goztepe merkez') || name.includes('merkez lab');
-}
-
-function deviceGroupName(device: Device) {
-  return String(device.cihazGrubu || device.groupName || device.brand || 'Genel Grup');
-}
-
-function definitionForDevice(device: Device, definitions: MaintenanceDefinition[]) {
-  const groupName = deviceGroupName(device);
-  return definitions.find((definition) => definition.groupName === groupName && definition.model === device.model);
+function definitionForDevice(device: Device, definitions: MaintenanceDefinition[], pools: DeviceLabPool[]) {
+  const pool = resolveDeviceLabPool(device, pools);
+  if (!pool) return undefined;
+  return definitions.find((definition) => definition.groupName === pool.name && definition.model === device.model);
 }
 
 function adaptivePeriodDays(plan: MaintenancePlan, logs: MaintenanceLog[]) {
@@ -205,7 +199,7 @@ function MetricCard({ title, value, color, active, onClick }: { title: string; v
   );
 }
 
-export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, maintenanceLogs, maintenanceDefinitions, onSaved }: BakimTakipPanelProps) {
+export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, maintenanceLogs, maintenanceDefinitions, deviceLabPools, onSaved }: BakimTakipPanelProps) {
   const { currentUserProfile } = useAuth();
   const { toast } = useToast();
   const [view, setView] = useState<ViewMode>('overview');
@@ -225,7 +219,7 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
 
   const enriched = useMemo<EnrichedDevice[]>(() => devices.map((device) => {
     const logs = maintenanceLogs.filter((log) => log.deviceId === device.id);
-    const definitionPlans = createDefinitionPlans(device, definitionForDevice(device, maintenanceDefinitions), logs);
+    const definitionPlans = createDefinitionPlans(device, definitionForDevice(device, maintenanceDefinitions, deviceLabPools), logs);
     const realPlans = maintenancePlans.filter((plan) => plan.deviceId === device.id);
     const plans = definitionPlans.length > 0 ? definitionPlans : realPlans;
     return {
@@ -236,7 +230,7 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
       category: getCategory(device),
       summary: calculateDeviceMaintenanceStatus(plans, logs),
     };
-  }), [devices, hospitalById, maintenanceDefinitions, maintenanceLogs, maintenancePlans]);
+  }), [deviceLabPools, devices, hospitalById, maintenanceDefinitions, maintenanceLogs, maintenancePlans]);
 
   const selectedHospital = selectedHospitalId ? hospitalById.get(selectedHospitalId) : undefined;
   const selectedDevice = selectedDeviceId ? enriched.find((d) => d.device.id === selectedDeviceId) : undefined;
@@ -247,16 +241,19 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
     .sort((a, b) => (a.hospital.name || '').localeCompare(b.hospital.name || '', 'tr-TR')),
   [enriched, hospitals]);
 
-  const groupedByDeviceGroup = useMemo(() => {
-    const groups = new Map<string, EnrichedDevice[]>();
-    enriched.forEach((item) => {
-      const key = deviceGroupName(item.device);
-      groups.set(key, [...(groups.get(key) || []), item]);
-    });
-    return Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0], 'tr-TR'));
-  }, [enriched]);
-  const primaryGroup = groupedByDeviceGroup[0] ?? ['MERKEZ GRUP', [] as EnrichedDevice[]];
-  const secondaryDevices = groupedByDeviceGroup.slice(1).flatMap(([, items]) => items);
+  const groupedByLabPool = useMemo(() => {
+    const rows = deviceLabPools.map((pool) => ({
+      id: pool.id,
+      name: pool.name,
+      devices: enriched.filter((item) => pool.memberIds.includes(String(item.device.hospitalId || ''))),
+    }));
+    const groupedHospitalIds = new Set(deviceLabPools.flatMap((pool) => pool.memberIds));
+    const ungrouped = enriched.filter((item) => !groupedHospitalIds.has(String(item.device.hospitalId || '')));
+    if (ungrouped.length > 0) {
+      rows.push({ id: 'ungrouped', name: 'Gruplanmamış Laboratuvarlar', devices: ungrouped });
+    }
+    return rows.filter((row) => row.devices.length > 0);
+  }, [deviceLabPools, enriched]);
 
   function groupStats(items: EnrichedDevice[]) {
     return {
@@ -268,8 +265,6 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
   }
 
   const totalStats = groupStats(enriched);
-  const centralStats = groupStats(primaryGroup[1]);
-  const peripheralStats = groupStats(secondaryDevices);
 
   const maintenanceOptions = useMemo(() => Array.from(new Set(enriched.flatMap(item => item.plans.map(plan => plan.taskName)))).sort((a, b) => a.localeCompare(b, 'tr-TR')), [enriched]);
   const selectedMaintenanceHistory = useMemo<MaintenanceHistoryRow[]>(() => {
@@ -392,22 +387,19 @@ export default function BakimTakipPanel({ hospitals, devices, maintenancePlans, 
           {view === 'overview' && (
             <section className="space-y-7">
               <MetricCard title="Toplam Cihaz" value={totalStats.total} color="white" onClick={() => setFilter('all')} active={filter === 'all'} />
-              <div>
-                <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.45em] text-[var(--dashboard-accent)]">{primaryGroup[0].toLocaleUpperCase('tr-TR')} — {centralStats.total} Cihaz</h2>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <MetricCard title="Güncel ≤150g" value={centralStats.guncel} color="green" active={filter === 'guncel'} onClick={() => setFilter('guncel')} />
-                  <MetricCard title="Uyarı 150-165g" value={centralStats.uyari} color="yellow" active={filter === 'uyari'} onClick={() => setFilter('uyari')} />
-                  <MetricCard title="Kritik >165g" value={centralStats.kritik} color="red" active={filter === 'kritik'} onClick={() => setFilter('kritik')} />
-                </div>
-              </div>
-              <div>
-                <h2 className="mb-3 font-mono text-sm uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">DİĞER GRUPLAR — {peripheralStats.total} Cihaz</h2>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <MetricCard title="Güncel ≤60g ✓" value={peripheralStats.guncel} color="green" active={filter === 'guncel'} onClick={() => setFilter('guncel')} />
-                  <MetricCard title="Uyarı 60-75g" value={peripheralStats.uyari} color="yellow" active={filter === 'uyari'} onClick={() => setFilter('uyari')} />
-                  <MetricCard title="Kritik >75g" value={peripheralStats.kritik} color="red" active={filter === 'kritik'} onClick={() => setFilter('kritik')} />
-                </div>
-              </div>
+              {groupedByLabPool.map((group) => {
+                const stats = groupStats(group.devices);
+                return (
+                  <div key={group.id}>
+                    <h2 className="mb-3 font-mono text-xs uppercase tracking-[0.4em] text-[var(--dashboard-accent)]">{group.name.toLocaleUpperCase('tr-TR')} — {stats.total} Cihaz</h2>
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <MetricCard title="Güncel" value={stats.guncel} color="green" active={filter === 'guncel'} onClick={() => setFilter('guncel')} />
+                      <MetricCard title="Uyarı" value={stats.uyari} color="yellow" active={filter === 'uyari'} onClick={() => setFilter('uyari')} />
+                      <MetricCard title="Kritik" value={stats.kritik} color="red" active={filter === 'kritik'} onClick={() => setFilter('kritik')} />
+                    </div>
+                  </div>
+                );
+              })}
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="block font-mono text-xs uppercase tracking-[0.35em] text-[var(--dashboard-muted)]">
                   Kurum Seçin

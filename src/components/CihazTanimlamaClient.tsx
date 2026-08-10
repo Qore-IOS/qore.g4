@@ -6,7 +6,7 @@ import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import type { Device, Hospital, DeviceGroup, MaintenanceDefinition, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
+import type { Device, Hospital, DeviceLabPool, MaintenanceDefinition, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table';
@@ -37,6 +37,7 @@ import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
+import { resolveDeviceLabPool } from '@/lib/maintenance';
 
 // Periyot birimi etiketleri
 const PERIOD_UNIT_LABELS: Record<MaintenancePeriodUnit, string> = {
@@ -152,7 +153,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const [bulkShowPeriodicParts, setBulkShowPeriodicParts] = useState(false);
   const [isSavingBulk, setIsSavingBulk] = useState(false);
   const [maintenanceDefinitions, setMaintenanceDefinitions] = useState<MaintenanceDefinition[]>([]);
-  const [deviceGroups, setDeviceGroups] = useState<DeviceGroup[]>([]);
+  const [deviceLabPools, setDeviceLabPools] = useState<DeviceLabPool[]>([]);
   const [definitionManagerOpen, setDefinitionManagerOpen] = useState(false);
   const [definitionGroupName, setDefinitionGroupName] = useState('');
   const [definitionModel, setDefinitionModel] = useState('');
@@ -200,7 +201,7 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
   const fetchMaintenanceDefinitionSetup = async () => {
     const [definitionSnap, groupSnap] = await Promise.all([
       getDocs(scopedQuery('maintenanceDefinitions', currentCompanyId, isSuperAdmin)),
-      getDocs(scopedQuery('deviceGroups', currentCompanyId, isSuperAdmin)),
+      getDocs(scopedQuery('deviceLabPools', currentCompanyId, isSuperAdmin)),
     ]);
     const definitions = filterByCompanyScope(
       definitionSnap.docs.map(d => ({ id: d.id, ...d.data() } as MaintenanceDefinition)),
@@ -208,13 +209,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
       isSuperAdmin
     );
     const groups = filterByCompanyScope(
-      groupSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceGroup)),
+      groupSnap.docs.map(d => ({ id: d.id, ...d.data() } as DeviceLabPool)),
       currentCompanyId,
       isSuperAdmin
     );
     definitions.sort((a, b) => `${a.groupName} ${a.model}`.localeCompare(`${b.groupName} ${b.model}`, 'tr'));
     setMaintenanceDefinitions(definitions);
-    setDeviceGroups(groups);
+    setDeviceLabPools(groups.filter(group => group.active !== false));
   };
 
   useEffect(() => {
@@ -223,16 +224,13 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
 
   useEffect(() => {
     setDefinedDeviceIds(new Set(devices.filter(device => Boolean(maintenanceDefinitionForDevice(device))).map(device => device.id)));
-  }, [devices, maintenanceDefinitions, deviceGroups]);
+  }, [devices, maintenanceDefinitions, deviceLabPools]);
 
 
-  const deviceGroupNameFor = (device: Device) => {
-    const grouped = deviceGroups.find(group => group.deviceIds?.includes(device.id));
-    return grouped?.name || String(device.cihazGrubu || device.groupName || device.brand || 'Genel');
-  };
+  const deviceGroupNameFor = (device: Device) => resolveDeviceLabPool(device, deviceLabPools)?.name;
 
   const maintenanceDefinitionForDevice = (device: Device) => maintenanceDefinitions.find(definition =>
-    definition.groupName === deviceGroupNameFor(device) && definition.model === device.model
+    Boolean(deviceGroupNameFor(device)) && definition.groupName === deviceGroupNameFor(device) && definition.model === device.model
   );
 
   const resetMaintenanceDefinitionForm = () => {
@@ -1814,18 +1812,17 @@ export default function CihazTanimlamaClient({ images, hospitals }: Props) {
           <DialogHeader>
             <DialogTitle>Bakım Tanımlamaları</DialogTitle>
             <DialogDescription>
-              Bakım Takip panelinde açılacak bakım listelerini cihaz grupları ve model bazında yönetin. Eski cihaz satırı bakım planları yerine ana kaynak burasıdır.
+              Bakım Takip panelinde açılacak listeleri Gruplandırma alanındaki cihaz laboratuvar grupları ve bu gruplardaki cihaz modelleri bazında yönetin.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 lg:grid-cols-[1fr_1.15fr]">
             <div className="cihaz-card p-4 space-y-3">
-              <p className="cihaz-section-label">Grup / Model Bakım Listesi</p>
+              <p className="cihaz-section-label">Laboratuvar Grubu / Model Bakım Listesi</p>
               <Select value={definitionGroupName} onValueChange={setDefinitionGroupName}>
-                <SelectTrigger><SelectValue placeholder="Cihaz grubu seçin" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder="Laboratuvar grubu seçin" /></SelectTrigger>
                 <SelectContent>
                   {Array.from(new Set([
-                    ...deviceGroups.map(group => group.name),
-                    ...devices.map(device => deviceGroupNameFor(device)),
+                    ...deviceLabPools.map(group => group.name),
                   ].filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr')).map(groupName => (
                     <SelectItem key={groupName} value={groupName}>{groupName}</SelectItem>
                   ))}

@@ -1,4 +1,11 @@
-import type { MaintenanceLog, MaintenancePlan, TimestampLike } from './types';
+import type { Device, DeviceLabPool, MaintenanceLog, MaintenancePlan, TimestampLike } from './types';
+
+/** Resolves the laboratory group configured in Cihaz Tanımlamaları for a device. */
+export function resolveDeviceLabPool(device: Device, pools: readonly DeviceLabPool[]): DeviceLabPool | undefined {
+  const hospitalId = String(device.hospitalId || '');
+  if (!hospitalId) return undefined;
+  return pools.find((pool) => pool.active !== false && pool.memberIds.includes(hospitalId));
+}
 
 export type BakimTakipStatus = 'guncel' | 'uyari' | 'kritik' | 'bakim_yok' | 'plansiz';
 
