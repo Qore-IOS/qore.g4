@@ -251,6 +251,9 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     { key: 'islem-formu', label: 'İşlem Formları', icon: ClipboardList,
       href: actionFormsHref,
       match: (p) => p.includes('/islem-formu') || p.endsWith('/tum-formlar') || p.includes('/tum-formlar/') },
+    { key: 'bakim-takip', label: 'Bakım Takip', icon: ListChecks,
+      href: '/bakim-takip',
+      match: (p) => p.startsWith('/bakim-takip') },
     { key: 'yedek-parca', label: 'Yedek Parça', icon: Package,
       href: '/direkt-transfer/yedek-parca-transfer',
       match: (p) => p.startsWith('/direkt-transfer/yedek-parca-transfer') },
@@ -293,6 +296,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
       subItems: [
         { label: 'İşlem Formları', icon: ClipboardList, href: actionFormsHref },
         { label: 'Form Oluşturma', icon: primaryPanel.icon, href: primaryPanel.href },
+        { label: 'Bakım Takip', icon: ListChecks, href: '/bakim-takip' },
         { label: 'Yedek Parça', icon: Package, href: '/direkt-transfer/yedek-parca-transfer' },
       ],
     },

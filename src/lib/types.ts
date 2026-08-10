@@ -732,6 +732,7 @@ export type AppView =
   | 'kumulatif-hesaplama'
   | 'arama'
   | 'cihaz-ariza-gecmis'
+  | 'bakim-takip'
   | 'personel-islemleri'
   | 'is-analizi'
   | 'total-verimlilik'
@@ -763,7 +764,7 @@ export type CihazYonetimiSubView = 'ana' | 'ayarlar' | 'cihazListesi' | 'teknikS
 // ============================================
 
 // Bakım periyot birimi
-export type MaintenancePeriodUnit = 'hafta' | 'ay' | 'yil';
+export type MaintenancePeriodUnit = 'gun' | 'hafta' | 'ay' | 'yil';
 
 // Bakım planı tipi
 export type MaintenanceType = 'teknik_servis' | 'aplikasyon';
@@ -779,6 +780,28 @@ export interface MaintenancePlan {
   createdAt?: Date;
   createdByUid?: string;
   createdByName?: string;
+}
+
+
+// Bakım takip paneli için cihaz grubu/model bazlı bakım liste tanımı
+export interface MaintenanceDefinitionTask {
+  id: string;
+  taskName: string;
+  periodDays: number;
+  type?: MaintenanceType;
+}
+
+export interface MaintenanceDefinition {
+  id: string;
+  groupName: string;
+  model: string;
+  listName: string;
+  tasks: MaintenanceDefinitionTask[];
+  createdAt?: TimestampLike;
+  updatedAt?: TimestampLike;
+  createdByUid?: string;
+  createdByName?: string;
+  companyId?: string;
 }
 
 // Bakım log kaydı - bir bakım yapıldığında oluşturulur

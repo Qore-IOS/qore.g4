@@ -168,6 +168,7 @@ service cloud.firestore {
     match /deviceActionForms/{id}             { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /aplikasyonActionForms/{id}         { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /maintenancePlans/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
+    match /maintenanceDefinitions/{id}        { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /maintenanceLogs/{id}               { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /deviceLabPools/{id}                { allow read: if inCompany(); allow write: if writingInCompany(); }
     match /tuketimKayitlari/{id}              { allow read: if inCompany(); allow write: if writingInCompany(); }
