@@ -19,6 +19,7 @@
     "src/lib/lojistik/**/*.ts",
     "src/lib/lab-period/**/*.ts",
     "src/lib/logger.ts",
+    "src/lib/maintenance.ts",
     "src/lib/test-cost-calculator.ts",
     "src/lib/stock-quantity.ts",
     "src/lib/device-faults.ts",
