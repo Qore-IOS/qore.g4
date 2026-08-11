@@ -87,11 +87,29 @@ async function main() {
       yaz(`  ${bulunan.kayit.IRSALIYE_NO}  ${bulunan.kayit.TARIH}  ${bulunan.kayit.CARI_KODU}  ${bulunan.kayit.CARI_UNVAN || ''}  [${bulunan.kayit.DURUM_ACIKLAMA || ''}]`);
       return 0;
     }
-    yaz('\nHiçbir tipte bulunamadı. Olası sebepler:');
-    yaz('  * İrsaliye gerçekten oluşmamış');
-    yaz('  * Tarih yanlış (--tarih ile gönderim gününü verin)');
-    yaz('  * Çıkış irsaliyeleri bu API ile hiç listelenmiyor');
-    yaz('  * Taranan tip kümesi eksik (--belge-tipi ile tek tek deneyin)');
+    // SAHADA ÖLÇÜLDÜ (2026-08-11, BK10138): hiçbir tipte bulunamadı ama
+    // sorgular çalıştı ve az sayıda kayıt döndü (2/1/1). Yani API erişilebilir,
+    // aradığımız belge bu uç noktanın kapsamında değil.
+    const dolu = sonuclar.filter((s) => (s.taranan || 0) > 0).length;
+    yaz('\nHiçbir tipte bulunamadı.');
+    if (dolu > 0) {
+      yaz('\nAMA sorgular çalıştı ve kayıt döndü — yani API erişilebilir,');
+      yaz('aradığımız belge bu uç noktanın KAPSAMINDA DEĞİL.');
+      yaz('');
+      yaz('selectIrsaliyeMaster bir SEVK modülü uç noktası; kuruma sevk edilen');
+      yaz('irsaliyeleri listeliyor. Çıkış İrsaliyesi ayrı bir belge ailesi.');
+      yaz('');
+      yaz('Ne döndüğünü görmek için:');
+      yaz(`  verify-irsaliye.bat --tarih ${tarih} --listele`);
+      yaz('');
+      yaz('Doğru uç noktayı aramak için (ORACLE-IRSALIYE.md#uç-nokta-keşfi):');
+      yaz('  $js = (Invoke-WebRequest -Uri "http://192.168.1.5:8081/build/app.js?v=1.30" -UseBasicParsing).Content');
+      yaz('  [regex]::Matches($js, \'a\\.api\\("(?:GET|POST)","[^"]*(?:irsaliye|Irsaliye|IRSALIYE)[^"]*"\') | %{ $_.Value } | Sort-Object -Unique');
+    } else {
+      yaz('\nHiçbir sorgu kayıt döndürmedi — tarih yanlış olabilir ya da API');
+      yaz('bu kullanıcıya veri vermiyor. Önce şunu deneyin:');
+      yaz(`  verify-irsaliye.bat --tarih ${tarih} --listele`);
+    }
     return 1;
   }
 

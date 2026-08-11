@@ -1065,3 +1065,55 @@ python -m py_compile scripts/ceomed-sync/oracle-ui/fill_irsaliye.py
 
 …ve çağrı/tanım dengesi gözle doğrulanmalı: `--check` ve `py_compile`
 sözdizimine bakar, **tanımsız fonksiyon çağrısını yakalamaz**.
+
+---
+
+## Ölçüm: gönderim doğrulaması hangi uç noktadan yapılabilir?
+
+**Tarih:** 2026-08-11 · **Numara:** `BK10138` (aynı gün başarıyla gönderildi)
+
+`verify-irsaliye.bat --kesfet` ile `selectIrsaliyeMaster` altı belge tipi için
+tarandı:
+
+| BELGE_TIPI | Sonuç | Dönen kayıt |
+|---|---|---|
+| 0 | yok | 2 |
+| 1 | yok | 1 |
+| 2 | yok | 1 |
+| 3, 4, 5 | yok | 0 |
+
+**Sonuç: uç nokta erişilebilir ama çıkış irsaliyesini görmüyor.**
+
+Sorgular çalıştı ve kayıt döndü — yani kimlik, ağ ve tarih doğru. Aranan belge
+bu uç noktanın kapsamında değil.
+
+Sebep, `selectIrsaliyeMaster`'ın bir **sevk modülü** uç noktası olması:
+`watch.js` onu "KURUMA SEVK EDİLDİ" irsaliyelerini okumak için kullanıyor.
+Ceomed masaüstündeki **Çıkış İrsaliyesi** ayrı bir belge ailesi.
+
+Bu, yazma tarafındaki bulguyla tutarlı: 187 uç noktalık katalogda çıkış
+irsaliyesi **oluşturan** uç nokta da yoktu. Anlaşılan çıkış irsaliyesi web
+API'sinin kapsamı dışında — ne yazılabiliyor ne okunabiliyor.
+
+### Bundan sonra
+
+Doğrulama katmanı `CEOMED_DOGRULAMA=0` (varsayılan) ile KAPALI kalmalı. Yanlış
+uç noktayla açmak her işi "bulunamadı" diye işaretler, gürültü üretir ve
+katmanın güvenilirliğini baştan bitirir.
+
+Denenebilecek iki yol:
+
+1. **Doğru okuma uç noktasını bulmak.** app.js içinde irsaliye geçen tüm
+   uç noktaları çıkarıp çıkış irsaliyesine bakanı aramak:
+   ```powershell
+   $js = (Invoke-WebRequest -Uri "http://192.168.1.5:8081/build/app.js?v=1.30" -UseBasicParsing).Content
+   [regex]::Matches($js, 'a\.api\("(?:GET|POST)","[^"]*(?:irsaliye|Irsaliye|IRSALIYE)[^"]*"') |
+     ForEach-Object { $_.Value } | Sort-Object -Unique
+   ```
+
+2. **Oracle veritabanını doğrudan okumak.** `ifrun60.exe` 192.168.1.5:1521'e
+   bağlanıyor. Salt-okunur bir bağlantı, UI'dan tamamen bağımsız ve en kesin
+   doğrulama olurdu; karşılığında ayrı kimlik ve sürücü gerektiriyor.
+
+Katman kodu hazır ve bekliyor: doğru uç nokta bulunduğunda `irsaliyeVarMi`
+içindeki sorguyu değiştirmek yetiyor, worker bağlantısı olduğu gibi kalıyor.
