@@ -2335,6 +2335,7 @@ export default function IslemFormuPage() {
               cariKodu: cari.cariKodu || girdi.cariKodu,
               sevkAdresi: cari.sevkAdresi,
               cariKaynagi: cari.kaynak,
+              cariHatasi: cari.hata,
             });
             // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve
             // bu modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.

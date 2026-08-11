@@ -328,6 +328,8 @@ export type BuildIrsaliyeGirisInput = {
   sevkAdresi?: string | null;
   /** Cari kodu ana labdan geldiyse 'ana_lab' — iz sürme için kuyruğa yazılır. */
   cariKaynagi?: CariKaynagi | null;
+  /** Cari çözümlemesi başarısızsa sebebi; engel mesajına eklenir. */
+  cariHatasi?: string | null;
   labName?: string | null;
   deviceId?: string | null;
   cihazAdi?: string | null;
@@ -456,14 +458,21 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     });
   }
   if (!cariKodu) {
+    // Cari çözümlemesi neden başarısız olduysa BURADA görünmeli. Aksi hâlde bir
+    // izin hatası ya da eksik ek hizmet bağı, "cari kodu tanımlı değil" diye
+    // görünüp operatörü var olmayan bir veri eksiğini aramaya yollar — sahada
+    // tam bu oldu: cari kodu zaten ana labdaydı, sorun bağın kurulmamasıydı.
+    const cariHatasi = text(input.cariHatasi);
     blocks.push({
       reason: 'cari_kodu_tanimsiz',
       detail:
         // "otomatik yeniden denenecek" YAZMAYIN: blocked işleri yeniden
         // değerlendiren hiçbir mekanizma yok, operatör bekleyip durur.
-        `"${text(input.labName) || input.hospitalId}" laboratuvarında Ceomed cari kodu tanımlı değil. ` +
-        'Yönetim → Laboratuvarlar ekranından cari kodunu girin, sonra Ceomed kuyruk ' +
-        'panelinden bu işe "Yeniden kuyruğa al" deyin.',
+        `"${text(input.labName) || input.hospitalId}" için Ceomed cari kodu çözülemedi. ` +
+        (cariHatasi ? `Sebep: ${cariHatasi} ` : '') +
+        'Laboratuvarın kendi cari kodu yoksa bir ana laboratuvarın "Ek Hizmet ' +
+        'Laboratuvarları" listesinde işaretli olmalı ve o ana labın cari kodu ' +
+        'dolu olmalı. Düzelttikten sonra bu işe "İrsaliye oluştur" deyin.',
     });
   }
   if (!tarih) {
