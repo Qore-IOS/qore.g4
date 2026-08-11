@@ -3,6 +3,10 @@
 Depo zeminindeki kullanıcılar için sadeleştirilmiş bir arayüz ve onu masaüstü
 uygulaması olarak paketleyen bir Electron kabuğu.
 
+> Aynı arayüzün Android (APK) kabuğu için bkz.
+> [`android-terminal.md`](./android-terminal.md). Ekranlar ve yazma mantığı
+> ortaktır; yalnızca kabuk değişir.
+
 ## Neden
 
 Web panelleri (`/mal-kabul`, `/direkt-transfer`, `/siparisler`) yıllar içinde

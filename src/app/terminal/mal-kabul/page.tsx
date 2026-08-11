@@ -47,6 +47,7 @@ import {
   TerminalStat,
   type ScanFeedback,
 } from '@/components/terminal/shell';
+import { CameraScanButton } from '@/components/terminal/camera-scan-button';
 
 const IDLE: ScanFeedback = { tone: 'idle', title: 'Okutmaya hazır', detail: 'Barkodu okutun.' };
 
@@ -292,6 +293,8 @@ export default function TerminalMalKabulPage() {
         </p>
 
         <ScanFeedbackBar feedback={feedback} />
+        {/* Android'de kamerayla okutma; diğer kabuklarda hiç render edilmez. */}
+        <CameraScanButton onScan={handleScan} />
 
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
           {rows.length === 0 ? (

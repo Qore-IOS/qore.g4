@@ -28,6 +28,7 @@ import {
   TerminalShell,
   type ScanFeedback,
 } from '@/components/terminal/shell';
+import { CameraScanButton } from '@/components/terminal/camera-scan-button';
 
 const IDLE: ScanFeedback = {
   tone: 'idle',
@@ -148,6 +149,8 @@ export default function TerminalSorguPage() {
     >
       <div className="flex h-full min-h-0 flex-col gap-4 p-6">
         <ScanFeedbackBar feedback={feedback} />
+        {/* Android'de kamerayla okutma; diğer kabuklarda hiç render edilmez. */}
+        <CameraScanButton onScan={handleScan} disabled={isLoading} />
 
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border p-6">
           {isLoading ? (

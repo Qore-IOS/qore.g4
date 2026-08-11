@@ -15,6 +15,8 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { syncStatusBarTheme } from '@/lib/native-shell';
+
 const STORAGE_KEY = 'qore.terminal.theme';
 
 export type TerminalTheme = 'light' | 'dark';
@@ -25,6 +27,9 @@ function applyTheme(theme: TerminalTheme) {
   // Tarayıcının kendi arayüz parçalarını (kaydırma çubuğu, form denetimleri)
   // da temayla uyumlu çizmesi için.
   root.style.colorScheme = theme;
+  // Android'de sistem durum çubuğu da temaya uyar; web ve masaüstünde bu
+  // çağrı sessizce hiçbir şey yapmaz.
+  void syncStatusBarTheme(theme);
 }
 
 export function useTerminalTheme(): [TerminalTheme, (next: TerminalTheme) => void] {

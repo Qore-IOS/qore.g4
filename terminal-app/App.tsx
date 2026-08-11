@@ -14,6 +14,7 @@ import React, { useEffect } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 
 import { useAuth } from '@/contexts/auth-context';
+import { exitNativeApp, pushBackHandler } from '@/lib/native-shell';
 
 import TerminalHomePage from '@/app/terminal/page';
 import TerminalMalKabulPage from '@/app/terminal/mal-kabul/page';
@@ -62,6 +63,25 @@ export default function App() {
   useEffect(() => {
     if (currentUser && !isLoadingAuth && !isKnownRoute) router.replace('/terminal');
   }, [currentUser, isLoadingAuth, isKnownRoute, router]);
+
+  /**
+   * Android donanım geri tuşu.
+   *
+   * En alttaki (varsayılan) işleyici budur; kamera örtüsü gibi geçici
+   * katmanlar kendi işleyicisini yığının üstüne koyar ve önce onlar çalışır.
+   *
+   * Ana ekranda geri = uygulamadan çık. WebView geçmişinde geri gitmek
+   * yerine bunu yapıyoruz; hash router'da geçmiş bir vardiya boyunca birikir
+   * ve kullanıcı geri tuşuyla saatler önceki ekranlarda dolaşırdı.
+   */
+  useEffect(
+    () =>
+      pushBackHandler(() => {
+        if (pathname === '/terminal') void exitNativeApp();
+        else router.push('/terminal');
+      }),
+    [pathname, router],
+  );
 
   if (isLoadingAuth) {
     return (

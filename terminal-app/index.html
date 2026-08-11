@@ -5,39 +5,15 @@
     <title>Qore Terminal</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!--
-      İçerik Güvenlik Politikası.
+      İçerik Güvenlik Politikası BURADA DEĞİL, derleme sırasında yazılır.
 
-      Paket `app://terminal` kaynağından sunulur ve kendi kodundan başka
-      hiçbir betiği çalıştırmamalıdır: `script-src 'self'`. Bir CSP olmadan
-      Electron uyarı basar ve daha önemlisi, gelecekte eklenecek bir üçüncü
-      taraf betiği sessizce çalışabilir hâle gelirdi.
-
-      `connect-src` yalnızca Firebase uç noktalarını içerir — terminalin ağa
-      çıktığı tek yer orasıdır. `wss:` Firestore'un canlı dinleyicileri için
-      gerekli.
-
-      `style-src 'unsafe-inline'`: React ve Tailwind çalışma anında satır içi
-      stil enjekte eder; bu olmadan arayüz stilsiz kalır.
+      Sebep: politika kabuğa göre bir satır farklıdır (Electron `app://`,
+      Capacitor `https://localhost`) ve iki kopya tutmak, birini güncelleyip
+      diğerini unutmanın kestirme yoludur. Aşağıdaki işaretin yerine
+      `vite.config.terminal.ts` içindeki `injectCsp()` eklentisi hedefe uygun
+      tek politikayı koyar.
     -->
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="
-        default-src 'self';
-        script-src 'self';
-        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-        font-src 'self' data: https://fonts.gstatic.com;
-        img-src 'self' data: blob:;
-        connect-src 'self'
-          https://*.googleapis.com
-          https://*.firebaseio.com
-          https://*.cloudfunctions.net
-          wss://*.firebaseio.com
-          wss://*.googleapis.com;
-        frame-src 'none';
-        object-src 'none';
-        base-uri 'none';
-      "
-    />
+    <!-- qore:csp -->
     <!--
       Kökteki `dark` sınıfı yalnızca VARSAYILAN. Kayıtlı tercih varsa
       aşağıdaki `theme-boot.js` bunu ilk boyamadan önce düzeltir.
