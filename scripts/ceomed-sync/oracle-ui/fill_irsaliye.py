@@ -78,6 +78,10 @@ ACIKLAMA_PENCERE_KONUMU = (70, 698)
 # (14, 297) konumunda ölçüldü. Başlık ile grid de farklı iç MDI köklerine
 # bağlanabildiği için bölgeler arası geçişte bu karşılık kullanılır.
 STOK_KODU_PENCERE_KONUMU = (14, 297)
+# İrsaliye No'nun ana pencereye göre karşılığı. Yukarıdaki ölçüm notunda geçen
+# (123,113) değeriyle aynı; MDI(117,82) + (6,31) ofseti de bunu veriyor.
+# F6 için gerekli: temizleme yalnızca odak İrsaliye No'dayken çalışıyor.
+IRSALIYE_NO_PENCERE_KONUMU = (123, 113)
 
 KONUM_TOLERANS = 18
 
@@ -443,8 +447,32 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             "penceresi). F6 bu durumda çalışmaz; pencere kapatılmalı.",
             retryable=True,
         )
+
+    # ODAK İRSALİYE NO'DA OLMALI. Sahada ölçüldü: başka bir alan seçiliyken F6
+    # hiçbir şey yapmıyor — hata da vermiyor. Sessiz başarısızlık en kötüsü:
+    # sürücü "yenilendi" sanıp sıradaki işi DOLU formun üstüne yazardı.
+    o = ui60.odak()
+    if o["hwnd"] and alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+        ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+        o = ui60.odak()
+
+    if not o["hwnd"]:
+        raise Durdu(
+            "Form yenilenemedi: İrsaliye No alanına tıklandı ama odak alınamadı.",
+            retryable=True,
+        )
+    if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+        # F6'ya burada basmak sessizce hiçbir şey yapmaz; tahminle devam etmek
+        # yerine duruyoruz.
+        raise Durdu(
+            f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı, "
+            f"{o['mdi_ici']} konumunda kaldı "
+            f"({alan_adi(o['mdi_ici']) or 'tanınmayan alan'}).",
+            retryable=True,
+        )
+
     ui60.tus("F6", bekle_ms=1500)
-    log.append(f"F6 ile form yenilendi ({sebep})")
+    log.append(f"F6 ile form yenilendi ({sebep}; odak İrsaliye No'ya alındı)")
 
 
 def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:

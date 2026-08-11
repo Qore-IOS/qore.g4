@@ -6,6 +6,7 @@ import {
   formatTarihForCeomed,
   normalizeTarih,
   resolveLotValue,
+  aciklamaKur,
   ceomedIrsaliyeNo,
   ceomedNoOnEki,
   ceomedNumaraAlani,
@@ -64,7 +65,9 @@ test('tam veriyle iş pending olarak hazırlanır ve sabitler yerine oturur', ()
   assert.equal(r.doc.islemTipi, '35');
   assert.equal(r.doc.depo, CEOMED_DEPO);
   assert.equal(r.doc.depo, '10');
-  assert.equal(r.doc.aciklama, 'Ahmet Yılmaz');
+  // Açıklama personel adı + kullanılan parçalar; muhasebe irsaliyeye bakınca
+  // işi kimin yaptığını ve neyin çıktığını tek satırda görsün.
+  assert.equal(r.doc.aciklama, 'Ahmet Yılmaz - Pompa');
   assert.equal(r.doc.satirlar.length, 1);
   assert.equal(r.doc.blockedReason, null);
 });
@@ -369,4 +372,47 @@ test('paylaşılmayan sayaç mükerrer üretir — düzeltilen davranış budur'
     ceomedNumaraAlani('ISLAB2', 'AMY', 'T'),
     ceomedNumaraAlani('ISLAB2', 'AMZ', 'T'),
   );
+});
+
+// ---------------------------------------------------------------------------
+// Açıklama alanı: personel adı - yedek parçalar
+// ---------------------------------------------------------------------------
+
+const satir = (stokAdi: string, miktar = 1, stokKodu = 'X1') => ({
+  actionId: 'a', stokKodu, stokAdi, miktar, lot: '', lotKaynagi: 'yok' as const, miad: '',
+});
+
+test('açıklama personel adını ve parçaları kısa çizgiyle birleştirir', () => {
+  assert.equal(aciklamaKur('Ahmet Yılmaz', [satir('Pompa')]), 'Ahmet Yılmaz - Pompa');
+});
+
+test('birden çok parça virgülle sıralanır', () => {
+  assert.equal(
+    aciklamaKur('Ahmet Yılmaz', [satir('Pompa'), satir('Sensör')]),
+    'Ahmet Yılmaz - Pompa, Sensör',
+  );
+});
+
+test('miktar yalnızca 1den büyükse yazılır — "x1" gürültüdür', () => {
+  assert.equal(aciklamaKur('AY', [satir('Pompa', 1)]), 'AY - Pompa');
+  assert.equal(aciklamaKur('AY', [satir('Pompa', 3)]), 'AY - Pompa x3');
+});
+
+test('parça adı yoksa stok kodu yazılır', () => {
+  assert.equal(aciklamaKur('AY', [satir('', 1, '03753379001')]), 'AY - 03753379001');
+});
+
+test('parça yoksa yalnızca personel adı kalır — sondaki tire bırakılmaz', () => {
+  assert.equal(aciklamaKur('Ahmet Yılmaz', []), 'Ahmet Yılmaz');
+  // Adı ve kodu boş satır atlanır; geriye yazılacak bir şey kalmaz.
+  assert.equal(aciklamaKur('Ahmet Yılmaz', [satir('', 1, '')]), 'Ahmet Yılmaz');
+});
+
+test('çok uzun açıklama kesilir ve kesildiği görünür kılınır', () => {
+  // Sessiz kesilme muhasebeye yarım cümle yazar; sonundaki işaret bunu belli eder.
+  const cok = Array.from({ length: 60 }, (_, i) => satir(`Parca-${i}`));
+  const sonuc = aciklamaKur('Ahmet Yılmaz', cok);
+  assert.ok(sonuc.length <= 200, `uzunluk ${sonuc.length}`);
+  assert.ok(sonuc.endsWith('…'));
+  assert.ok(sonuc.startsWith('Ahmet Yılmaz - Parca-0'));
 });

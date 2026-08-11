@@ -187,6 +187,44 @@ export function ceomedIrsaliyeNo(formNo: string): string | null {
   return CEOMED_IRSALIYE_NO_DESENI.test(aday) ? aday : null;
 }
 
+/**
+ * Ceomed Açıklama alanının taşıyabileceği üst sınır.
+ *
+ * ÖLÇÜLMEDİ — temkinli bir tavan. İrsaliye No alanının 8 karakterde SESSİZCE
+ * kestiği ölçüldüğü için aynı davranışın burada da olabileceği varsayılıyor.
+ * Sessiz kesilme muhasebeye yarım cümle yazar; kendimiz kısaltıp sonunu "…"
+ * ile işaretlemek en azından kesildiğini görünür kılar.
+ */
+const ACIKLAMA_MAX = 200;
+
+/**
+ * Açıklama metni: personel adı, ardından kullanılan yedek parçalar.
+ *
+ * `Batuhan Tubasar - Sensör Kiti x2, Pompa Contası`
+ *
+ * Muhasebe irsaliyeye baktığında işi kimin yaptığını ve neyin çıktığını tek
+ * satırda görsün diye. Parça adı yoksa stok kodu yazılır — ikisi de yoksa satır
+ * atlanır (stok kodu eksikse iş zaten `blocked`, açıklama o durumu kurtarmaz).
+ *
+ * Miktar yalnızca 1'den büyükse yazılır; "x1" gürültüden başka bir şey değil.
+ */
+export function aciklamaKur(personelAdi: string, satirlar: IrsaliyeGirisSatiri[]): string {
+  const parcalar = (satirlar || [])
+    .map((s) => {
+      const ad = text(s?.stokAdi) || text(s?.stokKodu);
+      if (!ad) return '';
+      const adet = Number(s?.miktar);
+      return Number.isFinite(adet) && adet > 1 ? `${ad} x${adet}` : ad;
+    })
+    .filter(Boolean);
+
+  if (parcalar.length === 0) return personelAdi;
+
+  const tam = `${personelAdi} - ${parcalar.join(', ')}`;
+  if (tam.length <= ACIKLAMA_MAX) return tam;
+  return `${tam.slice(0, ACIKLAMA_MAX - 1)}…`;
+}
+
 /** Yedek parça sayılan action tipleri. Hücre değişimi de stoktan parça tüketir. */
 const PART_ACTION_TYPES = new Set(['part_change', 'hucre_degisimi']);
 
@@ -320,6 +358,7 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
   const cariKodu = text(input.cariKodu).toLocaleUpperCase('tr-TR');
   const personnelName = text(input.personnelName);
   const tarih = normalizeTarih(input.tarih);
+  const aciklama = aciklamaKur(personnelName, satirlar);
 
   const blocks: Array<{ reason: BlockReason; detail: string }> = [];
 
@@ -378,7 +417,7 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     tarih: tarih || '',
     islemTipi: CEOMED_ISLEM_TIPI,
     depo: CEOMED_DEPO,
-    aciklama: personnelName,
+    aciklama,
     satirlar,
     status: blocks.length > 0 ? 'blocked' : 'pending',
     blockedReason: blocks.length > 0 ? blocks[0].reason : null,
