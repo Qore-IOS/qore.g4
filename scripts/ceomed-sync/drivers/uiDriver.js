@@ -86,10 +86,16 @@ function submit(job) {
     if (GERCEK_GONDERIM) {
       args.push('--gercek');
     }
-    // Acil kapatma anahtarı. Sevk Adresi forma yazılan EN YENİ alan ve saha
-    // davranışı Windows olmadan denenemiyor. Alan otomasyonu tıkarsa kod
-    // değiştirmeden kapatılabilsin: ORACLE_SEVK_ADRESI=0
-    if (process.env.ORACLE_SEVK_ADRESI === '0') {
+    // SEVK ADRESİ VARSAYILAN OLARAK YAZILMIYOR.
+    //
+    // Sahada ölçüldü: Çekmeköy'ün adresi yazıldığı hâlde formda cariye kayıtlı
+    // adres (Sancaktepe) göründü — Ceomed alanı cari kodundan kendisi
+    // dolduruyor ve bizim yazdığımızı eziyor. Yazmak hem sonuç değiştirmiyor
+    // hem de bir başarısızlık kaynağı (ilk denemede işi düşürdü, BK10133).
+    //
+    // Anahtar duruyor: Ceomed tarafında ek hizmet adresi ayrı tanımlanabilir
+    // hâle gelirse ORACLE_SEVK_ADRESI=1 ile açılır.
+    if (process.env.ORACLE_SEVK_ADRESI !== '1') {
       args.push('--sevk-adresi-yok');
     }
     const child = spawn(PYTHON, args, {
@@ -154,14 +160,30 @@ function submit(job) {
           });
           return;
         }
+        // `adimlar` HER İKİ YOLDA da taşınıyor. Python her alan yazımını, F6
+        // sonucunu ve atlanan adımları bu diziye yazıyordu ama Node tarafı onu
+        // atıyordu; worker log'unda yalnızca tek satırlık özet görünüyordu.
+        // Sahada "F6 yapılmadı ama logda bir şey yok" tam olarak buydu —
+        // otomasyonun ne yaptığı hiçbir yerde kayıtlı değildi.
         finish(parsed.ok
           ? {
               ok: true,
               kuru: parsed.kuru === true,
               ceomedIrsaliyeNo: parsed.ceomedIrsaliyeNo,
               screenshotPath: parsed.screenshotPath,
+              adimlar: parsed.log || [],
+              // `uyari`: gönderim başarılı ama F6 yenilemesi tutmadı. `not`:
+              // kuru koşu açıklaması. İkisi de tek satırlık özette görünmüyordu;
+              // F6 uyarısı özellikle önemli, çünkü sıradaki iş DOLU forma yazar.
+              not: parsed.uyari || parsed.not || null,
             }
-          : { ok: false, retryable: parsed.retryable !== false, error: parsed.error || 'UI otomasyonu başarısız.' });
+          : {
+              ok: false,
+              retryable: parsed.retryable !== false,
+              error: parsed.error || 'UI otomasyonu başarısız.',
+              screenshotPath: parsed.screenshotPath,
+              adimlar: parsed.log || [],
+            });
         return;
       }
 
