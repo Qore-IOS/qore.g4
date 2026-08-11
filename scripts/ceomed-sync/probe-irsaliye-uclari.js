@@ -102,6 +102,7 @@ async function main() {
   yaz(`"${no}" (${tarih}) hangi uç noktada görünüyor?\n`);
 
   const bulunanlar = [];
+  const ornekAdaylari = [];
 
   for (const uc of UC_NOKTALAR) {
     if (!okumaMi(uc.yol)) {
@@ -139,10 +140,33 @@ async function main() {
         break;
       }
       // En bilgilendirici denemeyi sakla: veri döndüren, döndürmeyene yeğ.
-      if (!enIyi || (adet || 0) > 0) enIyi = { etiket: sekil.ad, ozet };
+      if (!enIyi || (adet || 0) > 0) {
+        enIyi = { etiket: sekil.ad, ozet, adet: adet || 0, metin: r.metin };
+      }
     }
 
+    if (enIyi && enIyi.adet) {
+      ornekAdaylari.push({ yol: uc.yol, adet: enIyi.adet, metin: enIyi.metin });
+    }
     yaz(`  ${uc.yontem.padEnd(4)} ${uc.yol.padEnd(42)} ${enIyi ? `${enIyi.ozet}  [${enIyi.etiket}]` : 'sonuç yok'}`);
+  }
+
+  // ÖRNEK KAYIT: "hiçbiri görmüyor" sonucunu kapatmadan önce en çok kayıt
+  // döndüren uç noktanın NE döndürdüğüne bakmak gerekiyor. Kayıtlar bizimkiyle
+  // aynı aileden ama başka bir dönemdense sorun kapsam değil PARAMETRE olur —
+  // ikisi çok farklı sonuçlar ve çok farklı çözümler.
+  const zengin = ornekAdaylari.filter((a) => a.adet > 0).sort((a, b) => b.adet - a.adet)[0];
+  if (zengin && bulunanlar.length === 0) {
+    yaz('');
+    yaz(`En çok kayıt döndüren: ${zengin.yol} (${zengin.adet} kayıt)`);
+    yaz('İlk kayıt — bizim belgemizle aynı aile mi?\n');
+    try {
+      const j = JSON.parse(zengin.metin);
+      const liste = Array.isArray(j) ? j : j.data;
+      yaz(JSON.stringify(liste[0], null, 2).split('\n').slice(0, 26).join('\n'));
+    } catch {
+      yaz(zengin.metin.slice(0, 500));
+    }
   }
 
   yaz('');
