@@ -222,11 +222,21 @@ export default function DashboardV2({
     return () => { alive = false; };
   }, [currentCompanyId, isSuperAdmin]);
 
-  const counterAnalysisSlides = useMemo(() => {
+  const counterAnalysis = useMemo(() => {
     const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth() + 1;
-    const previousDate = subMonths(now, 1);
+    const availablePeriods = counterHistory
+      .map((record) => ({
+        year: record.year ?? Number(record.period?.split('-')[0]),
+        month: record.month ?? Number(record.period?.split('-')[1]),
+        hasData: record.items?.some((item) => (Number(item.total) || 0) > 0) ?? false,
+      }))
+      .filter(({ year, month, hasData }) => hasData && Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12)
+      .sort((a, b) => (b.year * 12 + b.month) - (a.year * 12 + a.month));
+    // İçinde bulunulan ay henüz yüklenmemişse boş kart göstermek yerine veri olan
+    // en son dönemi, onun bir önceki takvim ayıyla karşılaştır.
+    const latestPeriod = availablePeriods[0] ?? { year: now.getFullYear(), month: now.getMonth() + 1 };
+    const analysisDate = new Date(latestPeriod.year, latestPeriod.month - 1, 1);
+    const previousDate = subMonths(analysisDate, 1);
 
     const totalsFor = (year: number, month: number) => {
       const productTotals = new Map<string, number>();
@@ -245,24 +255,27 @@ export default function DashboardV2({
       ]));
     };
 
-    const current = totalsFor(currentYear, currentMonth);
+    const current = totalsFor(latestPeriod.year, latestPeriod.month);
     const previous = totalsFor(previousDate.getFullYear(), previousDate.getMonth() + 1);
     const ranked = [...current.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
     const rising = [...current.entries()]
       .map(([name, value]) => ({ name, value, increase: value - (previous.get(name) ?? 0) }))
       .sort((a, b) => b.increase - a.increase)[0];
 
-    return [
-      { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
-      { label: 'En az çalışılan test', name: ranked.at(-1)?.[0] || 'Henüz veri yok', value: ranked.at(-1)?.[1] ?? 0, suffix: 'test', icon: TrendingDown, color: HOME_C.amber, bg: HOME_C.amberSoft },
-      { label: 'Geçen aya göre en çok yükselen', name: rising?.increase && rising.increase > 0 ? rising.name : 'Artış gösteren test yok', value: Math.max(0, rising?.increase ?? 0), suffix: 'artış', icon: BarChart3, color: HOME_C.accent, bg: HOME_C.accentA08 },
-    ];
+    return {
+      periodLabel: format(analysisDate, 'MMMM yyyy', { locale: tr }),
+      slides: [
+        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
+        { label: 'En az çalışılan test', name: ranked.at(-1)?.[0] || 'Henüz veri yok', value: ranked.at(-1)?.[1] ?? 0, suffix: 'test', icon: TrendingDown, color: HOME_C.amber, bg: HOME_C.amberSoft },
+        { label: 'Önceki aya göre en çok yükselen', name: rising?.increase && rising.increase > 0 ? rising.name : 'Artış gösteren test yok', value: Math.max(0, rising?.increase ?? 0), suffix: 'artış', icon: BarChart3, color: HOME_C.accent, bg: HOME_C.accentA08 },
+      ],
+    };
   }, [counterHistory, testDefinitions]);
 
   useEffect(() => {
-    const timer = window.setInterval(() => setCounterSlide((current) => (current + 1) % counterAnalysisSlides.length), 4200);
+    const timer = window.setInterval(() => setCounterSlide((current) => (current + 1) % counterAnalysis.slides.length), 4200);
     return () => window.clearInterval(timer);
-  }, [counterAnalysisSlides.length]);
+  }, [counterAnalysis.slides.length]);
 
   // Anlık maliyet — costSnapshots/{companyId} dokümanından okunur (her sabah
   // 06:00'da Cloud Function günceller). Doküman yoksa ilk açılışta istemci
@@ -908,9 +921,9 @@ export default function DashboardV2({
             {/* Counter analizi — aylık öne çıkan testler */}
             <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
               <ClayCard hover pad={16} style={{ height: '100%' }}>
-                <CardHead ico={<BarChart3 size={18} />} title="Counter Analizi" tone="accent" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex' }}><ArrowUpRight size={16} /></span>} />
+                <CardHead ico={<BarChart3 size={18} />} title="Counter Analizi" tone="accent" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, textTransform: 'capitalize' }}>{counterAnalysis.periodLabel}<ArrowUpRight size={16} /></span>} />
                 <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 14, minHeight: 86, marginTop: 10, overflow: 'hidden' }}>
-                  {counterAnalysisSlides.map((slide, index) => {
+                  {counterAnalysis.slides.map((slide, index) => {
                     const Icon = slide.icon;
                     const active = index === counterSlide;
                     return (
@@ -926,7 +939,7 @@ export default function DashboardV2({
                   })}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
-                  {counterAnalysisSlides.map((slide, index) => (
+                  {counterAnalysis.slides.map((slide, index) => (
                     <span key={slide.label} style={{ width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
                   ))}
                   </div>
