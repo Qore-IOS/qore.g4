@@ -14,7 +14,7 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertTriangle, Trash2 } from 'lucide-react';
+import { AlertTriangle, Minus, Plus, Trash2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
@@ -38,6 +38,8 @@ import {
   commitMalKabul,
   type MalKabulWriteRow,
 } from '@/lib/mal-kabul/write';
+// Seri numarasız (lot/adet takipli) ürünlerin okutma mantığı.
+import { addQuantityScan, adjustQuantity, intakeGroupKey } from '@/lib/terminal/quantity-picking';
 import {
   ScanFeedbackBar,
   TerminalButton,
@@ -112,13 +114,56 @@ export default function TerminalMalKabulPage() {
       }
 
       const serial = (parsed.seriNumarasi || '').trim();
+
+      /**
+       * SERİ NUMARASIZ ÜRÜNLER.
+       *
+       * Tanımlı ürünlerin bir kısmı lot ya da adet takipli (`TrackingMode`).
+       * Terminal eskiden bunları reddedip kullanıcıyı web paneline yolluyordu;
+       * oysa aynı rafta duruyorlar ve görevlinin bir kutu için terminale,
+       * diğeri için bilgisayara gitmesi anlamsız.
+       *
+       * Her okutma BİR ADET ekler; aynı ürün+lot+miad tek satırda toplanır.
+       * "Kaç adet?" diye soran bir alan, eldiven ve barkod okuyucuyla çalışan
+       * biri için sürtünmedir — düzeltme satırdaki +/- ile yapılır.
+       */
       if (!serial) {
-        setFeedback({
-          tone: 'warning',
-          title: 'Seri numarası okunamadı',
-          detail: 'Bu ürün için web panelindeki mal kabul ekranını kullanın.',
+        const lot = (parsed.lotNumarasi || '').trim();
+        const miad = parsed.miadFormatted || '';
+        const groupKey = intakeGroupKey({ stokKodu: product.stokKodu, lotNumarasi: lot, miad });
+
+        setRows(prev => {
+          const result = addQuantityScan<MalKabulWriteRow>(
+            prev,
+            groupKey,
+            row =>
+              intakeGroupKey({
+                stokKodu: row.stokKodu || '',
+                lotNumarasi: row.lotNumarasi,
+                miad: typeof row.miad === 'string' ? row.miad : '',
+              }),
+            () => ({
+              id: generateId(),
+              stokKodu: product.stokKodu,
+              stokAdi: product.stokAdi,
+              lotNumarasi: lot,
+              miad,
+              seriNumarasi: '',
+              rafAdresi,
+              irsaliyeNumarasi,
+              timestamp: new Date(),
+              adet: 1,
+            }),
+          );
+          return result.rows;
         });
-        playFeedback(true);
+
+        setFeedback({
+          tone: 'success',
+          title: product.stokAdi,
+          detail: lot ? `Lot ${lot} · +1 adet` : '+1 adet',
+        });
+        playFeedback();
         return;
       }
 
@@ -262,7 +307,15 @@ export default function TerminalMalKabulPage() {
       title="Mal Kabul"
       subtitle={depotName || 'Depo seçilmedi'}
       onBack={() => router.push('/terminal')}
-      right={<TerminalStat label="Okutulan" value={rows.length} />}
+      right={
+        // Satır sayısı artık yeterli değil: seri numarasız kalemler tek
+        // satırda toplanıyor, dolayısıyla "3 satır" 30 adet olabilir. Toplam
+        // adet gösterilmezse görevli kaç kutu okuttuğunu ekrandan göremez.
+        <TerminalStat
+          label="Okutulan"
+          value={rows.reduce((total, row) => total + Math.max(1, row.adet ?? 1), 0)}
+        />
+      }
     >
       <div className="flex h-full min-h-0 flex-col gap-4 p-6">
         <div className="grid shrink-0 grid-cols-1 gap-4 md:grid-cols-3">
@@ -309,6 +362,7 @@ export default function TerminalMalKabulPage() {
                   <th className="px-4 py-3">Seri</th>
                   <th className="px-4 py-3">Lot</th>
                   <th className="px-4 py-3">Miad</th>
+                  <th className="px-4 py-3">Adet</th>
                   <th className="px-4 py-3">Raf</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -328,9 +382,45 @@ export default function TerminalMalKabulPage() {
                         </div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 font-mono text-foreground/80">{row.seriNumarasi}</td>
+                    <td className="px-4 py-3 font-mono text-foreground/80">
+                      {row.seriNumarasi || '—'}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{row.lotNumarasi || '—'}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{row.miad || '—'}</td>
+                    <td className="px-4 py-3 text-muted-foreground">
+                      {typeof row.miad === 'string' ? row.miad || '—' : '—'}
+                    </td>
+                    {/*
+                      Adet yalnızca seri numarasız satırlarda düzenlenebilir.
+                      Seri numaralı bir kalem tanım gereği tektir; orada +/-
+                      göstermek stoğu bozmaya davet olurdu.
+                    */}
+                    <td className="px-4 py-3">
+                      {row.seriNumarasi ? (
+                        <span className="text-muted-foreground">1</span>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setRows(prev => adjustQuantity(prev, row.id, -1))}
+                            aria-label="Adedi azalt"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground/80 hover:bg-muted"
+                          >
+                            <Minus className="h-4 w-4" />
+                          </button>
+                          <span className="min-w-8 text-center font-medium tabular-nums text-foreground">
+                            {row.adet ?? 1}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setRows(prev => adjustQuantity(prev, row.id, 1))}
+                            aria-label="Adedi artır"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground/80 hover:bg-muted"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{row.rafAdresi || '—'}</td>
                     <td className="px-4 py-3 text-right">
                       <button
