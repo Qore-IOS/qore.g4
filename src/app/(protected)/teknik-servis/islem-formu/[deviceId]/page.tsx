@@ -32,7 +32,7 @@ import WizardFormShell, { hapticDouble } from '@/components/islem-formu/WizardFo
 import type { WizardHeading } from '@/components/islem-formu/WizardFormShell';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { reserveActionFormNumber } from '@/lib/form-number';
-import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import { cariCozAsync, enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
 import type { BuildIrsaliyeGirisInput } from '@/lib/ceomed/irsaliye-giris';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -2325,7 +2325,17 @@ export default function IslemFormuPage() {
           const bekleyenler: string[] = [];
           const yazilamayanlar: string[] = [];
           for (const girdi of irsaliyeGirisleri) {
-            const sonuc = await enqueueIrsaliyeGirisAyri(db, girdi);
+            // Cari kodu ve sevk adresi BURADA çözülüyor, commit'ten sonra:
+            // ana lab araması bir sorgu ve sorgular form kaydetme yolunda
+            // üretimi durdurmuştu. Ek hizmet binasıysa cari ana labdan,
+            // sevk adresi kendi tanımından gelir.
+            const cari = await cariCozAsync(db, girdi.hospitalId);
+            const sonuc = await enqueueIrsaliyeGirisAyri(db, {
+              ...girdi,
+              cariKodu: cari.cariKodu || girdi.cariKodu,
+              sevkAdresi: cari.sevkAdresi,
+              cariKaynagi: cari.kaynak,
+            });
             // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve
             // bu modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.
             if (sonuc.enqueued === true && sonuc.status === 'blocked') {

@@ -606,6 +606,9 @@ def main() -> int:
             "irsaliyeNo": str(header.get("irsaliyeNo") or ""),
             "tarih": str(header.get("tarih") or ""),
             "cariKodu": str(header.get("cariKodu") or ""),
+            # Boşsa baslik_doldur alana dokunmaz; ek hizmet binası olmayan
+            # laboratuvarlarda bu alan boş kalmaya devam eder.
+            "sevkAdresi": str(header.get("sevkAdresi") or ""),
             "islemTipi": str(header.get("islemTipi") or ""),
             "depo": str(header.get("depo") or ""),
         }

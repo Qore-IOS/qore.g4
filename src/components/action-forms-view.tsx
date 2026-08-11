@@ -29,7 +29,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
-import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import { cariCozAsync, enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
 import { selectPartActions } from '@/lib/ceomed/irsaliye-giris';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
@@ -407,13 +407,10 @@ function IrsaliyeOlusturHucresi({ form }: { form: ActionRecord }) {
         return;
       }
 
-      // Cari kodu TAZE okunuyor: işin ilk kez bloklanmasının en sık sebebi
-      // laboratuvarda cari kodun boş olması ve sonradan girilmiş olması.
-      let cariKodu = '';
-      if (form.hospitalId) {
-        const hSnap = await getDoc(doc(db, 'hospitals', form.hospitalId));
-        cariKodu = String((hSnap.data() as any)?.ceomedCariKodu || '').trim().toUpperCase();
-      }
+      // Cari kodu TAZE çözülüyor: işin ilk kez bloklanmasının en sık sebebi
+      // cari kodun o an boş olup sonradan girilmesi. Ek hizmet binasıysa cari
+      // ana labdan, sevk adresi kendi tanımından gelir.
+      const cari = await cariCozAsync(db, form.hospitalId || '');
 
       const sonuc = await enqueueIrsaliyeGirisAyri(db, {
         formId: form.id,
@@ -421,7 +418,9 @@ function IrsaliyeOlusturHucresi({ form }: { form: ActionRecord }) {
         formType: form.moduleType === 'aplikasyon-paneli' ? 'aplikasyon' : 'teknik_servis',
         tarih: form.baslangicTarihi || (form.createdAt?.toDate ? form.createdAt.toDate().toISOString().slice(0, 10) : ''),
         hospitalId: form.hospitalId || '',
-        cariKodu,
+        cariKodu: cari.cariKodu,
+        sevkAdresi: cari.sevkAdresi,
+        cariKaynagi: cari.kaynak,
         labName: form.labName,
         deviceId: form.deviceId,
         cihazAdi: form.cihazAdi,
