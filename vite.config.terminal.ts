@@ -181,9 +181,19 @@ export default defineConfig(({ mode }) => {
    * o değerlerle çalışıyor.
    *
    * Kendi ortamını (ör. ayrı bir Firebase projesi) tanımlayan biri hâlâ
-   * kazanır: `loadEnv` sonuçları yedeğin ÜSTÜNE yazılır.
+   * kazanır: dolu bir `.env.local` değeri yedeği ezer.
+   *
+   * Birleştirme anahtar anahtar ve BOŞ DEĞERLERİ ATLAYARAK yapılır. Sahada
+   * görülen hâl tam olarak buydu: `.env.local` vardı ama Firebase
+   * anahtarlarını içermiyordu. Toptan bir `{...yedek, ...loadEnv()}` da
+   * yeterdi ama `KEY=` gibi boş bir satır yedeği boş dizeyle ezip aynı
+   * hatayı geri getirirdi.
    */
-  const env = { ...readApphostingPublicEnv(ROOT), ...loadEnv(mode, ROOT, '') };
+  const fileEnv = loadEnv(mode, ROOT, '');
+  const env: Record<string, string> = { ...fileEnv };
+  for (const [key, value] of Object.entries(readApphostingPublicEnv(ROOT))) {
+    if (!env[key]) env[key] = value;
+  }
 
   const missing = PUBLIC_ENV_KEYS.filter(
     key => key.includes('FIREBASE_API_KEY') || key.includes('FIREBASE_PROJECT_ID'),
