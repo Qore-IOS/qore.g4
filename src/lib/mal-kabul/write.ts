@@ -316,8 +316,23 @@ export async function commitMalKabul(params: {
    * `'wait'` (varsayılan, web paneli): mevcut davranış korunur.
    */
   sync?: 'wait' | 'queue';
+  /**
+   * Bekleyen işlemler defterindeki kayıt kimliği.
+   *
+   * `sync: 'queue'` ile birlikte verilir; yazım sunucuya işlenince kayıt
+   * "gönderildi", reddedilirse "başarısız" olarak işaretlenir.
+   */
+  operationId?: string;
 }): Promise<MalKabulCommitResult> {
-  const { rows, ctx, companyId, mode = 'unverified', resolveBrand, sync = 'wait' } = params;
+  const {
+    rows,
+    ctx,
+    companyId,
+    mode = 'unverified',
+    resolveBrand,
+    sync = 'wait',
+    operationId,
+  } = params;
 
   const transactionId = `MK-${generateId()}`;
   const txRef = doc(db, 'malKabulTransactions', transactionId);
@@ -375,6 +390,8 @@ export async function commitMalKabul(params: {
     // ekran "Kaydediliyor…" konumunda kilitlenir. Yazım yerel önbelleğe anında
     // uygulanır; sunucu onayı gelmezse işlem kuyrukta beklemeye devam eder.
     if (sync === 'queue') {
+      // Defter kimliği burada VERİLMEZ: bu yalnızca stok partilerinden biri.
+      // Kayıt, en son yazım (işlem başlığı) onaylanınca güncellenir.
       queueWrite(batch.commit());
       outcome = 'pending';
     } else if ((await commitLocalFirst(batch.commit())) === 'pending') {
@@ -426,7 +443,9 @@ export async function commitMalKabul(params: {
       );
     });
     if (sync === 'queue') {
-      queueWrite(batch.commit());
+      // Son yazım: defter kaydı buna bağlanır.
+      const isLastBatch = i + 400 >= lines.length;
+      queueWrite(batch.commit(), undefined, isLastBatch ? operationId : undefined);
       outcome = 'pending';
     } else if ((await commitLocalFirst(batch.commit())) === 'pending') {
       outcome = 'pending';

@@ -28,6 +28,9 @@
  * bekliyor" göstergesi gerçeği yansıtır.
  */
 
+import { markOperationFailed, markOperationSent } from '@/lib/pending-operations';
+
+
 /**
  * Sunucu onayı için beklenecek süre.
  *
@@ -87,22 +90,30 @@ export function subscribeToPendingWrites(listener: PendingListener): () => void 
  * "Kaydediliyor…" görmesi için hiçbir sebep yok. Sunucu onayı gelene kadar
  * işlem bekleyen sayaca yazılır ve üst şeritteki göstergede görünür.
  *
+ * Bir `operationId` verilirse bekleyen işlemler defteri de güncellenir
+ * (bkz. `src/lib/pending-operations.ts`): işlem sunucuya işlenince "gönderildi",
+ * reddedilirse "başarısız" olarak işaretlenir. Böylece kullanıcı neyin
+ * beklediğini ve neyin gittiğini ekranda görebilir.
+ *
  * @param onSettled Sunucu sonucu geldiğinde çağrılır (arka planda).
  */
 export function queueWrite(
   commit: Promise<unknown>,
   onSettled?: (result: { ok: boolean; error?: unknown }) => void,
+  operationId?: string,
 ): void {
   setPending(pendingCount + 1);
   commit.then(
     () => {
       setPending(pendingCount - 1);
+      if (operationId) markOperationSent(operationId);
       onSettled?.({ ok: true });
     },
     (error: unknown) => {
       setPending(pendingCount - 1);
       // Gerçek bir ret (kural ihlali, geçersiz belge) sessizce kaybolmamalı.
       console.error('[offline-write] Kuyruktaki yazım reddedildi:', error);
+      if (operationId) markOperationFailed(operationId, error);
       onSettled?.({ ok: false, error });
     },
   );

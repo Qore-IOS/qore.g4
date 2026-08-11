@@ -20,27 +20,25 @@
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { collection, doc, onSnapshot, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { Check, Trash2 } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import {
-  useHospitals,
-  useProductCodes,
-  useUnshippedDepoStokByDepot,
-  useInvalidateQueries,
-  touchStockMetadata,
-} from '@/hooks/useFirebaseQueries';
+import { parseAndResolveBarcode } from '@/lib/barcode';
+import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
-import { useDepots } from '@/hooks/useFirebaseQueries';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { playFeedback } from '@/lib/utils';
 import { withCompanyScope } from '@/lib/company-scope';
 import { queueWrite } from '@/lib/offline-write';
+import { recordOperation } from '@/lib/pending-operations';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
@@ -58,6 +56,7 @@ import {
   TerminalStat,
   type ScanFeedback,
 } from '@/components/terminal/shell';
+import { CameraScanButton } from '@/components/terminal/camera-scan-button';
 
 const IDLE: ScanFeedback = {
   tone: 'idle',
@@ -72,17 +71,11 @@ function TerminalToplamaScreen() {
 
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
-  const { data: depots = [] } = useDepots();
-  const { data: hospitals = [] } = useHospitals();
-  const { data: productCodes = [] } = useProductCodes();
-  const { formats, parseAndResolveBarcode } = useBarcodeParser();
+  const { depots, hospitals, productCodes, barcodeFormats: formats, depotStock, orders } = useTerminalData();
   const { invalidateDepoStok } = useInvalidateQueries();
 
   const [depotId] = useTerminalDepot();
-  const { data: depotStock = [] } = useUnshippedDepoStokByDepot(depotId || null);
 
-  const [order, setOrder] = useState<Order | null>(null);
-  const [orderMissing, setOrderMissing] = useState(false);
   const [picked, setPicked] = useState<DepoStokItem[]>([]);
   const [feedback, setFeedback] = useState<ScanFeedback>(IDLE);
 
@@ -94,25 +87,15 @@ function TerminalToplamaScreen() {
   );
   const depotName = sourceDepots.find(d => d.id === depotId)?.name || '';
 
-  // Sipariş canlı dinlenir: başka bir kullanıcı aynı siparişi kapatırsa
-  // terminal bunu görür ve boşuna toplamaya devam edilmez.
-  useEffect(() => {
-    if (!orderId) return;
-    const unsubscribe = onSnapshot(
-      doc(db, 'orders', orderId),
-      snap => {
-        if (!snap.exists()) {
-          setOrder(null);
-          setOrderMissing(true);
-          return;
-        }
-        setOrder({ id: snap.id, ...snap.data() } as Order);
-        setOrderMissing(false);
-      },
-      () => setOrderMissing(true),
-    );
-    return () => unsubscribe();
-  }, [orderId]);
+  /**
+   * Sipariş önyükleme deposundan alınır — ayrı bir belge dinleyicisi YOK.
+   *
+   * Depo zaten seçili deponun siparişlerini canlı dinliyor; başka bir
+   * kullanıcı siparişi kapatırsa liste güncellenir ve sipariş buradan düşer.
+   * Ekran bunu "artık açık değil" olarak gösterir.
+   */
+  const order = useMemo(() => orders.find(o => o.id === orderId) || null, [orders, orderId]);
+  const orderMissing = !order;
 
   const targetLab = useMemo(() => {
     if (!order) return undefined;
@@ -192,7 +175,7 @@ function TerminalToplamaScreen() {
       });
       playFeedback(!inOrder);
     },
-    [order, parseAndResolveBarcode, formats, productCodes, stockBySerial, pickingList],
+    [order, formats, productCodes, stockBySerial, pickingList],
   );
 
   useHidScanner({ onScan: handleScan });
@@ -259,7 +242,16 @@ function TerminalToplamaScreen() {
       return;
     }
 
-    queueWrite(batch.commit());
+    queueWrite(
+      batch.commit(),
+      undefined,
+      recordOperation({
+        id: transferRef.id,
+        kind: 'siparis_karsilama',
+        summary: `${order.kurumAdi} · ${totalShippedAdet} adet${complete ? ' · sipariş kapandı' : ' · kısmi'}`,
+        itemCount: totalShippedAdet,
+      }),
+    );
     void appendSerialEvents(ledgerEvents, currentCompanyId).catch(() => {});
     void touchStockMetadata();
     invalidateDepoStok();
@@ -298,6 +290,8 @@ function TerminalToplamaScreen() {
       <div className="grid h-full min-h-0 grid-cols-1 gap-4 p-6 lg:grid-cols-2">
         <div className="flex min-h-0 flex-col gap-4">
           <ScanFeedbackBar feedback={feedback} />
+          {/* Android'de kamerayla okutma; diğer kabuklarda hiç render edilmez. */}
+          <CameraScanButton onScan={handleScan} />
 
           <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
             <table className="w-full text-left text-sm">

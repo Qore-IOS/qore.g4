@@ -81,3 +81,7 @@ scripts/ceomed-sync/oracle-ui/controls.json
 scripts/ceomed-sync/oracle-ui/screenshots/
 scripts/ceomed-sync/oracle-ui/agac.json
 scripts/ceomed-sync/oracle-ui/__pycache__/
+
+# Android terminal arayüz paketi (derleme çıktısı — depoda tutulmaz).
+# Yerel Android projesinin kendi çıktıları android/.gitignore ile eleniyor.
+android-app/www/

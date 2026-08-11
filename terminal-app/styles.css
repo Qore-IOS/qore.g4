@@ -25,3 +25,30 @@ body,
    üzerinde boyar. Buraya bir `body` kuralı yazmak sessizce etkisiz kalırdı —
    ölçüldü ve öyle olduğu görüldü. Tema, `html.dark` sınıfı üzerinden
    `globals.css` değişkenleriyle yürür. */
+
+/*
+ * Dokunmatik kabuk (Android) düzeltmeleri.
+ *
+ * Masaüstünde görünür bir etkisi yok; hepsi dokunmatik girdiye özgü
+ * davranışları kapatır:
+ *
+ *   - Uzun basınca çıkan metin seçimi/kopyala balonu: eldivenli elle
+ *     çalışırken kazara sürekli açılıyor ve okutmanın önünü kapatıyor.
+ *     Yazılabilir alanlarda seçim AÇIK bırakılır, yoksa el ile düzeltme
+ *     yapılamaz.
+ *   - Dokunma vurgusu: her dokunuşta beliren mavi dikdörtgen.
+ *   - Çift dokunuşla yakınlaştırma: liste kaydırırken kazara tetikleniyor.
+ */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+input,
+textarea,
+[contenteditable='true'] {
+  -webkit-user-select: text;
+  user-select: text;
+}

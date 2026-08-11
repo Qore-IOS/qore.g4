@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { FileText, Loader2 } from 'lucide-react';
 import { formatUnitMultiplier, normalizeUnitLabel } from '@/lib/product-unit';
 import { loadClayKit, renderTransferForm, type TransferRow } from '@/lib/pdf/clay-tutanak';
+import { deliverPdf } from '@/lib/pdf-delivery';
 
 type HeaderInfo = {
   shipmentId: string;
@@ -63,7 +64,9 @@ export async function generateTransferTutanakPDF(header: HeaderInfo, rows: Row[]
     toplamAdet: rows.reduce((s, r) => s + (Number(r.adet) || 0), 0),
   });
 
-  doc.save(`Transfer_${header.shipmentId}_Form.pdf`);
+  // Web ve masaüstünde bu `doc.save()` ile aynıdır; Android'de dosya yazılıp
+  // sistem paylaşım sayfası açılır (bkz. pdf-delivery.ts).
+  await deliverPdf(doc, `Transfer_${header.shipmentId}_Form.pdf`);
 }
 
 export default function TransferTutanakPDFButton({ header, rows, className }: TransferTutanakPDFButtonProps) {

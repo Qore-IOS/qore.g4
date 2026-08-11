@@ -15,16 +15,20 @@ import { Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { parseAndResolveBarcode } from '@/lib/barcode';
 import { scopedQuery } from '@/lib/firestore-helpers';
-import { playFeedback } from '@/lib/utils';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import type { DepoStokItem } from '@/lib/types';
+import { playFeedback } from '@/lib/utils';
 import {
   ScanFeedbackBar,
   TerminalShell,
   type ScanFeedback,
 } from '@/components/terminal/shell';
+import { CameraScanButton } from '@/components/terminal/camera-scan-button';
 
 const IDLE: ScanFeedback = {
   tone: 'idle',
@@ -42,9 +46,7 @@ type LookupResult = {
 export default function TerminalSorguPage() {
   const router = useRouter();
   const { currentCompanyId, isSuperAdmin } = useAuth();
-  const { data: productCodes = [] } = useProductCodes();
-  // Tipli ayrıştırma yolu — bkz. mal kabul ekranındaki not.
-  const { formats, parseAndResolveBarcode } = useBarcodeParser();
+  const { productCodes, barcodeFormats: formats, depotStock } = useTerminalData();
 
   const [feedback, setFeedback] = useState<ScanFeedback>(IDLE);
   const [result, setResult] = useState<LookupResult | null>(null);
@@ -73,12 +75,32 @@ export default function TerminalSorguPage() {
       setFeedback({ tone: 'idle', title: 'Aranıyor…', detail: `Seri ${serial}` });
 
       try {
-        // Seri numarası üzerinden arama: ürün kodu çözümlenemese bile sonuç
-        // döner, çünkü depoda asıl aranan şey elde tutulan fiziksel kutudur.
-        const snap = await getDocs(
-          scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('seriNumarasi', '==', serial)),
-        );
-        const matches = snap.docs.map(d => ({ id: d.id, ...d.data() }) as DepoStokItem);
+        // Önce YEREL: seçili deponun stoğu zaten bellekte, ağ turu gerekmez.
+        const local = depotStock.filter(item => item.seriNumarasi === serial);
+
+        /**
+         * Çevrimdışıyken sunucu sorgusu ATILMAZ.
+         *
+         * `getDocs` ağ arayüzü "bağlı" görünüp internet yokken (depoda tipik
+         * hâl) sunucu yanıtını zaman aşımına kadar bekler ve ekran donar.
+         * Bu ekranın tek işi bir soruyu hızlı cevaplamak; donmak yerine
+         * elindekiyle cevap verip kapsamı açıkça söyler.
+         */
+        const canQueryServer = typeof navigator === 'undefined' || navigator.onLine;
+
+        let matches: DepoStokItem[] = local;
+        let scopeNote = '';
+
+        if (canQueryServer) {
+          // Seri numarası üzerinden arama: ürün kodu çözümlenemese bile sonuç
+          // döner, çünkü depoda asıl aranan şey elde tutulan fiziksel kutudur.
+          const snap = await getDocs(
+            scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('seriNumarasi', '==', serial)),
+          );
+          matches = snap.docs.map(d => ({ id: d.id, ...d.data() }) as DepoStokItem);
+        } else if (local.length === 0) {
+          scopeNote = ' (çevrimdışı — yalnızca bu deponun stoğunda arandı)';
+        }
 
         setResult({
           serial,
@@ -91,7 +113,7 @@ export default function TerminalSorguPage() {
           setFeedback({
             tone: 'warning',
             title: 'Kayıt bulunamadı',
-            detail: `Seri ${serial} sistemde görünmüyor.`,
+            detail: `Seri ${serial} sistemde görünmüyor.${scopeNote}`,
           });
           playFeedback(true);
         } else {
@@ -114,7 +136,7 @@ export default function TerminalSorguPage() {
         setIsLoading(false);
       }
     },
-    [parseAndResolveBarcode, formats, productCodes, currentCompanyId, isSuperAdmin],
+    [formats, productCodes, currentCompanyId, isSuperAdmin, depotStock],
   );
 
   useHidScanner({ enabled: !isLoading, onScan: handleScan });
@@ -127,6 +149,8 @@ export default function TerminalSorguPage() {
     >
       <div className="flex h-full min-h-0 flex-col gap-4 p-6">
         <ScanFeedbackBar feedback={feedback} />
+        {/* Android'de kamerayla okutma; diğer kabuklarda hiç render edilmez. */}
+        <CameraScanButton onScan={handleScan} disabled={isLoading} />
 
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border p-6">
           {isLoading ? (

@@ -77,14 +77,18 @@ export function TerminalShell({
 
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-6 py-4">
+      {/* `flex-wrap`: telefon genişliğinde (Android kabuğu) başlık şeridi
+          yatay taşıp durum göstergesini ekrandan çıkarıyordu. Masaüstünde
+          hiçbir şey değişmez — sarma yalnızca yer kalmadığında devreye
+          girer. */}
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4">
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
           {subtitle ? (
             <p className="truncate text-sm text-muted-foreground">{subtitle}</p>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Bağlantı durumu HER ekranda görünür — çevrimdışı olduğunu
               bilmeyen kullanıcı, kaydın gittiğini sanıp devam eder. */}
           <ConnectionBadge />

@@ -19,16 +19,18 @@ import { AlertTriangle, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
-import { useBarcodeParser } from '@/hooks/useBarcodeParser';
-import {
-  useDepots,
-  useProductCodes,
-  useInvalidateQueries,
-  touchStockMetadata,
-} from '@/hooks/useFirebaseQueries';
+// Ayrıştırıcı doğrudan lib'den: hook sürümü barkod formatlarını kendi
+// sorgusuyla çeker, terminalde formatlar zaten önyükleme deposunda.
+import { parseAndResolveBarcode } from '@/lib/barcode';
+import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
+// Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
+// BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
+// geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.
+import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import { generateId, playFeedback } from '@/lib/utils';
+import { recordOperation } from '@/lib/pending-operations';
 import { getSerialLedgerEntries } from '@/lib/serial-ledger/client';
 import { canReceiveSerial, describeSerialBlock } from '@/lib/serial-ledger/core';
 import {
@@ -45,6 +47,7 @@ import {
   TerminalStat,
   type ScanFeedback,
 } from '@/components/terminal/shell';
+import { CameraScanButton } from '@/components/terminal/camera-scan-button';
 
 const IDLE: ScanFeedback = { tone: 'idle', title: 'Okutmaya hazır', detail: 'Barkodu okutun.' };
 
@@ -52,12 +55,7 @@ export default function TerminalMalKabulPage() {
   const router = useRouter();
   const { toast } = useToast();
   const { currentUser, currentUserProfile, currentCompanyId } = useAuth();
-  const { data: depots = [] } = useDepots();
-  const { data: productCodes = [] } = useProductCodes();
-  // `parseAuto` gevşek tipli `ParsedBarcode`'a döner (index signature: unknown).
-  // `parseAndResolveBarcode` ise `ParsedGeneric` döndürür — alanlar gerçekten
-  // string olarak tiplenir, bu yüzden terminal bu yolu kullanır.
-  const { formats, parseAndResolveBarcode } = useBarcodeParser();
+  const { depots, productCodes, barcodeFormats: formats } = useTerminalData();
   const { invalidateDepoStok } = useInvalidateQueries();
 
   const [depotId, setDepotId] = useTerminalDepot();
@@ -170,7 +168,7 @@ export default function TerminalMalKabulPage() {
           /* defter okunamadı — kabul engellenmez */
         });
     },
-    [depotId, parseAndResolveBarcode, formats, productCodes, rafAdresi, irsaliyeNumarasi, currentCompanyId],
+    [depotId, formats, productCodes, rafAdresi, irsaliyeNumarasi, currentCompanyId],
   );
 
   useHidScanner({ onScan: handleScan });
@@ -223,6 +221,15 @@ export default function TerminalMalKabulPage() {
       detail: skipped > 0 ? `${skipped} seri atlandı (geçmişte işlem görmüş).` : 'Gönderim arka planda sürüyor.',
     });
 
+    // İşlem deftere yazılır: çevrimdışıyken kullanıcı neyin beklediğini
+    // "Bekleyen İşlemler" ekranından görebilsin.
+    const operationId = recordOperation({
+      id: `mk-${generateId()}`,
+      kind: 'mal_kabul',
+      summary: `${depotName || 'Depo'} · ${accepted.length} kalem`,
+      itemCount: accepted.length,
+    });
+
     void commitMalKabul({
       rows: accepted,
       ctx: {
@@ -233,6 +240,7 @@ export default function TerminalMalKabulPage() {
       },
       companyId: currentCompanyId,
       sync: 'queue',
+      operationId,
     })
       .then(() => {
         void touchStockMetadata();
@@ -285,6 +293,8 @@ export default function TerminalMalKabulPage() {
         </p>
 
         <ScanFeedbackBar feedback={feedback} />
+        {/* Android'de kamerayla okutma; diğer kabuklarda hiç render edilmez. */}
+        <CameraScanButton onScan={handleScan} />
 
         <div className="min-h-0 flex-1 overflow-auto rounded-xl border border-border">
           {rows.length === 0 ? (

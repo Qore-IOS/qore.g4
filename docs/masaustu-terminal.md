@@ -3,6 +3,10 @@
 Depo zeminindeki kullanıcılar için sadeleştirilmiş bir arayüz ve onu masaüstü
 uygulaması olarak paketleyen bir Electron kabuğu.
 
+> Aynı arayüzün Android (APK) kabuğu için bkz.
+> [`android-terminal.md`](./android-terminal.md). Ekranlar ve yazma mantığı
+> ortaktır; yalnızca kabuk değişir.
+
 ## Neden
 
 Web panelleri (`/mal-kabul`, `/direkt-transfer`, `/siparisler`) yıllar içinde
@@ -65,16 +69,47 @@ Terminalde bilerek YOKTUR: gerekçeli FEFO aşımı (burada FEFO bir öneridir,
 engel değil), kurum bazlı özel ürün sıralaması, iki adımlı doğrulama. Bu
 durumlar için web toplama ekranı kullanılmalıdır.
 
-## Önyükleme: veri girişte iner
+## Önyükleme: veri girişte iner ve BELLEKTE tutulur
 
 Terminal açılırken tüm çalışma verisi yerele indirilir (`src/lib/terminal-prefetch.ts`):
 stok kartları, barkod formatları, depolar, laboratuvarlar ve seçili deponun
 stoğu + siparişleri. İndirme `onSnapshot` ile yapılır — ilk anlık görüntü
-indirmedir, sonraki değişiklikler önbelleği kendiliğinden günceller.
+indirmedir, sonraki değişiklikler hem önbelleği hem belleği günceller.
 
-Amaç, beklemeyi İŞLEM ANINDAN alıp açılışa taşımaktır. Açılış ekranı yalnızca
-ilk indirmede görünür; sonraki açılışlarda veri diskte olduğu için göz kırpar
-gibi geçer.
+**Ekranlar veriyi BURADAN okur** (`useTerminalData()`). TanStack hook'ları
+(`useDepots`, `useProductCodes`, `useUnshippedDepoStokByDepot` …) terminalde
+BİLEREK kullanılmaz.
+
+### Neden — panel geçişindeki donmanın sebebi
+
+O hook'lar `getDocs` ile sorgu atar ve 5 dakikalık tazelik süresi dolduktan
+sonra her ekran açılışında yeniden çalışır. Çevrimdışıyken bu ölümcüldü: ağ
+arayüzü "bağlı" görünüp internet olmadığında (depoda tipik hâl) `getDocs`
+sunucu yanıtını zaman aşımına kadar bekler ve arayüz donar.
+
+Sahada görülen "panel değiştiriyorum, uygulama donuyor" tam olarak buydu.
+Artık navigasyon yolunda tek bir ağ çağrısı yoktur.
+
+Aynı sebeple stok sorgu ekranı çevrimdışıyken sunucuya sorgu ATMAZ: elindeki
+depo stoğunda arar ve kapsamı ("yalnızca bu deponun stoğunda arandı") açıkça
+söyler.
+
+## Bekleyen işlemler
+
+Çevrimdışı yapılan işlemler `/terminal/bekleyen` ekranında listelenir:
+ne zaman yapıldığı, kaç kalem olduğu, gönderilip gönderilmediği.
+
+Gönderme işini **Firestore'un kendi kuyruğu** yapar; o kuyruk kalıcıdır ve
+uygulama kapansa bile kaybolmaz. `src/lib/pending-operations.ts` yalnızca
+insan tarafından okunabilir bir defter tutar ve durumu yansıtır.
+
+**İkinci bir gönderim mantığı BİLEREK yazılmadı.** İki ayrı kuyruk (biri
+Firestore'un, biri bizimki) aynı işlemi iki kez gönderebilirdi — aynı seri
+numarasının iki kez stoğa girmesi demek olurdu.
+
+Defter `localStorage`'da saklanır; üst şeritteki bağlantı göstergesi de bu
+sayacı okur, böylece uygulama kapanıp açıldığında bekleyen işlem varsa
+görünür kalır.
 
 ## İşlemler beklemez
 

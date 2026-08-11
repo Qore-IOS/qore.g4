@@ -59,6 +59,55 @@ function copyPdfAssets(outDir: string): Plugin {
 }
 
 /**
+ * `index.html` içindeki `<!-- qore:csp -->` işaretini hedefe uygun politikayla
+ * değiştirir.
+ *
+ * Terminal hiçbir uzak betik yüklemez; ağa çıktığı tek yer Firebase'dir. Bu
+ * yüzden politika `default-src 'self'` üzerine kurulu ve `connect-src` bir
+ * beyaz listedir.
+ *
+ * ANDROID'DEKİ TEK FARK — `script-src` içindeki `'unsafe-inline'`:
+ * Capacitor, yerel köprüsünü (`native-bridge.js`, plugin kayıtları) sunucu
+ * tarafında SATIR İÇİ bir `<script>` olarak `<head>`in hemen ardına enjekte
+ * eder (bkz. JSInjector.java). Bu betik bizim meta etiketimizden ÖNCE geldiği
+ * için ayrıştırıcıya göre politikaya takılmayabilir — ama bu, WebView
+ * sürümüne bağlı bir ayrıntıdır ve tutmadığında uygulama köprüsüz açılır:
+ * geri tuşu, tutanak kaydı, durum çubuğu çalışmaz. Uygulamanın açılmasını
+ * ayrıştırıcı sırasına bağlamak yerine kuralı açıkça gevşetiyoruz; paketin
+ * içinde bizim yazmadığımız betik zaten yok.
+ */
+function injectCsp(target: 'desktop' | 'android'): Plugin {
+  const scriptSrc = target === 'android' ? "'self' 'unsafe-inline'" : "'self'";
+  const policy = [
+    "default-src 'self'",
+    `script-src ${scriptSrc}`,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' data: https://fonts.gstatic.com",
+    "img-src 'self' data: blob:",
+    // Kamera önizlemesi: `<video>` MediaStream ile beslenir.
+    "media-src 'self' blob:",
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com " +
+      'https://*.cloudfunctions.net wss://*.firebaseio.com wss://*.googleapis.com',
+    "frame-src 'none'",
+    "object-src 'none'",
+    "base-uri 'none'",
+  ].join('; ');
+
+  return {
+    name: 'qore-terminal-csp',
+    transformIndexHtml(html) {
+      if (!html.includes('<!-- qore:csp -->')) {
+        throw new Error('[terminal] index.html içinde `<!-- qore:csp -->` işareti yok.');
+      }
+      return html.replace(
+        '<!-- qore:csp -->',
+        `<meta http-equiv="Content-Security-Policy" content="${policy}" />`,
+      );
+    },
+  };
+}
+
+/**
  * Web uygulamasının okuduğu `NEXT_PUBLIC_*` değişkenleri.
  *
  * `src/lib/firebase.ts` bunları `process.env` üzerinden okur. Vite'ta
@@ -78,8 +127,27 @@ const PUBLIC_ENV_KEYS = [
   'NEXT_PUBLIC_FB_FUNCTION_REGION',
 ] as const;
 
-/** Electron kabuğunun paketlediği çıktı klasörü. */
-const OUT_DIR = path.join(ROOT, 'desktop/renderer-dist');
+/**
+ * Paketin yazılacağı klasör.
+ *
+ * AYNI paket iki kabuk tarafından kullanılır:
+ *
+ *   - Electron  → `desktop/renderer-dist` (varsayılan)
+ *   - Capacitor → `android-app/www`       (`TERMINAL_OUT_DIR` ile)
+ *
+ * Android için ayrı bir arayüz paketi ÜRETİLMEZ; ekranlar, yazma mantığı ve
+ * çevrimdışı davranış birebir aynıdır. Değişen tek şey kabuğun paketi nereden
+ * okuduğudur.
+ */
+const OUT_DIR = process.env.TERMINAL_OUT_DIR
+  ? path.resolve(ROOT, process.env.TERMINAL_OUT_DIR)
+  : path.join(ROOT, 'desktop/renderer-dist');
+
+/**
+ * Hedef kabuk. Yalnızca kabuğa özgü İKİ ayrıntıyı belirler: CSP ve gövde
+ * arka planı. Ekran kodu bu değeri görmez.
+ */
+const TARGET = process.env.TERMINAL_TARGET === 'android' ? 'android' : 'desktop';
 
 /**
  * Kısa git revizyonu — paket damgası için.
@@ -117,6 +185,7 @@ export default defineConfig(({ mode }) => {
     // Paket damgası: kurulu uygulamanın hangi derleme olduğu ekranda görünsün.
     __TERMINAL_BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __TERMINAL_BUILD_REV__: JSON.stringify(gitRevision()),
+    __TERMINAL_TARGET__: JSON.stringify(TARGET),
     // `src/lib/firebase.ts` ve birkaç modül `process.env.NODE_ENV` de okur.
     'process.env.NODE_ENV': JSON.stringify(mode === 'development' ? 'development' : 'production'),
   };
@@ -129,7 +198,7 @@ export default defineConfig(({ mode }) => {
     // Varlıklar `app://` özel protokolünden göreli yollarla yüklenir; kök
     // ('/') tabanı orada 404 verir.
     base: './',
-    plugins: [react(), copyPdfAssets(OUT_DIR)],
+    plugins: [react(), injectCsp(TARGET), copyPdfAssets(OUT_DIR)],
     define,
     resolve: {
       alias: [
@@ -151,9 +220,17 @@ export default defineConfig(({ mode }) => {
       // Electron kabuğu bu klasörü paketler.
       outDir: OUT_DIR,
       emptyOutDir: true,
-      // Kaynak haritaları çevrimdışı hata ayıklamayı gerçekten kolaylaştırır
-      // ve paket zaten kullanıcıya değil, kurum içi makinelere gider.
-      sourcemap: true,
+      /**
+       * Kaynak haritaları çevrimdışı hata ayıklamayı gerçekten kolaylaştırır
+       * ve paket zaten kullanıcıya değil, kurum içi makinelere gider.
+       *
+       * Android'de bir istisna var: haritalar APK'nın İÇİNE giriyor ve 8,5
+       * MB'lık bir hata ayıklama APK'sının 7 MB'ını tek başlarına kaplıyorlar
+       * (ölçüldü). Telefona indirilecek yayın paketinde bunun bedeli var,
+       * hata ayıklama paketinde yok — bu yüzden yalnızca yayın derlemesinde
+       * `TERMINAL_SOURCEMAP=0` ile kapatılıyor.
+       */
+      sourcemap: TARGET === 'android' ? process.env.TERMINAL_SOURCEMAP !== '0' : true,
     },
     server: { port: 9010 },
   };

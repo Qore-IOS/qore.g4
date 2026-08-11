@@ -1,0 +1,67 @@
+name: Android APK
+
+# NEDEN VAR: APK üretmek için normalde Android Studio + SDK (birkaç GB)
+# kurulu bir makine gerekiyor. Terminali kullanan kişilerin çoğunda o kurulum
+# yok ve olması da gerekmiyor — burada üretilen APK, iş akışı çıktısı olarak
+# indirilip telefona doğrudan kurulabiliyor.
+#
+# Firebase istemci anahtarları `apphosting.yaml` içinde açık hâlde duruyor
+# (istemci anahtarlarıdır, erişimi Firestore kuralları belirler), bu yüzden
+# iş akışının hiçbir gizli değere ihtiyacı yok.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'terminal-app/**'
+      - 'src/app/terminal/**'
+      - 'src/components/terminal/**'
+      - 'capacitor.config.ts'
+      - 'vite.config.terminal.ts'
+      - 'scripts/build-terminal-android.js'
+      - 'scripts/build-android-apk.js'
+      - '.github/workflows/android-apk.yml'
+
+jobs:
+  apk:
+    name: Hata ayıklama APK'sı üret
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # Capacitor 7 + Android Gradle Plugin JDK 21 ister.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Bağımlılıkları kur
+        run: npm ci --no-audit --no-fund
+
+      - name: Firebase istemci anahtarlarını hazırla
+        run: node scripts/env-from-apphosting.js
+
+      - name: Arayüz paketini üret
+        run: npm run build:terminal:android
+
+      - name: Capacitor eşitle
+        run: npx cap sync android
+
+      - name: APK derle
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      # Çıktı adına commit ekleniyor: bir kişi APK'yı indirip "yeni sürüm
+      # bende yok" dediğinde hangi derleme olduğu dosya adından anlaşılsın.
+      # Masaüstünde tam olarak bu soru saatler yemişti.
+      - name: APK'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: qore-terminal-${{ github.sha }}
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
