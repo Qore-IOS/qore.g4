@@ -50,23 +50,46 @@ import {
  * Sorgu başarısız olursa istisna fırlatmaz: elde ne varsa onunla döner ve iş
  * `blocked` olarak kuyruğa girer — operatör panelden yeniden deneyebilir.
  */
-export async function cariCozAsync(db: Firestore, hospitalId: string): Promise<CariCozum> {
-  const bos: CariCozum = { cariKodu: '', sevkAdresi: '', kaynak: 'yok', anaLabAdi: null };
-  if (!hospitalId) return bos;
+export async function cariCozAsync(
+  db: Firestore,
+  hospitalId: string,
+): Promise<CariCozum & { hata: string | null }> {
+  const bos = { cariKodu: '', sevkAdresi: '', kaynak: 'yok' as const, anaLabAdi: null, hata: null };
+  if (!hospitalId) return { ...bos, hata: 'Laboratuvar kimliği yok.' };
 
   let lab: LabCariBilgisi | null = null;
   try {
     const snap = await getDoc(doc(db, 'hospitals', hospitalId));
-    if (snap.exists()) lab = { id: snap.id, ...(snap.data() as any) };
-  } catch {
-    return bos;
+    if (!snap.exists()) return { ...bos, hata: 'Laboratuvar kaydı bulunamadı.' };
+    lab = { id: snap.id, ...(snap.data() as any) };
+  } catch (e: any) {
+    return { ...bos, hata: `Laboratuvar okunamadı: ${e?.message || e}` };
   }
 
-  // Kendi carisi varsa ana labı aramaya gerek yok — sorgudan da kaçınmış oluruz.
+  // Kendi carisi varsa ana labı aramaya hiç gerek yok.
   const kendi = cariCoz(lab, null);
-  if (kendi.kaynak === 'kendi') return kendi;
+  if (kendi.kaynak === 'kendi') return { ...kendi, hata: null };
 
-  let anaLab: LabCariBilgisi | null = null;
+  // BİRİNCİL YOL — ters bağ: çocuk kendi ana labını taşıyor, tek `get` yeter.
+  // Sorgu yok, dolayısıyla list kuralı tuzağı da yok.
+  const anaLabId = String((lab as any)?.anaLabId || '').trim();
+  if (anaLabId) {
+    try {
+      const snap = await getDoc(doc(db, 'hospitals', anaLabId));
+      if (snap.exists()) {
+        return { ...cariCoz(lab, { id: snap.id, ...(snap.data() as any) }), hata: null };
+      }
+      return { ...cariCoz(lab, null), hata: `Ana lab kaydı (${anaLabId}) bulunamadı.` };
+    } catch (e: any) {
+      return { ...cariCoz(lab, null), hata: `Ana lab okunamadı: ${e?.message || e}` };
+    }
+  }
+
+  // YEDEK YOL — ters bağı henüz yazılmamış eski kayıtlar için. Bu bir LIST
+  // sorgusu: kurallar dönen belgeyi tek tek denetliyor, ana labın companyId'si
+  // eşleşmezse sorgunun tamamı reddedilir. Bu yüzden birincil yol değil.
+  // Ana lab bir kez Yönetim → Laboratuvarlar'dan kaydedilince ters bağ yazılır
+  // ve bu yola bir daha düşülmez.
   try {
     const q = query(
       collection(db, 'hospitals'),
@@ -74,16 +97,22 @@ export async function cariCozAsync(db: Firestore, hospitalId: string): Promise<C
       limit(1),
     );
     const snap = await getDocs(q);
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      anaLab = { id: d.id, ...(d.data() as any) };
+    if (snap.empty) {
+      return { ...cariCoz(lab, null), hata: 'Bu laboratuvar hiçbir ana laba ek hizmet olarak bağlı değil.' };
     }
-  } catch {
-    // Ana lab bulunamadı; iş cari kodu olmadan blocked olur ve panelde görünür.
-    return cariCoz(lab, null);
+    const d = snap.docs[0];
+    return { ...cariCoz(lab, { id: d.id, ...(d.data() as any) }), hata: null };
+  } catch (e: any) {
+    // Sessizce yutmak, izin hatasını "cari kodu tanımlı değil" gibi gösterip
+    // operatörü var olmayan bir veri eksiğini aramaya yollardı.
+    return {
+      ...cariCoz(lab, null),
+      hata:
+        `Ana lab aranamadı: ${e?.message || e}. Ana laboratuvarı Yönetim → ` +
+        'Laboratuvarlar ekranından bir kez kaydedin; bağ doğrudan yazılır ve ' +
+        'bu arama gerekmez.',
+    };
   }
-
-  return cariCoz(lab, anaLab);
 }
 
 export type EnqueueOutcome =

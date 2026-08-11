@@ -421,6 +421,7 @@ function IrsaliyeOlusturHucresi({ form }: { form: ActionRecord }) {
         cariKodu: cari.cariKodu,
         sevkAdresi: cari.sevkAdresi,
         cariKaynagi: cari.kaynak,
+        cariHatasi: cari.hata,
         labName: form.labName,
         deviceId: form.deviceId,
         cihazAdi: form.cihazAdi,
