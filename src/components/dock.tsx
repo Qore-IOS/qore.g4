@@ -2,7 +2,7 @@
 "use client";
 
 /**
- * Masaüstü dock — sade, performanslı kart yüzeyi.
+ * Masaüstü dock — clay yüzey üzerinde Apple tarzı yakınlık büyütmesi.
  *
  * Kabuk, mobil dock ile birebir aynı prensiple kurulur: framer-motion'sız
  * düz bir div. Bunun nedeni kozmetik değil, işlevsel: motion.div'in opacity
@@ -103,6 +103,8 @@ const DockItem = ({
   isLiquidHovered,
   onRefSet,
   customIcon,
+  magnification = 1,
+  onHoverChange,
 }: {
   item: DockItemData;
   isActive: boolean;
@@ -110,6 +112,8 @@ const DockItem = ({
   isLiquidHovered?: boolean;
   onRefSet?: (el: HTMLDivElement | null) => void;
   customIcon?: string;
+  magnification?: number;
+  onHoverChange?: (hovered: boolean) => void;
 }) => {
   const router = useRouter();
   const [isHovered, setIsHovered] = useState(false);
@@ -140,12 +144,14 @@ const DockItem = ({
       hoverTimeoutRef.current = null;
     }
     setIsHovered(true);
+    onHoverChange?.(true);
   };
 
   const handleMouseLeave = () => {
     hoverTimeoutRef.current = setTimeout(() => {
       setIsHovered(false);
       setActiveSubMenu(null);
+      onHoverChange?.(false);
     }, 150); // Small delay to allow moving to submenu
   };
 
@@ -180,8 +186,9 @@ const DockItem = ({
 
     // Reset
     menu.style.transform = '';
-    menu.style.bottom = '';
+    menu.style.bottom = 'calc(100% + 24px)';
     menu.style.top = '';
+    menu.style.marginTop = '';
 
     // If the menu overflows above the viewport, flip it below the dock icon
     if (rect.top < 8) {
@@ -290,17 +297,17 @@ const DockItem = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.12 }}
-              className={cn("absolute bottom-full mb-1 flex flex-col items-stretch gap-0.5 p-1.5 rounded-xl", submenuSurface)}
+              className={cn("absolute bottom-full flex flex-col items-stretch gap-0.5 p-1.5 rounded-2xl", submenuSurface)}
               style={{
-                bottom: '100%',
-                marginBottom: '4px',
+                bottom: 'calc(100% + 24px)',
+                marginBottom: '0',
                 zIndex: 'var(--z-float)',
                 whiteSpace: 'nowrap',
                 willChange: 'auto',
               } as React.CSSProperties}
             >
               {/* Invisible bridge to prevent gap between submenu and icon */}
-              <div className="absolute -bottom-2 left-0 right-0 h-3" />
+              <div className="absolute -bottom-6 left-0 right-0 h-7" />
               {item.subItems!.map(sub => {
                 const subColors = ICON_COLORS[sub.key] || ['#6b7280', '#4b5563'];
                 return (
@@ -364,7 +371,7 @@ const DockItem = ({
           <TooltipTrigger asChild>
             <motion.div
               ref={(el) => { if (onRefSet) onRefSet(el); (iconRef as React.MutableRefObject<HTMLDivElement | null>).current = el; }}
-              animate={{ scale: 1 }}
+              animate={{ scale: magnification, y: magnification > 1 ? -(magnification - 1) * 34 : 0 }}
               className={cn(
                 'dock-item-wrapper flex items-center justify-center cursor-pointer',
                 isActive && item.type === 'nav' && 'active',
@@ -385,7 +392,7 @@ const DockItem = ({
               <TooltipContent
                 side="top"
                 align="center"
-                sideOffset={12}
+                sideOffset={30}
                 className="dock-tooltip"
                 style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
               >
@@ -407,7 +414,7 @@ const DockItem = ({
       onMouseLeave={handleMouseLeave}
     >
       <motion.div
-        animate={{ scale: 1, y: 0 }}
+        animate={{ scale: magnification, y: magnification > 1 ? -(magnification - 1) * 34 : 0 }}
         className={cn(
           'dock-item-wrapper flex items-center justify-center cursor-pointer',
           isActive && item.type === 'nav' && 'active',
@@ -435,7 +442,7 @@ const DockItem = ({
           <TooltipContent
             side="top"
             align="center"
-            sideOffset={12}
+            sideOffset={30}
             className="dock-tooltip"
             style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
           >
@@ -484,7 +491,7 @@ const DockLogo = () => {
         </motion.button>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
-        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+        <TooltipContent side="top" align="center" sideOffset={30} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
           <p>Başlat</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
@@ -520,7 +527,7 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
         </motion.div>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
-        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+        <TooltipContent side="top" align="center" sideOffset={30} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
           <p>Takvim · Planlama</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
@@ -530,7 +537,7 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
 
 export function Dock({ items, currentView, className, setTheme, isVisible }: DockProps) {
   const { currentUserProfile } = useAuth();
-  // Dock her zaman performanslı/sade modda çalışır; mouse takibi ve cam kırılması kapalı.
+  // Pahalı cam kırılması kapalı; yakınlık büyütmesi hafif spring animasyonuyla çalışır.
   const isLiquidMode = false;
   const iconData = useIconMappings();
   const dockIcons = iconData?.mappings?.dock || {};
@@ -542,6 +549,7 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
 
   // Calendar shortcut (right zone). Close it when navigating to another view.
   const [calendarOpen, setCalendarOpen] = useState(false);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   useEffect(() => { setCalendarOpen(false); }, [currentView]);
 
   // Auto-fit: shrink the whole dock proportionally if it would overflow the
@@ -581,13 +589,11 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
   return (
     <div className={cn(className)}>
       <TooltipProvider delayDuration={150}>
-        {/* Kabuk: düz div — mobil dock ile aynı yapı. Camı bozan gerçek neden
-            sheen katmanındaki mix-blend-mode idi (globals.css'teki nota bakın);
-            transform'suz/zoom'lu bu sade kurulum yine de korunuyor. */}
+        {/* Clay kabuk; ikonlar imlece olan sıralı uzaklığa göre yaylı biçimde büyür. */}
         <div
           ref={dockRef}
           className={cn(
-            "relative flex h-[72px] items-center gap-1 px-3 py-2.5 rounded-full",
+            "relative flex h-[76px] items-end gap-1 px-3 py-2.5 rounded-[26px]",
             "transition-opacity duration-300 ease-in-out",
             "qdock-flat-shell",
             !isVisible && "opacity-0 pointer-events-none"
@@ -595,9 +601,9 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
           style={{ zoom: fitScale } as React.CSSProperties}
         >
           {/* Content wrapper for position reference */}
-          <div ref={dockContentRef} className="relative flex items-center gap-1">
+          <div ref={dockContentRef} className="relative flex items-end gap-1">
             <DockLogo />
-            {mainItems.map((item) => (
+            {mainItems.map((item, index) => (
               <DockItem
                 key={item.key}
                 item={item}
@@ -606,6 +612,8 @@ export function Dock({ items, currentView, className, setTheme, isVisible }: Doc
                 isLiquidHovered={false}
                 onRefSet={(el) => setItemRef(item.key, el)}
                 customIcon={dockIcons[item.key]}
+                magnification={hoveredIndex === null ? 1 : index === hoveredIndex ? 1.48 : Math.abs(index - hoveredIndex) === 1 ? 1.2 : 1}
+                onHoverChange={(hovered) => setHoveredIndex(hovered ? index : (current) => current === index ? null : current)}
               />
             ))}
 
