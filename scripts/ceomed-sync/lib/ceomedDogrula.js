@@ -24,12 +24,12 @@ const { login, BASE_URL } = require('../login');
 const { fetchIrsaliyeMaster } = require('../fetchIrsaliyeMaster');
 
 /**
- * Çıkış irsaliyelerinin belge tipi. ÖLÇÜLMEDİ.
+ * Çıkış irsaliyelerinin belge tipi.
  *
- * `fetchIrsaliyeMaster` varsayılanı 0 ve okuma tarafı (watch.js) gelen
- * irsaliyeler için bunu kullanıyor. Bizim YAZDIĞIMIZ çıkış irsaliyesinin hangi
- * tipe düştüğü sahada `verify-irsaliye.bat --kesfet` ile bulunmalı ve buraya
- * ya da CEOMED_CIKIS_BELGE_TIPI'ye yazılmalıdır.
+ * ÖLÇÜLDÜ VE SONUÇ OLUMSUZ (2026-08-11): çıkış irsaliyesi bu API'nin kapsamı
+ * dışında. 8 uç nokta + 6 belge tipi tarandı, hiçbiri görmedi; ayrıntı
+ * ORACLE-IRSALIYE.md. Bu sabit yalnızca katman ileride Oracle veritabanına
+ * bağlanana kadar yer tutuyor.
  */
 const VARSAYILAN_BELGE_TIPI = Number(process.env.CEOMED_CIKIS_BELGE_TIPI || 0);
 
