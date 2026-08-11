@@ -76,12 +76,18 @@ export function TerminalShell({
   }, [onBack, router]);
 
   return (
-    <div className="flex h-screen flex-col bg-background text-foreground">
+    // `data-terminal-*` işaretleri: kamera açıkken bu üç bölge saydamlaşır ya
+    // da gizlenir (bkz. camera-scan-button.tsx). Sınıf adı yerine veri
+    // özniteliği, Tailwind sınıflarının değişmesinden etkilenmesin diye.
+    <div data-terminal-shell className="flex h-screen flex-col bg-background text-foreground">
       {/* `flex-wrap`: telefon genişliğinde (Android kabuğu) başlık şeridi
           yatay taşıp durum göstergesini ekrandan çıkarıyordu. Masaüstünde
           hiçbir şey değişmez — sarma yalnızca yer kalmadığında devreye
           girer. */}
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4">
+      <header
+        data-terminal-header
+        className="flex shrink-0 flex-wrap items-center justify-between gap-4 border-b border-border px-6 py-4"
+      >
         <div className="min-w-0">
           <h1 className="truncate text-2xl font-semibold tracking-tight">{title}</h1>
           {subtitle ? (
@@ -103,7 +109,9 @@ export function TerminalShell({
           </button>
         </div>
       </header>
-      <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
+      <main data-terminal-main className="min-h-0 flex-1 overflow-hidden">
+        {children}
+      </main>
     </div>
   );
 }
