@@ -655,7 +655,31 @@ def ekran_goruntusu(hwnd: int, dizin: str, ad: str) -> str | None:
         return None
 
 
+SW_RESTORE = 9
+
+
 def one_getir(hwnd: int) -> bool:
+    """Pencereyi ön plana alır; alamazsa False.
+
+    ÖN PLAN ŞART: tuşlar `SendInput` ile gönderiliyor ve bunlar hedef pencereye
+    değil ÖN PLANDAKİ pencereye gider. Fare de fiziksel imleçle tıklıyor.
+
+    Simge durumuna küçültülmüş pencerede `SetForegroundWindow` tek başına
+    yetmiyor — pencere küçük kalıyor, tuşlar hedefine ulaşmıyordu. Önce geri
+    yükleniyor.
+
+    `SW_RESTORE` YALNIZCA küçültülmüşken uygulanır. Ekranı kaplamış bir
+    pencerede çağrılırsa onu kaplamadan çıkarır; alan haritası MDI belge
+    penceresine göre ölçülü olduğu için bu, tüm koordinatları kaydırıp
+    sürücünün yanlış alana yazmasına yol açardı.
+    """
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        time.sleep(0.4)
+
     user32.SetForegroundWindow(hwnd)
     time.sleep(0.3)
+    # Doğrulama şart: Windows arka plandaki bir sürecin ön planı ele
+    # geçirmesini engelleyebiliyor ve SetForegroundWindow sessizce yalnızca
+    # görev çubuğunu yanıp söndürüyor.
     return user32.GetForegroundWindow() == hwnd
