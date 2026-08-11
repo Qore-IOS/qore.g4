@@ -186,8 +186,9 @@ const DockItem = ({
 
     // Reset
     menu.style.transform = '';
-    menu.style.bottom = '';
+    menu.style.bottom = 'calc(100% + 24px)';
     menu.style.top = '';
+    menu.style.marginTop = '';
 
     // If the menu overflows above the viewport, flip it below the dock icon
     if (rect.top < 8) {
@@ -296,17 +297,17 @@ const DockItem = ({
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.12 }}
-              className={cn("absolute bottom-full mb-1 flex flex-col items-stretch gap-0.5 p-1.5 rounded-xl", submenuSurface)}
+              className={cn("absolute bottom-full flex flex-col items-stretch gap-0.5 p-1.5 rounded-2xl", submenuSurface)}
               style={{
-                bottom: '100%',
-                marginBottom: '4px',
+                bottom: 'calc(100% + 24px)',
+                marginBottom: '0',
                 zIndex: 'var(--z-float)',
                 whiteSpace: 'nowrap',
                 willChange: 'auto',
               } as React.CSSProperties}
             >
               {/* Invisible bridge to prevent gap between submenu and icon */}
-              <div className="absolute -bottom-2 left-0 right-0 h-3" />
+              <div className="absolute -bottom-6 left-0 right-0 h-7" />
               {item.subItems!.map(sub => {
                 const subColors = ICON_COLORS[sub.key] || ['#6b7280', '#4b5563'];
                 return (
@@ -391,7 +392,7 @@ const DockItem = ({
               <TooltipContent
                 side="top"
                 align="center"
-                sideOffset={12}
+                sideOffset={30}
                 className="dock-tooltip"
                 style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
               >
@@ -441,7 +442,7 @@ const DockItem = ({
           <TooltipContent
             side="top"
             align="center"
-            sideOffset={12}
+            sideOffset={30}
             className="dock-tooltip"
             style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}
           >
@@ -490,7 +491,7 @@ const DockLogo = () => {
         </motion.button>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
-        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+        <TooltipContent side="top" align="center" sideOffset={30} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
           <p>Başlat</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
@@ -526,7 +527,7 @@ const CalendarDockButton = ({ open, onToggle, customIcon }: { open: boolean; onT
         </motion.div>
       </TooltipTrigger>
       <TooltipPrimitive.Portal>
-        <TooltipContent side="top" align="center" sideOffset={12} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
+        <TooltipContent side="top" align="center" sideOffset={30} className="dock-tooltip" style={{ zIndex: 'var(--z-float)' } as React.CSSProperties}>
           <p>Takvim · Planlama</p>
         </TooltipContent>
       </TooltipPrimitive.Portal>
