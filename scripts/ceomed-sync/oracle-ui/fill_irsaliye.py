@@ -554,8 +554,15 @@ def main() -> int:
 
     ana = pencereler[0]
     if not ui60.one_getir(ana):
-        return fail("Ceomed penceresi öne getirilemedi (oturum kilitli olabilir).",
-                    retryable=True)
+        # Küçültülmüş pencere artık one_getir içinde geri yükleniyor; geriye
+        # kalan sebepler operatörün kontrol edebileceği şeyler.
+        return fail(
+            "Ceomed penceresi öne getirilemedi. Olası sebepler: oturum kilitli "
+            "(kilitli oturumda tuş vuruşları hedefine ulaşmaz), ekranda kapatılmayı "
+            "bekleyen bir kip pencere var, ya da makinede o anda başka bir uygulama "
+            "kullanılıyor.",
+            retryable=True,
+        )
 
     if args.tani:
         o = ui60.odak()
