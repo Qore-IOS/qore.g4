@@ -135,6 +135,27 @@ terminaller kurulum dışında kalmaz.
 
 ---
 
+## Uygulama simgesi
+
+Capacitor'ın ürettiği proje kendi varsayılan simgesiyle gelir; telefonun ana
+ekranında jenerik bir logo duran uygulama yarım kalmış görünür.
+
+`scripts/generate-android-icons.js` simgeleri çizer: INVITROLAB logosunun
+**kare olan tek parçası** (atom küresi ve yörüngeleri), terminalin kendi koyu
+zemininde. Depodaki `public/invlogo.png` geniş bir yazı markası olduğu için
+kare bir simgeye sığdırıldığında okunmuyor — bu yüzden doğrudan kullanılmadı.
+
+```bash
+node scripts/generate-android-icons.js
+```
+
+Beş yoğunluğun üçer dosyasını (`ic_launcher`, `ic_launcher_round`,
+`ic_launcher_foreground`) ve uyarlanabilir simgenin zemin rengini tazeler.
+Simgeyi değiştirmek için betikteki `PALETTE` ve `sampleMark()` yeterli; dış
+bağımlılık yok, PNG kodlayıcı betiğin içinde.
+
+---
+
 ## İçerik Güvenlik Politikası
 
 Politika `index.html` içinde değil, `vite.config.terminal.ts` → `injectCsp()`
