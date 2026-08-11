@@ -7100,69 +7100,80 @@ body > main,
    Bildirilen sorunlar: buton/KPI kartı en-boy orantısızlığı, etkileşimli
    alanların taşması/kesilmesi, alt navigasyonun içeriği kapatması.
    ========================================================================== */
-@media (max-width: 640px) {
-  /* 1) Yatay taşma: mobilde hiçbir panel sayfayı yana kaydırmasın */
-  html, body { max-width: 100%; overflow-x: hidden; }
+@media (max-width: 767px) {
+  /* Mobil geometri tek bir viewport ritmine bağlıdır. `clip`, yanlışlıkla geniş
+     bir alt öğenin sayfayı yana sürüklemesini engeller; tablo/sekme gibi bilinçli
+     kaydırma alanları kendi kapsayıcılarında `auto` kalır. */
+  html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+  body { font-size: 16px; text-rendering: optimizeLegibility; }
 
-  /* 2) TAŞMA YERİNE SARMA.
-        Daha önce buradaki toptan `min-width:0` kuralı, flex öğelerinin
-        içeriklerinin altına ezilmesine izin veriyordu: "Geri Dön" harf harf alt
-        alta iniyor, adım etiketleri ("Bağlam", "Ürün Ekle") kırpılıyordu.
-        Doğru çözüm ezmek değil, satırı alt satıra sarmak. */
   :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
-      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, [style*="display:flex"], [style*="display: flex"]) {
-    flex-wrap: wrap;
-    row-gap: 8px;
+      .ml-root, .pl-root, .mg-root, .cihaz-shell, main),
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell, main) * {
+    box-sizing: border-box;
   }
 
-  /* 2b) Kontroller ve etiketler içeriğinin altına ezilmez, metinleri bölünmez. */
-  button, [role="button"], [role="tab"], a[class*="btn"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"] {
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  /* 2c) İç etiketler de küçülmez: kontrol küçülmese bile içindeki metin span'i
-         flex item olduğu için küçülüp "Bağlam" → "ğlam" gibi kırpılıyordu. */
-  :is(button, [role="button"], [role="tab"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"]) > * {
-    flex-shrink: 0;
+  /* Flex/grid çocuklarının içerik genişliği ebeveyni büyütmesine izin verme.
+     Önceki global `flex-wrap` ve `repeat(auto-fit)` müdahaleleri takvimleri ve
+     KPI düzenlerini bozuyordu; yerleşim kararını artık panelin responsive
+     tanımına bırakıyoruz. */
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, .grid, [style*="display: flex"], [style*="display:flex"], [style*="display: grid"], [style*="display:grid"]) > * {
+    min-width: 0;
   }
 
-  /* 3) Dokunma hedefi: yüksekliği açıkça verilmemiş butonlar ezilmesin */
-  button:not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) { min-height: 42px; }
+  /* Metinler kelime bütünlüğünü korur. `overflow-wrap:anywhere` Türkçe başlıkları
+     tek harflik sütunlara ayırdığı için yalnızca gerçek, kesintisiz kimliklerde
+     devreye girecek güvenli kırılma kullanılır. */
+  :is(h1, h2, h3, h4, p, span, label, td, th, a, button) {
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: none;
+  }
+  :is(h1, h2, h3) { line-height: 1.2; letter-spacing: -0.025em; }
 
-  /* 4) İkon butonlar kare kalsın (en-boy orantısızlığı) */
+  /* Apple benzeri tutarlı kontrol geometrisi: 44px dokunma alanı, kontrollü
+     yatay dolgu ve ezilmeyen ikonlar. Bilinçli küçük/kare kontroller korunur. */
+  :is(button, [role="button"], [role="tab"], [role="switch"], a[href]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :is(button, [role="button"], [role="tab"]):not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) {
+    min-height: 44px;
+  }
+  :is(button, [role="button"], [role="tab"]) {
+    max-width: 100%;
+    line-height: 1.25;
+  }
+  :is(button, [role="button"], [role="tab"]) > svg {
+    flex: 0 0 auto;
+  }
   button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
     aspect-ratio: 1 / 1;
     flex: 0 0 auto;
     padding-inline: 0;
   }
 
-  /* 5) KPI kartları ve içindeki sayılar: taşma yerine küçülme */
-  [class*="grid-cols-"] > * { min-width: 0; }
-  [style*="grid-template-columns"] > * { min-width: 0; overflow-wrap: anywhere; }
-
-  /* 5b) Sabit sütunlu ızgaralar mobilde kesilmesin — otomatik sarsın.
-         `repeat(N, …)` içeren inline ızgaralar hedeflenir; `1fr` veya
-         `minmax(0,1.5fr) minmax(0,1fr)` gibi elle yazılmış düzenler korunur.
-         minmax(min(100%,96px),1fr) sayesinde tek sütuna kadar inebilir ve
-         hiçbir zaman ekranı taşırmaz. */
-  [style*="grid-template-columns"][style*="repeat("] {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
+  :is(input, select, textarea) {
+    max-width: 100%;
+    font-size: max(16px, 1em);
   }
-  /* Tailwind ızgaraları: 3 ve üzeri sütunlar sarsın (1-2 sütun zaten mobil uyumlu) */
-  [class*="grid-cols-"]:not([class*="grid-cols-1"]):not([class*="grid-cols-2"]) {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  :is(img, svg, canvas) { max-width: 100%; }
+
+  /* Geniş veri tabloları kartı/sayfayı büyütmek yerine kendi içinde kayar. */
+  :is(.overflow-x-auto, [style*="overflow-x: auto"]) {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  :is(.overflow-x-auto, [style*="overflow-x: auto"])::-webkit-scrollbar { display: none; }
 
-  /* 6) Yatay kaydırılabilir buton/sekme şeritleri kesilmesin */
-  [style*="overflow-x"], .overflow-x-auto { scrollbar-width: none; }
-  [style*="overflow-x"]::-webkit-scrollbar, .overflow-x-auto::-webkit-scrollbar { display: none; }
-
-  /* 7) Alt navigasyon içeriği kapatmasın */
+  /* Alt navigasyon içeriği kapatmasın; güvenli alan tüm clay sayfalarında aynı. */
   main, .page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
   .ml-root, .pl-root, .mg-root {
     padding-bottom: calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px)) !important;
   }
-
-  /* 8) Uzun metin/sayılar kutuyu patlatmasın */
-  h1, h2, h3, td, th { overflow-wrap: anywhere; }
 }
