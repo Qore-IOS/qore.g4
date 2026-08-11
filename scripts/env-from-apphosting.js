@@ -19,6 +19,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { readApphostingPublicEnv } = require('./apphosting-env');
+
 const REPO_ROOT = path.join(__dirname, '..');
 const SOURCE = path.join(REPO_ROOT, 'apphosting.yaml');
 const TARGET = path.join(REPO_ROOT, '.env.local');
@@ -34,29 +36,9 @@ if (!fs.existsSync(SOURCE)) {
   process.exit(1);
 }
 
-/**
- * Küçük ve kasıtlı olarak dar bir ayrıştırıcı.
- *
- * Tam bir YAML kütüphanesi eklemek yerine yalnızca aradığımız kalıbı okuyoruz:
- *
- *     - variable: NEXT_PUBLIC_X
- *       value: "..."
- *
- * `secret:` ile tanımlı girdiler değersizdir ve doğal olarak atlanır — bu
- * betiğin gizli değerlere hiç dokunmaması İSTENEN davranış.
- */
-const lines = fs.readFileSync(SOURCE, 'utf8').split(/\r?\n/);
-const values = [];
-
-for (let i = 0; i < lines.length; i++) {
-  const nameMatch = lines[i].match(/^\s*-\s*variable:\s*(NEXT_PUBLIC_[A-Z0-9_]+)\s*$/);
-  if (!nameMatch) continue;
-
-  const valueMatch = (lines[i + 1] || '').match(/^\s*value:\s*"?(.*?)"?\s*$/);
-  if (!valueMatch) continue;
-
-  values.push(`${nameMatch[1]}=${valueMatch[1]}`);
-}
+const values = Object.entries(readApphostingPublicEnv(REPO_ROOT)).map(
+  ([key, value]) => `${key}=${value}`,
+);
 
 if (values.length === 0) {
   console.error('[qore-terminal] apphosting.yaml içinde NEXT_PUBLIC_* değeri bulunamadı.');

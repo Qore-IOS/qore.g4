@@ -16,6 +16,9 @@ import path from 'node:path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
+// CommonJS yardımcı: `.env.local` yokken anahtarların yedek kaynağı.
+import { readApphostingPublicEnv } from './scripts/apphosting-env.js';
+
 const ROOT = path.resolve(__dirname);
 const TERMINAL_ROOT = path.join(ROOT, 'terminal-app');
 
@@ -166,18 +169,36 @@ function gitRevision(): string {
 }
 
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, ROOT, '');
+  /**
+   * Değer sırası: `.env.local` / gerçek ortam değişkenleri ÖNCE, sonra
+   * `apphosting.yaml`.
+   *
+   * NEDEN YEDEK VAR: Taze bir klonda `.env.local` yoktur ve derleme
+   * "Zorunlu ortam değişkenleri eksik" diyerek duruyordu. Oysa aranan
+   * değerler zaten depoda, `apphosting.yaml` içinde açık hâlde duruyor —
+   * bunlar Firebase'in İSTEMCİ anahtarları; erişimi `firestore.rules`
+   * belirler, anahtarın gizliliği değil. Web uygulaması yayında tam olarak
+   * o değerlerle çalışıyor.
+   *
+   * Kendi ortamını (ör. ayrı bir Firebase projesi) tanımlayan biri hâlâ
+   * kazanır: `loadEnv` sonuçları yedeğin ÜSTÜNE yazılır.
+   */
+  const env = { ...readApphostingPublicEnv(ROOT), ...loadEnv(mode, ROOT, '') };
 
   const missing = PUBLIC_ENV_KEYS.filter(
     key => key.includes('FIREBASE_API_KEY') || key.includes('FIREBASE_PROJECT_ID'),
   ).filter(key => !env[key]);
 
   if (missing.length > 0) {
-    // Sessizce eksik yapılandırmayla paketlemek, sahada "Firebase: Error
+    // Buraya düşmek artık gerçek bir yapılandırma sorunu demek: hem
+    // `.env.local` yok hem de `apphosting.yaml` okunamıyor/eksik. Sessizce
+    // eksik yapılandırmayla paketlemek, sahada "Firebase: Error
     // (auth/invalid-api-key)" olarak ortaya çıkar ve nedeni anlaşılmaz.
     throw new Error(
       `[terminal] Zorunlu ortam değişkenleri eksik: ${missing.join(', ')}.\n` +
-        'Bunları .env.local dosyasına (apphosting.yaml ile aynı değerler) ekleyin.',
+        'apphosting.yaml okunamadı ya da bu anahtarları içermiyor.\n' +
+        'Depo kökünde şunu çalıştırıp .env.local üretin:\n' +
+        '  node scripts/env-from-apphosting.js',
     );
   }
 

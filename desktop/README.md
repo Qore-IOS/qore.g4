@@ -68,11 +68,13 @@ doldurun — kurulan uygulama form göstermeden doğrudan bağlanır.
 Arayüz paketi repo kökünden üretilir ve `desktop/renderer-dist` içine düşer:
 
 ```bash
-# repo kökünde — .env.local içinde Firebase anahtarları olmalı
+# repo kökünde
 pnpm build:terminal
 ```
 
-Anahtarlar `apphosting.yaml` içindekilerle aynıdır (`NEXT_PUBLIC_FIREBASE_*`).
+Firebase anahtarları (`NEXT_PUBLIC_FIREBASE_*`) `apphosting.yaml` içinden
+otomatik okunur — taze bir klonda ek bir adım gerekmez. Ayrı bir Firebase
+projesine derleyecekseniz `.env.local` yazın; oradaki değerler önceliklidir.
 Eksikse build açık bir hata ile durur — sessizce çalışmayan bir `.exe`
 üretmektense.
 

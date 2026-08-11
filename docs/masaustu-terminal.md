@@ -228,7 +228,8 @@ altındaki aynı bileşenler import edilir. Next'e özgü üç bağımlılık
 | `process.env.NEXT_PUBLIC_*` | Derleme zamanında sabit değer (`define`) |
 
 ```bash
-# Firebase anahtarları .env.local içinde olmalı (apphosting.yaml ile aynı değerler)
+# Firebase anahtarları apphosting.yaml içinden otomatik okunur; ayrı bir
+# proje kullanacaksanız .env.local ile üzerine yazın.
 pnpm build:terminal          # → desktop/renderer-dist
 cd desktop && npm install
 npm start                    # gömülü paketi açar

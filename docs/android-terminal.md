@@ -60,7 +60,6 @@ Gereken: **JDK 21** ve **Android SDK** (Android Studio ile gelir).
 
 ```bash
 npm install
-node scripts/env-from-apphosting.js   # .env.local yoksa üretir
 npm run android:apk                   # hata ayıklama APK'sı
 npm run android:apk -- --release      # imzasız yayın APK'sı
 ```
