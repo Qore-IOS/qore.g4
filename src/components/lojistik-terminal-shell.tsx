@@ -158,7 +158,7 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
     }
     document.documentElement.style.setProperty(
       '--lt-sidebar-current-w',
-      collapsed ? 'var(--lt-sidebar-w-compact)' : 'var(--lt-sidebar-w)'
+      collapsed ? '0px' : 'var(--lt-sidebar-w)'
     );
   }, [collapsed]);
 
@@ -205,17 +205,17 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
       <div className="lt-bg" aria-hidden="true" />
 
       {/* Desktop / Tablet sidebar */}
-      <aside className="lt-sidebar hidden md:flex">
+      {!collapsed && <aside className="lt-sidebar hidden md:flex">
         <div className="lt-sidebar__brand">
-          <QorelogisticsBrand collapsed={collapsed} />
+          <QorelogisticsBrand collapsed={false} />
           <button
             type="button"
-            aria-label={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
-            title={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
+            aria-label="Kenar çubuğunu kapat"
+            title="Kenar çubuğunu kapat"
             className="lt-collapse-btn"
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={() => setCollapsed(true)}
           >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            <ChevronLeft className="h-4 w-4" />
           </button>
         </div>
 
@@ -315,7 +315,19 @@ export default function LojistikTerminalShell({ children }: { children: React.Re
             )}
           </button>
         </div>
-      </aside>
+      </aside>}
+
+      {collapsed && (
+        <button
+          type="button"
+          className="lt-sidebar-reveal hidden md:flex"
+          onClick={() => setCollapsed(false)}
+          aria-label="QORE Logistics kenar çubuğunu aç"
+          title="Menüyü aç"
+        >
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
 
       {/* Mobile top bar */}
       <header className="lt-mobile-header md:hidden">
