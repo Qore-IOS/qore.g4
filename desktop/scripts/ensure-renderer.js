@@ -87,7 +87,12 @@ if (result.error || result.status !== 0) {
       'Repo kökünde şunu elle çalıştırıp hatayı görün:\n' +
       `  ${manager === 'pnpm' ? 'pnpm build:terminal' : 'npm run build:terminal'}\n\n` +
       'En sık iki sebep:\n' +
-      '  • Kökte bağımlılıklar kurulu değil → önce `npm install`\n' +
+      // Paket yöneticisi ADI İLE söyleniyor: pnpm ile yönetilen bir çalışma
+      // kopyasında "npm install" demek, iki yöneticinin node_modules'ünü
+      // karıştırıp "modül çözümlenemedi" hatalarına yol açıyor. Sahada tam
+      // olarak bu yaşandı: yeni bağımlılıklar pnpm-lock.yaml'a girmemişti ve
+      // mesaj yanlış komutu öneriyordu.
+      `  • Bağımlılıklar güncel değil → repo kökünde \`${manager} install\`\n` +
       '  • Firebase anahtarları okunamıyor → `node scripts/env-from-apphosting.js`\n' +
       '    (anahtarlar normalde apphosting.yaml içinden otomatik alınır)',
   );
