@@ -213,6 +213,24 @@ if (!app.requestSingleInstanceLock()) {
       if (mainWindow) mainWindow.loadFile(path.join(__dirname, 'setup.html'));
     });
 
+    /**
+     * Geliştirici araçları — yerele İNEN VERİYİ CANLI GÖRMEK İÇİN.
+     *
+     * Terminalin tüm çalışma verisi Firestore'un kalıcı önbelleğinde, yani
+     * IndexedDB'de duruyor. O dosyalar diskte LevelDB biçiminde ve uygulama
+     * açıkken kilitli: dışarıdan bir araçla okunmaya çalışıldığında ya
+     * okunamıyor ya da yarım yazılmış bir durum görünüyor.
+     *
+     * Veriyi güvenle ve CANLI izlemenin tek doğru yolu uygulamanın kendi
+     * penceresinden bakmak: Application → Storage → IndexedDB. Kayıtlar
+     * değiştikçe orada anında güncelleniyor.
+     *
+     * Menü çubuğu depoda dikkat dağıtmasın diye gizli, bu yüzden kısayol.
+     */
+    globalShortcut.register('CommandOrControl+Shift+I', () => {
+      if (mainWindow) mainWindow.webContents.toggleDevTools();
+    });
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
