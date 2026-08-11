@@ -7,7 +7,7 @@ import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimes
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
-import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban } from 'lucide-react';
+import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban, Send } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -29,6 +29,8 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
+import { enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import { selectPartActions } from '@/lib/ceomed/irsaliye-giris';
 
 type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
@@ -269,6 +271,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                       <TableHead className="text-[var(--dashboard-muted)]">Laboratuvar</TableHead>
                       <TableHead className="text-[var(--dashboard-muted)]">İşlem Saati</TableHead>
                       <TableHead className="text-[var(--dashboard-muted)]">Oluşturan</TableHead>
+                      <TableHead className="text-[var(--dashboard-muted)]">Ceomed</TableHead>
                       <TableHead className="w-10" />
                     </TableRow>
                   </TableHeader>
@@ -300,6 +303,9 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                           {(form.baslangicSaati || '-')}{form.bitisSaati ? ` - ${form.bitisSaati}` : ''}
                         </TableCell>
                         <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <IrsaliyeOlusturHucresi form={form} />
+                        </TableCell>
                         <TableCell><ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" /></TableCell>
                       </TableRow>
                     ))}
@@ -335,6 +341,146 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Kayıtlı bir formdan Ceomed irsaliye işini (yeniden) kuyruğa alır.
+ *
+ * NEDEN GEREKLİ: kuyruk yazımı form kaydından AYRI ve commit'ten SONRA yapılıyor
+ * (bkz. enqueue-irsaliye-giris.ts — aynı batch'te olması üretimi durdurmuştu).
+ * Bu tasarımın bilinen bedeli: form kaydedilip kuyruk yazısı düşebilir. O ana
+ * kadar tek çare muhasebenin irsaliyeyi elle kesmesiydi; artık form listesinden
+ * yeniden denenebiliyor.
+ *
+ * Yalnızca YEDEK PARÇA İÇEREN formlarda buton çıkar — diğerlerinde irsaliye
+ * zaten oluşmaz, buton koymak "bir şey eksik" izlenimi verirdi.
+ *
+ * MÜKERRER GÜVENLİĞİ: kuyruk dokümanının kimliği form kimliğidir. Butona kaç
+ * kez basılırsa basılsın aynı doküman yazılır; muhasebeye ikinci irsaliye
+ * düşmez. Zaten gönderilmiş bir işin üstüne yazmamak için önce durum okunuyor.
+ */
+function IrsaliyeOlusturHucresi({ form }: { form: ActionRecord }) {
+  const { currentCompanyId } = useAuth();
+  const { toast } = useToast();
+  const [calisiyor, setCalisiyor] = useState(false);
+
+  const yedekParcaVar = useMemo(
+    () => selectPartActions((form.actions || []) as any[]).length > 0,
+    [form.actions],
+  );
+
+  if (!yedekParcaVar) {
+    return <span className="text-xs text-[var(--dashboard-muted)]">—</span>;
+  }
+
+  const olustur = async () => {
+    setCalisiyor(true);
+    try {
+      // Zaten gönderilmiş bir işi tekrar kuyruğa almak, sürücünün aynı
+      // irsaliyeyi ikinci kez yazmasına yol açardı. Doküman kimliği aynı olsa
+      // bile durumu 'pending'e çekmek bunu yapardı; o yüzden önce bakıyoruz.
+      const mevcut = await getDoc(doc(db, 'ceomedIrsaliyeGirisJobs', form.id));
+      const durum = mevcut.exists() ? (mevcut.data() as any)?.status : null;
+      if (durum === 'sent') {
+        toast({
+          title: 'İrsaliye zaten oluşturulmuş',
+          description: `Bu form için Ceomed irsaliyesi gönderilmiş durumda (${(mevcut.data() as any)?.ceomedIrsaliyeNo || form.id}).`,
+        });
+        return;
+      }
+      if (durum === 'pending' || durum === 'processing') {
+        toast({
+          title: 'İş zaten kuyrukta',
+          description: 'Bu form için bekleyen bir irsaliye işi var; worker sırası gelince yazacak.',
+        });
+        return;
+      }
+      if (durum === 'awaiting_review') {
+        // Form Oracle ekranında dolu duruyor ve operatör onayı bekliyor.
+        // Yeniden kuyruğa almak o beklemeyi bozar; worker sıradaki işi alıp
+        // dolu formun üstüne yazmaya çalışabilir.
+        toast({
+          title: 'Oracle ekranında incelemede',
+          description: 'Bu iş şu an Oracle\'da dolduruldu ve onay bekliyor. Ceomed kuyruk panelinden "Testi tamamla" deyin.',
+        });
+        return;
+      }
+
+      // Cari kodu TAZE okunuyor: işin ilk kez bloklanmasının en sık sebebi
+      // laboratuvarda cari kodun boş olması ve sonradan girilmiş olması.
+      let cariKodu = '';
+      if (form.hospitalId) {
+        const hSnap = await getDoc(doc(db, 'hospitals', form.hospitalId));
+        cariKodu = String((hSnap.data() as any)?.ceomedCariKodu || '').trim().toUpperCase();
+      }
+
+      const sonuc = await enqueueIrsaliyeGirisAyri(db, {
+        formId: form.id,
+        formNo: (form as any).formNo,
+        formType: form.moduleType === 'aplikasyon-paneli' ? 'aplikasyon' : 'teknik_servis',
+        tarih: form.baslangicTarihi || (form.createdAt?.toDate ? form.createdAt.toDate().toISOString().slice(0, 10) : ''),
+        hospitalId: form.hospitalId || '',
+        cariKodu,
+        labName: form.labName,
+        deviceId: form.deviceId,
+        cihazAdi: form.cihazAdi,
+        seriNumarasi: form.seriNumarasi,
+        personnelName: form.createdByName,
+        personnelUid: form.createdByUid,
+        companyId: currentCompanyId,
+        actions: (form.actions || []) as any[],
+      });
+
+      // `=== true/false` kasıtlı: tsconfig'de strictNullChecks kapalı ve bu
+      // modda `!sonuc.enqueued` ayrımlı birleşimi daraltmıyor.
+      if (sonuc.enqueued === true && sonuc.status === 'blocked') {
+        toast({
+          title: 'İrsaliye eksik veri nedeniyle bekliyor',
+          description: sonuc.blockedDetail || 'Eksik veri var.',
+          variant: 'destructive',
+          duration: 12000,
+        });
+        return;
+      }
+      if (sonuc.enqueued === false) {
+        toast({
+          title: 'Kuyruğa alınamadı',
+          description:
+            sonuc.reason === 'yedek_parca_yok'
+              ? 'Bu formda yedek parça bulunmuyor.'
+              : sonuc.reason === 'entegrasyon_acil_kapali'
+                ? 'Ceomed entegrasyonu şu an kapalı.'
+                : sonuc.hata || 'Bilinmeyen hata.',
+          variant: 'destructive',
+          duration: 12000,
+        });
+        return;
+      }
+
+      toast({
+        title: 'İrsaliye kuyruğa alındı',
+        description: 'Ceomed worker\'ı sırası gelince formu dolduracak.',
+      });
+    } catch (e: any) {
+      toast({ title: 'Hata', description: e?.message || 'İşlem tamamlanamadı.', variant: 'destructive' });
+    } finally {
+      setCalisiyor(false);
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={calisiyor}
+      onClick={olustur}
+      className="h-7 text-xs whitespace-nowrap"
+    >
+      {calisiyor ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Send className="h-3 w-3 mr-1" />}
+      İrsaliye oluştur
+    </Button>
   );
 }
 
