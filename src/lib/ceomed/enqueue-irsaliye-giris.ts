@@ -10,14 +10,81 @@
  * aynı kimlik üretilir — muhasebeye MÜKERRER irsaliye düşmez. Bu, tam otomatik
  * gönderim modunda pazarlık konusu değildir.
  */
-import { doc, serverTimestamp, setDoc, type Firestore, type WriteBatch } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+  type Firestore,
+  type WriteBatch,
+} from 'firebase/firestore';
 
 import {
   buildIrsaliyeGirisDoc,
+  cariCoz,
   IRSALIYE_GIRIS_COLLECTION,
   type BuildIrsaliyeGirisInput,
   type BuildIrsaliyeGirisResult,
+  type CariCozum,
+  type LabCariBilgisi,
 } from './irsaliye-giris';
+
+/**
+ * Bir laboratuvarın Ceomed cari kodunu ve sevk adresini Firestore'dan çözer.
+ *
+ * Ek hizmet binalarının Ceomed'de kendi carisi yok; bağlı oldukları ana labın
+ * carisi üzerinden faturalanıyorlar. Bağ ANA LABDA tutuluyor
+ * (`hospitals/{ana}.ekHizmetLabIds` dizisi), o yüzden ana labı bulmak bir
+ * `array-contains` SORGUSU gerektiriyor.
+ *
+ * ⚠️ BU FONKSİYON FORM KAYDETME YOLUNDA ÇAĞRILMAMALI. Sorgular Firestore
+ * kurallarınca belge belge değerlendiriliyor; form kaydında bir sorgunun
+ * reddedilmesi tüm kaydı düşürür ve üretimi durdurur (iki kez yaşandı).
+ * Çağrı yeri her zaman `batch.commit()` SONRASI olmalı.
+ *
+ * Sorgu başarısız olursa istisna fırlatmaz: elde ne varsa onunla döner ve iş
+ * `blocked` olarak kuyruğa girer — operatör panelden yeniden deneyebilir.
+ */
+export async function cariCozAsync(db: Firestore, hospitalId: string): Promise<CariCozum> {
+  const bos: CariCozum = { cariKodu: '', sevkAdresi: '', kaynak: 'yok', anaLabAdi: null };
+  if (!hospitalId) return bos;
+
+  let lab: LabCariBilgisi | null = null;
+  try {
+    const snap = await getDoc(doc(db, 'hospitals', hospitalId));
+    if (snap.exists()) lab = { id: snap.id, ...(snap.data() as any) };
+  } catch {
+    return bos;
+  }
+
+  // Kendi carisi varsa ana labı aramaya gerek yok — sorgudan da kaçınmış oluruz.
+  const kendi = cariCoz(lab, null);
+  if (kendi.kaynak === 'kendi') return kendi;
+
+  let anaLab: LabCariBilgisi | null = null;
+  try {
+    const q = query(
+      collection(db, 'hospitals'),
+      where('ekHizmetLabIds', 'array-contains', hospitalId),
+      limit(1),
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const d = snap.docs[0];
+      anaLab = { id: d.id, ...(d.data() as any) };
+    }
+  } catch {
+    // Ana lab bulunamadı; iş cari kodu olmadan blocked olur ve panelde görünür.
+    return cariCoz(lab, null);
+  }
+
+  return cariCoz(lab, anaLab);
+}
 
 export type EnqueueOutcome =
   | { enqueued: false; reason: 'yedek_parca_yok' | 'entegrasyon_acil_kapali' }
