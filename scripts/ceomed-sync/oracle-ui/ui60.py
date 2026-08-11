@@ -79,6 +79,21 @@ def normalize(s: str) -> str:
     return (s or "").translate(_TR)
 
 
+def ascii_indirge(s: str) -> str:
+    """Metni Ceomed'in taşıyabileceği ASCII'ye indirger.
+
+    Ceomed karakter kümesi Türkçe harfleri TAŞIMIYOR: sahada 'ALK-BİO-E-CI'
+    veritabanına 'ALK-B?O-E-CI' olarak gitti ve stok kartı bulunamadı. Geri
+    okuma bunu yakalayamıyor — alan doğru görünüyor, bozulma commit sırasında
+    oluyor. Bu yüzden yazmadan ÖNCE indirgemek tek güvenli yol.
+
+    `normalize` bilinen Türkçe harfleri çeviriyor; geriye kalan ASCII dışı her
+    şey (aksanlı harfler, tırnak çeşitleri, görünmez karakterler) atılıyor —
+    '?' olarak gitmesindense hiç gitmemesi yeğ.
+    """
+    return "".join(ch for ch in normalize(s) if ord(ch) < 128)
+
+
 # --- Win32 yapıları -----------------------------------------------------------
 
 class RECT(ctypes.Structure):

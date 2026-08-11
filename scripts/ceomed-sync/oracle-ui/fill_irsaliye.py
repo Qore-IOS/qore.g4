@@ -247,7 +247,31 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
             grid_stok_koduna_git(ana_pencere, log)
             return
 
-        if ad and degerler.get(ad):
+        if ad == "sevkAdresi" and degerler.get(ad):
+            # SEVK ADRESİ İKİNCİL BİLGİDİR — irsaliyeyi düşürmemeli.
+            #
+            # Sahada: adres Türkçe karakter içeriyor, Ceomed'in karakter kümesi
+            # bunları taşımıyor ('Ç' → '?'). alan_yaz geri okuyup karşılaştırdığı
+            # için uyuşmazlıkta iş duruyordu; yani Türkçe adresli HER ek hizmet
+            # işi bu alanda kalırdı. Değer ASCII'ye indirgenerek yazılıyor.
+            #
+            # Yine de yazılamazsa ATLANIYOR: cari kodu doğru olduğu sürece
+            # irsaliye kesilebilir, adres olmadan da muhasebe kaydı geçerlidir.
+            # Bu alan yüzünden gönderimi iptal etmek, ikincil bir bilgi için
+            # birincil işi feda etmek olurdu.
+            ascii_adres = ui60.ascii_indirge(degerler[ad])
+            try:
+                ui60.alan_yaz(ascii_adres, ad)
+                if ascii_adres != degerler[ad]:
+                    log.append(
+                        f"{ad}: {ascii_adres!r} yazıldı "
+                        f"(Türkçe karakterler ASCII'ye indirgendi)"
+                    )
+                else:
+                    log.append(f"{ad}: {ascii_adres!r} yazıldı ve geri okundu")
+            except Exception as exc:
+                log.append(f"{ad}: YAZILAMADI, atlandı — {exc}")
+        elif ad and degerler.get(ad):
             if ad in LOV_ALANLARI:
                 lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
                 # Geri okuma için dönülen alandan sonraki alana yeniden
@@ -495,6 +519,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--controls", required=False,
                         help="Geriye dönük uyumluluk; konumlar artık kodda ölçülmüş.")
+    parser.add_argument("--sevk-adresi-yok", action="store_true",
+                        help="Sevk Adresi alanına hiç dokunma. Alan forma yazılan "
+                             "en yeni alan; sahada sorun çıkarırsa bu bayrakla "
+                             "kapatılır ve otomasyon geri kalanıyla sürer.")
     parser.add_argument("--f6-yenileme-yok", action="store_true",
                         help="Formu F6 ile yenileme. Varsayılan: işin başında ve "
                              "gönderim sonrası F6 basılır, böylece sıradaki iş "
@@ -615,7 +643,7 @@ def main() -> int:
             "cariKodu": str(header.get("cariKodu") or ""),
             # Boşsa baslik_doldur alana dokunmaz; ek hizmet binası olmayan
             # laboratuvarlarda bu alan boş kalmaya devam eder.
-            "sevkAdresi": str(header.get("sevkAdresi") or ""),
+            "sevkAdresi": "" if args.sevk_adresi_yok else str(header.get("sevkAdresi") or ""),
             "islemTipi": str(header.get("islemTipi") or ""),
             "depo": str(header.get("depo") or ""),
         }

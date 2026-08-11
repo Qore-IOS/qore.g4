@@ -86,6 +86,12 @@ function submit(job) {
     if (GERCEK_GONDERIM) {
       args.push('--gercek');
     }
+    // Acil kapatma anahtarı. Sevk Adresi forma yazılan EN YENİ alan ve saha
+    // davranışı Windows olmadan denenemiyor. Alan otomasyonu tıkarsa kod
+    // değiştirmeden kapatılabilsin: ORACLE_SEVK_ADRESI=0
+    if (process.env.ORACLE_SEVK_ADRESI === '0') {
+      args.push('--sevk-adresi-yok');
+    }
     const child = spawn(PYTHON, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: false,
