@@ -88,8 +88,8 @@ if (result.error || result.status !== 0) {
       `  ${manager === 'pnpm' ? 'pnpm build:terminal' : 'npm run build:terminal'}\n\n` +
       'En sık iki sebep:\n' +
       '  • Kökte bağımlılıklar kurulu değil → önce `npm install`\n' +
-      '  • .env.local dosyasında Firebase anahtarları eksik\n' +
-      '    (apphosting.yaml içindekilerle aynı NEXT_PUBLIC_FIREBASE_* değerleri)',
+      '  • Firebase anahtarları okunamıyor → `node scripts/env-from-apphosting.js`\n' +
+      '    (anahtarlar normalde apphosting.yaml içinden otomatik alınır)',
   );
 }
 
