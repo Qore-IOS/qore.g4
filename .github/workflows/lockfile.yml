@@ -1,0 +1,59 @@
+name: Lockfile
+
+# NEDEN AYRI BİR İŞ AKIŞI
+#
+# Depo İKİ lockfile taşıyor (npm ve pnpm) ve geliştiriciler ikisini de
+# kullanıyor. Yalnızca birini güncelleyen bir bağımlılık değişikliği hiçbir
+# kontrole takılmıyordu:
+#
+#   - `firestore-rules-tests` → `pnpm install --no-frozen-lockfile` (sapmayı
+#     bilerek yok sayar)
+#   - `android-apk`           → `npm ci` (pnpm tarafına hiç bakmaz) ve zaten
+#     yalnızca terminal dosyaları değiştiğinde çalışır
+#
+# Sonuç: pnpm-lock.yaml eksik kaldı, PR'lar yeşil geçti ve hata ancak App
+# Hosting CANLI DEPLOY'unda ortaya çıktı:
+#
+#   ERR_PNPM_OUTDATED_LOCKFILE  Cannot install with "frozen-lockfile"
+#
+# App Hosting derlemesi `pnpm install`i CI kipinde çalıştırır, yani
+# `--frozen-lockfile` varsayılandır. Buradaki kontrol tam olarak aynı komuttur;
+# artık sapma canlıda değil, PR'da görünür.
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'package-lock.json'
+
+jobs:
+  frozen:
+    name: Lockfile'lar package.json ile uyumlu mu
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 10
+
+      # `--lockfile-only`: paketleri indirmeye gerek yok, sorulan tek şey
+      # lockfile'ın package.json ile uyuşup uyuşmadığı. Saniyeler sürer.
+      - name: pnpm-lock.yaml
+        run: pnpm install --frozen-lockfile --lockfile-only
+
+      # npm tarafı da kontrol edilir: `Android APK` iş akışı ve CI `npm ci`
+      # kullanıyor, orada da sapma aynı şekilde derlemeyi durdurur.
+      - name: package-lock.json
+        run: npm ci --dry-run --no-audit --no-fund

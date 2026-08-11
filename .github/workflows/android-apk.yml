@@ -40,19 +40,10 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      # Depoda İKİ lockfile var (npm ve pnpm) ve geliştiriciler ikisini de
-      # kullanıyor. Yalnızca birini güncelleyen bir bağımlılık değişikliği
-      # diğerini kullanan makinede "modül çözümlenemedi" diye patlıyor —
-      # sahada tam olarak bu yaşandı ve hiçbir kontrol yakalamadı.
-      # `--frozen-lockfile`, pnpm-lock.yaml package.json ile uyuşmuyorsa
-      # burada, birleştirmeden ÖNCE durur.
-      - uses: pnpm/action-setup@v3
-        with:
-          version: 10
-
-      - name: pnpm-lock.yaml güncel mi
-        run: pnpm install --frozen-lockfile --lockfile-only
-
+      # Lockfile tutarlılığı BURADA DEĞİL, `lockfile.yml` iş akışında kontrol
+      # ediliyor. Sebep: bu iş yalnızca terminal dosyaları değiştiğinde
+      # çalışıyor, oysa bağımlılık sapması depoda her yerden gelebilir ve
+      # canlı deploy'u düşürüyor.
       - name: Bağımlılıkları kur
         run: npm ci --no-audit --no-fund
 
