@@ -35,6 +35,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ui60  # noqa: E402
 
+# Sonuç JSON'u Node'a boru üzerinden gidiyor ve Node onu UTF-8 okuyor. Windows'ta
+# Python'un stdout kodlaması varsayılan olarak cp1254/cp857 olduğu için Türkçe
+# karakterler bozuluyordu: worker log'unda "yaz ld " (yazıldı), "do ruland "
+# (doğrulandı) gibi okunamaz adımlar çıkıyordu. Adım log'u teşhis aracı;
+# okunamaz olması onu işlevsiz kılar.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass  # Python 3.6 ve öncesi; bu makinede 3.7+ var.
+
 
 # Ölçülmüş alan konumları — MDI BELGE penceresinin sol üst köşesine göre.
 #
@@ -486,8 +497,22 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
     # ODAK İRSALİYE NO'DA OLMALI. Sahada ölçüldü: başka bir alan seçiliyken F6
     # hiçbir şey yapmıyor — hata da vermiyor. Sessiz başarısızlık en kötüsü:
     # sürücü "yenilendi" sanıp sıradaki işi DOLU formun üstüne yazardı.
+    #
+    # DOĞRULAMA PENCERE KOORDİNATIYLA YAPILIR, MDI'yle DEĞİL.
+    #
+    # Sahada ölçüldü (HE20097): işin BAŞINDAKİ F6 çalıştı, gönderim
+    # SONRASINDAKİ çalışmadı ve odak "mdi (1334, 664) — tanınmayan alan" diye
+    # raporlandı. Sebep, gönderimden sonra odağın BAŞKA BİR MDI BELGESİNE
+    # düşmesi: o belgeye göre hesaplanan konum alan haritasıyla hiç örtüşmüyor,
+    # dolayısıyla doğru yere tıklanmış olsa bile "yanlış alan" görünüyor.
+    #
+    # Tıklamayı zaten ANA PENCEREYE göre yapıyoruz; doğrulamayı da aynı
+    # düzlemde yapmak tek tutarlı seçim.
+    def irsaliye_noda_mi(odak_bilgisi: dict) -> bool:
+        return konum_eslesiyor(odak_bilgisi["pencere_ici"], IRSALIYE_NO_PENCERE_KONUMU)
+
     o = ui60.odak()
-    if o["hwnd"] and alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+    if not o["hwnd"] or not irsaliye_noda_mi(o):
         ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
         o = ui60.odak()
 
@@ -496,13 +521,14 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             "Form yenilenemedi: İrsaliye No alanına tıklandı ama odak alınamadı.",
             retryable=True,
         )
-    if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+    if not irsaliye_noda_mi(o):
         # F6'ya burada basmak sessizce hiçbir şey yapmaz; tahminle devam etmek
-        # yerine duruyoruz.
+        # yerine duruyoruz. Her iki koordinat da yazılıyor: hangi düzlemde
+        # sapma olduğu bir dahaki teşhiste doğrudan görünsün.
         raise Durdu(
-            f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı, "
-            f"{o['mdi_ici']} konumunda kaldı "
-            f"({alan_adi(o['mdi_ici']) or 'tanınmayan alan'}).",
+            f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı "
+            f"(pencere {IRSALIYE_NO_PENCERE_KONUMU}), odak pencere "
+            f"{o['pencere_ici']} / mdi {o['mdi_ici']} konumunda kaldı.",
             retryable=True,
         )
 
@@ -592,6 +618,9 @@ def main() -> int:
         )
 
     ana = pencereler[0]
+    # Bundan sonra tuşlar YALNIZCA Ceomed sürecine gidebilir. Sahada odak
+    # Chrome'a kaydı ve irsaliye numarası tarayıcıya yazıldı.
+    ui60.hedef_pencere_ayarla(ana)
     if not ui60.one_getir(ana):
         # Küçültülmüş pencere artık one_getir içinde geri yükleniyor; geriye
         # kalan sebepler operatörün kontrol edebileceği şeyler.
@@ -718,6 +747,17 @@ def main() -> int:
             sonuc["uyari"] = yenileme_notu
         return emit(sonuc)
 
+    except ui60.YanlisPencere as exc:
+        # YENİDEN DENENEBİLİR: makinede biri başka bir uygulamaya geçmiş, form
+        # bozulmamış olabilir. Sürücü tuş göndermeden durduğu için Ceomed'e
+        # yanlış bir şey yazılmadı. Bir sonraki turda Ceomed öne alınıp
+        # baştan denenir.
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-yanlis-pencere")
+        return fail(
+            f"{exc} Ceomed makinesinde otomasyon çalışırken başka uygulama "
+            "kullanılmamalı; tuş vuruşları ön plandaki pencereye gider.",
+            retryable=True, screenshot=goruntu, log=log,
+        )
     except ui60.TehlikeliOdak as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-tehlikeli")
         return fail(f"Güvenlik durdurması: {exc}", retryable=False, screenshot=goruntu, log=log)

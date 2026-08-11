@@ -383,12 +383,67 @@ class TehlikeliOdak(RuntimeError):
     """Odak, basılması geri alınamaz bir butondayken tuş gönderilmek istendi."""
 
 
+class YanlisPencere(RuntimeError):
+    """Odak Ceomed'in dışına çıktı; tuş göndermek başka uygulamaya yazardı."""
+
+
+# Tuşların gitmesine izin verilen sürecin kimliği. `hedef_pencere_ayarla` ile
+# kurulur; kurulmadıysa kontrol yapılmaz (problar için).
+_HEDEF_PID: int | None = None
+
+
+def _pencere_pid(hwnd: int) -> int:
+    if not hwnd:
+        return 0
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def hedef_pencere_ayarla(hwnd: int) -> None:
+    """Bundan sonra tuşların YALNIZCA bu pencerenin sürecine gitmesine izin ver.
+
+    NEDEN SÜREÇ, PENCERE DEĞİL: LOV ve uyarı pencereleri ayrı üst düzey
+    pencerelerdir ama aynı Ceomed sürecine aittir. Tek pencereye kilitlemek
+    onları da reddederdi; süreç kimliği doğru ayrımı yapıyor.
+    """
+    global _HEDEF_PID
+    _HEDEF_PID = _pencere_pid(hwnd)
+
+
+def hedef_pencere_temizle() -> None:
+    global _HEDEF_PID
+    _HEDEF_PID = None
+
+
+def odak_hedefte_mi() -> bool:
+    """Odaktaki kontrol hedef sürece mi ait?"""
+    if _HEDEF_PID is None:
+        return True
+    fg = user32.GetForegroundWindow()
+    return bool(fg) and _pencere_pid(fg) == _HEDEF_PID
+
+
 def tehlikeli_odak_kontrol() -> None:
     """Tuş göndermeden ÖNCE çağrılır.
 
     ENTER odaktaki butona basar. Bu kontrol olmadan yanlış zamanlanmış tek bir
     ENTER e-irsaliye gönderebilir — geri alınamaz.
+
+    AYRICA HEDEF SÜRECİ DOĞRULAR. `SendInput` tuşları belirli bir pencereye
+    değil ÖN PLANDAKİ pencereye gönderir. Sahada Ceomed odağı kaybetti ve
+    sürücü irsaliye numarasını Chrome'a yazdı — geri okuma
+    'React Bits - Index - Google Chrome' döndü. Yani otomasyon, farkında
+    olmadan başka bir uygulamaya tuş basıyordu; ENTER'ın nereye gittiği
+    tamamen tesadüfe kalmıştı.
     """
+    if not odak_hedefte_mi():
+        baslik_metni = baslik(user32.GetForegroundWindow())
+        raise YanlisPencere(
+            f"Ön plandaki pencere Ceomed değil ({baslik_metni!r}); tuş gönderilmedi. "
+            "Makinede başka bir uygulama öne geldi."
+        )
+
     o = odak()
     if o["sinif"] != "Button":
         return

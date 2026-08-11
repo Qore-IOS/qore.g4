@@ -101,6 +101,11 @@ function submit(job) {
     const child = spawn(PYTHON, args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: false,
+      // Windows'ta Python stdout'u varsayılan olarak cp1254; Node ise UTF-8
+      // okuyor. Bu uyuşmazlık adım log'undaki Türkçe karakterleri bozuyordu.
+      // Python tarafında da reconfigure ediliyor; ikisi birlikte, çünkü env
+      // bazı kurulumlarda görmezden gelinebiliyor.
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
     });
 
     let stdout = '';
