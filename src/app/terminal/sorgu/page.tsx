@@ -4,6 +4,10 @@
  * "Elimdeki kutu nerede kayıtlı?" sorusunu tek okutmada cevaplar. Hiçbir şey
  * yazmaz; depoda en sık sorulan ve en çok telefon trafiği yaratan soruyu
  * ortadan kaldırmak için vardır.
+ *
+ * Seri numarasız (lot/adet takipli) üründe soru değişiyor: "bu kutu nerede?"
+ * değil, "bu üründen nerede ne kadar var?". O durumda ürün koduyla aranıp
+ * seçili deponun stoğu lot lot gösterilir.
  */
 
 'use client';
@@ -23,6 +27,7 @@ import { scopedQuery } from '@/lib/firestore-helpers';
 import { useTerminalData } from '@/components/terminal/prefetch-provider';
 import type { DepoStokItem } from '@/lib/types';
 import { playFeedback } from '@/lib/utils';
+import { getStockItemQuantity } from '@/lib/stock-quantity';
 import {
   ScanFeedbackBar,
   TerminalShell,
@@ -59,15 +64,56 @@ export default function TerminalSorguPage() {
 
       const hit = parseAndResolveBarcode(code, formats, productCodes);
       const serial = (hit?.parsed.seriNumarasi || '').trim();
+      const lot = (hit?.parsed.lotNumarasi || '').trim();
 
+      /**
+       * SERİ NUMARASIZ ÜRÜNLER — ürün koduyla arama.
+       *
+       * Lot/adet takipli üründe sorulacak bir seri numarası yok; sorunun
+       * kendisi de değişiyor: "bu kutu nerede?" değil, "bu üründen nerede,
+       * ne kadar var?". Cevap yereldeki depo stoğundan verilir — bu ekran
+       * çevrimdışıyken zaten sunucuya sorgu ATMIYOR.
+       */
       if (!serial) {
-        setFeedback({
-          tone: 'error',
-          title: 'Seri numarası okunamadı',
-          detail: `Barkod: ${code.slice(0, 40)}`,
+        if (!hit?.product) {
+          setFeedback({
+            tone: 'error',
+            title: 'Ürün tanınmadı',
+            detail: `Barkod: ${code.slice(0, 40)}`,
+          });
+          setResult(null);
+          playFeedback(true);
+          return;
+        }
+
+        const stokKodu = hit.product.stokKodu;
+        const matches = depotStock.filter(item => {
+          if ((item.stokKodu || '') !== stokKodu) return false;
+          return !lot || (item.lotNumarasi || '').trim() === lot;
         });
-        setResult(null);
-        playFeedback(true);
+
+        setResult({
+          serial: '',
+          productName: hit.product.stokAdi || 'Bilinmeyen ürün',
+          stokKodu,
+          matches,
+        });
+
+        const toplam = matches.reduce((sum, item) => sum + getStockItemQuantity(item), 0);
+        setFeedback(
+          matches.length === 0
+            ? {
+                tone: 'warning',
+                title: 'Bu depoda bulunamadı',
+                detail: `${hit.product.stokAdi}${lot ? ` · Lot ${lot}` : ''} — seçili deponun stoğunda yok.`,
+              }
+            : {
+                tone: 'success',
+                title: `${toplam} adet`,
+                detail: `${matches.length} lot${lot ? ` · Lot ${lot}` : ''}`,
+              },
+        );
+        playFeedback(matches.length === 0);
         return;
       }
 
@@ -166,14 +212,16 @@ export default function TerminalSorguPage() {
               <div>
                 <p className="text-3xl font-semibold text-foreground">{result.productName}</p>
                 <p className="text-muted-foreground">
-                  {result.stokKodu ? `${result.stokKodu} · ` : ''}Seri {result.serial}
+                  {result.stokKodu ? `${result.stokKodu}` : ''}
+                  {result.serial ? ` · Seri ${result.serial}` : ''}
                 </p>
               </div>
 
               {result.matches.length === 0 ? (
                 <p className="text-muted-foreground">
-                  Bu seri numarası için stok kaydı yok. Ürün henüz mal kabul
-                  edilmemiş ya da tüketilmiş olabilir.
+                  {result.serial
+                    ? 'Bu seri numarası için stok kaydı yok. Ürün henüz mal kabul edilmemiş ya da tüketilmiş olabilir.'
+                    : 'Bu ürün seçili deponun stoğunda görünmüyor.'}
                 </p>
               ) : (
                 <div className="space-y-3">
@@ -193,6 +241,7 @@ export default function TerminalSorguPage() {
                         </span>
                       </div>
                       <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+                        <Detail label="Adet" value={String(getStockItemQuantity(item))} />
                         <Detail label="Raf" value={item.rafAdresi} />
                         <Detail label="Lot" value={item.lotNumarasi} />
                         <Detail

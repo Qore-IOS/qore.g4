@@ -243,3 +243,40 @@ asıl koruma `default-src 'self'` ve `connect-src` beyaz listesi.
   ama ferah değildir.
 - **Cihazda elle test edilmedi.** APK bu ortamda derlendi ve içeriği
   doğrulandı; gerçek cihazda okutma/çevrimdışı davranış testi sizde.
+
+---
+
+## İnen veri diskte nerede duruyor?
+
+Terminalin tüm çalışma verisi Firestore'un kalıcı önbelleğinde, yani
+**IndexedDB**'de durur — ayrı bir dosyaya JSON yazılmaz.
+
+| Kabuk | Yol |
+| --- | --- |
+| Masaüstü (Windows) | `%APPDATA%\Qore Terminal\IndexedDB\app_terminal_0.indexeddb.leveldb\` |
+| Masaüstü (macOS) | `~/Library/Application Support/Qore Terminal/IndexedDB/…` |
+| Android | `/data/data/com.qore.terminal/app_webview/Default/IndexedDB/…` (uygulamaya özel, root'suz erişilemez) |
+
+Depo seçimi ve bekleyen işlemler defteri ise `localStorage`'da
+(`qore.terminal.depotId.*`, `qore.terminal.pendingOps`).
+
+### Bu dosyaları elle açmayın
+
+Diskteki biçim **LevelDB** — insan tarafından okunabilir değil ve uygulama
+açıkken **kilitli**. Dışarıdan bir araçla okumaya çalışmak ya hiç
+çalışmaz ya da yarım yazılmış bir durum gösterir; kötü ihtimalle önbelleği
+bozar.
+
+### Canlı bakmanın doğru yolu
+
+**Masaüstü:** `Ctrl+Shift+I` → *Application* → *Storage* → *IndexedDB* →
+`firebaseLocalStorageDb` / `firestore/...`. Kayıtlar değiştikçe orada anında
+güncellenir.
+
+**Android:** telefonda USB hata ayıklamayı açın, bilgisayarda Chrome'da
+`chrome://inspect` → cihazın altındaki `Qore Terminal` → *inspect*. Aynı
+DevTools penceresi açılır.
+
+Çoğu soru için buna bile gerek yok: açılış ekranı koleksiyon koleksiyon kaç
+kayıt indiğini gösteriyor, `/terminal/bekleyen` ekranı da gönderilmeyi
+bekleyen işlemleri listeliyor.
