@@ -772,11 +772,12 @@ export default function FaultDetailPage() {
    * irsaliye de üretilmez — mükerrer riski yok, ama o parçalar elle
    * kesilmelidir. Sonradan parça ekleme akışı ayrıca ele alınmalı.
    */
-  const arizaIrsaliyesiKuyrugaAl = useCallback(async () => {
+  const arizaIrsaliyesiKuyrugaAl = useCallback(async (
+    parcalar: any[],
+    kuyrukKimligi: string,
+  ) => {
     if (!fault) return;
-
-    const parcalar = (faultPartChanges || []).filter((p: any) => !p.isPostClosure);
-    if (parcalar.length === 0) return;
+    if (!parcalar || parcalar.length === 0) return;
 
     try {
       // İrsaliye numarası Qore form numarasından türetiliyor; arızanın kendi
@@ -798,7 +799,11 @@ export default function FaultDetailPage() {
       const cari = await cariCozAsync(db, hospitalId);
 
       const sonuc = await enqueueIrsaliyeGirisAyri(db, {
-        formId: fault.id,
+        // Kuyruk dokümanının kimliği BU değer oluyor. Kapanış irsaliyesi için
+        // arıza kimliği; kapanış sonrası eklenen her parça için arıza kimliği +
+        // parça kimliği. Böylece her parça kendi tekil işini alıyor ve aynı
+        // parça iki kez kuyruğa girse bile tek kayıt oluşuyor.
+        formId: kuyrukKimligi,
         formNo,
         formType: 'teknik_servis',
         tarih: new Date().toISOString().slice(0, 10),
@@ -816,7 +821,8 @@ export default function FaultDetailPage() {
         companyId: currentCompanyId,
         // Builder yedek parçayı `type` alanından tanıyor; arıza kayıtlarında
         // bu alan yok, parçanın kendisi zaten bir parça değişimi.
-        actions: parcalar.map((p: any) => ({ ...p, type: 'part_change' })),
+        // Tipi olan (hücre değişimi) korunuyor; olmayan parça değişimi sayılıyor.
+        actions: parcalar.map((p: any) => ({ ...p, type: p.type || 'part_change' })),
       });
 
       if (sonuc.enqueued === true && sonuc.status === 'blocked') {
@@ -845,7 +851,7 @@ export default function FaultDetailPage() {
         duration: 15000,
       });
     }
-  }, [fault, faultPartChanges, currentCompanyId, currentUser, currentUserProfile, toast]);
+  }, [fault, currentCompanyId, currentUser, currentUserProfile, toast]);
 
   const handleClose = useCallback(async () => {
     if (!fault) return;
@@ -875,7 +881,19 @@ export default function FaultDetailPage() {
       // buradan sonra kuyruğa alınır — teknik/aplikasyon formlarındaki mantığın
       // aynısı. Arıza kaydından SONRA ve AYRI yapılıyor: kuyruk tarafındaki bir
       // sorun arıza kapatmayı düşüremez.
-      await arizaIrsaliyesiKuyrugaAl();
+      // Hücre değişimleri AYRI bir alt koleksiyonda tutuluyor ama Ceomed
+      // açısından onlar da stoktan çıkan yedek parça (`hucre_degisimi` builder
+      // tarafından yedek parça sayılıyor). Yalnızca partChanges'e bakmak, hücre
+      // değişimi yapılan arızalarda irsaliyeyi sessizce atlardı.
+      await arizaIrsaliyesiKuyrugaAl(
+        [
+          ...(faultPartChanges || []).filter((p: any) => !p.isPostClosure),
+          ...(faultHucreDegisimleri || [])
+            .filter((h: any) => !h.isPostClosure)
+            .map((h: any) => ({ ...h, type: 'hucre_degisimi' })),
+        ],
+        fault.id,
+      );
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
@@ -1443,6 +1461,23 @@ export default function FaultDetailPage() {
       }
 
       await batch.commit();
+
+      // KAPANIŞ SONRASI PARÇA KENDİ İRSALİYESİNİ ALIR.
+      //
+      // Kapanışta toplu irsaliye kesiliyor; arıza zaten kapandıktan sonra
+      // eklenen parça o irsaliyeye giremez ve toplanacağı ikinci bir kapanış
+      // anı da yok. Bu yüzden her biri tek satırlık kendi irsaliyesini alıyor.
+      // Kuyruk kimliği arıza + parça kimliği: aynı parça iki kez işlense bile
+      // tek kayıt oluşur.
+      //
+      // Kapanış ÖNCESİ eklenenlere burada dokunulmuyor — onlar kapanışta
+      // toplu kesiliyor, burada da kesmek mükerrer irsaliye üretirdi.
+      if (isPostClosure) {
+        await arizaIrsaliyesiKuyrugaAl(
+          [{ ...partChangeData, id: partRef.id }],
+          `${fault.id}_${partRef.id}`,
+        );
+      }
 
       toast({ title: 'Başarılı', description: isPostClosure ? 'Parça değişimi sonradan eklendi ve loglandı.' : 'Parça değişimi eklendi.' });
       resetPartModalState();
