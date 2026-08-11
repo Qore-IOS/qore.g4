@@ -116,7 +116,7 @@ Android'de PDF önbelleğe yazılıp sistem paylaşım sayfası açılır: kulla
 yazıcıya, WhatsApp'a ya da Drive'a kendi gönderir. Web ve masaüstünde davranış
 birebir aynı kaldı.
 
-### 3. `src/components/terminal/camera-scan-button.tsx`
+### 3. `src/components/terminal/camera-scan-button.tsx` — yerel barkod motoru
 
 El terminallerindeki (Zebra, Honeywell, Urovo…) barkod okuyucular *keyboard
 wedge* kipinde tuş vuruşu üretir; `useHidScanner` bunu zaten dinler ve
@@ -128,9 +128,69 @@ yok. Kamera düğmesi **yalnızca Android kabuğunda** görünür; okunan kod, H
 okuyucununkiyle aynı yoldan (`onScan({ raw })`) ekrana verilir — doğrulama ve
 yazma mantığı tek kopya kalır.
 
+**Motor: Google ML Kit** (`@capacitor-mlkit/barcode-scanning`), WebView'daki
+ZXing değil. İlk sürüm kareleri JavaScript'e kopyalayıp tek iş parçacığında
+çözüyordu; buruşuk etiket, küçük DataMatrix ve loş raf arasında yetersizdi.
+ML Kit çözümlemeyi kamera akışının üstünde, yerel kodda yapar. Biçim listesi
+**verilmez** — eklenti desteklediği bütün biçimleri arar; depoda hangi
+tedarikçinin ne bastığı önceden bilinmiyor. Çözünürlük 1080p: 4K kare ML Kit'i
+belirgin biçimde yavaşlatır, barkodda sınırlayıcı etken çözünürlük değil odak
+ve ışıktır. Flaş, cihazda gerçekten varsa gösterilir.
+
+Model **APK'nın içinde** (`assets/mlkit_barcode_models/`), Play Services'ten
+indirilmez — yani ilk kullanımda bile internet gerekmez.
+
+#### Önizleme neden bir "delik"
+
+Eklentinin `startScan()` kipi kamerayı WebView'ın **arkasına, tam ekran** çizer;
+önizlemeyi bir bölgeye sığdıran seçenek yok. Bu yüzden ekran 2×3 kareye bölünüp
+sol üst karenin dışında kalan her yer opak boyanıyor; geriye kalan saydam kare
+kameranın göründüğü delik oluyor.
+
+Sonucu bilerek kabul edildi: delikte tam ekran görüntünün **sol üst bölgesi**
+görünür (küçültülmüş tamamı değil). Buna karşılık **algılama karenin tamamını
+kullanır** — delikte görünmeyen bir barkod da okunur. Delik nişan almak için.
+
+Okutma **süreklidir**: ilk barkodda kapanmaz. Kalan beş kare, okutulan ürünlerin
+listesi için boş bırakılıyor — görevli kutuları arka arkaya geçirirken listenin
+büyüdüğünü görür.
+
 Kamera izni yalnızca düğmeye basıldığında istenir ve
 `<uses-feature … required="false">` sayesinde kamerası olmayan sabit
 terminaller kurulum dışında kalmaz.
+
+#### APK boyutu ve ABI
+
+ML Kit dört mimari için de yerel kütüphane getiriyor ve APK'yı 33 MB'a
+çıkarıyordu; bunun 11,6 MB'ı x86/x86_64 idi. O iki mimari pratikte yalnızca
+emülatörlerde var, sahadaki cihazlar ARM. `android/app/build.gradle` yalnızca
+`arm64-v8a` ve `armeabi-v7a` paketliyor (33 MB → 19 MB). x86 emülatörde denemek
+gerekirse:
+
+```bash
+cd android && ./gradlew assembleDebug -PincludeX86
+```
+
+---
+
+## Elle eşitleme düğmesi
+
+Bağlantı göstergesinin yanındaki döngü simgesi (`src/lib/terminal-sync.ts`).
+Firestore kuyruğunu normalde kendi boşaltır; bu düğme iki gerçek durum için var:
+
+1. **Bayat bağlantı.** Cihaz ağa yeniden bağlandığında açık kalan soket ölü
+   olabilir ve SDK bunu kendi zaman aşımıyla fark edene kadar kuyruk bekler.
+   Düğme `disableNetwork` → `enableNetwork` turu yaparak yeni bağlantı kurmaya
+   zorlar.
+2. **Yanılan sayaç.** Bekleyen işlemler defteri bir kaydı, yazımı başlatan sözün
+   çözülmesiyle "gönderildi"ye çevirir; o söz uygulama kapanınca kaybolur.
+   Yazımın kendisi kaybolmaz (Firestore kuyruğu kalıcı) ama defter sonsuza kadar
+   "bekliyor"da takılı kalırdı. `waitForPendingWrites()` **tüm** bekleyen
+   yazımlar sunucuca onaylandığında çözülür; ancak o zaman defter düzeltilir.
+
+Onay gelmezse defter **olduğu gibi bırakılır** — gitmemiş bir işlemi
+"gönderildi" göstermek bu ekrandaki tek gerçek tehlike. Aynı mutabakat uygulama
+açılışında sessizce bir kez çalışır.
 
 ---
 

@@ -16,10 +16,13 @@
 
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Check, Loader2, RefreshCw } from 'lucide-react';
+
 import { cn } from '@/lib/utils';
 import { subscribeToPendingWrites } from '@/lib/offline-write';
 import { countPendingOperations, subscribeToPendingOperations } from '@/lib/pending-operations';
+import { forceResync, reconcilePendingWrites } from '@/lib/terminal-sync';
 
 /** Tarayıcının çevrimiçi durumunu izler. */
 function useOnlineStatus(): boolean {
@@ -85,16 +88,94 @@ export function ConnectionBadge() {
       : 'Bağlı';
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
+    <div className="flex items-center gap-2">
+      <div
+        role="status"
+        aria-live="polite"
+        className={cn(
+          'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium',
+          styles[tone],
+        )}
+      >
+        <span className={cn('h-2 w-2 shrink-0 rounded-full', dot[tone])} aria-hidden="true" />
+        {label}
+      </div>
+      <SyncButton />
+    </div>
+  );
+}
+
+/**
+ * Elle eşitleme düğmesi.
+ *
+ * Firestore kuyruğu normalde kendi boşalır; bu düğme iki gerçek durum için
+ * var (ayrıntı: `src/lib/terminal-sync.ts`):
+ *
+ *   - Ağ geri geldi ama açık kalan soket ölü → bağlantı tazelenir
+ *   - Uygulama kapanıp açıldığı için defter "bekliyor"da takılı kaldı →
+ *     yazımların gerçekten gittiği doğrulandıktan sonra düzeltilir
+ *
+ * Sonuç düğmenin ÜSTÜNDE gösterilir. Bir toast yeterli olmazdı: kullanıcı
+ * çoğu zaman elinde kutuyla, ekrana yan gözle bakıyor.
+ */
+function SyncButton() {
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'timeout'>('idle');
+
+  /**
+   * Açılışta SESSİZ mutabakat.
+   *
+   * Uygulama kapalıyken gönderilen işlemler defterde "bekliyor" görünüyordu.
+   * Burada ağ zaten varsa kuyruk birkaç saniyede boşalır ve sayaç kendiliğinden
+   * doğruya döner; yoksa hiçbir şey değişmez.
+   */
+  useEffect(() => {
+    void reconcilePendingWrites().catch(() => {});
+  }, []);
+
+  const run = useCallback(async () => {
+    setState('busy');
+    try {
+      const result = await forceResync();
+      setState(result.timedOut ? 'timeout' : 'done');
+    } catch {
+      setState('timeout');
+    }
+    // Sonucu bir süre gösterip sessizleş.
+    setTimeout(() => setState('idle'), 4000);
+  }, []);
+
+  const title =
+    state === 'busy'
+      ? 'Eşitleniyor…'
+      : state === 'done'
+        ? 'Her şey gönderildi'
+        : state === 'timeout'
+          ? 'Eşitlenemedi — bağlantı yok ya da çok yavaş'
+          : 'Şimdi eşitle';
+
+  return (
+    <button
+      type="button"
+      onClick={run}
+      disabled={state === 'busy'}
+      title={title}
+      aria-label={title}
       className={cn(
-        'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium',
-        styles[tone],
+        'flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-lg border text-foreground/80',
+        state === 'done'
+          ? 'border-emerald-600 text-emerald-600'
+          : state === 'timeout'
+            ? 'border-red-600 text-red-600'
+            : 'border-border hover:bg-muted',
       )}
     >
-      <span className={cn('h-2 w-2 shrink-0 rounded-full', dot[tone])} aria-hidden="true" />
-      {label}
-    </div>
+      {state === 'busy' ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : state === 'done' ? (
+        <Check className="h-4 w-4" />
+      ) : (
+        <RefreshCw className="h-4 w-4" />
+      )}
+    </button>
   );
 }
