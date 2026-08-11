@@ -6,9 +6,9 @@ import { useTheme } from 'next-themes';
 import type { Hospital, ConsumptionRecord, ProductCode, DailyConsumptionStats, DeviceFaultReport, PurchasingTask } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
-import { TrendingUp, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search, Loader2, Download, Warehouse, FlaskConical, FileText } from 'lucide-react';
+import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, UserPlus2, TimerReset, ActivitySquare, AlertTriangle, CalendarCheck, Banknote, RefreshCw, ArrowUpRight, Bell, Maximize2, Check, X as XIcon, Search, Loader2, Download, Warehouse, FlaskConical, FileText, BarChart3 } from 'lucide-react';
 import {
-  HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart, Ring,
+  HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart,
   Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar, DeltaBadge,
 } from '@/components/dashboard-v2/clay-home';
 import { ClayShell } from '@/components/mal-kabul/clay-kit';
@@ -42,7 +42,7 @@ import { matchesCompanyScope } from '@/lib/company-scope';
 import {
   useOpenDeviceFaultReports,
   usePurchasingTasks,
-  useExpiringProductsCount
+  useTestDefinitions,
 } from '@/hooks/useFirebaseQueries';
 import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -139,6 +139,13 @@ interface DashboardPanelProps {
 
 type TrendPeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+type CounterHistoryRecord = {
+  year?: number;
+  month?: number;
+  period?: string;
+  items?: Array<{ productId?: string; total?: number }>;
+};
+
 function DashboardSkeleton() {
   return (
     <div className="p-4 sm:p-8 space-y-8 animate-pulse">
@@ -173,7 +180,7 @@ export default function DashboardV2({
   // tam karşılığı; çok daha hafif.
   const { data: faultReports = [], isLoading: faultsLoading } = useOpenDeviceFaultReports();
   const { data: purchasingTasks = [], isLoading: tasksLoading } = usePurchasingTasks();
-  const { data: expiringCountServer = 0, isLoading: expiringLoading } = useExpiringProductsCount();
+  const { data: testDefinitions = [] } = useTestDefinitions();
 
   // Faz 5: Pre-aggregated KPI özet — Cloud Function realtime günceller.
   const { data: companyStats } = useCompanyStats();
@@ -200,9 +207,75 @@ export default function DashboardV2({
 
   const calendarScrollRef = useRef<HTMLDivElement | null>(null);
 
-  const expiringProductsCount = expiringCountServer;
+  const isLoading = faultsLoading || tasksLoading;
 
-  const isLoading = faultsLoading || tasksLoading || expiringLoading;
+  const [counterHistory, setCounterHistory] = useState<CounterHistoryRecord[]>([]);
+  const [counterSlide, setCounterSlide] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    getScopedDocs('kumulatifHesaplamaGecmisi', currentCompanyId, isSuperAdmin)
+      .then((snapshot) => {
+        if (alive) setCounterHistory(snapshot.map((item) => item.data() as CounterHistoryRecord));
+      })
+      .catch((error) => console.error('[Dashboard] Counter analiz özeti yüklenemedi:', error));
+    return () => { alive = false; };
+  }, [currentCompanyId, isSuperAdmin]);
+
+  const counterAnalysis = useMemo(() => {
+    const now = new Date();
+    const availablePeriods = counterHistory
+      .map((record) => ({
+        year: record.year ?? Number(record.period?.split('-')[0]),
+        month: record.month ?? Number(record.period?.split('-')[1]),
+        hasData: record.items?.some((item) => (Number(item.total) || 0) > 0) ?? false,
+      }))
+      .filter(({ year, month, hasData }) => hasData && Number.isFinite(year) && Number.isFinite(month) && month >= 1 && month <= 12)
+      .sort((a, b) => (b.year * 12 + b.month) - (a.year * 12 + a.month));
+    // İçinde bulunulan ay henüz yüklenmemişse boş kart göstermek yerine veri olan
+    // en son dönemi, onun bir önceki takvim ayıyla karşılaştır.
+    const latestPeriod = availablePeriods[0] ?? { year: now.getFullYear(), month: now.getMonth() + 1 };
+    const analysisDate = new Date(latestPeriod.year, latestPeriod.month - 1, 1);
+    const previousDate = subMonths(analysisDate, 1);
+
+    const totalsFor = (year: number, month: number) => {
+      const productTotals = new Map<string, number>();
+      counterHistory.forEach((record) => {
+        const recordYear = record.year ?? Number(record.period?.split('-')[0]);
+        const recordMonth = record.month ?? Number(record.period?.split('-')[1]);
+        if (recordYear !== year || recordMonth !== month) return;
+        record.items?.forEach((item) => {
+          if (!item.productId) return;
+          productTotals.set(item.productId, (productTotals.get(item.productId) ?? 0) + (Number(item.total) || 0));
+        });
+      });
+      return new Map(testDefinitions.map((definition) => [
+        definition.sutTestAdi || definition.sutKodu || 'Tanımsız test',
+        (definition.linkedStokKodlari || []).reduce((sum, code) => sum + (productTotals.get(code) ?? 0), 0),
+      ]));
+    };
+
+    const current = totalsFor(latestPeriod.year, latestPeriod.month);
+    const previous = totalsFor(previousDate.getFullYear(), previousDate.getMonth() + 1);
+    const ranked = [...current.entries()].filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]);
+    const rising = [...current.entries()]
+      .map(([name, value]) => ({ name, value, increase: value - (previous.get(name) ?? 0) }))
+      .sort((a, b) => b.increase - a.increase)[0];
+
+    return {
+      periodLabel: format(analysisDate, 'MMMM yyyy', { locale: tr }),
+      slides: [
+        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
+        { label: 'En az çalışılan test', name: ranked.at(-1)?.[0] || 'Henüz veri yok', value: ranked.at(-1)?.[1] ?? 0, suffix: 'test', icon: TrendingDown, color: HOME_C.amber, bg: HOME_C.amberSoft },
+        { label: 'Önceki aya göre en çok yükselen', name: rising?.increase && rising.increase > 0 ? rising.name : 'Artış gösteren test yok', value: Math.max(0, rising?.increase ?? 0), suffix: 'artış', icon: BarChart3, color: HOME_C.accent, bg: HOME_C.accentA08 },
+      ],
+    };
+  }, [counterHistory, testDefinitions]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCounterSlide((current) => (current + 1) % counterAnalysis.slides.length), 4200);
+    return () => window.clearInterval(timer);
+  }, [counterAnalysis.slides.length]);
 
   // Anlık maliyet — costSnapshots/{companyId} dokümanından okunur (her sabah
   // 06:00'da Cloud Function günceller). Doküman yoksa ilk açılışta istemci
@@ -804,10 +877,6 @@ export default function DashboardV2({
   const todayPct = totalToday ? Math.round((doneToday / totalToday) * 100) : 0;
   const selectedIsToday = isToday(selectedDay);
 
-  // Miad göstergesi (gauge — adet kapaklı oran)
-  const miadCount = typeof expiringProductsCount === 'number' ? expiringProductsCount : 0;
-  const miadPct = Math.min(miadCount / 50, 1);
-
   // Kullanıcı baş harfleri
   const userName = currentUserProfile?.name || 'Lojistik & Stok';
   const initials = userName.trim().split(/\s+/).slice(0, 2).map((s) => s[0]).join('').toUpperCase() || 'QO';
@@ -849,22 +918,31 @@ export default function DashboardV2({
               </ClayCard>
             </div>
 
-            {/* Miad ≤ 45 Gün */}
-            <Link href="/stok-yonetimi" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
+            {/* Counter analizi — aylık öne çıkan testler */}
+            <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
               <ClayCard hover pad={16} style={{ height: '100%' }}>
-                <CardHead ico={<AlertTriangle size={18} />} title="Miad ≤ 45 Gün" tone="amber" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex' }}><ArrowUpRight size={16} /></span>} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
-                  <Ring pct={miadPct} size={72} stroke={9} color={HOME_C.amber} delay={200}>
-                    <div style={{ textAlign: 'center' }}>
-                      <CountText value={miadCount} style={{ fontSize: 22, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', display: 'block' }} />
-                      <div style={{ fontSize: 10, fontWeight: 600, color: HOME_C.ink3 }}>ürün</div>
-                    </div>
-                  </Ring>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.4 }}>Tüm depolarda miadı yaklaşan ürünler</div>
-                    <div style={{ marginTop: 10 }}><Tag tone={HOME_C.amber} bg={HOME_C.amberSoft}>≤ 45 gün penceresi</Tag></div>
-                  </div>
+                <CardHead ico={<BarChart3 size={18} />} title="Counter Analizi" tone="accent" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, textTransform: 'capitalize' }}>{counterAnalysis.periodLabel}<ArrowUpRight size={16} /></span>} />
+                <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 14, minHeight: 86, marginTop: 10, overflow: 'hidden' }}>
+                  {counterAnalysis.slides.map((slide, index) => {
+                    const Icon = slide.icon;
+                    const active = index === counterSlide;
+                    return (
+                      <div key={slide.label} aria-hidden={!active} style={{ display: active ? 'flex' : 'none', alignItems: 'center', gap: 14, width: '100%', animation: active ? `mkRise 420ms ${HOME_C.ease} both` : undefined }}>
+                        <span style={{ width: 54, height: 54, flexShrink: 0, borderRadius: 17, display: 'grid', placeItems: 'center', color: slide.color, background: slide.bg, boxShadow: HOME_C.clayFlat }}><Icon size={24} /></span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.06em', textTransform: 'uppercase', color: slide.color }}>{slide.label}</div>
+                          <div title={slide.name} style={{ marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 16, fontWeight: 800, color: HOME_C.ink1 }}>{slide.name}</div>
+                          <div style={{ marginTop: 4, fontSize: 12, fontWeight: 700, color: HOME_C.ink2 }}><CountText value={slide.value} /> {slide.suffix}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
+                  {counterAnalysis.slides.map((slide, index) => (
+                    <span key={slide.label} style={{ width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
+                  ))}
+                  </div>
               </ClayCard>
             </Link>
 

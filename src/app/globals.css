@@ -4514,6 +4514,188 @@ html.qt-active { color: var(--qt-text); }
   }
 }
 
+/* ==========================================================================
+   YÖNETİM AĞACI — ORTAK CLAY SÖZLEŞMESİ
+   `/yonetim` layout'u bu scope'u bütün alt rotalara taşır. Böylece eski
+   shadcn, mg ve Tailwind tabanlı yönetim ekranları aynı krem clay paletini,
+   yüzey derinliğini ve mobil geometriyi paylaşır.
+   ========================================================================== */
+.yonetim-clay-scope {
+  --mg-bg: var(--qc-bg0);
+  --mg-surface: var(--qc-surface);
+  --mg-surface-2: var(--qc-surface2);
+  --mg-text: var(--qc-ink1);
+  --mg-text-2: var(--qc-ink2);
+  --mg-muted: var(--qc-ink3);
+  --mg-border: var(--qc-line);
+  --mg-border-strong: color-mix(in srgb, var(--qc-ink3) 24%, transparent);
+  --mg-accent: var(--qc-accent);
+  --mg-accent-soft: color-mix(in srgb, var(--qc-accent) 13%, transparent);
+  --mg-danger: var(--qc-danger);
+  --mg-danger-soft: color-mix(in srgb, var(--qc-danger) 13%, transparent);
+  width: 100%;
+  min-width: 0;
+  min-height: 100dvh;
+  color: var(--qc-ink1);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+.yonetim-clay-scope .mg-root {
+  --mg-bg: var(--qc-bg0);
+  --mg-surface: var(--qc-surface);
+  --mg-surface-2: var(--qc-surface2);
+  --mg-text: var(--qc-ink1);
+  --mg-text-2: var(--qc-ink2);
+  --mg-muted: var(--qc-ink3);
+  --mg-border: var(--qc-line);
+  --mg-border-strong: color-mix(in srgb, var(--qc-ink3) 24%, transparent);
+  --mg-accent: var(--qc-accent);
+  --mg-accent-soft: color-mix(in srgb, var(--qc-accent) 13%, transparent);
+}
+
+/* Eski panel kökleri ve standart içerik genişliği */
+.yonetim-clay-scope > :not(.clay-shell-backdrop),
+.yonetim-clay-scope .mg-root,
+.yonetim-clay-scope .cihaz-shell {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Kartlar: tek radius, tek sınır ve aynı çift yönlü clay gölge. */
+.yonetim-clay-scope :is(
+  .yonetim-hub-card,
+  .cihaz-card,
+  .rounded-lg.border.bg-card,
+  .rounded-xl.border.bg-card,
+  .rounded-2xl.border.bg-card,
+  [data-radix-scroll-area-viewport] > table
+) {
+  background: linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay) !important;
+}
+
+.yonetim-clay-scope :is(.rounded-lg.border.bg-card, .rounded-xl.border.bg-card, .rounded-2xl.border.bg-card) {
+  border-radius: 24px !important;
+}
+
+/* Formlar ve arama alanları yüzeye gömülür; rastgele beyaz kutular kalmaz. */
+.yonetim-clay-scope :is(input, textarea, select, [role="combobox"]):not([type="checkbox"]):not([type="radio"]) {
+  color: var(--qc-ink1);
+  background: var(--qc-surface2) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay-inset) !important;
+  border-radius: 14px;
+}
+.yonetim-clay-scope :is(input, textarea)::placeholder { color: var(--qc-ink3); opacity: .86; }
+.yonetim-clay-scope :is(input, textarea, select, [role="combobox"]):focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--qc-accent) 42%, transparent) !important;
+  outline-offset: 2px;
+}
+
+/* İkincil aksiyonlar yükseltilmiş, ana aksiyonlar sıcak clay vurgulu. */
+.yonetim-clay-scope :is(button, [role="button"]):not([data-state="checked"]):not(.bg-destructive) {
+  border-color: var(--qc-line);
+}
+.yonetim-clay-scope button:is(.bg-primary, [data-variant="default"]) {
+  background: linear-gradient(180deg, var(--qc-accent2), var(--qc-accent)) !important;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.38), 0 12px 22px -13px var(--qc-accent-glow) !important;
+}
+.yonetim-clay-scope button:is([data-variant="outline"], [data-variant="secondary"]),
+.yonetim-clay-scope .border.bg-background {
+  background: linear-gradient(180deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  box-shadow: var(--qc-clay-flat) !important;
+}
+
+/* Tablolar geniş ekranda sakin, mobilde kendi ekseninde kaydırılabilir. */
+.yonetim-clay-scope table { color: var(--qc-ink1); }
+.yonetim-clay-scope thead,
+.yonetim-clay-scope thead tr,
+.yonetim-clay-scope thead th {
+  background: color-mix(in srgb, var(--qc-surface2) 88%, var(--qc-accent) 4%) !important;
+  color: var(--qc-ink2) !important;
+}
+.yonetim-clay-scope :is(th, td, tr) { border-color: var(--qc-line) !important; }
+.yonetim-clay-scope tbody tr { transition: background-color 180ms ease; }
+.yonetim-clay-scope tbody tr:hover { background: color-mix(in srgb, var(--qc-accent) 6%, transparent) !important; }
+
+/* Modal, dropdown ve popover'lar da sayfadan kopuk düz beyaz yüzeyler değildir. */
+.yonetim-clay-scope :is([role="dialog"], [role="menu"], [role="listbox"]) {
+  color: var(--qc-ink1);
+  background: linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay), 0 26px 70px -34px rgba(52, 42, 26, .42) !important;
+}
+/* Radix katmanları portal ile body altına taşındığı için layout scope'unun
+   fiziksel dışında kalır; yönetim rotası açıkken aynı yüzeyi portala da uygula. */
+body:has(.yonetim-clay-scope) :is([role="dialog"], [role="menu"], [role="listbox"]) {
+  color: var(--qc-ink1);
+  background: linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2)) !important;
+  border-color: var(--qc-line) !important;
+  box-shadow: var(--qc-clay), 0 26px 70px -34px rgba(52, 42, 26, .42) !important;
+}
+
+.yonetim-clay-scope .text-muted-foreground { color: var(--qc-ink3) !important; }
+.yonetim-clay-scope .bg-muted { background-color: var(--qc-surface2) !important; }
+.yonetim-clay-scope .border-border { border-color: var(--qc-line) !important; }
+
+@media (max-width: 767px) {
+  .yonetim-clay-scope { overflow-x: clip; }
+  .yonetim-clay-scope :is(.p-6, .p-8) { padding: 16px !important; }
+  .yonetim-clay-scope :is(.px-6, .px-8) { padding-inline: 16px !important; }
+  .yonetim-clay-scope :is(.py-6, .py-8) { padding-block: 16px !important; }
+
+  .yonetim-hub-shell { padding-inline: 14px !important; }
+  .yonetim-hub-header { align-items: flex-start !important; }
+  .yonetim-hub-header > :last-child:not(:nth-child(2)) {
+    width: 100%;
+    margin-left: 56px;
+  }
+  .yonetim-hub-header > :last-child:not(:nth-child(2)) > * { width: 100%; }
+  .yonetim-hub-tile { min-height: 132px !important; padding: 18px !important; }
+  .yonetim-hub-card { border-radius: 24px !important; padding: 16px !important; }
+
+  /* Masaüstü toolbar'larını dar sütuna sıkıştırmak yerine dengeli satırlara böl. */
+  .yonetim-clay-scope :is(.justify-between, [style*="justify-content: space-between"]) {
+    column-gap: 10px;
+  }
+  .yonetim-clay-scope :is(.justify-between, [style*="justify-content: space-between"]) > :is(.flex, [style*="display: flex"]) {
+    flex-wrap: wrap;
+  }
+
+  .yonetim-clay-scope :is([role="dialog"], [data-radix-dialog-content]) {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px) !important;
+    overflow-y: auto;
+    border-radius: 26px !important;
+    padding: 18px !important;
+  }
+  body:has(.yonetim-clay-scope) [role="dialog"] {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100dvh - 24px) !important;
+    overflow-y: auto;
+    border-radius: 26px !important;
+    padding: 18px !important;
+  }
+
+  .yonetim-clay-scope :is([data-radix-scroll-area-root], .overflow-auto, .overflow-x-auto) {
+    max-width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  .yonetim-clay-scope table { min-width: 680px; }
+
+  /* Mobil kart listeleri masaüstü tablolarına tercih edilir; mevcut md:hidden
+     listeler aynı clay derinliğiyle görünür. */
+  .yonetim-clay-scope .md\:hidden > :is(div, article, button) {
+    border-radius: 20px;
+    border-color: var(--qc-line);
+    background: linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2));
+    box-shadow: var(--qc-clay-flat);
+  }
+}
+
 .qore-technic-main__inner {
   max-width: 1280px;
   margin: 0 auto;
@@ -7100,69 +7282,80 @@ body > main,
    Bildirilen sorunlar: buton/KPI kartı en-boy orantısızlığı, etkileşimli
    alanların taşması/kesilmesi, alt navigasyonun içeriği kapatması.
    ========================================================================== */
-@media (max-width: 640px) {
-  /* 1) Yatay taşma: mobilde hiçbir panel sayfayı yana kaydırmasın */
-  html, body { max-width: 100%; overflow-x: hidden; }
+@media (max-width: 767px) {
+  /* Mobil geometri tek bir viewport ritmine bağlıdır. `clip`, yanlışlıkla geniş
+     bir alt öğenin sayfayı yana sürüklemesini engeller; tablo/sekme gibi bilinçli
+     kaydırma alanları kendi kapsayıcılarında `auto` kalır. */
+  html, body { width: 100%; max-width: 100%; overflow-x: clip; }
+  body { font-size: 16px; text-rendering: optimizeLegibility; }
 
-  /* 2) TAŞMA YERİNE SARMA.
-        Daha önce buradaki toptan `min-width:0` kuralı, flex öğelerinin
-        içeriklerinin altına ezilmesine izin veriyordu: "Geri Dön" harf harf alt
-        alta iniyor, adım etiketleri ("Bağlam", "Ürün Ekle") kırpılıyordu.
-        Doğru çözüm ezmek değil, satırı alt satıra sarmak. */
   :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
-      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, [style*="display:flex"], [style*="display: flex"]) {
-    flex-wrap: wrap;
-    row-gap: 8px;
+      .ml-root, .pl-root, .mg-root, .cihaz-shell, main),
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell, main) * {
+    box-sizing: border-box;
   }
 
-  /* 2b) Kontroller ve etiketler içeriğinin altına ezilmez, metinleri bölünmez. */
-  button, [role="button"], [role="tab"], a[class*="btn"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"] {
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-  /* 2c) İç etiketler de küçülmez: kontrol küçülmese bile içindeki metin span'i
-         flex item olduğu için küçülüp "Bağlam" → "ğlam" gibi kırpılıyordu. */
-  :is(button, [role="button"], [role="tab"], [class*="badge"], [class*="step"], [class*="chip"], [class*="pill"]) > * {
-    flex-shrink: 0;
+  /* Flex/grid çocuklarının içerik genişliği ebeveyni büyütmesine izin verme.
+     Önceki global `flex-wrap` ve `repeat(auto-fit)` müdahaleleri takvimleri ve
+     KPI düzenlerini bozuyordu; yerleşim kararını artık panelin responsive
+     tanımına bırakıyoruz. */
+  :is(.page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
+      .ml-root, .pl-root, .mg-root, .cihaz-shell) :is(.flex, .grid, [style*="display: flex"], [style*="display:flex"], [style*="display: grid"], [style*="display:grid"]) > * {
+    min-width: 0;
   }
 
-  /* 3) Dokunma hedefi: yüksekliği açıkça verilmemiş butonlar ezilmesin */
-  button:not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) { min-height: 42px; }
+  /* Metinler kelime bütünlüğünü korur. `overflow-wrap:anywhere` Türkçe başlıkları
+     tek harflik sütunlara ayırdığı için yalnızca gerçek, kesintisiz kimliklerde
+     devreye girecek güvenli kırılma kullanılır. */
+  :is(h1, h2, h3, h4, p, span, label, td, th, a, button) {
+    word-break: normal;
+    overflow-wrap: break-word;
+    hyphens: none;
+  }
+  :is(h1, h2, h3) { line-height: 1.2; letter-spacing: -0.025em; }
 
-  /* 4) İkon butonlar kare kalsın (en-boy orantısızlığı) */
+  /* Apple benzeri tutarlı kontrol geometrisi: 44px dokunma alanı, kontrollü
+     yatay dolgu ve ezilmeyen ikonlar. Bilinçli küçük/kare kontroller korunur. */
+  :is(button, [role="button"], [role="tab"], [role="switch"], a[href]) {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :is(button, [role="button"], [role="tab"]):not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) {
+    min-height: 44px;
+  }
+  :is(button, [role="button"], [role="tab"]) {
+    max-width: 100%;
+    line-height: 1.25;
+  }
+  :is(button, [role="button"], [role="tab"]) > svg {
+    flex: 0 0 auto;
+  }
   button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
     aspect-ratio: 1 / 1;
     flex: 0 0 auto;
     padding-inline: 0;
   }
 
-  /* 5) KPI kartları ve içindeki sayılar: taşma yerine küçülme */
-  [class*="grid-cols-"] > * { min-width: 0; }
-  [style*="grid-template-columns"] > * { min-width: 0; overflow-wrap: anywhere; }
-
-  /* 5b) Sabit sütunlu ızgaralar mobilde kesilmesin — otomatik sarsın.
-         `repeat(N, …)` içeren inline ızgaralar hedeflenir; `1fr` veya
-         `minmax(0,1.5fr) minmax(0,1fr)` gibi elle yazılmış düzenler korunur.
-         minmax(min(100%,96px),1fr) sayesinde tek sütuna kadar inebilir ve
-         hiçbir zaman ekranı taşırmaz. */
-  [style*="grid-template-columns"][style*="repeat("] {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
+  :is(input, select, textarea) {
+    max-width: 100%;
+    font-size: max(16px, 1em);
   }
-  /* Tailwind ızgaraları: 3 ve üzeri sütunlar sarsın (1-2 sütun zaten mobil uyumlu) */
-  [class*="grid-cols-"]:not([class*="grid-cols-1"]):not([class*="grid-cols-2"]) {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 96px), 1fr)) !important;
+  :is(img, svg, canvas) { max-width: 100%; }
+
+  /* Geniş veri tabloları kartı/sayfayı büyütmek yerine kendi içinde kayar. */
+  :is(.overflow-x-auto, [style*="overflow-x: auto"]) {
+    max-width: 100%;
+    overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
   }
+  :is(.overflow-x-auto, [style*="overflow-x: auto"])::-webkit-scrollbar { display: none; }
 
-  /* 6) Yatay kaydırılabilir buton/sekme şeritleri kesilmesin */
-  [style*="overflow-x"], .overflow-x-auto { scrollbar-width: none; }
-  [style*="overflow-x"]::-webkit-scrollbar, .overflow-x-auto::-webkit-scrollbar { display: none; }
-
-  /* 7) Alt navigasyon içeriği kapatmasın */
+  /* Alt navigasyon içeriği kapatmasın; güvenli alan tüm clay sayfalarında aynı. */
   main, .page-shell, .clay-shell, .mk-shell, .dt-shell, .sp-shell,
   .ml-root, .pl-root, .mg-root {
     padding-bottom: calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px)) !important;
   }
-
-  /* 8) Uzun metin/sayılar kutuyu patlatmasın */
-  h1, h2, h3, td, th { overflow-wrap: anywhere; }
 }
