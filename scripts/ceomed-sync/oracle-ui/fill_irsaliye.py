@@ -450,8 +450,19 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
             f"Tıklama: {tiklama!r}. Yazılmadı."
         )
 
-    ui60.alan_yaz(deger.strip(), "aciklama")
-    log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
+    # ASCII'ye indirgenerek yazılır. Sahada ölçüldü: 'PİNCH TUBE' alana
+    # "PA'NCH TUBE" olarak düştü — Ceomed karakter kümesi 'İ' harfini taşımıyor
+    # ve bozulma yalnızca gözle fark edilebiliyor, geri okuma yakalamıyor.
+    # Muhasebe açıklamasında bozuk karakter, okunabilir ASCII'den kötüdür.
+    ascii_aciklama = ui60.ascii_indirge(deger.strip())
+    ui60.alan_yaz(ascii_aciklama, "aciklama")
+    if ascii_aciklama != deger.strip():
+        log.append(
+            f"aciklama: {ascii_aciklama!r} yazıldı "
+            f"(Türkçe karakterler ASCII'ye indirgendi)"
+        )
+    else:
+        log.append(f"aciklama: {ascii_aciklama!r} yazıldı ve geri okundu")
 
 
 def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:

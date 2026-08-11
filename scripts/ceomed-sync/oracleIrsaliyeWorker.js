@@ -157,6 +157,26 @@ async function markSent(db, job, result) {
 }
 
 /**
+ * Sürücünün adım adım ne yaptığını log'a yazar.
+ *
+ * NEDEN: Python her alan yazımını, F6 sonucunu ve atladığı adımları bir diziye
+ * kaydediyordu ama bu dizi hiçbir yere ulaşmıyordu; log'da yalnızca tek satırlık
+ * "gönderildi" özeti vardı. Sahada "F6 yapılmadı ama logda buna dair bir şey
+ * yok" denildi — haklıydı, otomasyonun ne yaptığı kayıtlı değildi.
+ *
+ * Başarıda da yazılıyor: bir işin doğru gittiğini varsaymak yerine adımlardan
+ * görebilmek, sessizce atlanan bir alanı (ör. yazılamayıp geçilen sevk adresi)
+ * yakalamanın tek yolu.
+ */
+function adimlariYaz(ozet, result) {
+  const adimlar = (result && result.adimlar) || [];
+  if (adimlar.length === 0) return;
+  for (const adim of adimlar) log('adım', `${ozet} | ${adim}`);
+  if (result && result.not) log('adım', `${ozet} | NOT: ${result.not}`);
+  if (result && result.screenshotPath) log('adım', `${ozet} | görüntü: ${result.screenshotPath}`);
+}
+
+/**
  * Başarılı gönderim sonrası açık kullanıcılara push bildirimi yazar.
  *
  * NASIL ÇALIŞIR: `notifications` koleksiyonuna bir doküman yazılır;
@@ -314,6 +334,7 @@ async function processJob(db, driver, jobId) {
   }
 
   if (!result || !result.ok) {
+    adimlariYaz(ozet, result);
     const mesaj = (result && result.error) || 'Sürücü sebep belirtmeden başarısız döndü.';
     const retryable = !result || result.retryable !== false;
     const tekrar = await markFailure(db, job, mesaj, retryable);
@@ -334,6 +355,7 @@ async function processJob(db, driver, jobId) {
     return;
   }
 
+  adimlariYaz(ozet, result);
   dailyCounter.adet += 1;
   await markSent(db, job, result);
   await bildirimYaz(db, job, result);
