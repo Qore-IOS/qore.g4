@@ -13,10 +13,39 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+
+        <!--
+            Sistem çubukları saydam.
+
+            Çubuklar `MainActivity` tarafından gizleniyor; bu ayarlar
+            kullanıcı kenardan kaydırıp onları GEÇİCİ olarak çağırdığında
+            devreye giriyor. Opak bırakılsalardı o anda ekranın üstünde ve
+            altında iki koyu şerit belirip arayüzü aşağı kaydırırdı.
+        -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+
+        <!--
+            Çentikli/delikli ekranlarda o alan da kullanılsın.
+
+            API 27 öncesinde bu öznitelik yok sayılır — eski cihazlarda zaten
+            çentik de yok. Ayrı bir `values-v27` dosyası açmak gereksiz.
+        -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 
+    <!--
+        Açılış (splash) teması.
 
+        Tam ekran bayrakları BURAYA DA gerekli: uygulama açılırken bu tema
+        etkin oluyor ve `MainActivity.onCreate` henüz çalışmamış oluyor.
+        Olmadığında her açılışta durum çubuğu bir an görünüp kayboluyor —
+        günde yüzlerce kez açılan bir uygulamada göze batan bir sıçrama.
+    -->
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 </resources>
