@@ -1,29 +1,40 @@
 #!/usr/bin/env node
 
 /** Fail CI/builds when unresolved Git merge markers reach source files. */
-const { execFileSync } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 
-const markerPattern = '^(<<<<<<<|=======|>>>>>>>)';
-const args = [
-  '--line-number',
-  '--regexp', markerPattern,
-  'src',
-  'scripts',
-  '--glob', '!**/node_modules/**',
-  '--glob', '!src/lib/exceljs-browser.min.js',
-];
+const roots = ['src', 'scripts'];
+const excludedDirectories = new Set(['node_modules', '.next', '.git']);
+const excludedFiles = new Set([path.normalize('src/lib/exceljs-browser.min.js')]);
+const markerPattern = /^(<<<<<<<|=======|>>>>>>>)/;
+const findings = [];
 
-try {
-  const output = execFileSync('rg', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  process.stderr.write('Çözümlenmemiş Git conflict marker bulundu:\n');
-  process.stderr.write(output);
-  process.exit(1);
-} catch (error) {
-  // ripgrep 1: no matches. Any other code means the guard itself failed.
-  if (error?.status === 1) {
-    process.stdout.write('Conflict marker source guard passed.\n');
-    process.exit(0);
+function scan(target) {
+  if (!fs.existsSync(target)) return;
+  const stat = fs.statSync(target);
+  if (stat.isDirectory()) {
+    if (excludedDirectories.has(path.basename(target))) return;
+    for (const entry of fs.readdirSync(target)) scan(path.join(target, entry));
+    return;
   }
-  process.stderr.write(error?.stderr || String(error));
-  process.exit(error?.status || 1);
+  if (!stat.isFile() || excludedFiles.has(path.normalize(target))) return;
+
+  // Source files are UTF-8 text in this repository. Reading binary-like files
+  // is harmless, but null bytes let us skip them without producing noise.
+  const content = fs.readFileSync(target, 'utf8');
+  if (content.includes('\0')) return;
+  content.split(/\r?\n/).forEach((line, index) => {
+    if (markerPattern.test(line)) findings.push(`${target}:${index + 1}:${line}`);
+  });
 }
+
+for (const root of roots) scan(root);
+
+if (findings.length) {
+  process.stderr.write('Çözümlenmemiş Git conflict marker bulundu:\n');
+  process.stderr.write(`${findings.join('\n')}\n`);
+  process.exit(1);
+}
+
+process.stdout.write('Conflict marker source guard passed.\n');
