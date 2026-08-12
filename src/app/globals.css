@@ -4556,6 +4556,67 @@ html.qt-active { color: var(--qt-text); }
   }
 }
 
+/* Counter test detay ve karşılaştırma paneli */
+.counter-detail { display: flex; flex-direction: column; gap: 16px; }
+.counter-detail-toolbar { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding: 14px; border-radius: 24px; background: linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2)); box-shadow: var(--qc-clay); }
+.counter-detail-select { min-width: 220px; flex: 1 1 240px; }
+.counter-detail-select > span { display: block; margin: 0 0 7px 4px; color: var(--qc-ink3); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.counter-detail-select select { width: 100%; min-height: 46px; padding: 0 38px 0 14px; color: var(--qc-ink1); background: var(--qc-surface2); border: 1px solid var(--qc-line); border-radius: 15px; box-shadow: var(--qc-clay-inset); font-size: 13px; font-weight: 700; cursor: pointer; }
+.counter-compare-icon { width: 44px; height: 44px; display: grid; place-items: center; flex: 0 0 auto; margin-bottom: 1px; color: var(--qc-accent); border-radius: 14px; background: color-mix(in srgb, var(--qc-accent) 12%, var(--qc-surface-hi)); box-shadow: var(--qc-clay-flat); }
+.counter-detail-single { max-width: 1180px; width: 100%; margin: 0 auto; }
+.counter-detail-compare { display: grid; grid-template-columns: minmax(0, 1fr) 94px minmax(0, 1fr); align-items: start; gap: 14px; }
+.counter-test-side { --test-color: var(--qc-accent); min-width: 0; display: flex; flex-direction: column; gap: 16px; }
+.counter-test-hero { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 15px; }
+.counter-test-icon { width: 54px; height: 54px; display: grid; place-items: center; color: var(--test-color); border-radius: 18px; background: color-mix(in srgb, var(--test-color) 14%, var(--qc-surface-hi)); box-shadow: var(--qc-clay-flat); }
+.counter-test-code { color: var(--test-color); font-size: 10px; font-weight: 900; letter-spacing: .13em; text-transform: uppercase; }
+.counter-test-hero h1 { margin: 3px 0 0; color: var(--qc-ink1); font-size: clamp(21px, 2vw, 34px); font-weight: 900; line-height: 1.1; letter-spacing: -.035em; }
+.counter-test-hero p { margin: 6px 0 0; color: var(--qc-ink3); font-size: 12px; font-weight: 650; }
+.counter-test-total { min-width: 126px; text-align: right; }
+.counter-test-total strong { display: block; color: var(--test-color); font-size: clamp(30px, 4vw, 48px); font-weight: 900; letter-spacing: -.05em; font-variant-numeric: tabular-nums; line-height: 1; }
+.counter-test-total span { display: block; margin-top: 7px; color: var(--qc-ink3); font-size: 9px; font-weight: 850; letter-spacing: .12em; }
+.counter-trend-chip { display: inline-flex; align-items: center; gap: 7px; width: max-content; max-width: 100%; margin-top: 17px; padding: 8px 12px; border-radius: 999px; font-size: 11px; font-weight: 700; box-shadow: var(--qc-clay-flat); }
+.counter-trend-chip.up, .counter-lab-delta.up { color: #397E5B; background: rgba(111,181,133,.15); }
+.counter-trend-chip.down, .counter-lab-delta.down { color: #B85F58; background: rgba(232,120,120,.14); }
+.counter-section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.counter-section-title h2 { margin: 0; color: var(--qc-ink1); font-size: 16px; font-weight: 850; }
+.counter-section-title p { margin: 4px 0 0; color: var(--qc-ink3); font-size: 11px; font-weight: 650; }
+.counter-chart-lg { width: 100%; height: 285px; }
+.counter-chart-md { width: 100%; height: 260px; }
+.counter-lab-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 12px; }
+.counter-lab-row { min-width: 0; display: grid; grid-template-columns: 8px 17px minmax(0,1fr) auto auto; align-items: center; gap: 7px; padding: 10px; color: var(--qc-ink2); background: var(--qc-surface2); border-radius: 14px; box-shadow: var(--qc-clay-inset); font-size: 11px; }
+.counter-lab-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.counter-lab-dot { width: 8px; height: 8px; border-radius: 50%; }
+.counter-lab-delta { padding: 4px 7px; border-radius: 999px; font-size: 9px; font-weight: 850; white-space: nowrap; }
+.counter-comparison-rail { position: sticky; top: 18px; display: flex; flex-direction: column; align-items: stretch; gap: 78px; padding-top: 130px; }
+.counter-compare-marker { display: flex; flex-direction: column; align-items: center; text-align: center; }
+.counter-compare-marker > span { color: var(--qc-ink3); font-size: 9px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
+.counter-compare-marker small { margin-top: 5px; color: var(--qc-ink3); font-size: 9px; font-weight: 700; }
+.counter-compare-arrow { position: relative; width: 70px; height: 34px; display: grid; place-items: center; margin-top: 7px; color: white; }
+.counter-compare-arrow i { position: absolute; inset: 0 9px; background: linear-gradient(135deg, #A78BFA, #6EA8FF); border-radius: 12px; box-shadow: 0 8px 16px -9px rgba(110,168,255,.8); }
+.counter-compare-arrow b { position: relative; z-index: 1; font-size: 25px; line-height: 1; }
+.counter-compare-arrow.left i { clip-path: polygon(22% 0,100% 0,100% 100%,22% 100%,0 50%); }
+.counter-compare-arrow.right i { clip-path: polygon(0 0,78% 0,100% 50%,78% 100%,0 100%); }
+.counter-compare-arrow.equal i { background: linear-gradient(135deg, #BEB5A2, #968D7C); }
+
+@media (max-width: 1100px) {
+  .counter-detail-compare { grid-template-columns: 1fr; }
+  .counter-comparison-rail { position: static; order: 2; flex-direction: row; justify-content: center; gap: 14px; padding: 2px 0; overflow-x: auto; }
+  .counter-detail-compare .counter-test-side:last-child { order: 3; }
+  .counter-compare-marker { min-width: 76px; }
+}
+@media (max-width: 767px) {
+  .counter-detail-toolbar { padding: 12px; border-radius: 20px; }
+  .counter-detail-select { min-width: 100%; flex-basis: 100%; }
+  .counter-compare-icon { display: none; }
+  .counter-test-hero { grid-template-columns: auto minmax(0,1fr); }
+  .counter-test-total { grid-column: 1 / -1; display: flex; align-items: baseline; justify-content: space-between; text-align: left; padding-top: 8px; border-top: 1px solid var(--qc-line); }
+  .counter-test-total strong { font-size: 34px; }
+  .counter-chart-lg { height: 235px; }
+  .counter-chart-md { height: 230px; }
+  .counter-lab-list { grid-template-columns: 1fr; }
+  .counter-comparison-rail { justify-content: flex-start; }
+}
+
 /* ==========================================================================
    YÖNETİM AĞACI — ORTAK CLAY SÖZLEŞMESİ
    `/yonetim` layout'u bu scope'u bütün alt rotalara taşır. Böylece eski
@@ -7356,20 +7417,14 @@ body > main,
   }
   :is(h1, h2, h3) { line-height: 1.2; letter-spacing: -0.025em; }
 
-  /* Boş `flex:1` ARA BOŞLUKLARI mobilde gizlenir. Masaüstünde öğeleri iki yana
-     iten bu spacer'lar, satır sarınca kendi başına bir satır kaplayıp araç
-     çubuğunu dağıtıyordu (adım göstergesi ve butonların kayması). */
-  [style*="flex: 1"]:empty, [style*="flex:1"]:empty,
-  [style*="flex-grow: 1"]:empty, [style*="flex-grow:1"]:empty { display: none !important; }
-
-  /* Tutarlı kontrol geometrisi: dokunma alanı, kontrollü yatay dolgu ve
-     ezilmeyen ikonlar. */
+  /* Apple benzeri tutarlı kontrol geometrisi: 44px dokunma alanı, kontrollü
+     yatay dolgu ve ezilmeyen ikonlar. Bilinçli küçük/kare kontroller korunur. */
   :is(button, [role="button"], [role="tab"], [role="switch"], a[href]) {
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
   :is(button, [role="button"], [role="tab"]):not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) {
-    min-height: 42px;
+    min-height: 44px;
   }
   :is(button, [role="button"], [role="tab"]) {
     max-width: 100%;
@@ -7378,13 +7433,10 @@ body > main,
   :is(button, [role="button"], [role="tab"]) > svg {
     flex: 0 0 auto;
   }
-
-  /* Dokunma hedefi GENİŞLİĞİ. NOT: burada `aspect-ratio:1` KULLANILMAZ —
-     `svg:only-child` metin düğümlerini saymadığı için "<ikon> Geri Dön" gibi
-     butonlar da ikon-only sanılıp kareye zorlanıyor ve etiket kutunun dışına
-     taşıyordu ("Ge/Dö/n"). Genişliği içerik belirler, yalnızca alt sınır konur;
-     ikon-only buton doğal olarak kare çıkar. */
-  button:not([class*="w-"]):not([style*="width"]) { min-width: 42px; }
+  button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
+    aspect-ratio: 1 / 1;
+    flex: 0 0 auto;
+  }
 
   /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
   :is(input, select, textarea) {
