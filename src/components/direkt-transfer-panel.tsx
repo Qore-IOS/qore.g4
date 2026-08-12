@@ -382,13 +382,13 @@ function DTAddTile({ icon, label, onClick, disabled, lockReason }: {
 
 function DTStepper({ steps }: { steps: { label: string; done: boolean }[] }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className="dt-stepper" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {steps.map((s, i) => {
         const prevDone = i === 0 || steps[i - 1]?.done;
         const cur = !s.done && prevDone;
         return (
           <React.Fragment key={i}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div className="dt-step" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{
                 width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 800,
                 background: s.done ? 'linear-gradient(180deg, #8FD3A6, #6FB585)' : cur ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
@@ -397,10 +397,10 @@ function DTStepper({ steps }: { steps: { label: string; done: boolean }[] }) {
               }}>
                 {s.done ? <Check size={15} /> : i + 1}
               </span>
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{s.label}</span>
+              <span className="dt-step-label" style={{ fontSize: 13.5, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{s.label}</span>
             </div>
             {i < steps.length - 1 && (
-              <span style={{ width: 38, height: 2.5, borderRadius: 2, background: s.done ? C.waterSolid : C.ink3, opacity: s.done ? 1 : 0.3, transition: 'all 320ms ease' }} />
+              <span className="dt-step-line" style={{ width: 38, height: 2.5, borderRadius: 2, background: s.done ? C.waterSolid : C.ink3, opacity: s.done ? 1 : 0.3, transition: 'all 320ms ease' }} />
             )}
           </React.Fragment>
         );
@@ -1765,6 +1765,15 @@ export default function DirektTransferPanel() {
         @keyframes dtPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         @keyframes dtRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
         .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: var(--qc-shell-bg); color: var(--qc-ink1); min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
+        /* Mobil: adım göstergesi kompaktlaşır — etiketler gizlenir, yalnızca
+           numaralı daireler ve kısa bağlayıcılar kalır. Böylece başlık dar
+           ekranda kırpılmadan tek satırda durur. */
+        @media (max-width: 640px) {
+          .dt-stepper { gap: 2px; }
+          .dt-step { gap: 0 !important; }
+          .dt-step-label { display: none !important; }
+          .dt-step-line { width: 14px !important; }
+        }
         .dt-grid { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
         @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
         .dt-prod-row:hover { transform: translateY(-1px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 8px 22px -8px rgba(150,128,96,0.28), 0 2px 6px -2px rgba(150,128,96,0.14); }

@@ -7346,6 +7346,7 @@ body > main,
     min-width: 0;
   }
 
+<<<<<<< Updated upstream
   /* Metinler kelime bütünlüğünü korur. `overflow-wrap:anywhere` Türkçe başlıkları
      tek harflik sütunlara ayırdığı için yalnızca gerçek, kesintisiz kimliklerde
      devreye girecek güvenli kırılma kullanılır. */
@@ -7377,6 +7378,23 @@ body > main,
     flex: 0 0 auto;
     padding-inline: 0;
   }
+=======
+  /* 2d) Boş `flex:1` ARA BOŞLUKLARI mobilde gizlenir. Masaüstünde öğeleri iki
+         yana iten bu spacer'lar, satır sarınca kendi başına bir satır kaplayıp
+         araç çubuğunu dağıtıyordu (adım göstergesi ve butonların kayması). */
+  [style*="flex: 1"]:empty, [style*="flex:1"]:empty,
+  [style*="flex-grow: 1"]:empty, [style*="flex-grow:1"]:empty { display: none !important; }
+
+  /* 3) Dokunma hedefi: yüksekliği açıkça verilmemiş butonlar ezilmesin */
+  button:not([class*="h-"]):not([style*="height"]):not([style*="aspect"]) { min-height: 42px; }
+
+  /* 4) Dokunma hedefi genişliği. NOT: burada `aspect-ratio:1` KULLANILMAZ —
+        `svg:only-child` metin düğümlerini saymadığı için "<ikon> Geri Dön" gibi
+        butonlar da ikon-only sanılıp kareye zorlanıyor ve etiket kutunun
+        dışına taşıyordu ("Ge/Dö/n"). Genişliği içerik belirler, yalnızca
+        alt sınır konur; ikon-only buton doğal olarak kare çıkar. */
+  button:not([class*="w-"]):not([style*="width"]) { min-width: 42px; }
+>>>>>>> Stashed changes
 
   /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
   :is(input, select, textarea) {
