@@ -52,12 +52,13 @@ const config: CapacitorConfig = {
     backgroundColor: '#09090b',
 
     /**
-     * Android 15 (API 35) uçtan uca çizimi zorunlu kılar; önlem alınmazsa
-     * terminalin üst şeridi durum çubuğunun ALTINDA kalır ve depo/bağlantı
-     * göstergesi yarısı görünmez olur. `auto`, yalnızca gereken sürümlerde
-     * güvenli alan boşluğunu ekler.
+     * Güvenli alan boşluğu EKLENMEZ — çünkü sistem çubukları hiç yok.
+     *
+     * `MainActivity` durum ve gezinme çubuklarını gizliyor (tam ekran kip).
+     * Bu ayar `auto` kalsaydı Capacitor, olmayan çubuklar için üstte ve altta
+     * boşluk bırakacak ve ekranın bir kısmı boşuna harcanacaktı.
      */
-    adjustMarginsForEdgeToEdge: 'auto',
+    adjustMarginsForEdgeToEdge: 'disable',
   },
 
   plugins: {

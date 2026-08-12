@@ -246,6 +246,60 @@ asıl koruma `default-src 'self'` ve `connect-src` beyaz listesi.
 
 ---
 
+## Tam ekran (immersive) kip
+
+Uygulama açıldığında **durum çubuğu ve gezinme çubuğu gizlenir**; ekranın
+tamamı işe ayrılır. Bu bir depo terminali: üstteki saat/pil/bildirim şeridi
+hem yer yiyor hem de vardiya ortasında gelen bir bildirim okutma akışını
+bölüyor.
+
+Çubuklar **kaybolmaz, gizlenir**: kenardan kaydırınca geçici olarak gelir,
+birkaç saniye sonra kendiliğinden çekilir. Tamamen erişilemez yapmak — gerçek
+kiosk kilidi — cihazın sahiplik (device owner) ayarlarını gerektirir ve
+kullanıcıyı telefonundan eder; istenen bu değil.
+
+Üç yerde ele alındı:
+
+| Yer | Ne yapıyor |
+| --- | --- |
+| `MainActivity.java` | Çubukları gizler; `onWindowFocusChanged` ile geri geldiklerinde yeniden gizler |
+| `styles.xml` | Açılış temasında da tam ekran — yoksa her açılışta bir an durum çubuğu görünüp kayboluyor |
+| `capacitor.config.ts` | `adjustMarginsForEdgeToEdge: 'disable'` — olmayan çubuklar için boşluk bırakılmasın |
+
+### İki incelik
+
+**`onWindowFocusChanged` şart.** Sistem, uygulama odağı kaybedip geri
+kazandığında (bildirim gölgesi, kamera izni penceresi, paylaşım sayfası)
+çubukları KALICI olarak geri getiriyor. O geri çağrı olmadan uygulama ilk izin
+isteğinden sonra tam ekranlığını kaybediyor ve bir daha kazanmıyor.
+
+**`setDecorFitsSystemWindows(false)` bilerek çağrılmıyor.** Pencere yerleşimi
+sistemin insets hesabından alınırsa yazılım klavyesi açıldığında içerik yukarı
+itilmez ve raf adresi / irsaliye numarası gibi alanlar klavyenin altında
+kalır. Çubuklar zaten gizli olduğu için insets sıfır ve içerik ekranı
+dolduruyor; ikisini birden yapmaya gerek yok. Manifest'te
+`windowSoftInputMode="adjustResize"` bunu açıkça sabitliyor.
+
+---
+
+## Ana ekran widget'ı — ne gerekir
+
+Henüz yok. Teknik engel şu: widget AYRI BİR SÜREÇTE çalışır ve WebView'ın
+IndexedDB'sini okuyamaz. Terminalin bütün verisi orada durduğu için widget
+"bekleyen işlem sayısı" gibi en basit bilgiye bile doğrudan erişemez.
+
+Yapılabilir yol iki parçalı:
+
+1. Web katmanı, göstermek istediğimiz ÖZETİ her değiştiğinde
+   `@capacitor/preferences` ile yazar (Android tarafında `SharedPreferences`).
+2. Yerel bir `AppWidgetProvider` o özeti okuyup çizer ve
+   `AppWidgetManager.updateAppWidget` ile tazeler.
+
+Yani widget'ın göstereceği şeyin önceden kararlaştırılması gerekiyor — veri
+köprüsü ancak taşınacak alanlar belliyken yazılabilir.
+
+---
+
 ## İnen veri diskte nerede duruyor?
 
 Terminalin tüm çalışma verisi Firestore'un kalıcı önbelleğinde, yani
