@@ -20,18 +20,16 @@ export function YonetimShell({ children }: { children: React.ReactNode }) {
   const isMobile = useIsMobile();
   return (
     <div
-      className="mg-root"
+      className="mg-root yonetim-hub-shell"
       style={{
         minHeight: '100vh',
-        padding: isMobile ? '14px 14px 24px' : '20px 24px 32px',
-        background: `radial-gradient(ellipse at 0% 0%, rgba(251,146,60,0.06) 0%, transparent 50%),
-                     radial-gradient(ellipse at 100% 100%, rgba(167,139,250,0.04) 0%, transparent 50%),
-                     var(--mg-bg)`,
+        padding: isMobile ? '16px 14px 28px' : '24px clamp(24px, 3vw, 44px) 40px',
+        background: 'transparent',
         color: 'var(--mg-text)',
         letterSpacing: '-0.005em',
         display: 'flex',
         flexDirection: 'column',
-        gap: isMobile ? 14 : 18,
+        gap: isMobile ? 16 : 20,
       }}
     >
       {children}
@@ -54,15 +52,16 @@ export function YonetimHeader({ title, description, backHref, rightAction }: Yon
   const router = useRouter();
   const isMobile = useIsMobile();
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+    <div className="yonetim-hub-header" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       <button
         onClick={() => (backHref ? router.push(backHref) : router.back())}
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: '50%',
+          width: isMobile ? 44 : 42,
+          height: isMobile ? 44 : 42,
+          borderRadius: 15,
           background: 'var(--mg-surface)',
           border: '1px solid var(--mg-border)',
+          boxShadow: 'var(--qc-clay-flat)',
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
@@ -77,8 +76,8 @@ export function YonetimHeader({ title, description, backHref, rightAction }: Yon
       <div style={{ flex: 1, minWidth: 0 }}>
         <h1
           style={{
-            fontSize: isMobile ? 22 : 28,
-            fontWeight: 700,
+            fontSize: isMobile ? 23 : 30,
+            fontWeight: 800,
             letterSpacing: '-0.02em',
             color: 'var(--mg-text)',
             margin: 0,
@@ -90,7 +89,7 @@ export function YonetimHeader({ title, description, backHref, rightAction }: Yon
         {description && (
           <p
             style={{
-              fontSize: 12,
+              fontSize: isMobile ? 13 : 14,
               color: 'var(--mg-muted)',
               margin: '4px 0 0',
               fontWeight: 500,
@@ -132,12 +131,14 @@ export function YonetimTile({
 }: YonetimTileProps) {
   const content = (
     <div
+      className="yonetim-hub-tile"
       onClick={onClick}
       style={{
-        background: 'linear-gradient(135deg, rgba(255,255,255,0.025), rgba(255,255,255,0.005))',
+        background: 'linear-gradient(145deg, var(--qc-surface-hi), var(--qc-surface2))',
         border: '1px solid var(--mg-border)',
-        borderRadius: 20,
-        padding: '18px 20px',
+        borderRadius: 26,
+        padding: '20px',
+        boxShadow: 'var(--qc-clay)',
         position: 'relative',
         overflow: 'hidden',
         cursor: 'pointer',
@@ -145,15 +146,15 @@ export function YonetimTile({
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
-        minHeight: 140,
+        minHeight: 154,
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.transform = 'translateY(-3px)';
-        e.currentTarget.style.boxShadow = `0 16px 48px rgba(0,0,0,0.3), 0 0 0 1px ${color}33`;
+        e.currentTarget.style.transform = 'translateY(-2px)';
+        e.currentTarget.style.boxShadow = `var(--qc-clay), 0 12px 26px -18px ${color}`;
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.transform = 'none';
-        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.boxShadow = 'var(--qc-clay)';
       }}
     >
       {/* Soft glow blob */}
@@ -268,8 +269,8 @@ export function YonetimTileGrid({ children }: { children: React.ReactNode }) {
     <div
       style={{
         display: 'grid',
-        gridTemplateColumns: isMobile ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(220px, 1fr))',
-        gap: isMobile ? 10 : 14,
+        gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(240px, 1fr))',
+        gap: isMobile ? 14 : 18,
       }}
     >
       {children}
@@ -294,11 +295,13 @@ export function YonetimCard({
 }) {
   return (
     <div
+      className="yonetim-hub-card"
       style={{
         background: 'var(--mg-surface)',
         border: '1px solid var(--mg-border)',
-        borderRadius: 18,
+        borderRadius: 28,
         padding,
+        boxShadow: 'var(--qc-clay)',
         display: 'flex',
         flexDirection: 'column',
         gap: 12,
