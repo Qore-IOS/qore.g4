@@ -3,7 +3,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { orderBy } from 'firebase/firestore';
 import {
-  BarChart3, FileSpreadsheet, Loader2, ChevronDown, Check, Download,
+  BarChart3, FileSpreadsheet, Loader2, ChevronDown, Check,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
@@ -12,8 +12,9 @@ import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import {
-  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, PrimaryBtn, FieldLabel, Dropdown,
+  C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, FieldLabel,
 } from '@/components/raporlama/rapor-kit';
+import CounterTestDetail from '@/components/yonetim/CounterTestDetail';
 
 const EASE = 'cubic-bezier(.22, 1, .36, 1)';
 
@@ -146,6 +147,8 @@ export default function CounterAnalizPage() {
   const [analysisYear, setAnalysisYear] = useState(new Date().getFullYear());
   const [analysisMonth, setAnalysisMonth] = useState(new Date().getMonth());
   const [analysisLab, setAnalysisLab] = useState('__all__');
+  const [detailTestId, setDetailTestId] = useState<string | null>(null);
+  const [comparisonTestId, setComparisonTestId] = useState<string | undefined>();
 
   // Load cumulative history
   useEffect(() => {
@@ -317,6 +320,12 @@ export default function CounterAnalizPage() {
     { value: '__all__', label: 'Tüm Laboratuvarlar' },
     ...labs.map((l) => ({ value: l.id, label: l.name })),
   ];
+  const testOptions = [
+    { value: '', label: 'Test detayı seçin' },
+    ...testDefs.map((test) => ({ value: test.id, label: test.sutTestAdi || test.sutKodu || 'Tanımsız test' })),
+  ];
+  const detailTest = testDefs.find((test) => test.id === detailTestId);
+  const comparisonTest = testDefs.find((test) => test.id === comparisonTestId);
 
   return (
     <ClayPage>
@@ -329,12 +338,22 @@ export default function CounterAnalizPage() {
           desc="Test tanımlarını seçili dönem kümülatif geçmişiyle eşleştirir; laboratuvar bazında test sayılarını gösterir."
           onBack={() => router.push('/yonetim/test-yonetimi')}
           mobile={mobile}
-          right={
-            <SoftBtn tone={C.waterDeep} onClick={handleExport} disabled={isLoading || tableRows.length === 0}>
-              <FileSpreadsheet size={18} /> Excel&apos;e Aktar
-            </SoftBtn>
-          }
+          right={<div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            {!detailTest && <div style={{ minWidth: mobile ? '100%' : 260 }}><FilterSelect value={detailTestId || ''} onChange={(id) => setDetailTestId(id || null)} options={testOptions} label="Test detayı seçin" /></div>}
+            {!detailTest && <SoftBtn tone={C.waterDeep} onClick={handleExport} disabled={isLoading || tableRows.length === 0}><FileSpreadsheet size={18} /> Excel&apos;e Aktar</SoftBtn>}
+          </div>}
         />
+
+        {detailTest ? <CounterTestDetail
+          primary={detailTest as any}
+          comparison={comparisonTest as any}
+          tests={testDefs as any}
+          records={records}
+          mobile={mobile}
+          onPrimaryChange={(id) => { setDetailTestId(id); if (id === comparisonTestId) setComparisonTestId(undefined); }}
+          onComparisonChange={setComparisonTestId}
+          onClose={() => { setDetailTestId(null); setComparisonTestId(undefined); }}
+        /> : <>
 
         {/* Filter toolbar */}
         <Card style={{ marginBottom: 16, padding: mobile ? 14 : '16px 20px', position: 'relative', zIndex: 40, overflow: 'visible' }}>
@@ -411,7 +430,10 @@ export default function CounterAnalizPage() {
                     const periodVal = analysisMode === 'yearly' ? row.annualTotal : row.selectedTotal;
                     return (
                       <tr key={row.def.id}
-                        style={{ background: rowBg, transition: `background 120ms ${EASE}` }}
+                        role="button" tabIndex={0} aria-label={`${row.def.sutTestAdi || row.def.sutKodu} detayını aç`}
+                        onClick={() => setDetailTestId(row.def.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setDetailTestId(row.def.id); } }}
+                        style={{ background: rowBg, transition: `background 120ms ${EASE}`, cursor: 'pointer' }}
                         onPointerEnter={(e) => { e.currentTarget.style.background = `${AC.primary}09`; }}
                         onPointerLeave={(e) => { e.currentTarget.style.background = rowBg; }}
                       >
@@ -484,6 +506,7 @@ export default function CounterAnalizPage() {
             </div>
           )}
         </Card>
+        </>}
 
       </div>
     </ClayPage>
