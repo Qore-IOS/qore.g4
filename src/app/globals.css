@@ -52,17 +52,20 @@
     --z-float: 1200;
 
     /* Dashboard neumorphic tokens (light mode) */
-    --dashboard-bg: #eae9e5;
-    --dashboard-surface: #eae9e5;
-    --dashboard-surface-2: #eae9e5;
-    --dashboard-stroke: rgba(0, 0, 0, .045);
-    --dashboard-text: #2B2F33;
-    --dashboard-muted: #6C727A;
+    /* CLAY: cihaz-* / yedek parça ailesinin tamamı bu tokenlardan beslenir.
+       Tokenları clay'e bağlayınca panel dosyalarına dokunmadan tüm aile
+       (kartlar, tool item'lar, action tile'lar, pressed durumlar) clay olur. */
+    --dashboard-bg: var(--qc-bg0);
+    --dashboard-surface: var(--qc-surface);
+    --dashboard-surface-2: var(--qc-surface2);
+    --dashboard-stroke: var(--qc-line);
+    --dashboard-text: var(--qc-ink1);
+    --dashboard-muted: var(--qc-ink2);
     --dashboard-accent: #F2994A;
     --dashboard-focus-glow: rgba(185, 182, 214, .55);
-    --dashboard-raised: -10px -10px 22px rgba(255,255,255,.85), 10px 10px 22px rgba(120,120,120,.16);
-    --dashboard-raised-soft: -6px -6px 14px rgba(255,255,255,.75), 6px 6px 14px rgba(120,120,120,.14);
-    --dashboard-pressed: inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16);
+    --dashboard-raised: var(--qc-clay);
+    --dashboard-raised-soft: var(--qc-clay-flat);
+    --dashboard-pressed: var(--qc-clay-inset);
 
     /* Device management module tokens */
     --device-bg: #eae9e5;
@@ -114,17 +117,17 @@
     --ring: 30 51% 54%;
 
     /* Dashboard neumorphic tokens (dark mode) */
-    --dashboard-bg: #000000;
-    --dashboard-surface: #111111;
-    --dashboard-surface-2: #0A0A0A;
-    --dashboard-stroke: rgba(255, 255, 255, 0.08);
-    --dashboard-text: #F0F0F0;
-    --dashboard-muted: #9CA3AF;
+    --dashboard-bg: var(--qc-bg0);
+    --dashboard-surface: var(--qc-surface);
+    --dashboard-surface-2: var(--qc-surface2);
+    --dashboard-stroke: var(--qc-line);
+    --dashboard-text: var(--qc-ink1);
+    --dashboard-muted: var(--qc-ink2);
     --dashboard-accent: #F2994A;
     --dashboard-focus-glow: rgba(245, 158, 11, 0.30);
-    --dashboard-raised: 0 2px 10px rgba(0, 0, 0, 0.5);
-    --dashboard-raised-soft: 0 1px 6px rgba(0, 0, 0, 0.4);
-    --dashboard-pressed: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+    --dashboard-raised: var(--qc-clay);
+    --dashboard-raised-soft: var(--qc-clay-flat);
+    --dashboard-pressed: var(--qc-clay-inset);
 
     /* Device management module tokens (dark mode) */
     --device-bg: #000000;
@@ -7460,3 +7463,30 @@ body > main,
     padding-bottom: calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
+
+/* ==========================================================================
+   YEDEK PARÇA / CİHAZ YÖNETİMİ ailesi — clay yüzey dili.
+   Sınıflar `--dashboard-*` tokenlarından beslendiği için renkler ve gölgeler
+   zaten clay'e bağlandı; burada yalnızca clay'in yuvarlaklık ve gradyan
+   karakteri veriliyor. Panel dosyalarına dokunulmaz.
+   ========================================================================== */
+.cihaz-card,
+.cihaz-card-strong,
+.cihaz-action-tile,
+.cihaz-tool-item {
+  background: linear-gradient(180deg, var(--qc-surface) 0%, var(--qc-surface2) 100%) !important;
+  border: 1px solid var(--qc-line) !important;
+}
+.cihaz-card { border-radius: var(--qc-radius, 22px); }
+.cihaz-card-strong { border-radius: var(--qc-radius-lg, 26px); }
+.cihaz-action-tile, .cihaz-tool-item { border-radius: var(--qc-radius, 22px); }
+.cihaz-pressed {
+  background: var(--qc-surface2) !important;
+  box-shadow: var(--qc-clay-inset) !important;
+  border-radius: var(--qc-radius-sm, 14px);
+}
+.cihaz-focus-ring:focus-visible { box-shadow: 0 0 0 3px var(--qc-accent-glow) !important; }
+.cihaz-section-label { color: var(--qc-ink2); }
+/* Vurgulu ikon/aksiyon renkleri clay bronzuna çekilir */
+.cihaz-action-tile:hover, .cihaz-tool-item:hover { box-shadow: var(--qc-clay) !important; }
+.cihaz-action-tile:active, .cihaz-tool-item:active { box-shadow: var(--qc-clay-press) !important; }
