@@ -1,9 +1,12 @@
 /**
  * @fileoverview Terminal — Direkt Transfer (hızlı akış).
  *
- * KAPSAM: Depoda fiilen duran, seri numaralı kalemlerin laboratuvara sevki.
- * Borç deposu modu, lot/adet tahsisi (FEFO ile kısmi dağıtım), şablonlar ve
- * tutanak basımı BİLEREK dışarıda bırakıldı — bunlar web panelinde kalır.
+ * KAPSAM: Depoda fiilen duran kalemlerin laboratuvara sevki — hem seri
+ * numaralı hem lot/adet takipli ürünler. Seri numarasız okutmada belge FEFO
+ * ile seçilir (miadı yakın olan önce tüketilir) ve kısmi adet sevk edilir.
+ *
+ * Borç deposu modu ve şablonlar BİLEREK dışarıda bırakıldı — web panelinde
+ * kalır.
  *
  * Yazma `@/lib/direkt-transfer/write` üzerinden yapılır; web paneliyle aynı
  * belgeler üretilir.
@@ -14,7 +17,7 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
-import { FileDown, Loader2, Trash2 } from 'lucide-react';
+import { FileDown, Loader2, Minus, Plus, Trash2 } from 'lucide-react';
 
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/contexts/auth-context';
@@ -37,8 +40,11 @@ import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import {
   applyTransferItemWrites,
   buildTransferHeader,
+  type TransferableStockItem,
   type TransferWriteContext,
 } from '@/lib/direkt-transfer/write';
+// Seri numarasız (lot/adet takipli) kalemler için FEFO'lu belge seçimi.
+import { pickOneUnit } from '@/lib/terminal/quantity-picking';
 import { getStockItemQuantity } from '@/lib/stock-quantity';
 import type { DepoStokItem } from '@/lib/types';
 // Tutanak, transfer geçmişi detay sayfasının kullandığı ÜRETİCİNİN AYNISIYLA
@@ -100,7 +106,15 @@ export default function TerminalTransferPage() {
 
   const [depotId, setDepotId] = useTerminalDepot();
   const [labId, setLabId] = useState('');
-  const [items, setItems] = useState<DepoStokItem[]>([]);
+  /**
+   * Sevk listesi.
+   *
+   * `transferAdet` seri numarasız kalemler için doldurulur; `applyTransferItemWrites`
+   * o alanı görünce kaynak belgeden yalnızca o kadarını düşüp kalanı depoda
+   * bırakıyor (kısmi transfer). Seri numaralı kalemlerde alan boş kalır ve
+   * belgenin tamamı sevk edilir.
+   */
+  const [items, setItems] = useState<TransferableStockItem[]>([]);
   const [feedback, setFeedback] = useState<ScanFeedback>(IDLE);
   const [lastTransfer, setLastTransfer] = useState<LastTransfer | null>(null);
   const [tutanakBusy, setTutanakBusy] = useState(false);
@@ -131,6 +145,16 @@ export default function TerminalTransferPage() {
 
   const pickedIds = useRef<Set<string>>(new Set());
 
+  /**
+   * Seri numarasız kalemlerde HANGİ belgeden KAÇ adet ayrıldığı.
+   *
+   * Bir `depoStok` belgesi 50 adet taşıyabiliyor ve aynı belgeden arka arkaya
+   * okutma yapılabiliyor. Yalnızca "bu belge seçildi" bilgisi (pickedIds)
+   * yetmez: depoda kalandan fazlasının okutulmasını engellemek ve
+   * `transferAdet`i doğru yazmak için sayı gerekiyor.
+   */
+  const pickedQty = useRef<Map<string, number>>(new Map());
+
   const handleScan = useCallback(
     ({ raw }: { raw: string }) => {
       const code = raw.trim();
@@ -149,13 +173,63 @@ export default function TerminalTransferPage() {
       const hit = parseAndResolveBarcode(code, formats, productCodes);
       const product = hit?.product;
       const serial = (hit?.parsed.seriNumarasi || '').trim();
-      if (!product || !serial) {
+      if (!product) {
         setFeedback({
           tone: 'error',
           title: 'Ürün tanınmadı',
           detail: `Barkod: ${code.slice(0, 40)}`,
         });
         playFeedback(true);
+        return;
+      }
+
+      /**
+       * SERİ NUMARASIZ ÜRÜNLER — FEFO ile adet ayırma.
+       *
+       * Seri numaralı kalemde belge birebir bellidir. Lot/adet takipli üründe
+       * ise aynı ürünün depoda birden çok belgesi olabilir; hangisinden
+       * düşüleceğine MİADA göre karar veriliyor (miadı yakın olan önce
+       * tüketilir). Barkodda lot varsa yalnızca o lot, yoksa ürünün tüm
+       * lotları havuza girer.
+       */
+      if (!serial) {
+        const lot = (hit?.parsed.lotNumarasi || '').trim();
+        const pickedDocId = pickOneUnit(depotStock, pickedQty.current, {
+          stokKodu: product.stokKodu,
+          lotNumarasi: lot || undefined,
+        });
+
+        if (!pickedDocId) {
+          setFeedback({
+            tone: 'error',
+            title: 'Depoda kalmadı',
+            detail: `${product.stokAdi}${lot ? ` · Lot ${lot}` : ''} — bu depoda sevk edilebilir adet yok.`,
+          });
+          playFeedback(true);
+          return;
+        }
+
+        const source = depotStock.find(item => item.id === pickedDocId)!;
+        const nextQty = (pickedQty.current.get(pickedDocId) ?? 0) + 1;
+        pickedQty.current.set(pickedDocId, nextQty);
+        pickedIds.current.add(pickedDocId);
+
+        setItems(prev => {
+          const index = prev.findIndex(item => item.id === pickedDocId);
+          if (index === -1) return [{ ...source, transferAdet: 1 }, ...prev];
+          const next = [...prev];
+          next[index] = { ...next[index], transferAdet: nextQty };
+          return next;
+        });
+
+        setFeedback({
+          tone: 'success',
+          title: product.stokAdi,
+          detail: `${source.lotNumarasi ? `Lot ${source.lotNumarasi} · ` : ''}+1 adet${
+            source.rafAdresi ? ` · Raf ${source.rafAdresi}` : ''
+          }`,
+        });
+        playFeedback();
         return;
       }
 
@@ -189,14 +263,37 @@ export default function TerminalTransferPage() {
       });
       playFeedback();
     },
-    [depotId, labId, formats, productCodes, stockBySerial],
+    [depotId, labId, formats, productCodes, stockBySerial, depotStock],
   );
 
   useHidScanner({ onScan: handleScan });
 
   const removeItem = (id: string) => {
     pickedIds.current.delete(id);
+    // Ayrılan adet de geri bırakılmalı; aksi hâlde satır silindiği hâlde o
+    // belgeden okutmaya devam edilemezdi.
+    pickedQty.current.delete(id);
     setItems(prev => prev.filter(i => i.id !== id));
+  };
+
+  /**
+   * Seri numarasız bir satırın adedini değiştirir.
+   *
+   * Üst sınır depodaki gerçek adet: elde olmayanı sevk listesine yazmak,
+   * transferi Firestore'a gönderildikten sonra negatif stokla sonuçlandırırdı.
+   */
+  const changeQuantity = (id: string, delta: number) => {
+    const source = depotStock.find(item => item.id === id);
+    const available = source ? getStockItemQuantity(source) : 1;
+
+    setItems(prev =>
+      prev.map(item => {
+        if (item.id !== id) return item;
+        const next = Math.min(available, Math.max(1, (item.transferAdet ?? 1) + delta));
+        pickedQty.current.set(id, next);
+        return { ...item, transferAdet: next };
+      }),
+    );
   };
 
   /**
@@ -295,6 +392,7 @@ export default function TerminalTransferPage() {
 
     setItems([]);
     pickedIds.current.clear();
+              pickedQty.current.clear();
     setFeedback({
       tone: 'success',
       title: `${totalShippedAdet} adet sevk edildi`,
@@ -365,7 +463,15 @@ export default function TerminalTransferPage() {
               </span>
             </button>
           ) : null}
-          <TerminalStat label="Kalem" value={items.length} />
+          {/* Satır değil ADET: seri numarasız kalemlerde tek satır 30 adet
+              taşıyabiliyor ve görevli kaç kutu ayırdığını görebilmeli. */}
+          <TerminalStat
+            label="Adet"
+            value={items.reduce(
+              (total, item) => total + (item.transferAdet ?? getStockItemQuantity(item)),
+              0,
+            )}
+          />
         </div>
       }
     >
@@ -378,6 +484,7 @@ export default function TerminalTransferPage() {
               setDepotId(id);
               setItems([]);
               pickedIds.current.clear();
+              pickedQty.current.clear();
             }}
             options={sourceDepots}
             placeholder="Depo seç"
@@ -426,11 +533,48 @@ export default function TerminalTransferPage() {
                       <div className="font-medium text-foreground">{item.stokAdi}</div>
                       <div className="text-xs text-muted-foreground">{item.stokKodu}</div>
                     </td>
-                    <td className="px-4 py-3 font-mono text-foreground/80">{item.seriNumarasi}</td>
+                    <td className="px-4 py-3 font-mono text-foreground/80">
+                      {item.seriNumarasi || '—'}
+                    </td>
                     <td className="px-4 py-3 text-muted-foreground">{item.lotNumarasi || '—'}</td>
                     <td className="px-4 py-3 text-muted-foreground">{item.rafAdresi || '—'}</td>
-                    <td className="px-4 py-3 text-right tabular-nums text-foreground/80">
-                      {getStockItemQuantity(item)}
+                    {/*
+                      Adet yalnızca seri numarasız kalemlerde düzenlenebilir.
+                      Seri numaralı belge tanım gereği tektir ve tamamı sevk
+                      edilir; orada +/- göstermek stoğu bozmaya davet olurdu.
+                    */}
+                    <td className="px-4 py-3">
+                      {item.seriNumarasi ? (
+                        <div className="text-right tabular-nums text-foreground/80">
+                          {getStockItemQuantity(item)}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => changeQuantity(item.id, -1)}
+                            aria-label="Adedi azalt"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground/80 hover:bg-muted"
+                          >
+                            <Minus className="h-4 w-4" />
+                          </button>
+                          <span className="min-w-12 text-center font-medium tabular-nums text-foreground">
+                            {item.transferAdet ?? 1}
+                            <span className="text-xs text-muted-foreground">
+                              {' '}
+                              / {getStockItemQuantity(item)}
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => changeQuantity(item.id, 1)}
+                            aria-label="Adedi artır"
+                            className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-foreground/80 hover:bg-muted"
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button
@@ -455,6 +599,7 @@ export default function TerminalTransferPage() {
             onClick={() => {
               setItems([]);
               pickedIds.current.clear();
+              pickedQty.current.clear();
               setFeedback(IDLE);
             }}
             disabled={items.length === 0}

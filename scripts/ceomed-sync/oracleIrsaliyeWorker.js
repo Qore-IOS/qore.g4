@@ -37,11 +37,16 @@
  *   ORACLE_MAX_PER_DAY        (varsayılan 200) günlük gönderim tavanı
  *   ORACLE_STALE_CLAIM_MIN    (varsayılan 15) takılı kalan processing işi geri al
  *   ORACLE_POLL_SEC           (varsayılan 30) listener'a ek emniyet yoklaması
+ *   CEOMED_DOGRULAMA          (varsayılan 0)  1 = gönderimi okuma API'siyle teyit et
+ *   CEOMED_EPOSTA/PAROLA      doğrulama için Ceomed girişi
+ *   CEOMED_CIKIS_BELGE_TIPI   (varsayılan 0)  çıkış irsaliyelerinin belge tipi;
+ *                              verify-irsaliye.bat --kesfet ile ölçülür
  */
 const admin = require('firebase-admin');
 const os = require('os');
 
 const { COLLECTION, validateJob, describeJob } = require('./lib/irsaliyeJob');
+const { irsaliyeVarMi } = require('./lib/ceomedDogrula');
 
 const num = (v, def) => {
   const n = parseInt(v, 10);
@@ -78,6 +83,18 @@ const STALE_CLAIM_MIN = num(process.env.ORACLE_STALE_CLAIM_MIN, 15);
 const POLL_SEC = num(process.env.ORACLE_POLL_SEC, 30);
 const COMPANY_ID = (process.env.CEOMED_COMPANY_ID || '').trim();
 const INTEGRATION_ENABLED = process.env.ORACLE_INTEGRATION_ENABLED === '1';
+/**
+ * Gönderim sonrası doğrulama. Ceomed'in OKUMA API'si kullanılıyor; yazma
+ * tarafından tamamen bağımsız bir kanal.
+ *
+ * Kapalıysa (varsayılan) hiçbir sorgu yapılmaz. Açmak için CEOMED_EPOSTA ve
+ * CEOMED_PAROLA da tanımlı olmalı — onlarsız API'ye giriş yapılamaz.
+ */
+const DOGRULAMA_ACIK =
+  process.env.CEOMED_DOGRULAMA === '1' &&
+  !!process.env.CEOMED_EPOSTA &&
+  !!process.env.CEOMED_PAROLA;
+
 const WORKER_BUILD = 'fill-only-v2-no-controls';
 
 const WORKER_ID = `${os.hostname()}#${process.pid}`;
@@ -153,7 +170,46 @@ async function markSent(db, job, result) {
     ceomedIrsaliyeNo: result.ceomedIrsaliyeNo || null,
     screenshotPath: result.screenshotPath || null,
     driver: DRIVER_NAME,
+    // 'bulundu' | 'bulunamadi' | 'yapilamadi' | null(kapalı). Panelde ve
+    // mutabakatta "bu gerçekten Ceomed'e düştü mü" sorusunun kayıtlı cevabı.
+    dogrulama: result.dogrulama || null,
   });
+}
+
+/**
+ * Sürücünün adım adım ne yaptığını log'a yazar.
+ *
+ * NEDEN: Python her alan yazımını, F6 sonucunu ve atladığı adımları bir diziye
+ * kaydediyordu ama bu dizi hiçbir yere ulaşmıyordu; log'da yalnızca tek satırlık
+ * "gönderildi" özeti vardı. Sahada "F6 yapılmadı ama logda buna dair bir şey
+ * yok" denildi — haklıydı, otomasyonun ne yaptığı kayıtlı değildi.
+ *
+ * Başarıda da yazılıyor: bir işin doğru gittiğini varsaymak yerine adımlardan
+ * görebilmek, sessizce atlanan bir alanı (ör. yazılamayıp geçilen sevk adresi)
+ * yakalamanın tek yolu.
+ */
+/**
+ * İrsaliye Ceomed'de var mı? Doğrulama ASLA THROW ETMEZ.
+ *
+ * Bu fonksiyon gönderim yapılmış ya da yapılmamış bir işin ardından çağrılıyor;
+ * buradan çıkan bir istisna, doğrulama katmanının kendisini bir hata kaynağına
+ * çevirirdi. Sorgulanamadıysa 'yapilamadi' döner ve çağıran hiçbir kararı
+ * değiştirmez.
+ */
+async function gonderildiMi(job) {
+  try {
+    return await irsaliyeVarMi({ irsaliyeNo: job.irsaliyeNo, tarih: job.tarih });
+  } catch (e) {
+    return { durum: 'yapilamadi', hata: e && e.message ? e.message : String(e) };
+  }
+}
+
+function adimlariYaz(ozet, result) {
+  const adimlar = (result && result.adimlar) || [];
+  if (adimlar.length === 0) return;
+  for (const adim of adimlar) log('adım', `${ozet} | ${adim}`);
+  if (result && result.not) log('adım', `${ozet} | NOT: ${result.not}`);
+  if (result && result.screenshotPath) log('adım', `${ozet} | görüntü: ${result.screenshotPath}`);
 }
 
 /**
@@ -314,8 +370,29 @@ async function processJob(db, driver, jobId) {
   }
 
   if (!result || !result.ok) {
+    adimlariYaz(ozet, result);
     const mesaj = (result && result.error) || 'Sürücü sebep belirtmeden başarısız döndü.';
     const retryable = !result || result.retryable !== false;
+
+    // BELİRSİZ BAŞARISIZLIK: sürücü "olmadı" diyor ama gönderim ekranın
+    // ötesinde gerçekleşmiş olabilir (zaman aşımı, çözülemeyen çıktı, tıklama
+    // sonrası kopan bağlantı). Ceomed'e sorup kesinleştiriyoruz.
+    //
+    // Yalnızca BULUNDU sonucu karar değiştirir: iş `sent` olur ve bir daha
+    // denenmez. "Bulunamadı" hiçbir şeyi değiştirmez — yanlış belge tipi ya da
+    // kapalı ağ da aynı sonucu verir ve onu "tekrar gönder" diye okumak
+    // mükerrer e-irsaliye demek olurdu.
+    if (DOGRULAMA_ACIK && !retryable) {
+      const d = await gonderildiMi(job);
+      if (d.durum === 'bulundu') {
+        log('doğrulama', `${ozet}: sürücü başarısız döndü AMA irsaliye Ceomed'de VAR — iş gönderilmiş sayılıyor, tekrar denenmeyecek.`);
+        await markSent(db, job, { ...(result || {}), ceomedIrsaliyeNo: job.irsaliyeNo, dogrulama: 'bulundu' });
+        await bildirimYaz(db, job, { ceomedIrsaliyeNo: job.irsaliyeNo });
+        return;
+      }
+      log('doğrulama', `${ozet}: Ceomed sorgusu — ${d.durum}${d.hata ? ` (${d.hata})` : ''}`);
+    }
+
     const tekrar = await markFailure(db, job, mesaj, retryable);
     errLog('hata', `${ozet}: ${mesaj}${tekrar ? ' — yeniden denenecek' : ' — ELLE MÜDAHALE GEREKİR'}`);
     return;
@@ -334,8 +411,27 @@ async function processJob(db, driver, jobId) {
     return;
   }
 
+  adimlariYaz(ozet, result);
   dailyCounter.adet += 1;
-  await markSent(db, job, result);
+
+  // Gönderim sonrası TEYİT. Sonucu işin durumunu DEĞİŞTİRMEZ — gönderim
+  // yapıldı, geri alınamaz. Yalnızca kaydediliyor ve "bulunamadı" ise sesli
+  // uyarılıyor: muhasebeye düşmemiş bir irsaliyeyi haftalar sonra mutabakatta
+  // keşfetmektense aynı gün log'da görmek gerekir.
+  let dogrulama = null;
+  if (DOGRULAMA_ACIK) {
+    const d = await gonderildiMi(job);
+    dogrulama = d.durum;
+    if (d.durum === 'bulundu') {
+      log('doğrulama', `${ozet}: Ceomed'de doğrulandı (${d.kayit && d.kayit.DURUM_ACIKLAMA ? d.kayit.DURUM_ACIKLAMA : 'durum yok'}).`);
+    } else if (d.durum === 'bulunamadi') {
+      errLog('doğrulama', `${ozet}: sürücü GÖNDERDİ ama irsaliye Ceomed'de BULUNAMADI. Belge tipi yanlış olabilir (CEOMED_CIKIS_BELGE_TIPI) ya da kayıt gerçekten oluşmamıştır — elle kontrol edin.`);
+    } else {
+      log('doğrulama', `${ozet}: doğrulama yapılamadı — ${d.hata}`);
+    }
+  }
+
+  await markSent(db, job, { ...result, dogrulama });
   await bildirimYaz(db, job, result);
   log('ok', `${ozet} — e-irsaliye gönderildi${result.ceomedIrsaliyeNo ? ` (Ceomed no: ${result.ceomedIrsaliyeNo})` : ''}`);
 }

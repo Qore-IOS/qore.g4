@@ -243,3 +243,94 @@ asıl koruma `default-src 'self'` ve `connect-src` beyaz listesi.
   ama ferah değildir.
 - **Cihazda elle test edilmedi.** APK bu ortamda derlendi ve içeriği
   doğrulandı; gerçek cihazda okutma/çevrimdışı davranış testi sizde.
+
+---
+
+## Tam ekran (immersive) kip
+
+Uygulama açıldığında **durum çubuğu ve gezinme çubuğu gizlenir**; ekranın
+tamamı işe ayrılır. Bu bir depo terminali: üstteki saat/pil/bildirim şeridi
+hem yer yiyor hem de vardiya ortasında gelen bir bildirim okutma akışını
+bölüyor.
+
+Çubuklar **kaybolmaz, gizlenir**: kenardan kaydırınca geçici olarak gelir,
+birkaç saniye sonra kendiliğinden çekilir. Tamamen erişilemez yapmak — gerçek
+kiosk kilidi — cihazın sahiplik (device owner) ayarlarını gerektirir ve
+kullanıcıyı telefonundan eder; istenen bu değil.
+
+Üç yerde ele alındı:
+
+| Yer | Ne yapıyor |
+| --- | --- |
+| `MainActivity.java` | Çubukları gizler; `onWindowFocusChanged` ile geri geldiklerinde yeniden gizler |
+| `styles.xml` | Açılış temasında da tam ekran — yoksa her açılışta bir an durum çubuğu görünüp kayboluyor |
+| `capacitor.config.ts` | `adjustMarginsForEdgeToEdge: 'disable'` — olmayan çubuklar için boşluk bırakılmasın |
+
+### İki incelik
+
+**`onWindowFocusChanged` şart.** Sistem, uygulama odağı kaybedip geri
+kazandığında (bildirim gölgesi, kamera izni penceresi, paylaşım sayfası)
+çubukları KALICI olarak geri getiriyor. O geri çağrı olmadan uygulama ilk izin
+isteğinden sonra tam ekranlığını kaybediyor ve bir daha kazanmıyor.
+
+**`setDecorFitsSystemWindows(false)` bilerek çağrılmıyor.** Pencere yerleşimi
+sistemin insets hesabından alınırsa yazılım klavyesi açıldığında içerik yukarı
+itilmez ve raf adresi / irsaliye numarası gibi alanlar klavyenin altında
+kalır. Çubuklar zaten gizli olduğu için insets sıfır ve içerik ekranı
+dolduruyor; ikisini birden yapmaya gerek yok. Manifest'te
+`windowSoftInputMode="adjustResize"` bunu açıkça sabitliyor.
+
+---
+
+## Ana ekran widget'ı — ne gerekir
+
+Henüz yok. Teknik engel şu: widget AYRI BİR SÜREÇTE çalışır ve WebView'ın
+IndexedDB'sini okuyamaz. Terminalin bütün verisi orada durduğu için widget
+"bekleyen işlem sayısı" gibi en basit bilgiye bile doğrudan erişemez.
+
+Yapılabilir yol iki parçalı:
+
+1. Web katmanı, göstermek istediğimiz ÖZETİ her değiştiğinde
+   `@capacitor/preferences` ile yazar (Android tarafında `SharedPreferences`).
+2. Yerel bir `AppWidgetProvider` o özeti okuyup çizer ve
+   `AppWidgetManager.updateAppWidget` ile tazeler.
+
+Yani widget'ın göstereceği şeyin önceden kararlaştırılması gerekiyor — veri
+köprüsü ancak taşınacak alanlar belliyken yazılabilir.
+
+---
+
+## İnen veri diskte nerede duruyor?
+
+Terminalin tüm çalışma verisi Firestore'un kalıcı önbelleğinde, yani
+**IndexedDB**'de durur — ayrı bir dosyaya JSON yazılmaz.
+
+| Kabuk | Yol |
+| --- | --- |
+| Masaüstü (Windows) | `%APPDATA%\Qore Terminal\IndexedDB\app_terminal_0.indexeddb.leveldb\` |
+| Masaüstü (macOS) | `~/Library/Application Support/Qore Terminal/IndexedDB/…` |
+| Android | `/data/data/com.qore.terminal/app_webview/Default/IndexedDB/…` (uygulamaya özel, root'suz erişilemez) |
+
+Depo seçimi ve bekleyen işlemler defteri ise `localStorage`'da
+(`qore.terminal.depotId.*`, `qore.terminal.pendingOps`).
+
+### Bu dosyaları elle açmayın
+
+Diskteki biçim **LevelDB** — insan tarafından okunabilir değil ve uygulama
+açıkken **kilitli**. Dışarıdan bir araçla okumaya çalışmak ya hiç
+çalışmaz ya da yarım yazılmış bir durum gösterir; kötü ihtimalle önbelleği
+bozar.
+
+### Canlı bakmanın doğru yolu
+
+**Masaüstü:** `Ctrl+Shift+I` → *Application* → *Storage* → *IndexedDB* →
+`firebaseLocalStorageDb` / `firestore/...`. Kayıtlar değiştikçe orada anında
+güncellenir.
+
+**Android:** telefonda USB hata ayıklamayı açın, bilgisayarda Chrome'da
+`chrome://inspect` → cihazın altındaki `Qore Terminal` → *inspect*. Aynı
+DevTools penceresi açılır.
+
+Çoğu soru için buna bile gerek yok: açılış ekranı koleksiyon koleksiyon kaç
+kayıt indiğini gösteriyor, `/terminal/bekleyen` ekranı da gönderilmeyi
+bekleyen işlemleri listeliyor.

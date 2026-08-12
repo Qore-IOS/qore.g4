@@ -208,6 +208,40 @@ export default function LaboratuvarPanel() {
     }
   };
 
+  /**
+   * Ek hizmet bağını ÇOCUK laboratuvarlara da yazar (`anaLabId`).
+   *
+   * NEDEN TERS BAĞ: bağ yalnızca ana labda (`ekHizmetLabIds` dizisi) dursaydı,
+   * bir ek hizmet binasının ana labını bulmak `array-contains` SORGUSU
+   * gerektirirdi. Firestore kuralları sorguları belge belge değerlendiriyor;
+   * dönen ana lab belgesinin companyId'si eşleşmezse sorgunun TAMAMI reddedilir
+   * ve Ceomed irsaliyesi sessizce "cari kodu yok" diye bloklanır. Bu projede
+   * list sorguları iki kez üretimi durdurdu.
+   *
+   * Çocuk kendi ana labını taşıyınca çözüm tek bir `get` oluyor — sorgu yok.
+   *
+   * Bağı kaldırılan çocuklardan alan temizleniyor; aksi hâlde eski bir ana lab
+   * üzerinden yanlış cari ile irsaliye kesilirdi.
+   */
+  const anaLabBaginiYaz = async (anaLabId: string, yeniCocukIds: string[]) => {
+    const oncekiCocuklar = hospitals
+      .filter((h) => (h as any).anaLabId === anaLabId)
+      .map((h) => h.id);
+    const kaldirilan = oncekiCocuklar.filter((id) => !yeniCocukIds.includes(id));
+
+    if (yeniCocukIds.length === 0 && kaldirilan.length === 0) return;
+
+    const batch = writeBatch(db);
+    yeniCocukIds.forEach((id) => {
+      if (id === anaLabId) return; // kendine bağlanma
+      batch.set(doc(db, 'hospitals', id), { anaLabId, updatedAt: new Date() }, { merge: true });
+    });
+    kaldirilan.forEach((id) => {
+      batch.set(doc(db, 'hospitals', id), { anaLabId: null, updatedAt: new Date() }, { merge: true });
+    });
+    await batch.commit();
+  };
+
   const handleSave = async () => {
     if (!currentHospital.name) {
       toast({ title: 'Hata', description: 'Laboratuvar adı boş olamaz.', variant: 'destructive' });
@@ -246,6 +280,7 @@ export default function LaboratuvarPanel() {
 
       if (currentHospital.id && isEditingHospital) {
         await setDoc(doc(db, 'hospitals', currentHospital.id), withCompanyScope(dataToSave, currentUserProfile?.companyId), { merge: true });
+        await anaLabBaginiYaz(currentHospital.id, (currentHospital.ekHizmetLabIds as string[]) || []);
         toast({ title: 'Başarılı', description: 'Laboratuvar güncellendi.' });
       } else {
         const newRef = doc(collection(db, 'hospitals'));

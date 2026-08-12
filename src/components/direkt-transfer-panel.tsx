@@ -382,13 +382,13 @@ function DTAddTile({ icon, label, onClick, disabled, lockReason }: {
 
 function DTStepper({ steps }: { steps: { label: string; done: boolean }[] }) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className="dt-stepper" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
       {steps.map((s, i) => {
         const prevDone = i === 0 || steps[i - 1]?.done;
         const cur = !s.done && prevDone;
         return (
           <React.Fragment key={i}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+            <div className="dt-step" style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
               <span style={{
                 width: 30, height: 30, borderRadius: '50%', display: 'grid', placeItems: 'center', fontSize: 13, fontWeight: 800,
                 background: s.done ? 'linear-gradient(180deg, #8FD3A6, #6FB585)' : cur ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : C.surface2,
@@ -397,10 +397,10 @@ function DTStepper({ steps }: { steps: { label: string; done: boolean }[] }) {
               }}>
                 {s.done ? <Check size={15} /> : i + 1}
               </span>
-              <span style={{ fontSize: 13.5, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{s.label}</span>
+              <span className="dt-step-label" style={{ fontSize: 13.5, fontWeight: 700, color: cur ? C.ink1 : C.ink3, whiteSpace: 'nowrap' }}>{s.label}</span>
             </div>
             {i < steps.length - 1 && (
-              <span style={{ width: 38, height: 2.5, borderRadius: 2, background: s.done ? C.waterSolid : C.ink3, opacity: s.done ? 1 : 0.3, transition: 'all 320ms ease' }} />
+              <span className="dt-step-line" style={{ width: 38, height: 2.5, borderRadius: 2, background: s.done ? C.waterSolid : C.ink3, opacity: s.done ? 1 : 0.3, transition: 'all 320ms ease' }} />
             )}
           </React.Fragment>
         );
@@ -639,14 +639,12 @@ function DirektTransferSkeleton() {
 }
 
 
-// OPTIMIZED FEFO CHECK:
-// Uses batch queries with Firestore 'in' clause (max 30 values) to reduce round trips
-const checkFefoOptimized = async (
+// Allocation and FEFO share one authoritative server snapshot. This is a pure,
+// in-memory pass so opening the warning dialog adds no further network latency.
+const checkFefoOptimized = (
   itemsToShip: DepoStokItem[],
-  depotId: string,
-  currentCompanyId?: string | null,
-  isSuperAdmin?: boolean,
-): Promise<FefoViolation[]> => {
+  currentStock: DepoStokItem[],
+): FefoViolation[] => {
   const violations: FefoViolation[] = [];
 
   // Transfer listesindeki benzersiz stok kodlarını bul
@@ -654,35 +652,8 @@ const checkFefoOptimized = async (
 
   if (uniqueStokKodlari.length === 0) return violations;
 
-  // OPTIMIZED: Batch queries using 'in' clause (max 30 values per query)
-  // This reduces N queries to ceil(N/30) queries
-  const allProductStock: DepoStokItem[] = [];
-
-  // Process in batches of 30 (Firestore 'in' clause limit)
-  const batchSize = 30;
-  for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
-    const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
-
-    // companyId sorguya DAHİL olmalı — yalnızca istemcide ayıklamak yetmez.
-    // Kurallar `list`te companyId filtresi istiyor; filtresiz sorgu
-    // permission-denied alır (bu, transfer butonunu sonsuz loading'de bırakan
-    // hatanın ta kendisiydi). Ayrıca filtresiz sorgu başka şirketin
-    // belgelerini de istemciye indiriyordu.
-    const q = scopedQuery(
-      'depoStok',
-      currentCompanyId,
-      isSuperAdmin,
-      where('depotId', '==', depotId),
-      where('stokKodu', 'in', batchCodes),
-    );
-    const snap = await getDocs(q);
-    snap.docs.forEach(d => {
-      const data = d.data();
-      if (!matchesScopedQueryCompany(data as any, currentCompanyId, isSuperAdmin)) return;
-      if (!isAvailableDepotStock(data)) return;
-      allProductStock.push({ id: d.id, ...data } as DepoStokItem);
-    });
-  }
+  const relevantCodes = new Set(uniqueStokKodlari);
+  const allProductStock = currentStock.filter(item => relevantCodes.has(item.stokKodu));
 
   // Group stock by stokKodu for efficient lookups
   const stockByCode = new Map<string, DepoStokItem[]>();
@@ -849,6 +820,7 @@ export default function DirektTransferPanel() {
   const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
+  const [preparedTransferItems, setPreparedTransferItems] = useState<DepoStokItem[]>([]);
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
   const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
@@ -1171,7 +1143,7 @@ export default function DirektTransferPanel() {
   };
 
   // OPTIMIZED: Batch allocate all groups at once instead of one query per group
-  const batchAllocateForGroups = useCallback(async (groupRows: TransferRow[]): Promise<{ allocations: Map<string, DepoStokItem[]>; error: TransferRow | null }> => {
+  const batchAllocateForGroups = useCallback((groupRows: TransferRow[], allStock: DepoStokItem[]): { allocations: Map<string, DepoStokItem[]>; error: TransferRow | null } => {
     const alreadyAllocatedIds = new Set(
       directTransferItems
         .filter(item => !item.isGroup)
@@ -1183,29 +1155,6 @@ export default function DirektTransferPanel() {
 
     if (uniqueStokKodlari.length === 0) {
       return { allocations: new Map(), error: null };
-    }
-
-    // Batch query all stock codes at once
-    const allStock: DepoStokItem[] = [];
-    const batchSize = 30;
-
-    for (let i = 0; i < uniqueStokKodlari.length; i += batchSize) {
-      const batchCodes = uniqueStokKodlari.slice(i, i + batchSize);
-      // companyId sorguya dahil — gerekçe checkFefoOptimized'daki notta.
-      const q = scopedQuery(
-        'depoStok',
-        currentCompanyId,
-        isSuperAdmin,
-        where('depotId', '==', selectedDepotId),
-        where('stokKodu', 'in', batchCodes),
-      );
-      const snap = await getDocs(q);
-      snap.docs.forEach(d => {
-        const data = d.data();
-        if (!matchesScopedQueryCompany(data as any, currentCompanyId, isSuperAdmin)) return;
-        if (!isAvailableDepotStock(data)) return;
-        allStock.push({ id: d.id, ...data } as DepoStokItem);
-      });
     }
 
     // Group stock by stokKodu and lotNumarasi for efficient allocation
@@ -1291,16 +1240,9 @@ export default function DirektTransferPanel() {
     }
 
     return { allocations, error: null };
-  }, [directTransferItems, selectedDepotId, productTracking, currentCompanyId, isSuperAdmin]);
+  }, [directTransferItems, productTracking]);
 
-  // Legacy function kept for compatibility
-  const allocateDocsForGroup = useCallback(async (row: TransferRow): Promise<DepoStokItem[] | null> => {
-    const { allocations, error } = await batchAllocateForGroups([row]);
-    if (error) return null;
-    return allocations.get(row.key) || null;
-  }, [batchAllocateForGroups]);
-
-  const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = []) => {
+  const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = [], preparedItems: DepoStokItem[] = preparedTransferItems) => {
     if (!currentUser || !currentUserProfile) return;
 
     if (!isBorcMode && !selectedLabId) {
@@ -1317,40 +1259,12 @@ export default function DirektTransferPanel() {
       : (targetLab?.name || '');
     const targetId = isBorcMode ? null : selectedLabId;
 
-    const itemsToShip: DepoStokItem[] = [];
-    let allocationError = false;
-
-    // Ağ çağrısı gerektiren ön tahsis işlemini yapalım (bu çok hızlıdır, 0.5s sürer)
-    //
-    // try/catch şart: `allocateDocsForGroup` Firestore'a sorgu atar ve
-    // fırlayabilir. Korumasız bırakılırsa istisna yukarı gider,
-    // `setShipmentLoading(false)` hiç çalışmaz ve buton sonsuz loading'de kalır
-    // — handleCompleteDirectTransfer'deki aynı hatanın ikizi.
-    try {
-      for (const row of directTransferItems) {
-        const picks = row.isGroup ? await allocateDocsForGroup(row) : [row];
-        if (!picks) {
-          toast({ title: 'Yetersiz Stok', description: `${row.stokAdi} ${row.lotNumarasi ? `(Lot: ${row.lotNumarasi})` : ''} için depoda yeterli adet (${row.adet}) yok.`, variant: 'destructive' });
-          allocationError = true;
-          break;
-        }
-        itemsToShip.push(...(picks as DepoStokItem[]));
-      }
-    } catch (err) {
-      direktTransferLogger.error('Ön tahsis başarısız', err, { depotId: selectedDepotId });
-      toast({
-        title: 'Transfer başlatılamadı',
-        description: err instanceof Error ? err.message : 'Stok okunurken beklenmeyen bir hata oluştu.',
-        variant: 'destructive',
-      });
+    if (preparedItems.length === 0) {
+      toast({ title: 'Stok güncellendi', description: 'Transfer edilecek güncel stok bulunamadı. Listeyi yenileyip tekrar deneyin.', variant: 'destructive' });
       setShipmentLoading(false);
       return;
     }
-
-    if (allocationError) {
-      setShipmentLoading(false);
-      return;
-    }
+    const itemsToShip = preparedItems;
 
     // --- OPTIMISTIC UI: Durumu Yedekle ve Ekranı Temizle ---
     const previousDirectTransferItems = [...directTransferItems];
@@ -1494,7 +1408,7 @@ export default function DirektTransferPanel() {
         toast({ title: 'İşlem İptal Edildi (Rollback)', description: 'Transfer sırasında bir hata oluştu, veriler eski haline getirildi.', variant: 'destructive' });
       }
     })();
-  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, allocateDocsForGroup, toast, selectedCompany, invalidateDepoStok, productMetaByCode]);
+  }, [currentUser, currentUserProfile, isBorcMode, selectedLabId, hospitals, borcDepots, selectedBorcDepotId, selectedDepotId, depotName, directTransferItems, toast, selectedCompany, invalidateDepoStok, productMetaByCode, preparedTransferItems, currentCompanyId]);
 
 
   const handleCompleteDirectTransfer = async () => {
@@ -1510,18 +1424,18 @@ export default function DirektTransferPanel() {
     // ve "Transfer Et" butonu SONSUZA KADAR loading'de kalıyordu — kullanıcıya
     // ne bir hata ne de bir çıkış yolu görünüyordu.
     try {
+      const stockCodes = Array.from(new Set(directTransferItems.map(item => item.stokKodu)));
+      const { getCurrentTransferStock } = await import('@/actions/stokActions');
+      const currentStock = await getCurrentTransferStock(selectedDepotId, stockCodes, currentCompanyId, isSuperAdmin);
       const itemsToShip: DepoStokItem[] = [];
 
       // OPTIMIZED: Use batch allocation for all groups at once
       const groupRows = directTransferItems.filter(row => row.isGroup);
       const nonGroupRows = directTransferItems.filter(row => !row.isGroup);
 
-      // Add non-group items directly (already allocated)
-      itemsToShip.push(...nonGroupRows as DepoStokItem[]);
-
       // Batch allocate all groups in one query
       if (groupRows.length > 0) {
-        const { allocations, error } = await batchAllocateForGroups(groupRows);
+        const { allocations, error } = batchAllocateForGroups(groupRows, currentStock);
 
         if (error) {
           toast({
@@ -1541,8 +1455,20 @@ export default function DirektTransferPanel() {
         });
       }
 
-      // OPTIMIZED FEFO CHECK: Sadece ilgili ürünler için FEFO kontrolü yap
-      const violations = await checkFefoOptimized(itemsToShip, selectedDepotId, currentCompanyId, isSuperAdmin);
+      const currentById = new Map(currentStock.map(item => [item.id, item]));
+      for (const row of nonGroupRows) {
+        const currentItem = currentById.get(row.id);
+        if (!currentItem) {
+          toast({ title: 'Stok güncellendi', description: `${row.stokAdi} artık seçili depoda bulunmuyor. Listeyi yenileyip tekrar deneyin.`, variant: 'destructive' });
+          return;
+        }
+        // Do not carry potentially stale stock fields from the scan-time cache.
+        itemsToShip.push(currentItem);
+      }
+
+      // Tahsis ve FEFO aynı, sunucudan anlık alınan stok görüntüsünü kullanır.
+      const violations = checkFefoOptimized(itemsToShip, currentStock);
+      setPreparedTransferItems(itemsToShip);
 
       if (violations.length > 0) {
         // Benzersiz violationları filtrele
@@ -1551,7 +1477,7 @@ export default function DirektTransferPanel() {
         );
         setFefoViolations(uniqueViolations);
       } else {
-        processTransfer();
+        processTransfer([], itemsToShip);
       }
     } catch (err) {
       direktTransferLogger.error('Transfer hazırlığı başarısız', err, {
@@ -1765,6 +1691,15 @@ export default function DirektTransferPanel() {
         @keyframes dtPopIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
         @keyframes dtRise { from { opacity: 0; transform: translateY(14px) scale(0.97); } to { opacity: 1; transform: none; } }
         .dt-shell { font-family: 'Plus Jakarta Sans', system-ui, sans-serif; background: var(--qc-shell-bg); color: var(--qc-ink1); min-height: 100vh; padding: 14px 24px 22px; -webkit-font-smoothing: antialiased; }
+        /* Mobil: adım göstergesi kompaktlaşır — etiketler gizlenir, yalnızca
+           numaralı daireler ve kısa bağlayıcılar kalır. Böylece başlık dar
+           ekranda kırpılmadan tek satırda durur. */
+        @media (max-width: 640px) {
+          .dt-stepper { gap: 2px; }
+          .dt-step { gap: 0 !important; }
+          .dt-step-label { display: none !important; }
+          .dt-step-line { width: 14px !important; }
+        }
         .dt-grid { display: grid; grid-template-columns: 320px minmax(0,1fr); gap: 18px; align-items: start; }
         @media (max-width: 1149px) { .dt-grid { grid-template-columns: 1fr; } }
         .dt-prod-row:hover { transform: translateY(-1px); box-shadow: inset 0 1px 1px rgba(255,255,255,0.9), 0 8px 22px -8px rgba(150,128,96,0.28), 0 2px 6px -2px rgba(150,128,96,0.14); }
@@ -2132,7 +2067,7 @@ export default function DirektTransferPanel() {
           </ScrollArea>
           <AlertDialogFooter>
             <AlertDialogCancel>İptal</AlertDialogCancel>
-            <AlertDialogAction onClick={() => processTransfer(fefoViolations)}>Yine de Transfer Et</AlertDialogAction>
+            <AlertDialogAction onClick={() => processTransfer(fefoViolations, preparedTransferItems)}>Yine de Transfer Et</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
