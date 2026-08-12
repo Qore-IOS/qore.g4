@@ -58,8 +58,17 @@ export type IrsaliyeGirisSatiri = {
 export type IrsaliyeGirisJob = {
   /** Ceomed "İrsaliye No" alanı — Qore form numarası. */
   irsaliyeNo: string;
-  /** Ceomed "Cari Kodu" alanı — laboratuvarın ceomedCariKodu değeri. */
+  /**
+   * Ceomed "Cari Kodu" alanı. Ek hizmet binalarında bu, işlemin yapıldığı labın
+   * değil BAĞLI OLDUĞU ANA LABIN kodudur — `cariCoz` çözer.
+   */
   cariKodu: string;
+  /**
+   * Ceomed "Sevk Adresi" alanı — HER ZAMAN işlemin yapıldığı labın kendi
+   * adresi, cari kodu ana labdan gelse bile. İrsaliyenin doğru binaya
+   * gitmesini bu alan sağlıyor. Tanımlı değilse boş geçilir.
+   */
+  sevkAdresi: string;
   /** İşlem tarihi, ISO (YYYY-MM-DD). Uygulama maskesine worker çevirir. */
   tarih: string;
   islemTipi: typeof CEOMED_ISLEM_TIPI;
@@ -87,6 +96,8 @@ export type IrsaliyeGirisDoc = IrsaliyeGirisJob & {
   personnelUid: string | null;
   personnelName: string;
   companyId: string | null;
+  /** Cari kodu 'ana_lab' ise irsaliye başka bir labın carisiyle kesilmiştir. */
+  cariKaynagi: CariKaynagi | null;
   attemptCount: number;
   lastError: string | null;
 };
@@ -225,6 +236,67 @@ export function aciklamaKur(personelAdi: string, satirlar: IrsaliyeGirisSatiri[]
   return `${tam.slice(0, ACIKLAMA_MAX - 1)}…`;
 }
 
+/** Cari kodunun hangi laboratuvardan geldiği — iz sürme ve panelde gösterim için. */
+export type CariKaynagi = 'kendi' | 'ana_lab' | 'yok';
+
+export type CariCozum = {
+  cariKodu: string;
+  /** Ceomed formundaki Sevk Adresi alanına yazılacak değer. */
+  sevkAdresi: string;
+  kaynak: CariKaynagi;
+  /** Cari kodu ana laboratuvardan geldiyse o labın adı; aksi hâlde null. */
+  anaLabAdi: string | null;
+};
+
+/** `cariCoz` için gereken minimum laboratuvar şekli. */
+export type LabCariBilgisi = {
+  id?: string;
+  name?: string | null;
+  ceomedCariKodu?: string | null;
+  sevkAdresi?: string | null;
+};
+
+/**
+ * Bir laboratuvar için Ceomed cari kodunu ve sevk adresini çözer.
+ *
+ * KURAL (sahadan): ek hizmet binalarının Ceomed'de kendi carisi yoktur; bağlı
+ * oldukları ANA laboratuvarın carisi üzerinden faturalanırlar. Ama irsaliyenin
+ * doğru binaya gitmesi için sevk adresi EK HİZMET BİNASININ kendi adresi
+ * olmalıdır. İkisi farklı laboratuvarlardan gelir.
+ *
+ * Örnek: ÇEKMEKÖY DEVLET HASTANESİ, SANCAKTEPE EAH'nin ek hizmeti.
+ *   cari kodu   → M51009  (Sancaktepe'nin)
+ *   sevk adresi → Çekmeköy'ün kendi adresi
+ *
+ * Laboratuvarın KENDİ cari kodu varsa o kazanır. Ek hizmet olarak işaretli bir
+ * laba ayrıca cari girilmişse bu bilinçli bir yönetici tercihidir; sessizce
+ * ezmek, ana labın hesabına yanlış kayıt yazmak olurdu. Pratikte ek hizmet
+ * binalarının bu alanı boş olduğu için iki kural aynı sonucu veriyor.
+ *
+ * Sevk adresi HER ZAMAN işlemin yapıldığı labın kendi adresidir — cari nereden
+ * gelirse gelsin.
+ */
+export function cariCoz(lab: LabCariBilgisi | null, anaLab: LabCariBilgisi | null): CariCozum {
+  const kendiCari = text(lab?.ceomedCariKodu).toLocaleUpperCase('tr-TR');
+  const sevkAdresi = text(lab?.sevkAdresi);
+
+  if (kendiCari) {
+    return { cariKodu: kendiCari, sevkAdresi, kaynak: 'kendi', anaLabAdi: null };
+  }
+
+  const anaCari = text(anaLab?.ceomedCariKodu).toLocaleUpperCase('tr-TR');
+  if (anaCari) {
+    return {
+      cariKodu: anaCari,
+      sevkAdresi,
+      kaynak: 'ana_lab',
+      anaLabAdi: text(anaLab?.name) || null,
+    };
+  }
+
+  return { cariKodu: '', sevkAdresi, kaynak: 'yok', anaLabAdi: null };
+}
+
 /** Yedek parça sayılan action tipleri. Hücre değişimi de stoktan parça tüketir. */
 const PART_ACTION_TYPES = new Set(['part_change', 'hucre_degisimi']);
 
@@ -247,8 +319,17 @@ export type BuildIrsaliyeGirisInput = {
   /** İşlem tarihi — 'YYYY-MM-DD' ya da Date. */
   tarih?: string | Date | null;
   hospitalId: string;
-  /** Laboratuvarın Ceomed cari kodu (Yönetim → Laboratuvarlar). */
+  /**
+   * Ceomed cari kodu. Ek hizmet binalarında ANA LABIN kodu gelir — çağıran
+   * `cariCoz` ile çözüp verir (bkz. enqueue-irsaliye-giris.ts#cariCozAsync).
+   */
   cariKodu?: string | null;
+  /** İşlemin yapıldığı labın kendi sevk adresi. Boşsa alan doldurulmaz. */
+  sevkAdresi?: string | null;
+  /** Cari kodu ana labdan geldiyse 'ana_lab' — iz sürme için kuyruğa yazılır. */
+  cariKaynagi?: CariKaynagi | null;
+  /** Cari çözümlemesi başarısızsa sebebi; engel mesajına eklenir. */
+  cariHatasi?: string | null;
   labName?: string | null;
   deviceId?: string | null;
   cihazAdi?: string | null;
@@ -377,14 +458,21 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     });
   }
   if (!cariKodu) {
+    // Cari çözümlemesi neden başarısız olduysa BURADA görünmeli. Aksi hâlde bir
+    // izin hatası ya da eksik ek hizmet bağı, "cari kodu tanımlı değil" diye
+    // görünüp operatörü var olmayan bir veri eksiğini aramaya yollar — sahada
+    // tam bu oldu: cari kodu zaten ana labdaydı, sorun bağın kurulmamasıydı.
+    const cariHatasi = text(input.cariHatasi);
     blocks.push({
       reason: 'cari_kodu_tanimsiz',
       detail:
         // "otomatik yeniden denenecek" YAZMAYIN: blocked işleri yeniden
         // değerlendiren hiçbir mekanizma yok, operatör bekleyip durur.
-        `"${text(input.labName) || input.hospitalId}" laboratuvarında Ceomed cari kodu tanımlı değil. ` +
-        'Yönetim → Laboratuvarlar ekranından cari kodunu girin, sonra Ceomed kuyruk ' +
-        'panelinden bu işe "Yeniden kuyruğa al" deyin.',
+        `"${text(input.labName) || input.hospitalId}" için Ceomed cari kodu çözülemedi. ` +
+        (cariHatasi ? `Sebep: ${cariHatasi} ` : '') +
+        'Laboratuvarın kendi cari kodu yoksa bir ana laboratuvarın "Ek Hizmet ' +
+        'Laboratuvarları" listesinde işaretli olmalı ve o ana labın cari kodu ' +
+        'dolu olmalı. Düzelttikten sonra bu işe "İrsaliye oluştur" deyin.',
     });
   }
   if (!tarih) {
@@ -414,6 +502,7 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
   const doc: IrsaliyeGirisDoc = {
     irsaliyeNo: irsaliyeNo || '',
     cariKodu,
+    sevkAdresi: text(input.sevkAdresi),
     tarih: tarih || '',
     islemTipi: CEOMED_ISLEM_TIPI,
     depo: CEOMED_DEPO,
@@ -433,6 +522,9 @@ export function buildIrsaliyeGirisDoc(input: BuildIrsaliyeGirisInput): BuildIrsa
     personnelUid: text(input.personnelUid) || null,
     personnelName,
     companyId: text(input.companyId) || null,
+    // Cari kodu ana labdan geldiyse burada görünür; muhasebe "bu neden başka
+    // hastanenin carisiyle kesilmiş" diye sorduğunda cevap kuyruk kaydında.
+    cariKaynagi: input.cariKaynagi || null,
     attemptCount: 0,
     lastError: null,
   };

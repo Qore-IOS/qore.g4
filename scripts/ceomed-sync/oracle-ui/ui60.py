@@ -79,6 +79,21 @@ def normalize(s: str) -> str:
     return (s or "").translate(_TR)
 
 
+def ascii_indirge(s: str) -> str:
+    """Metni Ceomed'in taşıyabileceği ASCII'ye indirger.
+
+    Ceomed karakter kümesi Türkçe harfleri TAŞIMIYOR: sahada 'ALK-BİO-E-CI'
+    veritabanına 'ALK-B?O-E-CI' olarak gitti ve stok kartı bulunamadı. Geri
+    okuma bunu yakalayamıyor — alan doğru görünüyor, bozulma commit sırasında
+    oluyor. Bu yüzden yazmadan ÖNCE indirgemek tek güvenli yol.
+
+    `normalize` bilinen Türkçe harfleri çeviriyor; geriye kalan ASCII dışı her
+    şey (aksanlı harfler, tırnak çeşitleri, görünmez karakterler) atılıyor —
+    '?' olarak gitmesindense hiç gitmemesi yeğ.
+    """
+    return "".join(ch for ch in normalize(s) if ord(ch) < 128)
+
+
 # --- Win32 yapıları -----------------------------------------------------------
 
 class RECT(ctypes.Structure):
@@ -368,12 +383,67 @@ class TehlikeliOdak(RuntimeError):
     """Odak, basılması geri alınamaz bir butondayken tuş gönderilmek istendi."""
 
 
+class YanlisPencere(RuntimeError):
+    """Odak Ceomed'in dışına çıktı; tuş göndermek başka uygulamaya yazardı."""
+
+
+# Tuşların gitmesine izin verilen sürecin kimliği. `hedef_pencere_ayarla` ile
+# kurulur; kurulmadıysa kontrol yapılmaz (problar için).
+_HEDEF_PID: int | None = None
+
+
+def _pencere_pid(hwnd: int) -> int:
+    if not hwnd:
+        return 0
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def hedef_pencere_ayarla(hwnd: int) -> None:
+    """Bundan sonra tuşların YALNIZCA bu pencerenin sürecine gitmesine izin ver.
+
+    NEDEN SÜREÇ, PENCERE DEĞİL: LOV ve uyarı pencereleri ayrı üst düzey
+    pencerelerdir ama aynı Ceomed sürecine aittir. Tek pencereye kilitlemek
+    onları da reddederdi; süreç kimliği doğru ayrımı yapıyor.
+    """
+    global _HEDEF_PID
+    _HEDEF_PID = _pencere_pid(hwnd)
+
+
+def hedef_pencere_temizle() -> None:
+    global _HEDEF_PID
+    _HEDEF_PID = None
+
+
+def odak_hedefte_mi() -> bool:
+    """Odaktaki kontrol hedef sürece mi ait?"""
+    if _HEDEF_PID is None:
+        return True
+    fg = user32.GetForegroundWindow()
+    return bool(fg) and _pencere_pid(fg) == _HEDEF_PID
+
+
 def tehlikeli_odak_kontrol() -> None:
     """Tuş göndermeden ÖNCE çağrılır.
 
     ENTER odaktaki butona basar. Bu kontrol olmadan yanlış zamanlanmış tek bir
     ENTER e-irsaliye gönderebilir — geri alınamaz.
+
+    AYRICA HEDEF SÜRECİ DOĞRULAR. `SendInput` tuşları belirli bir pencereye
+    değil ÖN PLANDAKİ pencereye gönderir. Sahada Ceomed odağı kaybetti ve
+    sürücü irsaliye numarasını Chrome'a yazdı — geri okuma
+    'React Bits - Index - Google Chrome' döndü. Yani otomasyon, farkında
+    olmadan başka bir uygulamaya tuş basıyordu; ENTER'ın nereye gittiği
+    tamamen tesadüfe kalmıştı.
     """
+    if not odak_hedefte_mi():
+        baslik_metni = baslik(user32.GetForegroundWindow())
+        raise YanlisPencere(
+            f"Ön plandaki pencere Ceomed değil ({baslik_metni!r}); tuş gönderilmedi. "
+            "Makinede başka bir uygulama öne geldi."
+        )
+
     o = odak()
     if o["sinif"] != "Button":
         return
@@ -655,7 +725,31 @@ def ekran_goruntusu(hwnd: int, dizin: str, ad: str) -> str | None:
         return None
 
 
+SW_RESTORE = 9
+
+
 def one_getir(hwnd: int) -> bool:
+    """Pencereyi ön plana alır; alamazsa False.
+
+    ÖN PLAN ŞART: tuşlar `SendInput` ile gönderiliyor ve bunlar hedef pencereye
+    değil ÖN PLANDAKİ pencereye gider. Fare de fiziksel imleçle tıklıyor.
+
+    Simge durumuna küçültülmüş pencerede `SetForegroundWindow` tek başına
+    yetmiyor — pencere küçük kalıyor, tuşlar hedefine ulaşmıyordu. Önce geri
+    yükleniyor.
+
+    `SW_RESTORE` YALNIZCA küçültülmüşken uygulanır. Ekranı kaplamış bir
+    pencerede çağrılırsa onu kaplamadan çıkarır; alan haritası MDI belge
+    penceresine göre ölçülü olduğu için bu, tüm koordinatları kaydırıp
+    sürücünün yanlış alana yazmasına yol açardı.
+    """
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, SW_RESTORE)
+        time.sleep(0.4)
+
     user32.SetForegroundWindow(hwnd)
     time.sleep(0.3)
+    # Doğrulama şart: Windows arka plandaki bir sürecin ön planı ele
+    # geçirmesini engelleyebiliyor ve SetForegroundWindow sessizce yalnızca
+    # görev çubuğunu yanıp söndürüyor.
     return user32.GetForegroundWindow() == hwnd

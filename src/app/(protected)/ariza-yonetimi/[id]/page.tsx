@@ -5,6 +5,8 @@ import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { db } from '@/lib/firebase';
+import { cariCozAsync, enqueueIrsaliyeGirisAyri } from '@/lib/ceomed/enqueue-irsaliye-giris';
+import { reserveActionFormNumber } from '@/lib/form-number';
 import { doc, getDoc, collection, query, orderBy, onSnapshot, updateDoc, serverTimestamp, getDocs, where, addDoc, Timestamp, writeBatch, arrayUnion } from 'firebase/firestore';
 import { Card, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -750,6 +752,107 @@ export default function FaultDetailPage() {
     }
   };
 
+  /**
+   * Arıza kapatılırken kullanılan yedek parçalar için Ceomed irsaliyesini
+   * kuyruğa alır.
+   *
+   * NEDEN AYRI BİR YOL: teknik/aplikasyon formlarında irsaliye form kapanışında
+   * kesiliyordu, arıza çözümlerinde ise HİÇ kesilmiyordu — parçalar stoktan
+   * düşüyor ama muhasebeye çıkış irsaliyesi gitmiyordu.
+   *
+   * TEK İRSALİYE, KAPANIŞTA: parçalar arızaya tek tek ekleniyor. Her eklemede
+   * irsaliye kesmek bir arıza için birden çok muhasebe kaydı üretirdi. Kapanış,
+   * "bu arızada toplam şu parçalar kullanıldı" bilgisinin tamamlandığı andır.
+   *
+   * ASLA THROW ETMEZ. Arıza ZATEN kapatıldı; buradan çıkan bir istisna
+   * kullanıcıya "arıza kapatılamadı" gibi görünürdü.
+   *
+   * BİLİNEN SINIR: kapanıştan SONRA eklenen parçalar (`isPostClosure`) bu
+   * irsaliyeye girmez. Doküman kimliği arıza kimliği olduğu için ikinci bir
+   * irsaliye de üretilmez — mükerrer riski yok, ama o parçalar elle
+   * kesilmelidir. Sonradan parça ekleme akışı ayrıca ele alınmalı.
+   */
+  const arizaIrsaliyesiKuyrugaAl = useCallback(async (
+    parcalar: any[],
+    kuyrukKimligi: string,
+  ) => {
+    if (!fault) return;
+    if (!parcalar || parcalar.length === 0) return;
+
+    try {
+      // İrsaliye numarası Qore form numarasından türetiliyor; arızanın kendi
+      // numarası Ceomed biçimine uymuyor. Sayaç teknik servisle PAYLAŞILIYOR
+      // ('T'): numaralar Ceomed'de aynı kümede, ayrı sayaç mükerrer üretirdi.
+      const formNo = await reserveActionFormNumber({
+        db,
+        companyId: currentCompanyId,
+        userUid: currentUser?.uid || '',
+        userName: currentUserProfile?.name || '',
+        formTypeLetter: 'T',
+      });
+
+      // `as any`: DeviceFaultReport tipi hospitalId taşımıyor ama doküman
+      // taşıyor (dosyanın başka yerlerinde de böyle okunuyor). Tipi düzeltmek
+      // bu değişikliğin kapsamı dışında; yeni tip hatası eklememek için tek
+      // yerde daraltıyoruz.
+      const hospitalId = String((fault as any).hospitalId || '');
+      const cari = await cariCozAsync(db, hospitalId);
+
+      const sonuc = await enqueueIrsaliyeGirisAyri(db, {
+        // Kuyruk dokümanının kimliği BU değer oluyor. Kapanış irsaliyesi için
+        // arıza kimliği; kapanış sonrası eklenen her parça için arıza kimliği +
+        // parça kimliği. Böylece her parça kendi tekil işini alıyor ve aynı
+        // parça iki kez kuyruğa girse bile tek kayıt oluşuyor.
+        formId: kuyrukKimligi,
+        formNo,
+        formType: 'teknik_servis',
+        tarih: new Date().toISOString().slice(0, 10),
+        hospitalId,
+        cariKodu: cari.cariKodu,
+        sevkAdresi: cari.sevkAdresi,
+        cariKaynagi: cari.kaynak,
+        cariHatasi: cari.hata,
+        labName: fault.labName,
+        deviceId: fault.deviceId,
+        cihazAdi: (fault as any).cihazAdi || fault.model,
+        seriNumarasi: (fault as any).seriNumarasi,
+        personnelName: currentUserProfile?.name,
+        personnelUid: currentUser?.uid,
+        companyId: currentCompanyId,
+        // Builder yedek parçayı `type` alanından tanıyor; arıza kayıtlarında
+        // bu alan yok, parçanın kendisi zaten bir parça değişimi.
+        // Tipi olan (hücre değişimi) korunuyor; olmayan parça değişimi sayılıyor.
+        actions: parcalar.map((p: any) => ({ ...p, type: p.type || 'part_change' })),
+      });
+
+      if (sonuc.enqueued === true && sonuc.status === 'blocked') {
+        toast({
+          title: 'Ceomed irsaliyesi beklemede',
+          description: sonuc.blockedDetail || 'Eksik veri var.',
+          variant: 'destructive',
+          duration: 12000,
+        });
+      } else if (sonuc.enqueued === false && sonuc.reason === 'yazilamadi') {
+        toast({
+          title: 'Ceomed irsaliyesi kuyruğa alınamadı',
+          description:
+            'Arıza kapatıldı. Ancak muhasebe irsaliyesi otomatik oluşturulmayacak; ' +
+            'Ceomed\'de elle kesilmesi gerekiyor. Sebep: ' + (sonuc.hata || 'bilinmiyor'),
+          variant: 'destructive',
+          duration: 15000,
+        });
+      }
+    } catch (e: any) {
+      // Arıza KAPATILDI. Buradaki hata yalnızca irsaliye otomasyonunu etkiler.
+      toast({
+        title: 'Ceomed irsaliyesi kuyruğa alınamadı',
+        description: 'Arıza kapatıldı, irsaliye elle kesilmeli. Sebep: ' + (e?.message || e),
+        variant: 'destructive',
+        duration: 15000,
+      });
+    }
+  }, [fault, currentCompanyId, currentUser, currentUserProfile, toast]);
+
   const handleClose = useCallback(async () => {
     if (!fault) return;
     if (isLockedByOther) {
@@ -773,6 +876,24 @@ export default function FaultDetailPage() {
       setCloseDescription('');
       setSelectedSupportPersonnelUids([]);
       toast({ title: 'Arıza Kapatıldı', description: `#${fault.id} kapatıldı.` });
+
+      // ARIZA KAPANDI. Yedek parça kullanıldıysa Ceomed muhasebe irsaliyesi
+      // buradan sonra kuyruğa alınır — teknik/aplikasyon formlarındaki mantığın
+      // aynısı. Arıza kaydından SONRA ve AYRI yapılıyor: kuyruk tarafındaki bir
+      // sorun arıza kapatmayı düşüremez.
+      // Hücre değişimleri AYRI bir alt koleksiyonda tutuluyor ama Ceomed
+      // açısından onlar da stoktan çıkan yedek parça (`hucre_degisimi` builder
+      // tarafından yedek parça sayılıyor). Yalnızca partChanges'e bakmak, hücre
+      // değişimi yapılan arızalarda irsaliyeyi sessizce atlardı.
+      await arizaIrsaliyesiKuyrugaAl(
+        [
+          ...(faultPartChanges || []).filter((p: any) => !p.isPostClosure),
+          ...(faultHucreDegisimleri || [])
+            .filter((h: any) => !h.isPostClosure)
+            .map((h: any) => ({ ...h, type: 'hucre_degisimi' })),
+        ],
+        fault.id,
+      );
     } catch (e) {
       console.error(e);
       toast({ title: 'Hata', description: 'Arıza kapatılamadı.', variant: 'destructive' });
@@ -1340,6 +1461,23 @@ export default function FaultDetailPage() {
       }
 
       await batch.commit();
+
+      // KAPANIŞ SONRASI PARÇA KENDİ İRSALİYESİNİ ALIR.
+      //
+      // Kapanışta toplu irsaliye kesiliyor; arıza zaten kapandıktan sonra
+      // eklenen parça o irsaliyeye giremez ve toplanacağı ikinci bir kapanış
+      // anı da yok. Bu yüzden her biri tek satırlık kendi irsaliyesini alıyor.
+      // Kuyruk kimliği arıza + parça kimliği: aynı parça iki kez işlense bile
+      // tek kayıt oluşur.
+      //
+      // Kapanış ÖNCESİ eklenenlere burada dokunulmuyor — onlar kapanışta
+      // toplu kesiliyor, burada da kesmek mükerrer irsaliye üretirdi.
+      if (isPostClosure) {
+        await arizaIrsaliyesiKuyrugaAl(
+          [{ ...partChangeData, id: partRef.id }],
+          `${fault.id}_${partRef.id}`,
+        );
+      }
 
       toast({ title: 'Başarılı', description: isPostClosure ? 'Parça değişimi sonradan eklendi ve loglandı.' : 'Parça değişimi eklendi.' });
       resetPartModalState();

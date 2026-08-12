@@ -75,6 +75,10 @@ function toKeystrokePlan(job, { dateSeparator = '/' } = {}) {
     header: {
       irsaliyeNo: text(job.irsaliyeNo),
       cariKodu: text(job.cariKodu),
+      // Ek hizmet binalarında cari ANA LABDAN gelir; irsaliyenin doğru
+      // binaya gitmesini bu alan sağlar. Tanımsızsa boş geçilir ve sürücü
+      // alana dokunmaz — boş yazmak mevcut değeri silmek olurdu.
+      sevkAdresi: text(job.sevkAdresi),
       tarih: formatTarih(job.tarih, dateSeparator),
       islemTipi: ISLEM_TIPI,
       depo: DEPO,

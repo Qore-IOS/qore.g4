@@ -7436,7 +7436,6 @@ body > main,
   button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
     aspect-ratio: 1 / 1;
     flex: 0 0 auto;
-    padding-inline: 0;
   }
 
   /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
