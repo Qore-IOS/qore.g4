@@ -7,8 +7,9 @@
  */
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { MK_C } from '@/components/mal-kabul/clay-kit';
+import { haptic } from '@/lib/haptics';
 
 const C = MK_C;
 export const HOME_C = {
@@ -19,6 +20,31 @@ export const HOME_C = {
   violetDeep: 'var(--qc-violet-deep)',
   ease: 'cubic-bezier(.22, 1, .36, 1)',
 };
+
+// ── girdi yeteneği ────────────────────────────────────────────────────────────
+// apple-design/references/adaptive.md: etkileşim kararları ekran genişliğine
+// değil girdi yeteneğine göre verilir. Hover yalnızca gerçek imleçte, 44px
+// dokunma hedefi yalnızca kaba işaretçide devreye girer.
+function useMediaQuery(queryString: string, serverValue = false): boolean {
+  const subscribe = useCallback((onChange: () => void) => {
+    if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+    const mql = window.matchMedia(queryString);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, [queryString]);
+  const getSnapshot = useCallback(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return serverValue;
+    return window.matchMedia(queryString).matches;
+  }, [queryString, serverValue]);
+  return useSyncExternalStore(subscribe, getSnapshot, () => serverValue);
+}
+
+/** Gerçek imleç: hover ve yoğun (küçük) kontrol geometrisi bu yetenekte açılır. */
+export const useHoverCapable = () => useMediaQuery('(hover: hover) and (pointer: fine)');
+/** Kaba işaretçi (parmak): kontroller 44px'lik hedefe büyür. */
+export const useCoarsePointer = () => useMediaQuery('(pointer: coarse)');
+/** Kullanıcı hareketi azaltmak istiyor mu — canlı olarak izlenir. */
+export const useReducedMotion = () => useMediaQuery('(prefers-reduced-motion: reduce)');
 
 // ── formatting helpers ────────────────────────────────────────────────────────
 export const fmtInt = (n: number) => Math.round(n).toLocaleString('tr-TR');
@@ -132,12 +158,28 @@ export function ClayLineChart({
   const step = Math.max(1, Math.ceil(n / (big ? 12 : 8)));
   const showLabel = (i: number) => i === 0 || i === n - 1 || i % step === 0;
 
-  const onMove = (e: React.MouseEvent<SVGSVGElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * W;
+  // Doğrudan manipülasyon: imleç *ve* parmak aynı kod yolundan okunur. Parmakla
+  // basılı tutup kaydırınca değer sürekli güncellenir (skill §1–§2); dikey sayfa
+  // kaydırması `touch-action: pan-y` ile korunur.
+  const readPoint = (clientX: number, el: SVGSVGElement) => {
+    const rect = el.getBoundingClientRect();
+    const x = ((clientX - rect.left) / rect.width) * W;
     let best = 0, bd = Infinity;
     pts.forEach((p, i) => { const d = Math.abs(p.x - x); if (d < bd) { bd = d; best = i; } });
     setHover(best);
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType !== 'mouse' && e.buttons === 0 && !e.currentTarget.hasPointerCapture?.(e.pointerId)) return;
+    readPoint(e.clientX, e.currentTarget);
+  };
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.pointerType === 'mouse') return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    readPoint(e.clientX, e.currentTarget);
+  };
+  const releasePointer = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    setHover(null);
   };
 
   const peak = pts[peakIdx];
@@ -145,8 +187,9 @@ export function ClayLineChart({
   return (
     <div style={{ position: 'relative', width: '100%' }}>
       <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
-        style={{ display: 'block', overflow: 'visible' }}
-        onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
+        style={{ display: 'block', overflow: 'visible', touchAction: 'pan-y' }}
+        onPointerMove={onPointerMove} onPointerDown={onPointerDown}
+        onPointerUp={releasePointer} onPointerCancel={releasePointer} onPointerLeave={releasePointer}>
         <defs>
           <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0" stopColor={accent} stopOpacity="0.42" />
@@ -232,7 +275,7 @@ export function ClayLineChart({
         <div style={{
           position: 'absolute', top: 0, left: `${(pts[hover].x / W) * 100}%`, transform: 'translateX(-50%)',
           padding: '7px 13px', borderRadius: C.radiusPill, background: `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`,
-          boxShadow: `0 12px 26px -10px rgba(90,72,40,0.5), ${C.clayFlat}`, pointerEvents: 'none', whiteSpace: 'nowrap',
+          boxShadow: `${C.floatShadow}, ${C.clayFlat}`, pointerEvents: 'none', whiteSpace: 'nowrap',
           fontSize: 13, fontWeight: 800, color: C.ink1,
         }}>
           <span style={{ color: accent }}>{labels[hover]}</span> · {fmtInt(data[hover])}
@@ -246,7 +289,7 @@ export function ClayLineChart({
 export function DeltaBadge({ value, suffix = '%', neutralLabel }: { value: number; suffix?: string; neutralLabel?: string }) {
   const up = value > 0, down = value < 0;
   const col = up ? C.waterDeep : down ? C.danger : C.ink2;
-  const bg = up ? 'rgba(111,181,133,0.16)' : down ? 'rgba(192,121,106,0.14)' : C.surface2;
+  const bg = up ? C.waterA14 : down ? C.dangerA12 : C.surface2;
   const arrow = up ? '▲' : down ? '▼' : '–';
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 11px', borderRadius: C.radiusPill, background: bg, color: col, fontSize: 12.5, fontWeight: 800, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
@@ -307,24 +350,46 @@ export function Ring({ pct, size = 86, stroke = 10, color, track, children, dela
 }
 
 // ── clay chrome ───────────────────────────────────────────────────────────────
+/**
+ * Clay kart.
+ *
+ * `onClick` yalnızca imleç/parmak için bir kolaylıktır: kartın tamamı tıklanır.
+ * Kartın kendisi role="button" almaz — kartların içinde kendi kontrolleri
+ * (yenile, büyüt, sekme) var ve "button" rolü kap görevi göremez. Bu yüzden
+ * tıklanabilir her kart, aynı eylemi yapan görünür bir kontrol de barındırmak
+ * zorundadır; klavye yolu oradan geçer (desktop.md §2).
+ */
 export function Card({ children, tone, onClick, hover, pad = 18, style }: {
   children: React.ReactNode; tone?: 'ok' | 'brown'; onClick?: () => void; hover?: boolean; pad?: number; style?: React.CSSProperties;
 }) {
   const [h, setH] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  // Hover yalnızca gerçek imleçte. Dokunmatikte `pointerenter` da tetiklendiği
+  // için kart parmak değince "hover" durumunda takılı kalıyordu.
+  const hoverCapable = useHoverCapable();
+  const canHover = !!hover && hoverCapable;
+  const lifted = canHover && h;
   const bg = tone === 'ok'
-    ? `linear-gradient(180deg, rgba(111,181,133,0.08), ${C.surface2})`
+    ? `linear-gradient(180deg, ${C.waterA09}, ${C.surface2})`
     : tone === 'brown'
-      ? `linear-gradient(165deg, ${C.accent} 0%, #B5784A 60%, #A66C40 100%)`
+      ? `linear-gradient(165deg, ${C.brownTop} 0%, ${C.brownMid} 60%, ${C.brownDeep} 100%)`
       : `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`;
   return (
-    <div onClick={onClick} onPointerEnter={() => hover && setH(true)} onPointerLeave={() => setH(false)}
+    <div onClick={onClick}
+      onPointerEnter={() => canHover && setH(true)}
+      onPointerLeave={() => { setH(false); setPressed(false); }}
+      // Geri bildirim basma anında doğar, bırakışta değil (skill §1).
+      onPointerDown={() => onClick && setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerCancel={() => setPressed(false)}
       style={{
         position: 'relative', padding: pad, borderRadius: C.radiusLg, background: bg,
         boxShadow: tone === 'brown'
-          ? `inset 0 1px 0 rgba(255,255,255,0.25), 0 18px 40px -18px ${C.accentGlow}, 0 4px 12px -4px rgba(150,128,96,0.3)`
-          : (hover && h ? `${C.clay}, 0 0 0 1.5px ${C.accent}` : C.clay),
-        cursor: onClick ? 'pointer' : 'default', transition: `box-shadow 240ms ${HOME_C.ease}, transform 240ms ${HOME_C.ease}`,
-        transform: hover && h ? 'translateY(-2px)' : 'none',
+          ? `inset 0 1px 0 ${C.hi}, 0 18px 40px -18px ${C.accentGlow}, 0 4px 12px -4px rgba(150,128,96,0.3)`
+          : (lifted ? `${C.clay}, 0 0 0 1.5px ${C.accent}` : C.clay),
+        cursor: onClick ? 'pointer' : 'default',
+        transition: `box-shadow 200ms ${HOME_C.ease}, transform 200ms ${HOME_C.ease}`,
+        transform: pressed ? 'scale(0.995)' : lifted ? 'translateY(-2px)' : 'none',
         ...style,
       }}>
       {children}
@@ -338,53 +403,67 @@ export function CardHead({ ico, title, tone, right, flush, onLight }: {
   const map: Record<string, { c: string; bg: string }> = {
     accent: { c: C.accent, bg: `${C.accentA09}` },
     amber: { c: C.amber, bg: C.amberSoft },
-    ok: { c: C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
-    sky: { c: HOME_C.skyDeep, bg: 'rgba(124,168,222,0.16)' },
-    violet: { c: HOME_C.violetDeep, bg: 'rgba(155,134,214,0.16)' },
+    ok: { c: C.waterDeep, bg: C.waterA14 },
+    sky: { c: HOME_C.skyDeep, bg: C.skyA16 },
+    violet: { c: HOME_C.violetDeep, bg: C.violetA16 },
   };
   const t = map[tone || 'accent'];
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: flush ? 0 : 2 }}>
-      <span style={{ width: 36, height: 36, borderRadius: 11, flexShrink: 0, display: 'grid', placeItems: 'center', color: onLight ? '#fff' : t.c, background: onLight ? 'rgba(255,255,255,0.22)' : t.bg, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}>{ico}</span>
-      <span style={{ fontSize: 13, fontWeight: 800, color: onLight ? '#fff' : C.ink2, letterSpacing: '0.07em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{title}</span>
+      <span style={{ width: 36, height: 36, borderRadius: 11, flexShrink: 0, display: 'grid', placeItems: 'center', color: onLight ? C.onBrown : t.c, background: onLight ? 'rgba(255,255,255,0.22)' : t.bg, boxShadow: `inset 0 1px 1px ${C.hi}` }}>{ico}</span>
+      {/* Büyük harf başlıklarda pozitif tracking okunurluğu artırır (skill §15). */}
+      <span style={{ fontSize: 13, fontWeight: 800, color: onLight ? C.onBrown : C.ink2, letterSpacing: '0.07em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{title}</span>
       {right && <span style={{ marginLeft: 'auto' }}>{right}</span>}
     </div>
   );
 }
 
 export function Pill({ children, onLight }: { children: React.ReactNode; onLight?: boolean }) {
-  return <span style={{ padding: '5px 12px', borderRadius: C.radiusPill, background: onLight ? 'rgba(255,255,255,0.22)' : C.surface2, boxShadow: onLight ? 'none' : C.clayInset, fontSize: 12.5, fontWeight: 700, color: onLight ? '#fff' : C.ink2, whiteSpace: 'nowrap' }}>{children}</span>;
+  return <span style={{ padding: '5px 12px', borderRadius: C.radiusPill, background: onLight ? 'rgba(255,255,255,0.22)' : C.surface2, boxShadow: onLight ? 'none' : C.clayInset, fontSize: 12.5, fontWeight: 700, color: onLight ? C.onBrown : C.ink2, whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>{children}</span>;
 }
 
 export function Tag({ children, tone, bg }: { children: React.ReactNode; tone: string; bg: string }) {
   return <span style={{ padding: '6px 12px', borderRadius: C.radiusPill, background: bg, color: tone, fontSize: 12.5, fontWeight: 700, whiteSpace: 'nowrap' }}>{children}</span>;
 }
 
-export function ClayIconBtn({ children, onClick, round, spin, onLight }: {
+export function ClayIconBtn({ children, onClick, round, spin, onLight, label }: {
   children: React.ReactNode; onClick?: () => void; round?: boolean; spin?: boolean; onLight?: boolean;
+  /** İkon-only kontrolün erişilebilir adı (skill §14: etiketsiz ikon olmaz). */
+  label?: string;
 }) {
   const [s, setS] = useState(false);
+  const coarse = useCoarsePointer();
+  // Dokunmatikte 44px'lik hedef, imleçte yoğun 38px geometri.
+  const size = coarse ? 44 : 38;
   return (
-    <button onClick={(e) => { e.stopPropagation(); onClick?.(); if (spin) { setS(true); setTimeout(() => setS(false), 700); } }}
-      style={{ all: 'unset', cursor: 'pointer', width: 38, height: 38, borderRadius: round ? '50%' : 12, display: 'grid', placeItems: 'center', color: onLight ? '#fff' : C.ink2, background: onLight ? 'rgba(255,255,255,0.2)' : `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: onLight ? 'none' : C.clayFlat, transition: `transform 200ms ${HOME_C.ease}` }}
+    <button type="button" aria-label={label} title={label} className="clay-focusable"
+      onClick={(e) => { e.stopPropagation(); onClick?.(); if (spin) { setS(true); setTimeout(() => setS(false), 700); } }}
+      style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', width: size, height: size, flexShrink: 0, borderRadius: round ? '50%' : 12, display: 'grid', placeItems: 'center', color: onLight ? C.onBrown : C.ink2, background: onLight ? 'rgba(255,255,255,0.2)' : `linear-gradient(180deg, ${C.surfaceHi}, ${C.surface2})`, boxShadow: onLight ? 'none' : C.clayFlat, transition: `transform 110ms ${HOME_C.ease}` }}
+      // Basma anında tepki (skill §1): 110ms içeri, bırakınca geri.
       onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.92)')}
       onPointerUp={(e) => (e.currentTarget.style.transform = '')}
+      onPointerCancel={(e) => (e.currentTarget.style.transform = '')}
       onPointerLeave={(e) => (e.currentTarget.style.transform = '')}>
       <span style={{ display: 'inline-flex', animation: s ? `mkSpin 0.7s ${HOME_C.ease}` : 'none' }}>{children}</span>
     </button>
   );
 }
 
-export function Segmented<T extends string>({ value, onChange, options }: {
-  value: T; onChange: (v: T) => void; options: { v: T; l: string }[];
+export function Segmented<T extends string>({ value, onChange, options, label }: {
+  value: T; onChange: (v: T) => void; options: { v: T; l: string; title?: string }[]; label?: string;
 }) {
+  const coarse = useCoarsePointer();
+  // Tek harfli sekmeler dokunmatikte 44px'lik hedefe büyür.
+  const h = coarse ? 40 : 32;
   return (
-    <div style={{ display: 'inline-flex', gap: 3, padding: 4, borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset }}>
+    <div role="tablist" aria-label={label} style={{ display: 'inline-flex', gap: 3, padding: 4, borderRadius: C.radiusPill, background: C.surface2, boxShadow: C.clayInset }}>
       {options.map(o => {
         const on = value === o.v;
         return (
-          <button key={o.v} onClick={(e) => { e.stopPropagation(); onChange(o.v); }}
-            style={{ all: 'unset', cursor: 'pointer', minWidth: 32, height: 32, padding: '0 11px', borderRadius: C.radiusPill, display: 'grid', placeItems: 'center', background: on ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : 'transparent', boxShadow: on ? `0 5px 11px -4px ${C.accentGlow}` : 'none', color: on ? '#fff' : C.ink2, fontSize: 13, fontWeight: 800, transition: `all 200ms ${HOME_C.ease}` }}>
+          <button key={o.v} type="button" role="tab" aria-selected={on} aria-label={o.title} title={o.title}
+            className="clay-focusable clay-touch-target"
+            onClick={(e) => { e.stopPropagation(); if (coarse) haptic(); onChange(o.v); }}
+            style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', minWidth: h, height: h, padding: coarse ? '0 14px' : '0 11px', borderRadius: C.radiusPill, display: 'grid', placeItems: 'center', background: on ? `linear-gradient(180deg, ${C.accent2}, ${C.accent})` : 'transparent', boxShadow: on ? `0 5px 11px -4px ${C.accentGlow}` : 'none', color: on ? C.onBrown : C.ink2, fontSize: 13, fontWeight: 800, transition: `background 200ms ${HOME_C.ease}, color 200ms ${HOME_C.ease}, box-shadow 200ms ${HOME_C.ease}` }}>
             {o.l}
           </button>
         );
@@ -402,7 +481,7 @@ export function ClayBar({ pct, tone = C.waterSolid, height = 8 }: { pct: number;
   }, [pct]);
   return (
     <div style={{ height, borderRadius: 99, background: C.surface2, boxShadow: C.clayInset, overflow: 'hidden' }}>
-      <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, w))}%`, borderRadius: 99, background: `linear-gradient(90deg, ${tone}, #8FD3A6)`, transition: `width 1000ms ${HOME_C.ease}` }} />
+      <div style={{ height: '100%', width: `${Math.max(0, Math.min(100, w))}%`, borderRadius: 99, background: `linear-gradient(90deg, ${tone}, ${C.waterHi})`, transition: `width 1000ms ${HOME_C.ease}` }} />
     </div>
   );
 }

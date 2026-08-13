@@ -10,6 +10,7 @@ import { TrendingUp, TrendingDown, ChevronLeft, ChevronRight, UserPlus2, TimerRe
 import {
   HOME_C, fmtInt, fmtTL, useCountUpFlash, ClayLineChart,
   Card as ClayCard, CardHead, Pill, Tag, ClayIconBtn, Segmented, ClayBar, DeltaBadge,
+  useCoarsePointer,
 } from '@/components/dashboard-v2/clay-home';
 import { ClayShell } from '@/components/mal-kabul/clay-kit';
 import {
@@ -22,7 +23,6 @@ import { tr } from 'date-fns/locale';
 import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
 import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from '@/lib/utils';
-import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
@@ -46,11 +46,7 @@ import {
 } from '@/hooks/useFirebaseQueries';
 import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
-
-const motionProps = {
-  initial: { scale: 1, y: 0 },
-  whileHover: { scale: 1.03, y: -5, transition: { type: 'spring', stiffness: 300, damping: 20 } },
-};
+import { haptic } from '@/lib/haptics';
 
 // ── clay dashboard sub-components (count-up animated) ─────────────────────────
 // Flash key bumps on every value change → number pulses to grab attention.
@@ -63,9 +59,11 @@ function MiniKpi({ s, i }: { s: { value: number; tone: string; bg: string; icon:
   const { value: v, flash } = useCountUpFlash(s.value, 1000);
   const Icon = s.icon;
   return (
-    <Link href={s.href} style={{ textDecoration: 'none', padding: '14px 10px', borderRadius: HOME_C.radiusSm, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, textAlign: 'center', animation: `mkPopIn ${320 + i * 120}ms ${HOME_C.ease}` }}>
-      <span style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: s.tone, background: s.bg, boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Icon size={19} /></span>
-      <span key={flash} style={{ display: 'inline-block', fontSize: 28, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, fontVariantNumeric: 'tabular-nums', animation: flash ? `mkValueFlash 600ms ${HOME_C.ease}` : undefined }}>{fmtInt(v)}</span>
+    <Link href={s.href} className="clay-focusable" aria-label={`${s.label}: ${fmtInt(s.value)} — listeyi aç`}
+      style={{ textDecoration: 'none', padding: '14px 10px', borderRadius: HOME_C.radiusSm, background: HOME_C.surfaceHi, boxShadow: HOME_C.clayFlat, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 7, textAlign: 'center', animation: `mkPopIn ${320 + i * 120}ms ${HOME_C.ease}` }}>
+      <span style={{ width: 38, height: 38, borderRadius: 12, display: 'grid', placeItems: 'center', color: s.tone, background: s.bg, boxShadow: `inset 0 1px 1px ${HOME_C.hi}` }}><Icon size={19} /></span>
+      {/* Büyük rakamlarda negatif tracking (skill §15) + sabit genişlikli rakam. */}
+      <span key={flash} style={{ display: 'inline-block', fontSize: 28, fontWeight: 800, color: HOME_C.ink1, lineHeight: 1, letterSpacing: '-0.02em', fontVariantNumeric: 'tabular-nums', animation: flash ? `mkValueFlash 600ms ${HOME_C.ease}` : undefined }}>{fmtInt(v)}</span>
       <span style={{ fontSize: 12, fontWeight: 600, color: HOME_C.ink2, lineHeight: 1.2 }}>{s.label}</span>
     </Link>
   );
@@ -76,18 +74,27 @@ function MiniCalendar({ month, selected, taskDays, onSelectDay, onPrevMonth, onN
   month: Date; selected: Date; taskDays: Set<string>;
   onSelectDay: (d: Date) => void; onPrevMonth: () => void; onNextMonth: () => void;
 }) {
+  const coarse = useCoarsePointer();
   const gridStart = startOfWeek(startOfMonth(month), { weekStartsOn: 1 });
   const days = Array.from({ length: 42 }, (_, i) => addDays(gridStart, i));
   const wd = ['Pt', 'Sa', 'Ça', 'Pe', 'Cu', 'Ct', 'Pz'];
-  const btn = (child: React.ReactNode, onClick: () => void) => (
-    <button onClick={(e) => { e.stopPropagation(); onClick(); }} style={{ all: 'unset', cursor: 'pointer', width: 26, height: 26, borderRadius: 9, display: 'grid', placeItems: 'center', color: HOME_C.ink2, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: HOME_C.clayFlat }}>{child}</button>
+  // Ay gezinme okları dokunmatikte 44px'lik hedefe büyür (mobile.md §1).
+  const navSize = coarse ? 44 : 28;
+  const btn = (child: React.ReactNode, onClick: () => void, label: string) => (
+    <button type="button" aria-label={label} title={label} className="clay-focusable"
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', width: navSize, height: navSize, flexShrink: 0, borderRadius: coarse ? 14 : 9, display: 'grid', placeItems: 'center', color: HOME_C.ink2, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: HOME_C.clayFlat, transition: `transform 110ms ${HOME_C.ease}` }}
+      onPointerDown={(e) => (e.currentTarget.style.transform = 'scale(0.92)')}
+      onPointerUp={(e) => (e.currentTarget.style.transform = '')}
+      onPointerCancel={(e) => (e.currentTarget.style.transform = '')}
+      onPointerLeave={(e) => (e.currentTarget.style.transform = '')}>{child}</button>
   );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-        {btn(<ChevronLeft size={14} />, onPrevMonth)}
-        <span style={{ fontSize: 12.5, fontWeight: 800, color: HOME_C.ink1, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{format(month, 'LLLL yyyy', { locale: tr })}</span>
-        {btn(<ChevronRight size={14} />, onNextMonth)}
+        {btn(<ChevronLeft size={16} />, onPrevMonth, 'Önceki ay')}
+        <span aria-live="polite" style={{ fontSize: 12.5, fontWeight: 800, color: HOME_C.ink1, textTransform: 'capitalize', whiteSpace: 'nowrap' }}>{format(month, 'LLLL yyyy', { locale: tr })}</span>
+        {btn(<ChevronRight size={16} />, onNextMonth, 'Sonraki ay')}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 2 }}>
         {wd.map((d) => <div key={d} style={{ textAlign: 'center', fontSize: 9.5, fontWeight: 700, color: HOME_C.ink3, padding: '2px 0' }}>{d}</div>)}
@@ -98,14 +105,20 @@ function MiniCalendar({ month, selected, taskDays, onSelectDay, onPrevMonth, onN
           const today = isToday(day);
           const has = taskDays.has(key);
           return (
-            <button key={key} onClick={(e) => { e.stopPropagation(); onSelectDay(day); }}
-              style={{ all: 'unset', cursor: 'pointer', position: 'relative', aspectRatio: '1 / 1', minWidth: 0, borderRadius: 8, display: 'grid', placeItems: 'center', fontSize: 11.5, fontWeight: sel || today ? 800 : 600,
-                color: sel ? '#fff' : inMonth ? HOME_C.ink1 : HOME_C.ink3,
+            <button key={key} type="button" className="clay-focusable"
+              aria-pressed={sel}
+              aria-label={`${format(day, 'd MMMM yyyy EEEE', { locale: tr })}${has ? ' · görev var' : ''}`}
+              // Seçim değişimi dokunmatikte hafif bir tık ile eşlenir; görsel ile
+              // aynı karede tetiklenir (skill §13).
+              onClick={(e) => { e.stopPropagation(); if (coarse) haptic(); onSelectDay(day); }}
+              style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', position: 'relative', aspectRatio: '1 / 1', minWidth: 0, minHeight: coarse ? 38 : 0, borderRadius: 8, display: 'grid', placeItems: 'center', fontSize: coarse ? 13 : 11.5, fontWeight: sel || today ? 800 : 600,
+                fontVariantNumeric: 'tabular-nums',
+                color: sel ? HOME_C.onBrown : inMonth ? HOME_C.ink1 : HOME_C.ink3,
                 background: sel ? `linear-gradient(180deg, ${HOME_C.accent2}, ${HOME_C.accent})` : 'transparent',
                 boxShadow: sel ? `0 5px 11px -5px ${HOME_C.accentGlow}` : today ? `inset 0 0 0 1.5px ${HOME_C.accent}` : 'none',
                 opacity: inMonth ? 1 : 0.55 }}>
               {format(day, 'd')}
-              {has && <span style={{ position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: sel ? '#fff' : HOME_C.accent }} />}
+              {has && <span aria-hidden style={{ position: 'absolute', bottom: 3, left: '50%', transform: 'translateX(-50%)', width: 4, height: 4, borderRadius: '50%', background: sel ? HOME_C.onBrown : HOME_C.accent }} />}
             </button>
           );
         })}
@@ -121,9 +134,12 @@ function ShortcutTile({ panel, i, dense, compact }: { panel: any; i: number; den
   const iconSz = compact ? 34 : dense ? 40 : 46;
   const iconGlyph = compact ? 18 : dense ? 20 : 22;
   return (
-    <Link href={panel.href} title={panel.label} aria-label={`${panel.label} panelini aç`} onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerLeave={() => setP(false)}
-      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 82 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 7 : dense ? 7 : 10, padding: compact ? '10px 5px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 16 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform 220ms ${HOME_C.ease}, box-shadow 220ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
-      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 11 : 14, display: 'grid', placeItems: 'center', background: 'radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%)', boxShadow: HOME_C.clayFlat, color: HOME_C.accent }}><Icon size={iconGlyph} /></span>
+    <Link href={panel.href} title={panel.label} aria-label={`${panel.label} panelini aç`} className="clay-focusable"
+      onPointerDown={() => setP(true)} onPointerUp={() => setP(false)} onPointerCancel={() => setP(false)} onPointerLeave={() => setP(false)}
+      // Basılı görünüm 110ms'de gelir (anında hissedilir), bırakışta 220ms'de
+      // yerine oturur — geri bildirim basmada doğar (skill §1).
+      style={{ textDecoration: 'none', boxSizing: 'border-box', position: 'relative', minWidth: 0, height: '100%', minHeight: compact ? 82 : dense ? 78 : 96, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: compact ? 7 : dense ? 7 : 10, padding: compact ? '10px 5px' : dense ? '10px 6px' : '16px 8px', borderRadius: compact ? 16 : HOME_C.radius, background: `linear-gradient(180deg, ${HOME_C.surfaceHi}, ${HOME_C.surface2})`, boxShadow: p ? HOME_C.clayPress : HOME_C.clay, color: HOME_C.ink1, transition: `transform ${p ? 110 : 220}ms ${HOME_C.ease}, box-shadow ${p ? 110 : 220}ms ${HOME_C.ease}`, transform: p ? 'translateY(2px) scale(0.96)' : 'none', animation: `mkPopIn ${260 + i * 40}ms ${HOME_C.ease}` }}>
+      <span style={{ width: iconSz, height: iconSz, flexShrink: 0, borderRadius: compact ? 11 : 14, display: 'grid', placeItems: 'center', background: HOME_C.tileFace, boxShadow: HOME_C.clayFlat, color: HOME_C.tileGlyph }}><Icon size={iconGlyph} /></span>
       {/* etiket kesilmesin: en fazla 2 satır */}
       <span style={{ fontSize: compact ? 10 : 12, fontWeight: 700, textAlign: 'center', lineHeight: 1.2, width: '100%', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', wordBreak: 'break-word', hyphens: 'auto' }}>{panel.label}</span>
     </Link>
@@ -265,7 +281,7 @@ export default function DashboardV2({
     return {
       periodLabel: format(analysisDate, 'MMMM yyyy', { locale: tr }),
       slides: [
-        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
+        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: HOME_C.waterA14 },
         { label: 'En az çalışılan test', name: ranked.at(-1)?.[0] || 'Henüz veri yok', value: ranked.at(-1)?.[1] ?? 0, suffix: 'test', icon: TrendingDown, color: HOME_C.amber, bg: HOME_C.amberSoft },
         { label: 'Önceki aya göre en çok yükselen', name: rising?.increase && rising.increase > 0 ? rising.name : 'Artış gösteren test yok', value: Math.max(0, rising?.increase ?? 0), suffix: 'artış', icon: BarChart3, color: HOME_C.accent, bg: HOME_C.accentA08 },
       ],
@@ -867,8 +883,8 @@ export default function DashboardV2({
 
   const faultStats = [
     { key: 'atama', label: 'Atama Bekleyen', value: faultKpis.atamaBekleyen, tone: HOME_C.accent, bg: `${HOME_C.accentA08}`, icon: UserPlus2, href: '/ariza-yonetimi?status=atama_bekliyor' },
-    { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, tone: HOME_C.danger, bg: 'rgba(192,121,106,0.12)', icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
-    { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, tone: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)', icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
+    { key: 'mb', label: 'Müdahale Bekleyen', value: faultKpis.mudahaleBekleyen, tone: HOME_C.danger, bg: HOME_C.dangerA12, icon: TimerReset, href: '/ariza-yonetimi?status=mudahale_bekliyor' },
+    { key: 'me', label: 'Müdahale Edilen', value: faultKpis.mudahaleEdilen, tone: HOME_C.waterDeep, bg: HOME_C.waterA14, icon: ActivitySquare, href: '/ariza-yonetimi?status=mudahale_ediliyor' },
   ];
 
   // Bugün — yapılan / toplam görev
@@ -883,26 +899,39 @@ export default function DashboardV2({
 
   const periodSeg = (['daily', 'weekly', 'monthly', 'yearly'] as TrendPeriod[]);
   const periodLabel: Record<TrendPeriod, string> = { daily: 'G', weekly: 'H', monthly: 'A', yearly: 'Y' };
+  // Tek harflik sekmelerin açık karşılığı — ekran okuyucu ve ipucu için.
+  const periodTitle: Record<TrendPeriod, string> = { daily: 'Günlük', weekly: 'Haftalık', monthly: 'Aylık', yearly: 'Yıllık' };
 
   const gap = isMobile ? 12 : 14;
 
+  // Güvenli alan + dock payı her kırılımda uygulanır. Önceden yalnızca geniş
+  // ekranda dock payı vardı; tablet genişliğinde son kısayol sırası dock'un
+  // arkasında kalıyordu (mobile.md §2).
+  const sideInset = isMobile ? 14 : wide ? 24 : 22;
+  const shellPadding: React.CSSProperties = {
+    paddingTop: isMobile ? 'calc(env(safe-area-inset-top, 0px) + 16px)' : wide ? 14 : 18,
+    paddingLeft: `calc(env(safe-area-inset-left, 0px) + ${sideInset}px)`,
+    paddingRight: `calc(env(safe-area-inset-right, 0px) + ${sideInset}px)`,
+    paddingBottom: 'calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px) + 16px)',
+  };
+
   return (
     <>
-      <ClayShell style={{ padding: isMobile ? '16px 14px 30px' : wide ? '14px 24px calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + 24px)' : '18px 22px 26px' }}>
+      <ClayShell style={shellPadding}>
         {/* İçerik doğal yüksekliğinde kalır. Sabit viewport yüksekliği, kısa masaüstü
             ekranlarında bu kartı küçültüp ikonları dock'un arkasına saklıyordu. */}
         <div style={{ maxWidth: 1480, margin: '0 auto', display: 'flex', flexDirection: 'column', gap }}>
 
           {/* Header */}
           <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: isMobile ? 12 : 16, flexWrap: 'wrap', animation: `mkRise 520ms ${HOME_C.ease} both` }}>
-            <div style={{ width: isMobile ? 42 : 46, height: isMobile ? 42 : 46, borderRadius: 15, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px rgba(255,255,255,0.4), 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 16 : 19, fontWeight: 800 }}>{initials}</div>
+            <div style={{ width: isMobile ? 42 : 46, height: isMobile ? 42 : 46, borderRadius: 15, flexShrink: 0, display: 'grid', placeItems: 'center', color: '#fff', background: `radial-gradient(circle at 32% 28%, ${HOME_C.accent2}, ${HOME_C.accent})`, boxShadow: `inset 0 1px 1px ${HOME_C.hi}, 0 10px 20px -8px ${HOME_C.accentGlow}`, fontSize: isMobile ? 16 : 19, fontWeight: 800 }}>{initials}</div>
             <div style={{ minWidth: 0 }}>
               <h1 style={{ margin: 0, fontSize: isMobile ? 20 : 23, fontWeight: 800, letterSpacing: '-0.02em', color: HOME_C.ink1 }}>{userName}</h1>
               <div style={{ fontSize: 13, fontWeight: 600, color: HOME_C.ink2 }}>Hoş geldin · genel bakış</div>
             </div>
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12 }}>
               {!isMobile && <span style={{ fontSize: 13.5, fontWeight: 700, color: HOME_C.ink2, fontFamily: 'ui-monospace, monospace' }}>{format(new Date(), 'dd MMMM yyyy · EEEE', { locale: tr })}</span>}
-              <ClayIconBtn round><Bell size={18} /></ClayIconBtn>
+              <ClayIconBtn round label="Bildirimler"><Bell size={18} /></ClayIconBtn>
             </div>
           </div>
 
@@ -918,9 +947,12 @@ export default function DashboardV2({
               </ClayCard>
             </div>
 
-            {/* Counter analizi — aylık öne çıkan testler */}
-            <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
-              <ClayCard hover pad={16} style={{ height: '100%' }}>
+            {/* Counter analizi — aylık öne çıkan testler.
+                Bağlantı kartın tamamını sarmıyor: kaydırma noktaları gerçek
+                birer kontrol olduğu için (buton, bağlantı içine yerleştirilemez)
+                kart gövdesi bağlantı, noktalar kardeş öğe. */}
+            <ClayCard hover pad={16} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+              <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" className="clay-focusable" style={{ textDecoration: 'none', color: 'inherit', display: 'block', flex: 1, minHeight: 0 }}>
                 <CardHead ico={<BarChart3 size={18} />} title="Counter Analizi" tone="accent" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, textTransform: 'capitalize' }}>{counterAnalysis.periodLabel}<ArrowUpRight size={16} /></span>} />
                 <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 14, minHeight: 86, marginTop: 10, overflow: 'hidden' }}>
                   {counterAnalysis.slides.map((slide, index) => {
@@ -938,17 +970,32 @@ export default function DashboardV2({
                     );
                   })}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
-                  {counterAnalysis.slides.map((slide, index) => (
-                    <span key={slide.label} style={{ width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
-                  ))}
-                  </div>
-              </ClayCard>
-            </Link>
+              </Link>
+              {/* Kaydırma noktaları gerçek kontrol: slaytlar kendiliğinden
+                  dönmediği için bunlar olmadan ilk slayttan sonrası hiç
+                  görünmüyordu. Dokunma hedefi 44px'e tamamlanır. */}
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
+                {counterAnalysis.slides.map((slide, index) => (
+                  <button key={slide.label} type="button" className="clay-focusable clay-touch-target"
+                    aria-label={`${slide.label} — ${slide.name}`} aria-current={index === counterSlide}
+                    onClick={(e) => { e.stopPropagation(); setCounterSlide(index); }}
+                    style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', padding: '8px 4px', display: 'grid', placeItems: 'center' }}>
+                    <span style={{ display: 'block', width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
+                  </button>
+                ))}
+              </div>
+            </ClayCard>
 
             {/* Anlık Maliyet */}
             <ClayCard tone="ok" onClick={() => setIsStockCostDetailOpen(true)} hover pad={16} style={{ height: '100%' }}>
-              <CardHead ico={<Banknote size={18} />} title="Anlık Maliyet" tone="ok" right={<ClayIconBtn onClick={() => computeAndSaveSnapshot('manual')}>{isRefreshingStockCost ? <Loader2 size={16} style={{ animation: 'mkSpin 0.8s linear infinite' }} /> : <RefreshCw size={16} />}</ClayIconBtn>} />
+              {/* Kartın tamamı tıklanır; klavye ve ekran okuyucu yolu ise şu iki
+                  görünür kontrolden geçer (detay + yeniden hesapla). */}
+              <CardHead ico={<Banknote size={18} />} title="Anlık Maliyet" tone="ok" right={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <ClayIconBtn label="Maliyeti yeniden hesapla" onClick={() => computeAndSaveSnapshot('manual')}>{isRefreshingStockCost ? <Loader2 size={16} style={{ animation: 'mkSpin 0.8s linear infinite' }} /> : <RefreshCw size={16} />}</ClayIconBtn>
+                  <ClayIconBtn label="Maliyet detayını aç" onClick={() => setIsStockCostDetailOpen(true)}><ArrowUpRight size={16} /></ClayIconBtn>
+                </span>
+              } />
               <div style={{ marginTop: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
                   {totalStockCost === null
@@ -958,7 +1005,7 @@ export default function DashboardV2({
                 <div style={{ fontSize: 11, fontWeight: 600, color: HOME_C.ink3, marginTop: 5 }}>
                   {costMeta ? `${format(new Date(costMeta.computedAt), 'dd MMM HH:mm', { locale: tr })} · ${costMeta.source === 'scheduled' ? '06:00 otomatik' : costMeta.source === 'manual' ? 'elle hesaplandı' : 'ilk hesap'}` : 'hesaplanıyor…'}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9, padding: '9px 13px', borderRadius: HOME_C.radiusSm, background: 'rgba(192,121,106,0.10)', boxShadow: 'inset 0 0 0 1px rgba(192,121,106,0.18)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9, padding: '9px 13px', borderRadius: HOME_C.radiusSm, background: HOME_C.dangerA12, boxShadow: `inset 0 0 0 1px ${HOME_C.dangerA18}` }}>
                   <span style={{ color: HOME_C.danger, display: 'inline-flex' }}><AlertTriangle size={16} /></span>
                   <span style={{ fontSize: 12.5, fontWeight: 800, color: HOME_C.danger, letterSpacing: '0.02em' }}>RİSKLİ STOK</span>
                   <span style={{ marginLeft: 'auto', fontSize: 15, fontWeight: 800, color: HOME_C.danger, fontVariantNumeric: 'tabular-nums' }}>{riskyCost !== null ? fmtTL(riskyCost) : '…'}</span>
@@ -974,8 +1021,8 @@ export default function DashboardV2({
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, marginBottom: 4, flexWrap: 'wrap' }}>
                 <CardHead ico={<TrendingUp size={18} />} title="Tüketim Trendi" tone="accent" flush />
                 <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <Segmented value={trendPeriod} onChange={(v) => setTrendPeriod(v)} options={periodSeg.map(p => ({ v: p, l: periodLabel[p] }))} />
-                  <ClayIconBtn onClick={() => setIsConsumptionModalOpen(true)}><Maximize2 size={16} /></ClayIconBtn>
+                  <Segmented label="Trend dönemi" value={trendPeriod} onChange={(v) => setTrendPeriod(v)} options={periodSeg.map(p => ({ v: p, l: periodLabel[p], title: periodTitle[p] }))} />
+                  <ClayIconBtn label="Trendi büyüt" onClick={() => setIsConsumptionModalOpen(true)}><Maximize2 size={16} /></ClayIconBtn>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 12 }}>
@@ -990,11 +1037,13 @@ export default function DashboardV2({
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-                  <ClayIconBtn round onClick={() => handleTrendNav('prev')}><ChevronLeft size={16} /></ClayIconBtn>
-                  <ClayIconBtn round onClick={() => handleTrendNav('next')}><ChevronRight size={16} /></ClayIconBtn>
+                  <ClayIconBtn round label="Önceki dönem" onClick={() => handleTrendNav('prev')}><ChevronLeft size={16} /></ClayIconBtn>
+                  <ClayIconBtn round label="Sonraki dönem" onClick={() => handleTrendNav('next')}><ChevronRight size={16} /></ClayIconBtn>
                 </div>
               </div>
-              <div style={{ marginTop: 6 }}>
+              {/* Grafiğin üstündeki dokunuş bir okuma jesti (değer takibi), kartı
+                  açma niyeti değil — tıklama burada durur. */}
+              <div style={{ marginTop: 6 }} onClick={(e) => e.stopPropagation()}>
                 <ClayLineChart data={trendSpark.length ? trendSpark : [0]} labels={trendLabels.length ? trendLabels : ['']} height={isMobile ? 150 : wide ? 132 : 168} animKey={trendPeriod + trendTitle} yTicks />
               </div>
             </ClayCard>
@@ -1023,8 +1072,8 @@ export default function DashboardV2({
                     {totalToday === 0 ? (
                       <div style={{ padding: '22px 0', textAlign: 'center', color: HOME_C.ink3, fontSize: 12.5, fontWeight: 600 }}>{selectedIsToday ? 'Bugün için planlanmış görev yok.' : 'Bu gün için planlanmış görev yok.'}</div>
                     ) : selectedDayTasks.map((t: any, i: number) => (
-                      <div key={t.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: HOME_C.radiusSm, background: t.completed ? 'rgba(111,181,133,0.09)' : HOME_C.surfaceHi, boxShadow: t.completed ? 'none' : HOME_C.clayFlat, animation: `mkPopIn ${240 + Math.min(i, 8) * 70}ms ${HOME_C.ease}` }}>
-                        <span style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', background: t.completed ? HOME_C.waterSolid : HOME_C.surface2, boxShadow: t.completed ? '0 4px 9px -3px rgba(111,181,133,0.6)' : HOME_C.clayInset, color: t.completed ? '#fff' : HOME_C.ink3 }}>{t.completed ? <Check size={12} /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: HOME_C.accent }} />}</span>
+                      <div key={t.id || i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', borderRadius: HOME_C.radiusSm, background: t.completed ? HOME_C.waterA09 : HOME_C.surfaceHi, boxShadow: t.completed ? 'none' : HOME_C.clayFlat, animation: `mkPopIn ${240 + Math.min(i, 8) * 70}ms ${HOME_C.ease}` }}>
+                        <span style={{ width: 22, height: 22, borderRadius: '50%', flexShrink: 0, display: 'grid', placeItems: 'center', background: t.completed ? HOME_C.waterSolid : HOME_C.surface2, boxShadow: t.completed ? `0 4px 9px -3px color-mix(in srgb, ${HOME_C.waterSolid} 60%, transparent)` : HOME_C.clayInset, color: t.completed ? '#fff' : HOME_C.ink3 }}>{t.completed ? <Check size={12} /> : <span style={{ width: 6, height: 6, borderRadius: '50%', background: HOME_C.accent }} />}</span>
                         <span style={{ fontSize: 11.5, fontWeight: 700, color: HOME_C.ink3, fontFamily: 'ui-monospace, monospace', flexShrink: 0 }}>{t.startTime}</span>
                         <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: t.completed ? HOME_C.ink3 : HOME_C.ink1, textDecoration: t.completed ? 'line-through' : 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.title}</span>
                       </div>
@@ -1068,14 +1117,14 @@ export default function DashboardV2({
           <DialogHeader style={{ padding: '22px 26px 16px', borderBottom: `1px solid ${HOME_C.line}` }}>
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
               <DialogTitle style={{ display: 'flex', alignItems: 'center', gap: 12, fontSize: 20, fontWeight: 800, color: HOME_C.ink1, letterSpacing: '-0.02em' }}>
-                <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: 'rgba(111,181,133,0.14)', boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.7)' }}><Banknote size={20} /></span>
+                <span style={{ width: 40, height: 40, borderRadius: 13, display: 'grid', placeItems: 'center', color: HOME_C.waterDeep, background: HOME_C.waterA14, boxShadow: `inset 0 1px 1px ${HOME_C.hi}` }}><Banknote size={20} /></span>
                 Anlık Maliyet Detayı
               </DialogTitle>
               <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-                <button onClick={exportCostReportPdf} disabled={isReportBusy} style={{ all: 'unset', cursor: isReportBusy ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: 'linear-gradient(180deg, #8B7CF0, #6C5CE7)', boxShadow: '0 8px 16px -8px rgba(108,92,231,0.7)', opacity: isReportBusy ? 0.7 : 1 }}>
+                <button type="button" className="clay-focusable" onClick={exportCostReportPdf} disabled={isReportBusy} style={{ all: 'unset', boxSizing: 'border-box', cursor: isReportBusy ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.violet}, ${HOME_C.violetDeep})`, boxShadow: `0 8px 16px -8px color-mix(in srgb, ${HOME_C.violetDeep} 70%, transparent)`, opacity: isReportBusy ? 0.7 : 1 }}>
                   {isReportBusy ? <Loader2 size={16} style={{ animation: 'mkSpin 0.8s linear infinite' }} /> : <FileText size={16} />} PDF Rapor
                 </button>
-                <button onClick={exportCostExcel} style={{ all: 'unset', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.waterSolid}, ${HOME_C.waterDeep})`, boxShadow: `0 8px 16px -8px rgba(111,181,133,0.7)` }}>
+                <button type="button" className="clay-focusable" onClick={exportCostExcel} style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 8, minHeight: 44, padding: '9px 15px', borderRadius: HOME_C.radiusSm, fontSize: 13, fontWeight: 800, color: '#fff', background: `linear-gradient(180deg, ${HOME_C.waterSolid}, ${HOME_C.waterDeep})`, boxShadow: `0 8px 16px -8px color-mix(in srgb, ${HOME_C.waterDeep} 70%, transparent)` }}>
                   <Download size={16} /> Excel
                 </button>
               </div>
@@ -1091,7 +1140,7 @@ export default function DashboardV2({
               <p style={{ fontSize: 14, color: HOME_C.ink3, fontWeight: 600, textAlign: 'center', padding: '40px 0' }}>Detay verisi bulunamadı.</p>
             ) : ([
               { key: 'depo', title: 'Depolar', icon: <Warehouse size={17} />, rows: costByDepot, tone: HOME_C.accent, bg: `${HOME_C.accentA09}` },
-              { key: 'lab', title: 'Laboratuvarlar', icon: <FlaskConical size={17} />, rows: costByLab, tone: HOME_C.skyDeep, bg: 'rgba(124,168,222,0.16)' },
+              { key: 'lab', title: 'Laboratuvarlar', icon: <FlaskConical size={17} />, rows: costByLab, tone: HOME_C.skyDeep, bg: HOME_C.skyA16 },
             ] as const).map((section) => section.rows.length === 0 ? null : (
               <div key={section.key} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 15, fontWeight: 800, color: HOME_C.ink1 }}>
