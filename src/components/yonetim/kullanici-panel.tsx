@@ -36,6 +36,7 @@ type NotificationTypeUI =
   | 'fault_opened'
   | 'fault_closed'
   | 'maliyet_sayim_davet'
+  | 'ceomed_irsaliye_olusturuldu'
   | 'custom';
 
 
@@ -52,6 +53,7 @@ const NOTIFICATION_OPTIONS: { key: NotificationTypeUI; label: string }[] = [
     { key: 'fault_closed', label: 'Arıza Kaydı Kapandı' },
     { key: 'fault_reminder', label: 'Arıza Müdahale Hatırlatma (4 saat+)' },
     { key: 'stock_threshold', label: 'Stok Eşik Uyarısı' },
+    { key: 'ceomed_irsaliye_olusturuldu', label: 'Ceomed İrsaliyesi Oluşturuldu' },
 ];
 
 

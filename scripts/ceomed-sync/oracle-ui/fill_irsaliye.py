@@ -85,6 +85,15 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
 # Grid ile alt Açıklama alanı farklı iç MDI document'lere bağlanabildiği
 # için bu iki bölge arasındaki tıklama ana pencereye göre yapılır.
 ACIKLAMA_PENCERE_KONUMU = (70, 698)
+# Açıklama tablosunun 2. ve 3. satırı — GÖNDERİM KANITI.
+#
+# Operatör ölçüsü: "açıklamanın 2. ve 3. satırına irsaliye bilgileri geldiğinde
+# irsaliye kesin kesilmiş oluyor". Bu, ekran otomasyonunun elindeki EN GÜÇLÜ
+# doğrulama: uygulamanın kendi yazdığı bir kayıt, bizim yazdığımız değil.
+#
+# Satır aralığı ÖLÇÜLMEDİ. Aşağıdaki adaylar sırayla denenip okunanlar log'a
+# yazılıyor; hangisinin tuttuğu ilk koşuda görülecek ve tek değere indirilecek.
+ACIKLAMA_SATIR_ARALIK_ADAYLARI = (11, 12, 13, 14)
 # Prova loglarında ilk Stok Kodu Edit'i ana pencereye göre tutarlı olarak
 # (14, 297) konumunda ölçüldü. Başlık ile grid de farklı iç MDI köklerine
 # bağlanabildiği için bölgeler arası geçişte bu karşılık kullanılır.
@@ -532,8 +541,78 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             retryable=True,
         )
 
-    ui60.tus("F6", bekle_ms=1500)
-    log.append(f"F6 ile form yenilendi ({sebep}; odak İrsaliye No'ya alındı)")
+    # SONUCU DOĞRULA, MEKANİZMAYI DEĞİL.
+    #
+    # Sahada: imleç İrsaliye No'ya gidiyor, odak doğrulaması geçiyor, F6
+    # gönderiliyor — ama form temizlenmiyor. Yani "F6'ya bastım" ile "form
+    # yenilendi" aynı şey değil ve şimdiye kadar birincisini ikincisi sanıyorduk.
+    #
+    # Tek güvenilir ölçü alanın kendisi: temizlenmişse İrsaliye No BOŞALIR.
+    # Gönderimden hemen sonra uygulama hâlâ meşgul olabildiği için birkaç kez,
+    # aralarını açarak deneniyor.
+    for deneme in range(1, 4):
+        ui60.tus("F6", bekle_ms=1200 * deneme)
+
+        o = ui60.odak()
+        if not irsaliye_noda_mi(o):
+            # F6 odağı taşımış olabilir; okumak için geri dön.
+            ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+            o = ui60.odak()
+
+        kalan = (o.get("deger") or "").strip()
+        if not kalan:
+            log.append(
+                f"F6 ile form yenilendi ({sebep}; {deneme}. denemede, "
+                "İrsaliye No boşaldı)"
+            )
+            return
+
+        log.append(
+            f"F6 {deneme}. deneme: form temizlenmedi, İrsaliye No hâlâ {kalan!r}"
+        )
+
+    raise Durdu(
+        f"Form yenilenemedi: 3 denemede de F6 formu temizlemedi, İrsaliye No "
+        f"alanında {kalan!r} kaldı. Odak doğru alandaydı, yani sorun odakta "
+        "değil: uygulama bu durumda F6'yı kabul etmiyor olabilir.",
+        retryable=True,
+    )
+
+
+def aciklama_kanidini_oku(ana_pencere: int, log: list[str]) -> str:
+    """Açıklamanın 2-3. satırlarını okur — gönderimin uygulama tarafından
+    yazılmış kanıtı.
+
+    Operatör ölçüsü: bu satırlara irsaliye bilgileri geldiğinde irsaliye kesin
+    kesilmiştir. Bizim yazdığımız bir değer değil, UYGULAMANIN yazdığı — bu
+    yüzden ekrandan okunabilen en güçlü doğrulama.
+
+    ASLA THROW ETMEZ. Gönderim geri alınamaz; kanıt okunamadı diye işi
+    başarısız saymak, gerçekleşmiş bir gönderimi tekrar denemeye yol açardı.
+    """
+    satirlar: list[str] = []
+    try:
+        for aralik in ACIKLAMA_SATIR_ARALIK_ADAYLARI:
+            for satir_no in (2, 3):
+                nokta = (
+                    ACIKLAMA_PENCERE_KONUMU[0],
+                    ACIKLAMA_PENCERE_KONUMU[1] + aralik * (satir_no - 1),
+                )
+                try:
+                    ui60.pencere_noktasina_tikla(ana_pencere, nokta, bekle_ms=200)
+                except Exception:
+                    continue
+                deger = (ui60.odak().get("deger") or "").strip()
+                if deger:
+                    satirlar.append(f"aralık {aralik}px satır {satir_no}: {deger!r}")
+            if satirlar:
+                # Bu aralık okunabilir değer verdi; diğerlerini denemeye gerek yok.
+                break
+    except Exception as exc:
+        log.append(f"gönderim kanıtı okunamadı: {exc}")
+        return ""
+
+    return " | ".join(satirlar)
 
 
 def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:
@@ -723,6 +802,12 @@ def main() -> int:
         # Görüntü F6'DAN ÖNCE alınır: gönderim sonrası forma yazılan irsaliye
         # kayıt bilgileri gönderimin kanıtıdır, F6 onları siler.
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-gonderildi")
+
+        # GÖNDERİM KANITI — okumaya çalış, ASLA işi düşürme.
+        # E-irsaliye zaten gönderildi; buradaki bir hata gönderimi geri almaz.
+        kanit = aciklama_kanidini_oku(ana, log)
+        if kanit:
+            log.append(f"gönderim kanıtı: {kanit}")
 
         # E-irsaliye GÖNDERİLDİ. Buradan sonraki hiçbir hata işi başarısız
         # saymamalı — gönderim geri alınamaz, tekrar denenirse mükerrer olur.
