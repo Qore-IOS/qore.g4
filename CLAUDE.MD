@@ -27,6 +27,7 @@
 - **Lucide Icons** - Icon library
 - **Framer Motion** - Animations
 - **Theme System** - CSS variables in `src/app/globals.css` for light/dark modes
+- **Design Reference** - the `apple-design` skill is the mandatory standard for all UI work (desktop + mobile). See "Design Reference" below.
 
 ### State Management
 - **Zustand** - Global state management
@@ -181,6 +182,38 @@ Location: `src/lib/types.ts`
 - User management with role assignments
 - Product codes, hospitals, addresses
 - Bulk Excel import/export
+
+## Design Reference (MANDATORY)
+
+**`.claude/skills/apple-design/` is the single design standard for this project** (mirrored at `.agents/skills/apple-design/` for other agents). It covers **both desktop and mobile** and applies to *every* piece of work that produces an interface:
+
+- product UI — web app, Capacitor/Android build, Electron desktop app, terminal app
+- prototypes and demos
+- presentations, decks, screenshots, screen recordings, landing/marketing pages
+
+Read it **before** writing or reviewing UI code — not after. Any deviation must be stated explicitly in the PR description with a reason.
+
+| File | Read it when |
+| --- | --- |
+| `SKILL.md` | Always — core principles: response, direct manipulation, interruptibility, springs, velocity handoff, momentum projection, materials, typography, the eight design foundations |
+| `references/desktop.md` | Pointer + keyboard surfaces: hover, focus, shortcuts, windows, dense tables, Electron |
+| `references/mobile.md` | Touch surfaces: targets, safe areas, sheets, gestures, haptics, WebView performance |
+| `references/adaptive.md` | One component serving both idioms: capability queries, shared APIs, what may differ |
+| `references/implementation.md` | This stack: Framer Motion spring presets, tokens, shadcn/Radix, `src/lib/haptics.ts`, performance |
+| `references/presentation.md` | Decks, demos, screenshots, marketing pages |
+| `references/checklist.md` | Reviewing a PR or self-checking before shipping |
+
+Non-negotiables pulled forward:
+
+1. **Feedback on pointer-down**, continuous through the gesture — never only at the end.
+2. **Every animation is interruptible** and animates from the current on-screen value.
+3. **Springs from the shared preset table** (`implementation.md` §1) — no ad-hoc `stiffness` values; bounce only after real momentum.
+4. **Animate `transform`/`opacity` only** — never layout or `box-shadow`.
+5. **Tokens only** (`src/app/globals.css`), verified in light *and* dark.
+6. **Touch ≥44pt targets, safe-area insets, dock clearance** on mobile; **hover + `:focus-visible` + full keyboard path** on desktop.
+7. **Branch on input capability** (`(hover: hover)` / `(pointer: coarse)`), not user-agent; layout branches on width.
+8. **`prefers-reduced-motion` / `-transparency` / `-contrast` paths** are part of "done".
+9. **Destructive medical-supply operations** (miad, quantity, kurum assignment) get a preview and explicit confirmation.
 
 ## Development Guidelines
 
@@ -393,6 +426,7 @@ Focus on barcode utilities that power supply-chain operations:
 ## Resources
 
 - [Project Brief](PROJECT_BRIEF.md) - Detailed requirements
+- [Apple Design Skill](.claude/skills/apple-design/SKILL.md) - Mandatory UI/UX standard (desktop + mobile)
 - [Quality Assurance](docs/quality-assurance.md) - Testing guidelines
 - [Global Loading Usage](GLOBAL_LOADING_USAGE.md) - Loading state patterns
 - [Next.js Documentation](https://nextjs.org/docs)
@@ -411,6 +445,7 @@ Focus on barcode utilities that power supply-chain operations:
 
 When working on this codebase:
 
+0. **Design first:** For any UI, demo, or presentation work, read `.claude/skills/apple-design/` before you start — it is mandatory, and covers desktop and mobile
 1. **Read before editing:** Always read files before making changes
 2. **Respect architecture:** Follow the SPA shell pattern
 3. **Use existing patterns:** Don't reinvent solutions
