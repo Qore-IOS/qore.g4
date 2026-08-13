@@ -337,7 +337,8 @@ def grid_stok_koduna_git(ana_pencere: int, log: list[str]) -> None:
     )
 
 
-def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
+def satir_doldur(satir: dict, ana_pencere: int, log: list[str],
+                 miktar_uyarisini_onayla: bool = False) -> None:
     """Bir grid satırını doldurur: Stok Kodu → LOT → Miat → KT → Miktar."""
     stok = str(satir.get("stokKodu") or "")
     if any(ord(ch) > 127 for ch in stok):
@@ -383,6 +384,25 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
                 log.append(f"{beklenen_sutun}: {deger!r} yazıldı ve geri okundu")
         else:
             log.append(f"{beklenen_sutun}: boş bırakıldı")
+
+        # UYARI HER ALANDAN SONRA ÇIKABİLİR.
+        #
+        # Sahada ölçüldü: uyarı yalnızca Miktar'dan sonra değil, LOT ya da seri
+        # no girildikten sonra da açılıyor. Yalnızca Miktar sonrası ele
+        # alındığı için sürücü uyarı penceresi açıkken öylece kalıyordu —
+        # sonraki her tuş uyarı penceresine gidiyor, iş zaman aşımına düşüyordu.
+        if ui60.uyari_penceresi_mi(ana_pencere):
+            if not miktar_uyarisini_onayla:
+                raise Durdu(
+                    f"{beklenen_sutun} alanından sonra bir uyarı penceresi açıldı. "
+                    "Uyarı metni Forms tuvaline çizildiği için okunamıyor; "
+                    "otomatik onaylanmadı. Ekran görüntüsündeki uyarı kabul "
+                    "edilecekse --miktar-uyarisini-onayla ile tekrarlayın.",
+                    retryable=True,
+                )
+            ui60.uyari_kabul_et(ana_pencere)
+            log.append(f"{beklenen_sutun} sonrası uyarı: operatör tercihiyle onaylandı")
+            time.sleep(0.3)
 
         if (beklenen_sutun != GRID_SIRASI[-1]
                 and beklenen_sutun not in LOV_ALANLARI):
@@ -522,6 +542,26 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
 
     o = ui60.odak()
     if not o["hwnd"] or not irsaliye_noda_mi(o):
+        ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+        o = ui60.odak()
+
+    # ODAK HAPSOLMUŞ OLABİLİR.
+    #
+    # Sahada ölçüldü: tıklamaya rağmen odak Cari Kodu'nda kaldı
+    # (pencere (123,132) / mdi (117,101)). Forms, doğrulaması tamamlanmamış bir
+    # alandan çıkışa izin vermiyor; önceki iş yarıda kaldıysa form bu durumda
+    # kalıyor ve tıklamak odağı taşımıyor.
+    #
+    # ESC alandaki bekleyen düzenlemeyi iptal eder ve kilidi çözer. Yazma
+    # yapmıyor, yalnızca yarım kalmış girdiyi geri alıyor — güvenli.
+    if not irsaliye_noda_mi(o):
+        log.append(
+            f"odak {o['pencere_ici']} konumunda takıldı; ESC ile serbest bırakılıyor"
+        )
+        try:
+            ui60.tus("ESC", bekle_ms=400)
+        except Exception as exc:
+            log.append(f"ESC gönderilemedi: {exc}")
         ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
         o = ui60.odak()
 
@@ -770,7 +810,8 @@ def main() -> int:
 
         for i, satir in enumerate(rows, start=1):
             log.append(f"--- satır {i}/{len(rows)} ---")
-            satir_doldur(satir, ana, log)
+            satir_doldur(satir, ana, log,
+                         miktar_uyarisini_onayla=args.miktar_uyarisini_onayla)
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
 

@@ -560,11 +560,29 @@ def alan_yaz(deger: str, etiket: str, bekle_ms: int = 250) -> str:
 
     E-irsaliye gönderimi geri alınamadığı için "yazdım, herhalde doğru gitti"
     kabul edilebilir değil. Uyuşmazlıkta çağıran taraf gönderime geçmemelidir.
+
+    BOŞ OKUMA BİR KEZ TEKRARLANIR. Sahada ölçüldü: F6'dan hemen sonraki yazımda
+    alan BOŞ okundu (`yazılan 'DC10094', alanda okunan ''`) — form yenilendikten
+    sonra girdi kabul etmeye hazır olması bir an alıyor ve o aralıkta tuşlar
+    hiçbir yere gitmiyor.
+
+    Tekrar yalnızca alan TAMAMEN BOŞ okunduğunda yapılıyor; bu, hiçbir şeyin
+    girmediğinin kanıtı ve tekrar yazmak bozamaz. Kısmen ya da yanlış yazılmış
+    bir alanda tekrar denemek değeri birleştirebilir ('m51016'+'12') — o yüzden
+    orada tekrar YOK, doğrudan hata.
     """
     alan_temizle()
     yaz(deger)
     time.sleep(bekle_ms / 1000.0)
     okunan = odak()["deger"]
+
+    if okunan == "" and deger != "":
+        time.sleep(0.8)
+        alan_temizle()
+        yaz(deger)
+        time.sleep(bekle_ms / 1000.0)
+        okunan = odak()["deger"]
+
     if okunan != deger:
         raise AlanReddedildi(
             f"{etiket}: yazılan {deger!r}, alanda okunan {okunan!r}"
