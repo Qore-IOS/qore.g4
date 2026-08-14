@@ -7,7 +7,7 @@ import { Timestamp, addDoc, collection, doc, getDoc, getDocs, query, serverTimes
 import { db } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveImageSrc } from '@/lib/image-utils';
-import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban, Send } from 'lucide-react';
+import { Calendar, ChevronRight, FileText, Loader2, ArrowLeft, AlertTriangle, RefreshCw, Search, Package, Plus, Camera, Image as ImageIcon, X, Ban, Send, Download } from 'lucide-react';
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import BackButton from '@/components/BackButton';
@@ -42,6 +42,7 @@ type ActionRecord = {
   hospitalId?: string;
   labName?: string;
   aciklama?: string;
+  formNo?: string;
   islemTipi?: string;
   islemTuru?: string;
   createdAt?: { toDate?: () => Date };
@@ -52,6 +53,9 @@ type ActionRecord = {
   bitisTarihi?: string;
   bitisSaati?: string;
   cihazDurumu?: string;
+  cihazDurumuAciklama?: string;
+  eslikEdenPersonel?: Array<{ name?: string; role?: string }>;
+  technicianName?: string;
   selectedFaultName?: string;
   faultName?: string;
   selectedTests?: string[];
@@ -64,6 +68,10 @@ type ActionRecord = {
     quantity?: number;
     description?: string;
     serialNumber?: string;
+    lotNumber?: string;
+    hucreNumarasi?: string;
+    removedHucreNumarasi?: string;
+    channelSelections?: string[];
     removedPartStokKodu?: string;
     removedPartStokAdi?: string;
     removedPartSerialNumber?: string;
@@ -78,6 +86,8 @@ type ActionRecord = {
     usedPartImageUrl?: string;
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
+  egitimIcerigi?: string;
+  egitimKatilanlar?: Array<{ name?: string }> | string[];
   moduleType?: ModuleType;
   isLabDeviceChild?: boolean;
 };
@@ -123,6 +133,8 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const [filterLab, setFilterLab] = useState('all');
   const [filterPersonnel, setFilterPersonnel] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
+  const { toast } = useToast();
 
   // Tarih penceresi — varsayılan son 180 gün. Tutanaklar zamanla birikir.
   const dateFilter = useDateRangeFilter({
@@ -208,19 +220,126 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const availableLabs = useMemo(() => Array.from(new Set(forms.map(f => f.labName || '-'))).sort((a, b) => a.localeCompare(b, 'tr')), [forms]);
   const availablePersonnel = useMemo(() => Array.from(new Set(forms.map(f => f.createdByName || '-'))).sort((a, b) => a.localeCompare(b, 'tr')), [forms]);
 
+  const exportAllForms = async () => {
+    if (filteredForms.length === 0) return;
+
+    setIsExporting(true);
+    try {
+      const XLSX = await import('xlsx');
+      const joinValues = (values?: Array<string | { name?: string; taskName?: string; role?: string }>) =>
+        (values || []).map((value) => {
+          if (typeof value === 'string') return value;
+          const name = value.taskName || value.name || '';
+          return value.role ? `${name} (${value.role})` : name;
+        }).filter(Boolean).join(', ');
+      const actionType = (value?: string) => ({
+        part_change: 'Yedek Parça Değişimi',
+        hucre_degisimi: 'Hücre Değişimi',
+        operation: 'İşlem',
+      }[value || ''] || prettifyActionText(value));
+
+      const formRows = filteredForms.map((form) => ({
+        'Form No': form.formNo || form.id,
+        'Form Kimliği': form.id,
+        Modül: form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon',
+        Tarih: form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : (form.baslangicTarihi || ''),
+        'Başlangıç Tarihi': form.baslangicTarihi || '',
+        'Başlangıç Saati': form.baslangicSaati || '',
+        'Bitiş Tarihi': form.bitisTarihi || '',
+        'Bitiş Saati': form.bitisSaati || '',
+        Laboratuvar: form.labName || '',
+        'Laboratuvar Kimliği': form.hospitalId || '',
+        'Cihaz Adı': form.cihazAdi || '',
+        'Cihaz Seri Numarası': form.seriNumarasi || '',
+        'Cihaz Kimliği': form.deviceId || '',
+        'İşlemi Yapan Kullanıcı': form.createdByName || '',
+        'Kullanıcı Kimliği': form.createdByUid || '',
+        'İşlem Tipi': ISLEM_TIPI_LABELS[form.islemTipi || ''] || prettifyActionText(form.islemTipi),
+        'İşlem Türü': ISLEM_TURU_LABELS[form.islemTuru || ''] || prettifyActionText(form.islemTuru),
+        'Arıza': form.selectedFaultName || form.faultName || '',
+        'Cihaz Durumu': CIHAZ_DURUMU_LABELS[form.cihazDurumu || ''] || prettifyActionText(form.cihazDurumu),
+        'Cihaz Durumu Açıklaması': form.cihazDurumuAciklama || '',
+        Açıklama: form.aciklama || '',
+        'Eşlik Eden Personel': joinValues(form.eslikEdenPersonel),
+        Teknisyen: form.technicianName || '',
+        'Bakım Görevleri': joinValues(form.selectedMaintenanceTasks),
+        Testler: joinValues(form.selectedTests),
+        'Eğitim İçeriği': form.egitimIcerigi || '',
+        'Eğitime Katılanlar': joinValues(form.egitimKatilanlar),
+        'İşlem / Parça Satırı Sayısı': form.actions?.length || 0,
+      }));
+
+      const actionRows = filteredForms.flatMap((form) => (form.actions || []).map((action, index) => ({
+        'Form No': form.formNo || form.id,
+        Modül: form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon',
+        Tarih: form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : (form.baslangicTarihi || ''),
+        Laboratuvar: form.labName || '',
+        'Cihaz Adı': form.cihazAdi || '',
+        'Cihaz Seri Numarası': form.seriNumarasi || '',
+        'İşlemi Yapan Kullanıcı': form.createdByName || '',
+        'Satır No': index + 1,
+        'Kayıt Tipi': actionType(action.type),
+        'Yapılan İşlem': prettifyActionText(action.action),
+        Açıklama: action.description || '',
+        'Takılan Parça Kodu': action.stokKodu || '',
+        'Takılan Parça Adı': action.stokAdi || '',
+        Adet: action.quantity ?? '',
+        'Takılan Parça Seri No': action.serialNumber || '',
+        'Takılan Parça Lot No': action.lotNumber || '',
+        'Çıkan Parça Kodu': action.removedPartStokKodu || '',
+        'Çıkan Parça Adı': action.removedPartStokAdi || '',
+        'Çıkan Parça Seri No': action.removedPartSerialNumber || '',
+        'Takılan Hücre No': action.hucreNumarasi || '',
+        'Çıkan Hücre No': action.removedHucreNumarasi || '',
+        Kanallar: action.channelSelections?.join(', ') || '',
+        'Stok Kaynağı': action.isManualEntry ? 'Manuel' : action.isDepotSelection ? 'Depo' : action.poolStockId ? 'Havuz' : action.personalStockId ? 'Şahsi Stok' : '',
+        'Havuz Deposu': action.poolWarehouseName || '',
+        'Takılan Parça Görseli': action.usedPartImageUrl || '',
+        'Çıkan Parça Görseli': action.removedPartImageUrl || '',
+      })));
+
+      const workbook = XLSX.utils.book_new();
+      const formsSheet = XLSX.utils.json_to_sheet(formRows);
+      const actionsSheet = XLSX.utils.json_to_sheet(actionRows.length > 0 ? actionRows : [{ Bilgi: 'İşlem veya yedek parça detayı bulunmuyor.' }]);
+      formsSheet['!cols'] = Object.keys(formRows[0]).map((key) => ({ wch: Math.min(45, Math.max(14, key.length + 2)) }));
+      actionsSheet['!cols'] = Object.keys(actionRows[0] || { Bilgi: '' }).map((key) => ({ wch: Math.min(45, Math.max(14, key.length + 2)) }));
+      XLSX.utils.book_append_sheet(workbook, formsSheet, 'İşlem Formları');
+      XLSX.utils.book_append_sheet(workbook, actionsSheet, 'İşlem ve Yedek Parçalar');
+      XLSX.writeFile(workbook, `tum-islem-formlari-${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
+      toast({ title: 'İşlem formları indirildi', description: `${filteredForms.length} form ve ${actionRows.length} işlem/parça satırı Excel dosyasına aktarıldı.` });
+    } catch (error) {
+      console.error('Action forms export error', error);
+      toast({ title: 'İndirme başarısız', description: 'İşlem formları Excel dosyası oluşturulamadı.', variant: 'destructive' });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="cihaz-shell px-4 py-6 sm:px-8 sm:py-10">
       <div className="max-w-6xl mx-auto space-y-5">
         <BackButton fallback={`/${moduleType}`} />
         <div className="cihaz-card-strong p-5 sm:p-7">
-          <div className="flex items-center gap-2.5">
-            <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
-              <FileText className="h-5 w-5 text-[var(--dashboard-accent)]" />
-            </span>
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)]">{getTitle(moduleType)}</h1>
-              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Firma kapsamındaki tüm teknik servis ve aplikasyon işlem formları</p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="flex items-center justify-center w-10 h-10 rounded-xl bg-[var(--dashboard-surface-2)] shadow-[var(--dashboard-pressed)]">
+                <FileText className="h-5 w-5 text-[var(--dashboard-accent)]" />
+              </span>
+              <div>
+                <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)]">{getTitle(moduleType)}</h1>
+                <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Firma kapsamındaki tüm teknik servis ve aplikasyon işlem formları</p>
+              </div>
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={exportAllForms}
+              disabled={loading || isExporting || filteredForms.length === 0}
+              className="min-h-11 w-full gap-2 sm:w-auto"
+            >
+              {isExporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Tüm Formları Excel İndir
+            </Button>
           </div>
         </div>
 
