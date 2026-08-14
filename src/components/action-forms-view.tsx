@@ -1453,6 +1453,8 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           usedAt: Timestamp.fromDate(now),
           usedOnDeviceId: form.deviceId,
           usedOnDeviceName: form.cihazAdi || '',
+          usedOnLabId: form.hospitalId || '',
+          usedOnLabName: form.labName || '',
           usedOnFormId: form.id,
           usedOnFormType: formType,
           usedPartImageUrl: appendedAction.usedPartImageUrl || null,

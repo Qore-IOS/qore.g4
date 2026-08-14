@@ -777,7 +777,7 @@ export default function YedekParcaTransferPage() {
           const usage = usageByPersonalStockId.get(item.id);
           return {
             ...item,
-            usageLabName: usage?.labName || '',
+            usageLabName: usage?.labName || item.usedOnLabName || '',
             usageDeviceName: usage?.deviceName || item.usedOnDeviceName || '',
           };
         })
@@ -3955,8 +3955,13 @@ export default function YedekParcaTransferPage() {
                               <td className="px-4 py-2.5 pl-10 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
                                 <span className="text-[10px] opacity-60">↳</span>
                               </td>
-                              <td className={cn('px-4 py-2.5 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
-                                {item.stokAdi}
+                              <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                                <span className={cn(isUsed && 'line-through')}>{item.stokAdi}</span>
+                                {isUsed && (
+                                  <span className="mt-1 block text-[10px] font-semibold" style={{ color: 'var(--dashboard-accent)' }}>
+                                    Kullanıldığı lab: {item.usageLabName || 'Lab bilgisi yok'}
+                                  </span>
+                                )}
                               </td>
                               <td className={cn('px-4 py-2.5 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                                 {item.serialNumber || '—'}
@@ -4108,6 +4113,11 @@ export default function YedekParcaTransferPage() {
                         <p className={cn('text-xs font-mono mt-0.5', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                           {item.stokKodu} {item.serialNumber ? `• ${item.serialNumber}` : ''}
                         </p>
+                        {isUsed && (
+                          <p className="mt-1 text-[11px] font-semibold" style={{ color: 'var(--dashboard-accent)' }}>
+                            Kullanıldığı lab: {item.usageLabName || 'Lab bilgisi yok'}
+                          </p>
+                        )}
                       </div>
                       {item.status === 'in_stock' && (
                         <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">Aktif</span>
