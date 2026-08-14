@@ -225,7 +225,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
     try { window.localStorage.setItem('qt:sidebar:collapsed', collapsed ? '1' : '0'); } catch { /* noop */ }
     document.documentElement.style.setProperty(
       '--qt-sidebar-current-w',
-      collapsed ? 'var(--qt-sidebar-w-compact)' : 'var(--qt-sidebar-w)'
+      collapsed ? '0px' : 'var(--qt-sidebar-w)'
     );
   }, [collapsed]);
 
@@ -334,19 +334,19 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
       <div className="qore-technic-bg" aria-hidden="true" />
 
       {/* Desktop / Tablet sidebar */}
-      <aside className="qore-technic-sidebar hidden md:flex">
+      {!collapsed && <aside className="qore-technic-sidebar hidden md:flex">
         <div className="qore-technic-sidebar__brand">
           <div className="qore-technic-sidebar__brand-inner">
-            {collapsed ? <QoreTechnicBrand iconOnly /> : <QoreTechnicBrand size="md" />}
+            <QoreTechnicBrand size="md" />
           </div>
           <button
             type="button"
-            aria-label={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
-            title={collapsed ? 'Menüyü genişlet' : 'Menüyü daralt'}
+            aria-label="Kenar çubuğunu kapat"
+            title="Kenar çubuğunu kapat"
             className="qore-technic-collapse-btn"
-            onClick={() => setCollapsed((c) => !c)}
+            onClick={() => setCollapsed(true)}
           >
-            {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            <ChevronLeft className="h-4 w-4" />
           </button>
         </div>
 
@@ -360,7 +360,6 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
                 type="button"
                 onClick={() => router.push(item.href)}
                 className={cn('qore-technic-navitem', active && 'qore-technic-navitem--active')}
-                title={collapsed ? item.label : undefined}
               >
                 <span className="qore-technic-navitem__icon">
                   <Icon className="h-[18px] w-[18px]" />
@@ -372,7 +371,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         </nav>
 
         <div className="qore-technic-sidebar__footer" ref={profileMenuRef}>
-          <SidebarNotificationsBell collapsed={collapsed} />
+          <SidebarNotificationsBell collapsed={false} />
           {profileMenuOpen && (
             <div className="qt-profile-popover" role="menu" aria-label="Profil menüsü">
               <button
@@ -408,7 +407,6 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
               'qore-technic-navitem qore-technic-navitem--profile',
               profileMenuOpen && 'qore-technic-navitem--active',
             )}
-            title={collapsed ? 'Profil' : undefined}
             aria-expanded={profileMenuOpen}
             aria-haspopup="menu"
           >
@@ -418,7 +416,19 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
             <span className="qore-technic-navitem__label">Profil</span>
           </button>
         </div>
-      </aside>
+      </aside>}
+
+      {collapsed && (
+        <button
+          type="button"
+          className="qore-technic-sidebar-reveal hidden md:flex"
+          onClick={() => setCollapsed(false)}
+          aria-label="QOREtechnic kenar çubuğunu aç"
+          title="Menüyü aç"
+        >
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        </button>
+      )}
 
       {/* Mobile top brand — arıza detayı kendi başlığına (fault-topbar) sahip olduğundan
           çift "QORE technic" başlığı olmaması için bu rotada gizlenir. */}
