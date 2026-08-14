@@ -1369,3 +1369,79 @@ yokluğu kanıtlamak da bir sonuç ve teşhis çıktısı olarak değerli.
   otomasyon yazdığı pencereyi simge durumuna küçültürdü. Desen yeterince dardı
   ama bu şansa bırakılamaz: pencere yönetimi fiilleri (`KÜÇÜLT|BOYUT|SİMGE|
   BASAMAKLA|DÖŞE|PENCERE|MINIMIZE|CASCADE|TILE`…) artık `MENU_YASAKLI` içinde.
+
+## F6 hâlâ reddediliyor — ve artık "ölçüm yanlıştı" diyemiyoruz
+
+Park edilmiş `Edit` düzeltmesinden **sonra** gelen saha koşusu (BK10141 → M51001):
+
+```
+Form yenilenemedi: F6 formu temizlemedi (3 deneme) ve menüden de boşaltılamadı;
+İrsaliye No alanında 'DC10095' kaldı. Odak doğru alandaydı ve okuma
+güvenilirdi (canlı Edit), yani alan gerçekten dolu.
+menü: formu boşaltan etkin bir madde bulunamadı
+```
+
+Bir önceki turda bu tabloyu "ölçüm yanlıştı" diye açıklamıştık ve **doğruydu** —
+ama o açıklama bu turu kapsamıyor: okuma bu kez canlı, boyutlu bir `Edit`'ten
+geldi. İki tur üst üste aynı belirtiyi iki farklı sebeple açıklamak, üçüncü bir
+tahmin yapmak için gerekçe değil. **Bu bölüm bir teşhis değil, teşhis
+edilebilirlik çalışmasıdır.**
+
+### Kapatılan üç ölçüm deliği
+
+1. **Gizlenerek park edilmiş `Edit`.** `canli_alan_mi` yalnızca boyuta bakıyordu.
+   Bir pencereyi park etmenin öbür yolu **gizlemek** ve `GetWindowRect` gizli
+   pencerede son boyutunu döndürmeye devam ediyor — yani gizlenmiş bir `Edit`
+   boyut denetiminden geçip eski değerini "güvenilir" diye teslim ederdi. Aynı
+   hatanın bir katman derindeki hâli. `IsWindowVisible` artık şart.
+2. **Tıklama sonrası konum doğrulanmıyordu.** F6'dan sonra odak İrsaliye No'da
+   değilse geri tıklanıyor, ama tıklamanın **tuttuğu doğrulanmıyordu**. Forms
+   doğrulaması tamamlanmamış alandan çıkışa izin vermediği için tıklama boşa
+   düşebilir; o durumda elimizdeki canlı `Edit` **başka bir alana** ait olur ve
+   onun değerini "İrsaliye No dolu" diye okumak, park edilmiş `Edit` hatasının
+   kılık değiştirmiş hâlidir. Artık okumadan önce konum yeniden doğrulanıyor.
+3. **Kısmi `SendInput` sessizdi.** `_gonder` dönüş değerini yok sayıyordu.
+   `SHIFTTAB` dört olay gönderiyor; son ikisi düşerse **SHIFT mantıksal olarak
+   basılı kalır** ve o andan sonra gönderilen her tuş Shift'li gider. Artık
+   kısmi gönderim hata.
+
+### En güçlü aday: F6, F6 olarak varmıyor olabilir
+
+Menü ölçümü bu formda **`İleri  Ctrl+F6`** maddesini gösterdi. Yani basılı
+kalmış bir CTRL, gönderdiğimiz F6'yı "formu temizle" değil **"sonraki MDI
+belgesine geç"** yapar. Bu, daha önce ölçülmüş olan
+
+> gönderim sonrası F6 çalışmadı ve odak `mdi (1334, 664) — tanınmayan alan`
+> diye raporlandı
+
+gözleminin birebir açıklaması: başka bir MDI belgesine geçilmiş, form
+temizlenmemiş. Bu yüzden fonksiyon tuşundan önce `ui60.degistiricileri_birak()`
+çağrılıyor (bırakmak hiçbir şey yazmaz) ve **F6 öncesi/sonrası etkin MDI
+belgesi log'a yazılıyor.** Belge değiştiyse sebep artık ekran görüntüsüne bakmadan
+görünür.
+
+Bu bir teşhis değil, **test edilebilir bir hipotez.** Doğruysa bir sonraki
+koşuda log söyleyecek.
+
+### `probe_f6.py` — ayrımı yapan ölçüm
+
+Şu ana kadar hiçbir log şunu ayırt edemedi:
+
+| | anlamı |
+|---|---|
+| sentetik F6 ✗, elle F6 ✓ | sorun **tuşun gönderilişinde** — kodla çözülür |
+| sentetik F6 ✗, elle F6 ✗ | sorun **formun durumunda** — F6 kimin bastığından bağımsız reddediliyor |
+
+`probe_f6.py` aynı takılı formda ikisini arka arkaya ölçer ve hükmü düz metin
+yazar. Yalnızca F6 gönderir; hiçbir alana yazmaz, menü tetiklemez, pencere
+kapatmaz.
+
+**Bu prob form GERÇEKTEN takılıyken çalıştırılmalı** — sürücü hata verdiği anda,
+form elle boşaltılmadan önce. Temiz formda çalıştırılırsa "ikisi de temizledi"
+çıkar ve hiçbir şey öğrenilmez.
+
+### Hâlâ kasıtlı olarak YAPILMAYAN: başka fonksiyon tuşu denemek
+
+Muhasebe formunda tuş taraması yapılmaz. Oracle Forms'ta Shift+F6 tipik olarak
+**kayıt siler**; "hangisi tutacak" diye denemenin bedeli geri alınamaz bir
+kayıttır. Formu boşaltan ikinci bir yol ancak **ölçüldükten sonra** eklenir.

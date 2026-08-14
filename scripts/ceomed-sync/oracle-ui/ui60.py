@@ -41,6 +41,7 @@ import time
 
 user32 = ctypes.windll.user32
 gdi32 = ctypes.windll.gdi32
+kernel32 = ctypes.windll.kernel32
 
 WM_GETTEXT = 0x000D
 WM_GETTEXTLENGTH = 0x000E
@@ -253,6 +254,7 @@ ODAK_BOS: dict = {
     "mdi_ici": (0, 0),
     "pencere_ici": (0, 0),
     "rect": (0, 0, 0, 0),
+    "gorunur": False,
     "canli": False,
 }
 
@@ -274,6 +276,13 @@ ODAK_BOS: dict = {
 # `Edit` OLMALI ve GÖRÜNÜR BİR BOYUTU olmalı. `alan_yaz` bundan etkilenmiyor,
 # çünkü o yazdığını geri okuyor; etkilenen tek şey "uygulamanın kendi yazdığı
 # değeri okumak" — F6 doğrulaması ve gönderim kanıtı tam olarak bunu yapıyor.
+#
+# PARK ETMENİN İKİ ŞEKLİ VAR. İlk ölçümde SIFIR BOYUTA çekilmiş bir Edit
+# görüldü ve denetim yalnızca boyuta bakacak şekilde yazıldı. Ama bir pencereyi
+# park etmenin öbür yolu GİZLEMEK ve `GetWindowRect` gizli pencerede son
+# boyutunu döndürmeye devam eder — yani gizlenerek park edilmiş bir Edit boyut
+# denetiminden geçer ve eski değerini "güvenilir okuma" diye teslim eder. Aynı
+# hatanın bir katman derindeki hâli; görünürlük de şart koşuluyor.
 PARK_ESIGI_PX = 4
 CANLI_ALAN_SINIFI = "Edit"
 
@@ -286,6 +295,8 @@ def canli_alan_mi(o: dict) -> bool:
     kez kirli ilan ettirdi.
     """
     if not o.get("hwnd") or o.get("sinif") != CANLI_ALAN_SINIFI:
+        return False
+    if not o.get("gorunur"):
         return False
     l, t, r, b = o.get("rect") or (0, 0, 0, 0)
     return (r - l) > PARK_ESIGI_PX and (b - t) > PARK_ESIGI_PX
@@ -320,6 +331,7 @@ def odak() -> dict:
         "mdi_ici": (r[0] - tr[0], r[1] - tr[1]),
         "pencere_ici": (r[0] - kr[0], r[1] - kr[1]),
         "rect": r,
+        "gorunur": bool(user32.IsWindowVisible(hwnd)),
     }
     # `canli`: `deger`e güvenilebilir mi? Park edilmiş Edit eski değerini
     # taşımaya devam ediyor ve konumu da doğru görünüyor — ayrıntı
@@ -512,10 +524,28 @@ def menu_komutu_gonder(hwnd: int, komut_id: int) -> None:
 
 # --- Yazma --------------------------------------------------------------------
 
+class GirdiEngellendi(RuntimeError):
+    """`SendInput` olayların hepsini kuyruğa koyamadı."""
+
+
 def _gonder(girdiler: list[INPUT]) -> None:
+    """Olayları gönderir ve HEPSİNİN girdiğini doğrular.
+
+    DÖNÜŞ DEĞERİ ÖNEMLİ: `SendInput` engellendiğinde (UIPI, düşük seviye kanca,
+    ekran kilidi) sessizce daha az olay yazar. Sessiz olduğu için de en kötü
+    yerde patlar: `SHIFTTAB` dört olay gönderiyor ve son ikisi düşerse SHIFT
+    MANTIKSAL OLARAK BASILI KALIR. O andan sonra gönderdiğimiz her tuş Shift'li
+    gider — F6 artık F6 değildir. Kısmi gönderimi burada hata sayıyoruz.
+    """
     n = len(girdiler)
     dizi = (INPUT * n)(*girdiler)
-    user32.SendInput(n, ctypes.byref(dizi), ctypes.sizeof(INPUT))
+    yazilan = user32.SendInput(n, ctypes.byref(dizi), ctypes.sizeof(INPUT))
+    if yazilan != n:
+        raise GirdiEngellendi(
+            f"SendInput {n} olaydan yalnızca {yazilan} tanesini yazabildi "
+            f"(GetLastError={kernel32.GetLastError()}). Girdi engellenmiş "
+            "olabilir; değiştirici tuşlar basılı kalmış olabilir."
+        )
 
 
 def _tus_girdi(vk: int, birak: bool) -> INPUT:
@@ -606,6 +636,44 @@ def tehlikeli_odak_kontrol() -> None:
 
 
 VK_SHIFT = 0x10
+
+# --- Değiştirici tuşlar: F6'nın F6 olarak varması ------------------------------
+#
+# Bir fonksiyon tuşunun ANLAMI basılı değiştiricilere bağlı ve Windows'ta
+# "basılı" olmak fiziksel olmak zorunda değil: `SendInput` bir SHIFT/CTRL
+# KEYUP'ını düşürürse tuş MANTIKSAL OLARAK basılı kalır, hiçbir yerde görünmez
+# ve sonraki her tuşu değiştirir.
+#
+# BU FORMDA BUNUN BEDELİ ÖLÇÜLDÜ: pencere menüsünde "İleri  Ctrl+F6" maddesi
+# var — yani CTRL basılı kaldıysa gönderdiğimiz F6, "formu temizle" değil
+# "SONRAKİ MDI BELGESİNE GEÇ" demektir. Sahada F6'dan sonra odağın başka bir
+# MDI belgesine düştüğü ve formun temizlenmediği tam olarak böyle raporlandı.
+#
+# Bu yüzden fonksiyon tuşundan önce değiştiricileri bırakıyoruz. Bırakmak
+# güvenli: hiçbir şey yazmaz, yalnızca "basılı" durumunu sıfırlar.
+DEGISTIRICILER = {
+    "SHIFT": 0x10, "CTRL": 0x11, "ALT": 0x12,
+    "LWIN": 0x5B, "RWIN": 0x5C,
+}
+
+
+def basili_degistiriciler() -> list[str]:
+    """Şu an basılı görünen değiştirici tuşlar."""
+    return [ad for ad, vk in DEGISTIRICILER.items()
+            if user32.GetAsyncKeyState(vk) & 0x8000]
+
+
+def degistiricileri_birak() -> list[str]:
+    """Basılı kalmış değiştiricileri bırakır; hangilerini bıraktığını döner.
+
+    Boş liste "temizdi" demektir. Dolu liste TEŞHİSTİR: bir sonraki tuşun
+    yanlış komuta dönüşmesine ramak kalmıştı ve nedeni artık log'da.
+    """
+    basili = basili_degistiriciler()
+    if basili:
+        _gonder([_tus_girdi(DEGISTIRICILER[ad], True) for ad in basili])
+        time.sleep(0.05)
+    return basili
 
 
 def tus(ad: str, bekle_ms: int = 120) -> None:
