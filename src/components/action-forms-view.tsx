@@ -25,7 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
@@ -156,43 +156,43 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       setLoading(true);
       // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
       const dateConstraints = dateFilter.constraints('createdAt');
-      const [teknikSnap, aplikasyonSnap, faultSnap] = await Promise.all([
-        getDocs(scopedQuery(
+      const [teknikDocs, aplikasyonDocs, faultDocs] = await Promise.all([
+        getScopedDocs(
           getCollectionName('teknik-servis'),
           currentCompanyId,
           isSuperAdmin,
           ...dateConstraints,
           orderBy('createdAt', 'desc'),
           fsLimit(2000),
-        )),
-        getDocs(scopedQuery(
+        ),
+        getScopedDocs(
           getCollectionName('aplikasyon-paneli'),
           currentCompanyId,
           isSuperAdmin,
           ...dateConstraints,
           orderBy('createdAt', 'desc'),
           fsLimit(2000),
-        )),
-        getDocs(scopedQuery(
+        ),
+        getScopedDocs(
           'deviceFaultReports',
           currentCompanyId,
           isSuperAdmin,
           ...dateFilter.constraints('closedAt'),
           orderBy('closedAt', 'desc'),
           fsLimit(2000),
-        )),
+        ),
       ]);
       const actionForms = [
-        ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis', recordType: 'action-form' } as ActionRecord)),
-        ...aplikasyonSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli', recordType: 'action-form' } as ActionRecord)),
+        ...teknikDocs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis', recordType: 'action-form' } as ActionRecord)),
+        ...aplikasyonDocs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli', recordType: 'action-form' } as ActionRecord)),
       ];
 
       // Kullanılan parçalar arıza belgesinin alt koleksiyonlarında tutulur.
       // Yalnızca parça/hücre içeren kapanışları kontrollü gruplar halinde oku.
       const faultClosures: ActionRecord[] = [];
       const CHILD_READ_BATCH_SIZE = 20;
-      for (let start = 0; start < faultSnap.docs.length; start += CHILD_READ_BATCH_SIZE) {
-        const faultBatch = faultSnap.docs.slice(start, start + CHILD_READ_BATCH_SIZE);
+      for (let start = 0; start < faultDocs.length; start += CHILD_READ_BATCH_SIZE) {
+        const faultBatch = faultDocs.slice(start, start + CHILD_READ_BATCH_SIZE);
         const records = await Promise.all(faultBatch.map(async (faultDoc) => {
           const [partsSnap, cellsSnap] = await Promise.all([
             getDocs(collection(db, 'deviceFaultReports', faultDoc.id, 'partChanges')),
