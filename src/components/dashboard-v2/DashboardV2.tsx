@@ -281,7 +281,7 @@ export default function DashboardV2({
     return {
       periodLabel: format(analysisDate, 'MMMM yyyy', { locale: tr }),
       slides: [
-        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: HOME_C.waterA14 },
+        { label: 'En çok çalışılan test', name: ranked[0]?.[0] || 'Henüz veri yok', value: ranked[0]?.[1] ?? 0, suffix: 'test', icon: TrendingUp, color: HOME_C.waterDeep, bg: 'rgba(111,181,133,0.14)' },
         { label: 'En az çalışılan test', name: ranked.at(-1)?.[0] || 'Henüz veri yok', value: ranked.at(-1)?.[1] ?? 0, suffix: 'test', icon: TrendingDown, color: HOME_C.amber, bg: HOME_C.amberSoft },
         { label: 'Önceki aya göre en çok yükselen', name: rising?.increase && rising.increase > 0 ? rising.name : 'Artış gösteren test yok', value: Math.max(0, rising?.increase ?? 0), suffix: 'artış', icon: BarChart3, color: HOME_C.accent, bg: HOME_C.accentA08 },
       ],
@@ -947,12 +947,9 @@ export default function DashboardV2({
               </ClayCard>
             </div>
 
-            {/* Counter analizi — aylık öne çıkan testler.
-                Bağlantı kartın tamamını sarmıyor: kaydırma noktaları gerçek
-                birer kontrol olduğu için (buton, bağlantı içine yerleştirilemez)
-                kart gövdesi bağlantı, noktalar kardeş öğe. */}
-            <ClayCard hover pad={16} style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-              <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" className="clay-focusable" style={{ textDecoration: 'none', color: 'inherit', display: 'block', flex: 1, minHeight: 0 }}>
+            {/* Counter analizi — aylık öne çıkan testler */}
+            <Link href="/yonetim/test-yonetimi/counter-analiz" aria-label="Counter test analizi panelini aç" style={{ textDecoration: 'none', display: 'block', height: '100%' }}>
+              <ClayCard hover pad={16} style={{ height: '100%' }}>
                 <CardHead ico={<BarChart3 size={18} />} title="Counter Analizi" tone="accent" right={<span style={{ color: HOME_C.ink3, display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, fontWeight: 700, textTransform: 'capitalize' }}>{counterAnalysis.periodLabel}<ArrowUpRight size={16} /></span>} />
                 <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: 14, minHeight: 86, marginTop: 10, overflow: 'hidden' }}>
                   {counterAnalysis.slides.map((slide, index) => {
@@ -970,21 +967,13 @@ export default function DashboardV2({
                     );
                   })}
                 </div>
-              </Link>
-              {/* Kaydırma noktaları gerçek kontrol: slaytlar kendiliğinden
-                  dönmediği için bunlar olmadan ilk slayttan sonrası hiç
-                  görünmüyordu. Dokunma hedefi 44px'e tamamlanır. */}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
-                {counterAnalysis.slides.map((slide, index) => (
-                  <button key={slide.label} type="button" className="clay-focusable clay-touch-target"
-                    aria-label={`${slide.label} — ${slide.name}`} aria-current={index === counterSlide}
-                    onClick={(e) => { e.stopPropagation(); setCounterSlide(index); }}
-                    style={{ all: 'unset', boxSizing: 'border-box', cursor: 'pointer', padding: '8px 4px', display: 'grid', placeItems: 'center' }}>
-                    <span style={{ display: 'block', width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
-                  </button>
-                ))}
-              </div>
-            </ClayCard>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 3 }}>
+                  {counterAnalysis.slides.map((slide, index) => (
+                    <span key={slide.label} style={{ width: index === counterSlide ? 18 : 6, height: 6, borderRadius: 99, background: index === counterSlide ? HOME_C.accent : HOME_C.line, transition: `width 220ms ${HOME_C.ease}, background 220ms ${HOME_C.ease}` }} />
+                  ))}
+                  </div>
+              </ClayCard>
+            </Link>
 
             {/* Anlık Maliyet */}
             <ClayCard tone="ok" onClick={() => setIsStockCostDetailOpen(true)} hover pad={16} style={{ height: '100%' }}>
