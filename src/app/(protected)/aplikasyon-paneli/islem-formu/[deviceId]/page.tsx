@@ -2129,6 +2129,8 @@ export default function AplikasyonIslemFormuPage() {
                       usedAt: Timestamp.fromDate(now),
                       usedOnDeviceId: currentDevice.id,
                       usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                      usedOnLabId: currentDevice.hospitalId || '',
+                      usedOnLabName: hospital?.name || '',
                       usedOnFormId: formRef.id,
                       usedOnFormType: 'aplikasyon',
                       replacedPartId: removedStockRefId,

@@ -22,7 +22,7 @@ import {
 import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 import {
@@ -603,7 +603,7 @@ export default function YedekParcaTransferPage() {
     } finally {
       setDepoStokLoading(false);
     }
-  }, [toast]);
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
 
   const downloadDepotStockExcel = useCallback(async () => {
@@ -736,20 +736,18 @@ export default function YedekParcaTransferPage() {
     setPersonnelStockSearchQuery('');
     setExpandedPersonnelStokKodu(null);
     try {
-      const stockQuery = query(
-        scopedQuery('personalStock', currentCompanyId, isSuperAdmin),
-        where('ownerUid', '==', uid)
-      );
-      const usageLogQuery = query(
-        scopedQuery('sparePartTransferLogs', currentCompanyId, isSuperAdmin),
-        where('action', '==', 'use_on_device')
-      );
-      // Stok ve kullanım logları birbirinden bağımsız — paralel çek (waterfall yok).
-      const [stockSnap, usageSnap] = await Promise.all([
-        getDocs(stockQuery),
-        getDocs(usageLogQuery),
+      // Eski kayıtlarda kullanım logu veya stok üstündeki lab alanı eksik
+      // olabildiğinden, form ve cihaz kayıtları da geriye dönük çözümleme için
+      // paralel okunur. getScopedDocs `__legacy__` kayıtlarını da kapsar.
+      const [stockDocs, usageDocs, teknikFormDocs, aplikasyonFormDocs, deviceDocs, hospitalDocs] = await Promise.all([
+        getScopedDocs('personalStock', currentCompanyId, isSuperAdmin, where('ownerUid', '==', uid)),
+        getScopedDocs('sparePartTransferLogs', currentCompanyId, isSuperAdmin, where('action', '==', 'use_on_device')),
+        getScopedDocs('teknikServisActionForms', currentCompanyId, isSuperAdmin),
+        getScopedDocs('aplikasyonActionForms', currentCompanyId, isSuperAdmin),
+        getScopedDocs('devices', currentCompanyId, isSuperAdmin),
+        getScopedDocs('hospitals', currentCompanyId, isSuperAdmin),
       ]);
-      const stockItems = filterByCompanyScope(stockSnap.docs.map(d => {
+      const stockItems = filterByCompanyScope(stockDocs.map(d => {
         const data = d.data();
         return {
           id: d.id,
@@ -760,25 +758,64 @@ export default function YedekParcaTransferPage() {
       }), currentCompanyId, isSuperAdmin);
       const usageByPersonalStockId = new Map<string, { labName: string; deviceName: string }>();
 
-      usageSnap.docs.forEach(d => {
+      usageDocs.forEach(d => {
         const data = d.data();
         const personalStockId = String(data.personalStockId || '').trim();
         if (!personalStockId) return;
-        if (usageByPersonalStockId.has(personalStockId)) return;
-
+        const existing = usageByPersonalStockId.get(personalStockId);
+        const nextLabName = String(data.labName || data.laboratoryName || '').trim();
+        const nextDeviceName = String(data.deviceName || '').trim();
         usageByPersonalStockId.set(personalStockId, {
-          labName: String(data.labName || data.laboratoryName || '').trim(),
-          deviceName: String(data.deviceName || '').trim(),
+          labName: existing?.labName || nextLabName,
+          deviceName: existing?.deviceName || nextDeviceName,
+        });
+      });
+
+      const hospitalNameById = new Map<string, string>();
+      hospitalDocs.forEach((hospitalDoc) => {
+        const data = hospitalDoc.data();
+        hospitalNameById.set(hospitalDoc.id, String(data.name || data.labName || '').trim());
+      });
+      const deviceUsageById = new Map<string, { labName: string; deviceName: string }>();
+      deviceDocs.forEach((deviceDoc) => {
+        const data = deviceDoc.data();
+        const hospitalId = String(data.hospitalId || data.labId || '').trim();
+        deviceUsageById.set(deviceDoc.id, {
+          labName: hospitalNameById.get(hospitalId) || String(data.labName || '').trim(),
+          deviceName: String(data.cihazAdi || data.model || '').trim(),
+        });
+      });
+
+      // Kullanım logu yazılmadan önce oluşturulmuş kayıtları formdaki
+      // `actions[].personalStockId` ilişkisi üzerinden tamamla.
+      const usageByFormAction = new Map<string, { labName: string; deviceName: string }>();
+      [...teknikFormDocs, ...aplikasyonFormDocs].forEach((formDoc) => {
+        const data = formDoc.data();
+        const deviceUsage = deviceUsageById.get(String(data.deviceId || ''));
+        const usage = {
+          labName: String(data.labName || '').trim() || deviceUsage?.labName || '',
+          deviceName: String(data.cihazAdi || '').trim() || deviceUsage?.deviceName || '',
+        };
+        (Array.isArray(data.actions) ? data.actions : []).forEach((action: any) => {
+          const personalStockId = String(action?.personalStockId || '').trim();
+          if (!personalStockId) return;
+          const existing = usageByFormAction.get(personalStockId);
+          usageByFormAction.set(personalStockId, {
+            labName: existing?.labName || usage.labName,
+            deviceName: existing?.deviceName || usage.deviceName,
+          });
         });
       });
 
       const enrichedStockItems: PersonnelStockViewItem[] = stockItems
         .map(item => {
           const usage = usageByPersonalStockId.get(item.id);
+          const formUsage = usageByFormAction.get(item.id);
+          const deviceUsage = deviceUsageById.get(item.usedOnDeviceId || '');
           return {
             ...item,
-            usageLabName: usage?.labName || '',
-            usageDeviceName: usage?.deviceName || item.usedOnDeviceName || '',
+            usageLabName: usage?.labName || item.usedOnLabName || formUsage?.labName || deviceUsage?.labName || '',
+            usageDeviceName: usage?.deviceName || item.usedOnDeviceName || formUsage?.deviceName || deviceUsage?.deviceName || '',
           };
         })
         .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -790,7 +827,7 @@ export default function YedekParcaTransferPage() {
     } finally {
       setPersonnelStockLoading(false);
     }
-  }, [toast]);
+  }, [currentCompanyId, isSuperAdmin, toast]);
 
   // Fetch all personnel stock for toplam stok view
   const fetchAllPersonnelStock = useCallback(async () => {
@@ -3955,8 +3992,13 @@ export default function YedekParcaTransferPage() {
                               <td className="px-4 py-2.5 pl-10 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
                                 <span className="text-[10px] opacity-60">↳</span>
                               </td>
-                              <td className={cn('px-4 py-2.5 text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
-                                {item.stokAdi}
+                              <td className="px-4 py-2.5 text-xs" style={{ color: 'var(--dashboard-muted)' }}>
+                                <span className={cn(isUsed && 'line-through')}>{item.stokAdi}</span>
+                                {isUsed && (
+                                  <span className="mt-1 block text-[10px] font-semibold" style={{ color: 'var(--dashboard-accent)' }}>
+                                    Kullanıldığı lab: {item.usageLabName || 'Lab bilgisi yok'}
+                                  </span>
+                                )}
                               </td>
                               <td className={cn('px-4 py-2.5 font-mono text-xs', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                                 {item.serialNumber || '—'}
@@ -4108,6 +4150,11 @@ export default function YedekParcaTransferPage() {
                         <p className={cn('text-xs font-mono mt-0.5', isUsed && 'line-through')} style={{ color: 'var(--dashboard-muted)' }}>
                           {item.stokKodu} {item.serialNumber ? `• ${item.serialNumber}` : ''}
                         </p>
+                        {isUsed && (
+                          <p className="mt-1 text-[11px] font-semibold" style={{ color: 'var(--dashboard-accent)' }}>
+                            Kullanıldığı lab: {item.usageLabName || 'Lab bilgisi yok'}
+                          </p>
+                        )}
                       </div>
                       {item.status === 'in_stock' && (
                         <span className="inline-flex items-center text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">Aktif</span>

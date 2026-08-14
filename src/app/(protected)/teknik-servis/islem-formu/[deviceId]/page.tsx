@@ -2173,6 +2173,8 @@ export default function IslemFormuPage() {
                 usedAt: Timestamp.fromDate(now),
                 usedOnDeviceId: currentDeviceId,
                 usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                usedOnLabId: currentDevice.hospitalId || '',
+                usedOnLabName: hospital?.name || '',
                 usedOnFormId: formRef.id,
                 usedOnFormType: 'teknik_servis',
                 replacedPartId: removedStockRefId,
@@ -2189,6 +2191,8 @@ export default function IslemFormuPage() {
                 usedByName: currentUserProfile?.name || '',
                 usedOnDeviceId: currentDeviceId,
                 usedOnDeviceName: currentDevice.cihazAdi || currentDevice.model || '',
+                usedOnLabId: currentDevice.hospitalId || '',
+                usedOnLabName: hospital?.name || '',
                 usedOnFormId: formRef.id,
                 usedOnFormType: 'teknik_servis',
               });

@@ -929,6 +929,8 @@ export interface PersonalStockItem {
   usedAt?: Date;               // Kullanıldığı tarih
   usedOnDeviceId?: string;     // Kullanıldığı cihaz
   usedOnDeviceName?: string;
+  usedOnLabId?: string;        // Kullanıldığı laboratuvar
+  usedOnLabName?: string;
   usedOnFormId?: string;       // Kullanıldığı form
   usedOnFormType?: 'teknik_servis' | 'aplikasyon';
   replacedPartId?: string;     // Değişilen parça (cihazdan çıkan) ID
