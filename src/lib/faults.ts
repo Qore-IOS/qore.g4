@@ -786,7 +786,7 @@ export async function resolveEjectedKitFault(
   // If resolution is 'imha', create record in destroyedKitsReports
   if (resolution === 'imha') {
     const destroyedKitRef = doc(collection(db, 'destroyedKitsReports'));
-    batch.set(destroyedKitRef, {
+    batch.set(destroyedKitRef, withCompanyScope({
       id: destroyedKitRef.id,
       ejectedKitRecordId: reportData.ejectedKitRecordId || null,
       faultReportId: reportId,
@@ -807,7 +807,7 @@ export async function resolveEjectedKitFault(
       resolvedByUid: actor.uid,
       resolvedByName: actor.name,
       sourceType: 'fault',
-    });
+    }, currentCompanyId));
   }
 
   await batch.commit();

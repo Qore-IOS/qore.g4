@@ -2959,7 +2959,7 @@ export default function YedekParcaTransferPage() {
           }, currentCompanyId));
 
           const depoLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-          transaction.set(depoLogRef, {
+          transaction.set(depoLogRef, withCompanyScope({
             action: 'iade_giris',
             productCodeId: item.productCodeId,
             stokKodu: item.stokKodu,
@@ -2974,7 +2974,7 @@ export default function YedekParcaTransferPage() {
             createdAt: Timestamp.fromDate(now),
             createdByUid: currentUserProfile?.uid || '',
             createdByName: currentUserProfile?.name || '',
-          });
+          }, currentCompanyId));
         }
       });
 

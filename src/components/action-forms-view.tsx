@@ -1011,7 +1011,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
 
       // Log the cancellation in sparePartTransferLogs
       const cancelLogRef = doc(collection(db, 'sparePartTransferLogs'));
-      batch.set(cancelLogRef, {
+      batch.set(cancelLogRef, withCompanyScope({
         action: 'cancel_usage',
         personalStockId: action.personalStockId || null,
         poolStockId: action.poolStockId || null,
@@ -1029,11 +1029,11 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         createdByUid: currentUserProfile?.uid || '',
         createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
         notes: `Yedek parça kullanımı iptal edildi. Parça ${action.personalStockId ? 'şahsi stoğa' : action.poolStockId ? 'havuz deposuna' : 'kaynağına'} geri iade edildi.`,
-      });
+      }, currentCompanyId));
 
       if (action.isDepotSelection) {
         const restoredDepotRef = doc(collection(db, 'yedekParcaDepoStok'));
-        batch.set(restoredDepotRef, {
+        batch.set(restoredDepotRef, withCompanyScope({
           productCodeId: action.action || action.stokAdi || '',
           stokKodu: action.stokKodu || '',
           stokAdi: action.stokAdi || '',
@@ -1044,7 +1044,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
-        });
+        }, currentCompanyId));
       }
 
       // Log in actionFormHistoryLogs for full audit trail
@@ -1265,7 +1265,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         });
 
         const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(useLogRef, {
+        batch.set(useLogRef, withCompanyScope({
           action: 'use_on_device',
           personalStockId: appendedAction.personalStockId,
           stokKodu: appendedAction.stokKodu,
@@ -1280,7 +1280,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
           usageImageUrl: appendedAction.usedPartImageUrl || null,
-        });
+        }, currentCompanyId));
       }
 
       if (appendedAction.poolStockId) {
@@ -1299,7 +1299,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         });
 
         const poolUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(poolUseLogRef, {
+        batch.set(poolUseLogRef, withCompanyScope({
           action: 'use_from_pool',
           poolStockId: appendedAction.poolStockId,
           poolWarehouseId: appendedAction.poolWarehouseId || '',
@@ -1315,7 +1315,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
-        });
+        }, currentCompanyId));
       }
 
       if (appendedAction.isDepotSelection && selectedDepotStockItem) {
@@ -1344,7 +1344,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
         }
 
         const depotUseLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(depotUseLogRef, {
+        batch.set(depotUseLogRef, withCompanyScope({
           action: 'use_on_device',
           depotStockId: appendedAction.depotStockId || null,
           stokKodu: appendedAction.stokKodu,
@@ -1359,7 +1359,7 @@ export function ActionFormDetailView({ moduleType, formId }: { moduleType: Modul
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUserProfile?.uid || '',
           createdByName: currentUserProfile?.name || currentUserProfile?.email || '',
-        });
+        }, currentCompanyId));
       }
 
       await batch.commit();

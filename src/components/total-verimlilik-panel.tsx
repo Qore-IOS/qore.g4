@@ -1914,13 +1914,13 @@ export default function TotalVerimlilikPanel({
       const malKabulCoveredLabIds = new Set(Array.from(excludedLabIds));
 
       // İstek dokümanı yaz
-      const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), {
+      const reqRef = await addDoc(collection(db, 'ceomedSevkiyatRequests'), withCompanyScope({
         year: selectedYear,
         month: selectedMonth + 1, // JS 0-11 → 1-12
         status: 'pending',
         requestedAt: serverTimestamp(),
         requestedByUid: currentUser?.uid || '',
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Sorgu gönderildi', description: 'Ceomed irsaliyeleri sorgulanıyor, bu birkaç dakika sürebilir…' });
 

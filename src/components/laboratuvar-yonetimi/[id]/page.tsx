@@ -13,7 +13,7 @@ import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope, matchesCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import { formatMiad } from "@/lib/date";
 import TimestampText from '@/components/TimestampText';
@@ -178,7 +178,7 @@ export default function LabStockDetailPage() {
       const consumptionRef = doc(collection(db, 'tuketimKayitlari'));
       const stockRef = doc(db, 'depoStok', id);
 
-      batch.set(consumptionRef, newConsumptionRecord);
+      batch.set(consumptionRef, withCompanyScope(newConsumptionRecord, currentCompanyId));
       batch.delete(stockRef);
 
       await batch.commit();

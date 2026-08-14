@@ -1134,7 +1134,7 @@ export default function FaultDetailPage() {
         batch.delete(doc(db, 'yedekParcaDepoStok', depotEntry.id));
 
         const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-        batch.set(borrowedRef, {
+        batch.set(borrowedRef, withCompanyScope({
           productCodeId: depotEntry.productCodeId || '',
           stokKodu: item.stokKodu,
           stokAdi: item.stokAdi,
@@ -1156,10 +1156,10 @@ export default function FaultDetailPage() {
           borrowedByName: currentUserProfile?.name || '',
           borrowedAt: Timestamp.fromDate(now),
           status: 'pending',
-        });
+        }, currentCompanyId));
 
         const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(transferLogRef, {
+        batch.set(transferLogRef, withCompanyScope({
           action: 'borrowed_part',
           borrowedPartId: borrowedRef.id,
           stokKodu: item.stokKodu,
@@ -1178,7 +1178,7 @@ export default function FaultDetailPage() {
           createdAt: Timestamp.fromDate(now),
           createdByUid: currentUser.uid,
           createdByName: currentUserProfile?.name || '',
-        });
+        }, currentCompanyId));
       }
       const hucreRef = doc(collection(db, 'deviceFaultReports', fault.id, 'hucreDegisimleri'));
       batch.set(hucreRef, {
@@ -1332,7 +1332,7 @@ export default function FaultDetailPage() {
         }
 
         const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-        batch.set(borrowedRef, {
+        batch.set(borrowedRef, withCompanyScope({
           productCodeId: fallbackEntry.productCodeId || '',
           stokKodu: resolvedStokKodu,
           stokAdi: resolvedStokAdi,
@@ -1354,10 +1354,10 @@ export default function FaultDetailPage() {
           borrowedAt: Timestamp.fromDate(now),
           status: 'pending',
           usedPartImageUrl: usedImgUrl || null,
-        });
+        }, currentCompanyId));
 
         const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-        batch.set(transferLogRef, {
+        batch.set(transferLogRef, withCompanyScope({
           action: 'borrowed_part',
           borrowedPartId: borrowedRef.id,
           stokKodu: resolvedStokKodu,
@@ -1376,7 +1376,7 @@ export default function FaultDetailPage() {
           createdByUid: currentUser.uid,
           createdByName: currentUserProfile?.name || '',
           usageImageUrl: usedImgUrl || null,
-        });
+        }, currentCompanyId));
       }
 
       // Cihazdan çıkan parça teknisyenin şahsi stoğuna değil yedek parça deposuna iade edilir.
