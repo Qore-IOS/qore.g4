@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 
@@ -116,6 +117,23 @@ GRID_SIRASI = ["stokKodu", "lot", "miat", "kt", "miktar"]
 
 MAX_ADIM = 60  # sonsuz döngü koruması
 
+# Formu boşaltan menü maddesinin adı — F6 reddedildiğinde kullanılan ikinci yol.
+#
+# Desen KASITLI OLARAK DAR: menü maddesi ateşlemek tuş göndermek kadar
+# tehlikeli, "Yeni Cari Kart" gibi başka bir form açan bir madde de "Yeni" ile
+# eşleşirdi. Bu yüzden eylem KAYIT/FORM/BELGE ile birlikte anılmak zorunda.
+# `ui60.MENU_YASAKLI` ayrıca Sil/Kaydet/Gönder gibi maddeleri baştan atıyor.
+FORM_YENILE_MENU_DESENI = re.compile(
+    r"(YENI|BOS)\s*(KAYIT|BELGE|FORM|IRSALIYE)"
+    r"|(KAYIT|FORM|BELGE|EKRAN)\s*(TEMIZLE|BOSALT|YENILE)"
+    # Yalnız başına "Temizle" maddesi. Desen TÜM YOLA uygulandığı için
+    # ("Düzen > Temizle") satır başı çapası yetmiyor; son parçayı yakalıyoruz.
+    r"|(^|>\s*)TEMIZLE$"
+    r"|CLEAR\s*(FORM|RECORD|BLOCK)"
+    r"|NEW\s*RECORD",
+    re.IGNORECASE,
+)
+
 
 def emit(payload: dict) -> int:
     print(json.dumps(payload, ensure_ascii=False))
@@ -124,13 +142,19 @@ def emit(payload: dict) -> int:
 
 
 def fail(error: str, retryable: bool, screenshot: str | None = None,
-         log: list[str] | None = None) -> int:
+         log: list[str] | None = None, form_kirli: bool = False) -> int:
     """Hata sonucu. `log` HER ZAMAN eklenir: bir kuru çalışma tıkandığında
     'nerede durdu' sorusunun cevabı adım geçmişindedir, ekran görüntüsü tek
-    başına yetmez."""
+    başına yetmez.
+
+    `form_kirli`: hata İŞLE İLGİLİ DEĞİL, ekranda duran formla ilgili. Bu ayrım
+    worker için kritik — ayrıntı `FormTemizlenemedi`in gövdesinde.
+    """
     payload = {"ok": False, "error": error, "retryable": retryable}
     if screenshot:
         payload["screenshotPath"] = screenshot
+    if form_kirli:
+        payload["formKirli"] = True
     payload["log"] = log or []
     return emit(payload)
 
@@ -157,6 +181,22 @@ class Durdu(RuntimeError):
     def __init__(self, mesaj: str, retryable: bool = False):
         super().__init__(mesaj)
         self.retryable = retryable
+
+
+class FormTemizlenemedi(Durdu):
+    """Ekranda duran form boşaltılamadı — HATA İŞTE DEĞİL, EKRANDA.
+
+    NEDEN AYRI BİR TÜR: bu hata sıradaki her işi de düşürür, çünkü hepsi aynı
+    dolu formu bulur. Sahada tam olarak bu oldu — bir işin gönderim sonrası F6
+    yenilemesi tutmadı, form 'DC10095' ile ekranda kaldı ve sonraki işler o
+    formun üstüne yazamadıkları için deneme haklarını tüketip
+    "ELLE MÜDAHALE GEREKİR" ile `failed` oldular. Oysa o işlerde hiçbir sorun
+    yoktu: tek bir ekran, birden çok işi yanlış yere yazdırdı.
+
+    Worker bu türü görünce işi deneme hakkı harcamadan kuyruğa geri koyuyor ve
+    turu bitiriyor; form elle boşaltılınca kuyruk kendiliğinden akmaya devam
+    ediyor.
+    """
 
 
 def ilerle(etiket: str) -> None:
@@ -337,7 +377,8 @@ def grid_stok_koduna_git(ana_pencere: int, log: list[str]) -> None:
     )
 
 
-def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
+def satir_doldur(satir: dict, ana_pencere: int, log: list[str],
+                 miktar_uyarisini_onayla: bool = False) -> None:
     """Bir grid satırını doldurur: Stok Kodu → LOT → Miat → KT → Miktar."""
     stok = str(satir.get("stokKodu") or "")
     if any(ord(ch) > 127 for ch in stok):
@@ -383,6 +424,25 @@ def satir_doldur(satir: dict, ana_pencere: int, log: list[str]) -> None:
                 log.append(f"{beklenen_sutun}: {deger!r} yazıldı ve geri okundu")
         else:
             log.append(f"{beklenen_sutun}: boş bırakıldı")
+
+        # UYARI HER ALANDAN SONRA ÇIKABİLİR.
+        #
+        # Sahada ölçüldü: uyarı yalnızca Miktar'dan sonra değil, LOT ya da seri
+        # no girildikten sonra da açılıyor. Yalnızca Miktar sonrası ele
+        # alındığı için sürücü uyarı penceresi açıkken öylece kalıyordu —
+        # sonraki her tuş uyarı penceresine gidiyor, iş zaman aşımına düşüyordu.
+        if ui60.uyari_penceresi_mi(ana_pencere):
+            if not miktar_uyarisini_onayla:
+                raise Durdu(
+                    f"{beklenen_sutun} alanından sonra bir uyarı penceresi açıldı. "
+                    "Uyarı metni Forms tuvaline çizildiği için okunamıyor; "
+                    "otomatik onaylanmadı. Ekran görüntüsündeki uyarı kabul "
+                    "edilecekse --miktar-uyarisini-onayla ile tekrarlayın.",
+                    retryable=True,
+                )
+            ui60.uyari_kabul_et(ana_pencere)
+            log.append(f"{beklenen_sutun} sonrası uyarı: operatör tercihiyle onaylandı")
+            time.sleep(0.3)
 
         if (beklenen_sutun != GRID_SIRASI[-1]
                 and beklenen_sutun not in LOV_ALANLARI):
@@ -497,7 +557,7 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
     operatörün her seferinde elle boş form açması gerekmez.
     """
     if ui60.lov_acik_mi(ana_pencere):
-        raise Durdu(
+        raise FormTemizlenemedi(
             "Form yenilenemedi: ekranda açık bir pencere var (uyarı ya da arama "
             "penceresi). F6 bu durumda çalışmaz; pencere kapatılmalı.",
             retryable=True,
@@ -525,8 +585,28 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
         ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
         o = ui60.odak()
 
+    # ODAK HAPSOLMUŞ OLABİLİR.
+    #
+    # Sahada ölçüldü: tıklamaya rağmen odak Cari Kodu'nda kaldı
+    # (pencere (123,132) / mdi (117,101)). Forms, doğrulaması tamamlanmamış bir
+    # alandan çıkışa izin vermiyor; önceki iş yarıda kaldıysa form bu durumda
+    # kalıyor ve tıklamak odağı taşımıyor.
+    #
+    # ESC alandaki bekleyen düzenlemeyi iptal eder ve kilidi çözer. Yazma
+    # yapmıyor, yalnızca yarım kalmış girdiyi geri alıyor — güvenli.
+    if not irsaliye_noda_mi(o):
+        log.append(
+            f"odak {o['pencere_ici']} konumunda takıldı; ESC ile serbest bırakılıyor"
+        )
+        try:
+            ui60.tus("ESC", bekle_ms=400)
+        except Exception as exc:
+            log.append(f"ESC gönderilemedi: {exc}")
+        ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+        o = ui60.odak()
+
     if not o["hwnd"]:
-        raise Durdu(
+        raise FormTemizlenemedi(
             "Form yenilenemedi: İrsaliye No alanına tıklandı ama odak alınamadı.",
             retryable=True,
         )
@@ -534,7 +614,7 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
         # F6'ya burada basmak sessizce hiçbir şey yapmaz; tahminle devam etmek
         # yerine duruyoruz. Her iki koordinat da yazılıyor: hangi düzlemde
         # sapma olduğu bir dahaki teşhiste doğrudan görünsün.
-        raise Durdu(
+        raise FormTemizlenemedi(
             f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı "
             f"(pencere {IRSALIYE_NO_PENCERE_KONUMU}), odak pencere "
             f"{o['pencere_ici']} / mdi {o['mdi_ici']} konumunda kaldı.",
@@ -571,12 +651,82 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             f"F6 {deneme}. deneme: form temizlenmedi, İrsaliye No hâlâ {kalan!r}"
         )
 
-    raise Durdu(
-        f"Form yenilenemedi: 3 denemede de F6 formu temizlemedi, İrsaliye No "
-        f"alanında {kalan!r} kaldı. Odak doğru alandaydı, yani sorun odakta "
-        "değil: uygulama bu durumda F6'yı kabul etmiyor olabilir.",
+    # F6 REDDEDİLDİ — İKİNCİ YOLA GEÇ.
+    #
+    # Buraya gelindiğinde bildiğimiz şey kesin: odak doğru alandaydı, F6 üç kez
+    # gönderildi, alan boşalmadı. Tuşun neden yutulduğu ekrandan okunamıyor
+    # (mesaj satırı tuvale çizili). Menü ise okunabilir: maddenin yazısı da
+    # etkin olup olmadığı da API'den geliyor.
+    if menu_ile_yenile(ana_pencere, log, sebep):
+        return
+
+    raise FormTemizlenemedi(
+        f"Form yenilenemedi: F6 formu temizlemedi (3 deneme) ve menüden de "
+        f"boşaltılamadı; İrsaliye No alanında {kalan!r} kaldı. Odak doğru "
+        f"alandaydı, yani sorun odakta değil. {menu_ozeti(ana_pencere)}",
         retryable=True,
     )
+
+
+def menu_ozeti(ana_pencere: int) -> str:
+    """Menü çubuğunun teşhis özeti.
+
+    F6 tıkandığında en çok ihtiyaç duyulan bilgi "bu formda formu boşaltan ne
+    var" sorusunun cevabı ve o cevap şimdiye kadar yalnızca ekran
+    görüntüsünden, gözle çıkarılabiliyordu. Hata mesajının içine konuyor:
+    operatörün elindeki tek çıktı worker log'u.
+    """
+    try:
+        maddeler = ui60.menu_agaci(ana_pencere)
+    except Exception as exc:
+        return f"Menü okunamadı: {exc}"
+    if not maddeler:
+        return "Pencerenin Windows menü çubuğu yok; ikinci yol mevcut değil."
+    etkin = [m["yol"] for m in maddeler if m["etkin"]]
+    return (
+        f"Menüde {len(maddeler)} madde var, {len(etkin)} tanesi etkin: "
+        + ", ".join(etkin[:25])
+        + ("…" if len(etkin) > 25 else "")
+    )
+
+
+def menu_ile_yenile(ana_pencere: int, log: list[str], sebep: str) -> bool:
+    """Formu menüden boşaltmayı dener. Başardıysa True.
+
+    Sonuç yine ALANDAN doğrulanıyor: menü maddesini tetiklemiş olmak formun
+    boşaldığı anlamına gelmez — F6'da tam olarak bu hataya düşmüştük.
+    """
+    madde = ui60.menu_komutu_bul(ana_pencere, FORM_YENILE_MENU_DESENI)
+    if not madde:
+        log.append("menü: formu boşaltan etkin bir madde bulunamadı")
+        return False
+
+    log.append(f"menü: {madde['yol']!r} maddesi tetikleniyor (F6 reddedildi)")
+    ui60.menu_komutu_gonder(ana_pencere, madde["id"])
+    time.sleep(1.5)
+
+    # MENÜ BİR PENCERE AÇTIYSA DOKUNMA.
+    #
+    # "Değişiklikleri kaydetmek istiyor musunuz?" tipi bir soruya körlemesine
+    # Tamam demek muhasebeye kayıt yazabilir. Onaylamak da iptal etmek de
+    # operatörün kararı; sürücü yalnızca durumu bildirir.
+    if ui60.lov_acik_mi(ana_pencere):
+        log.append(
+            "menü: madde tetiklendikten sonra bir pencere açıldı; içeriği "
+            "okunamadığı için dokunulmadı — ekranda kalan pencere elle "
+            "kapatılmalı"
+        )
+        return False
+
+    ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+    o = ui60.odak()
+    kalan = (o.get("deger") or "").strip()
+    if kalan:
+        log.append(f"menü: form temizlenmedi, İrsaliye No hâlâ {kalan!r}")
+        return False
+
+    log.append(f"menü ile form yenilendi ({sebep}; {madde['yol']!r})")
+    return True
 
 
 def aciklama_kanidini_oku(ana_pencere: int, log: list[str]) -> str:
@@ -723,6 +873,13 @@ def main() -> int:
             "mdi_baslik": o["mdi_baslik"],
             "taninan_alan": alan_adi(o["mdi_ici"]),
             "taninan_grid_alani": alan_adi(o["mdi_ici"], grid_modu=True),
+            # MENÜ: "formu ne boşaltıyor" sorusunun cevabı. F6 sahada reddedildi
+            # ve tuşun neden yutulduğu ekrandan okunamıyor; menü maddeleri ise
+            # yazısıyla ve etkin/pasif durumuyla okunabiliyor. Tanı modunda
+            # basılıyor ki bu soru tek komutla, ekrana bakmadan cevaplanabilsin.
+            "menu": ui60.menu_agaci(ana),
+            "menu_form_yenile_adayi": ui60.menu_komutu_bul(
+                ana, FORM_YENILE_MENU_DESENI),
             "not": "Hiçbir şey yazılmadı. 'mdi_ici' beklenen konumla "
                    "eşleşmiyorsa ALAN_KONUMLARI güncellenmeli.",
         })
@@ -770,7 +927,8 @@ def main() -> int:
 
         for i, satir in enumerate(rows, start=1):
             log.append(f"--- satır {i}/{len(rows)} ---")
-            satir_doldur(satir, ana, log)
+            satir_doldur(satir, ana, log,
+                         miktar_uyarisini_onayla=args.miktar_uyarisini_onayla)
             if i < len(rows):
                 ilerle(f"satır {i} sonu")
 
@@ -830,6 +988,11 @@ def main() -> int:
         }
         if yenileme_notu:
             sonuc["uyari"] = yenileme_notu
+            # BU İŞ BAŞARILI, EKRAN DEĞİL. Form dolu kaldı; sıradaki iş onun
+            # üstüne yazmaya çalışıp başarısız olur ve suç ona yazılır. Bayrağı
+            # burada taşımak, worker'ın kuyruğu durdurup formu boşaltılmayı
+            # beklemesini sağlıyor.
+            sonuc["formKirli"] = True
         return emit(sonuc)
 
     except ui60.YanlisPencere as exc:
@@ -849,7 +1012,8 @@ def main() -> int:
     except (Durdu, ui60.AlanReddedildi) as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-hata")
         retryable = getattr(exc, "retryable", False)
-        return fail(str(exc), retryable=retryable, screenshot=goruntu, log=log)
+        return fail(str(exc), retryable=retryable, screenshot=goruntu, log=log,
+                    form_kirli=isinstance(exc, FormTemizlenemedi))
     except Exception as exc:  # beklenmedik: sonucu belirsiz, yeniden denenmez
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-beklenmedik")
         return fail(

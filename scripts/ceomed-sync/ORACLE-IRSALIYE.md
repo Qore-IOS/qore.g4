@@ -1170,3 +1170,107 @@ tarafına dokunmak gerekmiyor.
 
 **Bu araştırma kapandı.** Yeni uç nokta denemeye gerek yok; katalog iki yönde de
 tükendi.
+
+## F6 reddediliyor: tek kirli ekran, birden çok sağlam işi batırdı
+
+**Tarih:** 2026-08-14 · **Kanıt:** `BK10141 → M51001` işinin hata satırı
+
+```
+Form yenilenemedi: 3 denemede de F6 formu temizlemedi,
+İrsaliye No alanında 'DC10095' kaldı. Odak doğru alandaydı,
+yani sorun odakta değil. — ELLE MÜDAHALE GEREKİR
+```
+
+Bu satır, sonuç doğrulamasının (F6'ya bastım ≠ form yenilendi) ilk kez
+çalıştığı andır ve iki ayrı şeyi kanıtlıyor.
+
+### 1. F6 gerçekten reddediliyor
+
+Önceden bilmediğimiz şey buydu: sürücü F6'yı gönderiyordu ve sonucu hiç
+ölçmüyordu. Şimdi ölçülüyor — odak doğru alanda, üç deneme, alan boşalmıyor.
+Sorun ne odakta ne de tıklamada. Tuşun neden yutulduğu **ekrandan okunamıyor**,
+çünkü Forms hata mesajını tuvale çiziyor.
+
+### 2. Alandaki numara BAŞKA BİR İŞE ait
+
+`BK10141` işlenirken alanda `DC10095` duruyordu. Yani form, **önceki bir işin**
+gönderdiği belgeyle ekranda kalmıştı. Zincir şöyle:
+
+1. Bir iş gönderildi (`DC10095`), gönderim **başarılı**.
+2. Gönderim sonrası F6 tutmadı. Bu yol `uyari` üretiyor, işi düşürmüyor —
+   doğru davranış, çünkü e-irsaliye geri alınamaz.
+3. Sıradaki iş dolu formu buldu, üstüne yazamadı, **üç deneme hakkını tüketip
+   `failed` oldu.** Sonraki işler de aynı kaderi paylaştı.
+
+Yani **tek bir ekran durumu, hiçbir kusuru olmayan işleri kalıcı olarak
+batırdı** ve log onları "ELLE MÜDAHALE GEREKİR" diye işaretledi. Suç yanlış
+yere yazıldı: sorun işlerde değil, ekrandaydı.
+
+### Yapılan — 1: hata artık işe değil ekrana yazılıyor
+
+`FormTemizlenemedi` ayrı bir hata türü. Sürücü sonucuna `formKirli: true`
+düşüyor ve worker bunu görünce:
+
+* işi **deneme hakkı harcamadan** `pending` bırakıyor,
+* turu kesiyor (yoksa tek kirli form 20 işi peşi sıra düşürürdü),
+* kuyruğu `ORACLE_FORM_KIRLI_BEKLEME_SN` (varsayılan 300 sn) beklemeye alıyor.
+
+Bayrak **başarılı gönderimde de** taşınıyor: iş `sent` oluyor ama sıra durup
+formun boşaltılmasını bekliyor. Formun elle boşaltıldığını uzaktan anlamanın
+yolu yok; bekleme dolunca deneyerek öğreniliyor.
+
+Sonuç: bir kirli ekran artık **hiçbir işi kaybettirmiyor**, yalnızca
+geciktiriyor.
+
+### Yapılan — 2: menü, F6'nın okunabilir alternatifi
+
+Bu formda tuvale çizilmiş hiçbir şey okunamıyor. **Menü çubuğu okunabiliyor:**
+maddenin yazısı, kimliği ve etkin/pasif durumu Win32 API'sinden geliyor. Yani
+tuş göndermenin aksine eylemi **önce görüp sonra** tetikleyebiliyoruz.
+
+`ui60.menu_agaci` / `menu_komutu_bul` / `menu_komutu_gonder` eklendi. F6 üç
+denemede tutmazsa `form_yenile` menüden boşaltmayı deniyor.
+
+Güvenlik, tuş göndermekten daha sıkı — menü maddesi ateşlemek en az tuş kadar
+tehlikeli:
+
+* `ui60.MENU_YASAKLI` — `Sil / Kaydet / Gönder / Çık / Kapat / Yazdır / Onayla`
+  içeren madde, desene uysa bile aday olmaz.
+* `FORM_YENILE_MENU_DESENI` kasıtlı olarak dar: eylem `KAYIT/FORM/BELGE` ile
+  birlikte anılmak zorunda. `Tanımlar > Yeni Cari Kart` bu yüzden eşleşmiyor.
+* Madde bir pencere açarsa **dokunulmuyor**: "Değişiklikleri kaydetmek istiyor
+  musunuz?" sorusuna körlemesine Tamam demek muhasebeye kayıt yazabilir.
+* Sonuç yine **alandan** doğrulanıyor. Menü maddesini tetiklemiş olmak formun
+  boşaldığı anlamına gelmez — F6'da tam olarak bu hataya düşmüştük.
+
+Desen tablosu (doğrulandı):
+
+| Madde | Aday mı? | Sebep |
+| --- | --- | --- |
+| `Kayıt > Yeni Kayıt` | ✔ | eylem + KAYIT |
+| `Düzen > Temizle` | ✔ | yalnız başına "Temizle" (yol sonunda) |
+| `Record > Clear Record` | ✔ | İngilizce menü karşılığı |
+| `Tanımlar > Yeni Cari Kart` | ✘ | "Yeni" var ama KAYIT/FORM/BELGE yok |
+| `Kayıt > Kayıt Sil` | ✘ | yasaklı |
+| `Pencere > Kapat` | ✘ | yasaklı |
+
+### Yapılan — 3: teşhis artık log'da
+
+`--tani` çıktısına `menu` ve `menu_form_yenile_adayi` eklendi; hata mesajına da
+etkin maddelerin listesi giriyor (`menu_ozeti`). "Bu formda formu boşaltan ne
+var" sorusu artık ekran görüntüsüne gözle bakmadan, tek komutla cevaplanıyor.
+
+### Kasıtlı olarak YAPILMAYAN: başka fonksiyon tuşu denemek
+
+Forms'ta `Shift+F6` **Kayıt Sil**. Temizleme tuşunu deneme yanılmayla aramak,
+gönderilmiş bir e-irsaliyenin kaydını silme riski taşır. Bu yüzden yalnızca iki
+mekanizma kullanılıyor: operatörün doğruladığı **F6** ve yazısı **okunabilen**
+menü maddesi. Tuş tahmin edilmiyor.
+
+### Açık kalan soru
+
+F6'nın neden reddedildiği hâlâ bilinmiyor — muhtemel sebep formun **işlenmiş
+(commit edilmiş) bir kayıt** üstünde durması; Forms bu durumda yeni kayıt
+oluşturmayı engelliyor olabilir. Bir sonraki koşunun `menu_ozeti` çıktısı
+mekanizmanın var olup olmadığını gösterecek. Bulunmazsa sıradaki adım, aynı
+durumda operatörün elle **ne yaptığını** ölçmek.

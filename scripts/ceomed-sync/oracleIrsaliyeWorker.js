@@ -37,6 +37,9 @@
  *   ORACLE_MAX_PER_DAY        (varsayılan 200) günlük gönderim tavanı
  *   ORACLE_STALE_CLAIM_MIN    (varsayılan 15) takılı kalan processing işi geri al
  *   ORACLE_POLL_SEC           (varsayılan 30) listener'a ek emniyet yoklaması
+ *   ORACLE_FORM_KIRLI_BEKLEME_SN (varsayılan 300) ekrandaki form boşaltılamazsa
+ *                              kuyruğun bekleyeceği süre; işler deneme hakkı
+ *                              harcamaz
  *   CEOMED_DOGRULAMA          (varsayılan 0)  1 = gönderimi okuma API'siyle teyit et
  *   CEOMED_EPOSTA/PAROLA      doğrulama için Ceomed girişi
  *   CEOMED_CIKIS_BELGE_TIPI   (varsayılan 0)  çıkış irsaliyelerinin belge tipi;
@@ -66,7 +69,7 @@ for (const anahtar of [
   'ORACLE_DRY_RUN', 'ORACLE_FILL_ONLY', 'ORACLE_DRIVER', 'ORACLE_PYTHON',
   'ORACLE_MAX_ATTEMPTS', 'ORACLE_MAX_PER_DAY', 'ORACLE_STALE_CLAIM_MIN',
   'ORACLE_POLL_SEC', 'ORACLE_ALLOW_POST_QUANTITY_WARNING', 'ORACLE_DATE_SEP',
-  'ORACLE_UI_TIMEOUT_SEC', 'ORACLE_SCREENSHOT_DIR',
+  'ORACLE_UI_TIMEOUT_SEC', 'ORACLE_SCREENSHOT_DIR', 'ORACLE_FORM_KIRLI_BEKLEME_SN',
 ]) {
   const ham = process.env[anahtar];
   if (ham && /^(".*"|'.*')$/.test(ham.trim())) {
@@ -109,6 +112,40 @@ let running = true;
 let draining = false;
 /** Gün içi gönderim sayacı: { gun: 'YYYY-MM-DD', adet: n } */
 let dailyCounter = { gun: '', adet: 0 };
+
+/**
+ * EKRANDAKİ FORM DOLU KALDI — kuyruk beklemede.
+ *
+ * Sahada görülen zincir: bir işin gönderim SONRASI F6 yenilemesi tutmadı, form
+ * 'DC10095' ile ekranda kaldı. Sıradaki işler o dolu formu buldu, üstüne
+ * yazamadı, üçer deneme hakkını tüketip `failed` oldu ve log'a
+ * "ELLE MÜDAHALE GEREKİR" düştü — oysa o işlerin hiçbirinde sorun yoktu. Tek
+ * bir ekran durumu, sağlam işleri kalıcı olarak batırdı.
+ *
+ * Bu yüzden sürücü "form kirli" dediğinde işler deneme hakkı HARCAMAZ ve worker
+ * bir süre kuyruğa dokunmaz. Formun elle boşaltıldığını uzaktan anlamanın yolu
+ * yok; tek yol bekleyip yeniden denemek. Beklerken kuyruk aynen duruyor.
+ */
+let formKirliZamani = 0;
+const FORM_KIRLI_BEKLEME_MS = num(process.env.ORACLE_FORM_KIRLI_BEKLEME_SN, 300) * 1000;
+
+function formKirliIsaretle(sebep) {
+  formKirliZamani = Date.now();
+  errLog('form', `Ceomed ekranındaki form boşaltılamadı: ${sebep} `
+    + `Kuyruk ${Math.round(FORM_KIRLI_BEKLEME_MS / 1000)} sn beklemeye alındı. `
+    + 'Ceomed\'de İrsaliye No alanına gelip formu elle boşaltın (F6); '
+    + 'işler deneme hakkı harcamadan kuyrukta duruyor.');
+}
+
+/** Bekleme sürüyorsa true — kuyruk bu turda hiç işlenmez. */
+function formKirliBekleniyorMu() {
+  if (!formKirliZamani) return false;
+  if (Date.now() - formKirliZamani < FORM_KIRLI_BEKLEME_MS) return true;
+  // Süre doldu: formun boşaltılıp boşaltılmadığını ancak DENEYEREK öğreniriz.
+  formKirliZamani = 0;
+  log('form', 'Bekleme süresi doldu; form boşalmış olabilir, kuyruk yeniden deneniyor.');
+  return false;
+}
 
 function initFirestore() {
   if (!admin.apps.length) {
@@ -332,7 +369,21 @@ async function processJob(db, driver, jobId) {
       return;
     }
     if (!result || !result.ok) {
+      adimlariYaz(ozet, result);
       const mesaj = (result && result.error) || 'Sürücü sebep belirtmeden başarısız döndü.';
+      // Form kirliyse suç işte değil ekranda; test modunda da deneme hakkı
+      // harcanmaz, aksi hâlde ilk gerçek gönderime kalmadan işler `failed` olur.
+      if (result && result.formKirli) {
+        await db.collection(COLLECTION).doc(job.id).update({
+          status: 'pending',
+          attemptCount: Math.max(0, job.attemptCount - 1),
+          lastError: String(mesaj).slice(0, 1500),
+          lastErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        formKirliIsaretle(`${ozet}: ${mesaj}`);
+        return;
+      }
       const retryable = !result || result.retryable !== false;
       const tekrar = await markFailure(db, job, mesaj, retryable);
       errLog('hata', `${ozet}: ${mesaj}${tekrar ? ' — yeniden denenecek' : ' — ELLE MÜDAHALE GEREKİR'}`);
@@ -373,6 +424,21 @@ async function processJob(db, driver, jobId) {
     adimlariYaz(ozet, result);
     const mesaj = (result && result.error) || 'Sürücü sebep belirtmeden başarısız döndü.';
     const retryable = !result || result.retryable !== false;
+
+    // FORM KİRLİ: bu işin suçu yok, ekranda dolu bir form duruyor. Deneme
+    // hakkını harcamak bu işi ve sıradaki her işi haksız yere `failed` yapardı;
+    // iş olduğu gibi kuyrukta kalıyor, worker formun boşaltılmasını bekliyor.
+    if (result && result.formKirli) {
+      await db.collection(COLLECTION).doc(job.id).update({
+        status: 'pending',
+        attemptCount: Math.max(0, job.attemptCount - 1),
+        lastError: String(mesaj).slice(0, 1500),
+        lastErrorAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      formKirliIsaretle(`${ozet}: ${mesaj}`);
+      return;
+    }
 
     // BELİRSİZ BAŞARISIZLIK: sürücü "olmadı" diyor ama gönderim ekranın
     // ötesinde gerçekleşmiş olabilir (zaman aşımı, çözülemeyen çıktı, tıklama
@@ -434,6 +500,13 @@ async function processJob(db, driver, jobId) {
   await markSent(db, job, { ...result, dogrulama });
   await bildirimYaz(db, job, result);
   log('ok', `${ozet} — e-irsaliye gönderildi${result.ceomedIrsaliyeNo ? ` (Ceomed no: ${result.ceomedIrsaliyeNo})` : ''}`);
+
+  // BU İŞ BİTTİ AMA EKRAN TEMİZ DEĞİL. Gönderim geri alınamaz ve doğru yapıldı;
+  // yine de sıradaki işi dolu formun üstüne sürmek onu düşürür. Sıra burada
+  // duruyor.
+  if (result.formKirli) {
+    formKirliIsaretle(`${ozet} gönderildi ama form ekranda dolu kaldı.`);
+  }
 }
 
 /** Kuyruktaki tüm pending işleri sırayla tüketir. */
@@ -445,6 +518,11 @@ async function drain(db, driver) {
       log('bekliyor', 'Oracle ekranında incelenen bir form var; kuyruktaki yeni işler sırada tutuluyor.');
       return;
     }
+    // Dolu form beklemesi: kuyruğa hiç dokunulmuyor. Tek satır bile log
+    // basılmıyor — bekleme sebebi `formKirliIsaretle` içinde bir kez yazıldı,
+    // her yoklamada yinelemek log'u kullanılamaz hâle getirir.
+    if (formKirliBekleniyorMu()) return;
+
     while (running) {
       let q = db.collection(COLLECTION).where('status', '==', 'pending');
       if (COMPANY_ID) q = q.where('companyId', '==', COMPANY_ID);
@@ -454,11 +532,14 @@ async function drain(db, driver) {
       for (const doc of snap.docs) {
         if (!running) break;
         await processJob(db, driver, doc.id);
+        // Form dolu kaldı: sıradaki iş de aynı ekrana yazacaktı. Turu burada
+        // kes, aksi hâlde tek bir kirli form 20 işi peşi sıra düşürür.
+        if (formKirliZamani) break;
         if (FILL_ONLY) break;
       }
 
       // Kuru çalışmada işler pending kalır — sonsuz döngüye girmemek için tek tur.
-      if (DRY_RUN || FILL_ONLY) break;
+      if (DRY_RUN || FILL_ONLY || formKirliZamani) break;
     }
   } catch (e) {
     errLog('kuyruk', `Tüketim hatası: ${e.message || e}`);
