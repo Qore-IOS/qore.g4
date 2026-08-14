@@ -630,6 +630,14 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
     # Tek güvenilir ölçü alanın kendisi: temizlenmişse İrsaliye No BOŞALIR.
     # Gönderimden hemen sonra uygulama hâlâ meşgul olabildiği için birkaç kez,
     # aralarını açarak deneniyor.
+    # "OKUYAMADIM" İLE "DOLU" AYNI ŞEY DEĞİL.
+    #
+    # Sahada BOŞ formda 'DC10095' okundu: odaktaki kontrol park edilmiş bir
+    # Edit'ti ve en son düzenlediği değeri taşıyordu (ayrıntı
+    # `ui60.canli_alan_mi`). Konum denetimi geçtiği için sürücü bunu "form
+    # temizlenmedi" sandı, kuyruğu durdurdu ve temiz bir formu üç kez kirli ilan
+    # etti. Bu yüzden yalnızca GÜVENİLİR okumalar karar verir.
+    guvenilir_kalan: str | None = None
     for deneme in range(1, 4):
         ui60.tus("F6", bekle_ms=1200 * deneme)
 
@@ -639,8 +647,18 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
             o = ui60.odak()
 
-        kalan = (o.get("deger") or "").strip()
-        if not kalan:
+        if not o["canli"]:
+            l, t, r, b = o["rect"]
+            log.append(
+                f"F6 {deneme}. deneme: alan OKUNAMADI — odak {o['sinif']!r} "
+                f"({r - l}×{b - t} px). Park edilmiş Edit'in metni "
+                f"({(o.get('deger') or '')!r}) alanın değeri DEĞİL, "
+                "bu okuma yok sayılıyor."
+            )
+            continue
+
+        guvenilir_kalan = (o.get("deger") or "").strip()
+        if not guvenilir_kalan:
             log.append(
                 f"F6 ile form yenilendi ({sebep}; {deneme}. denemede, "
                 "İrsaliye No boşaldı)"
@@ -648,22 +666,41 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             return
 
         log.append(
-            f"F6 {deneme}. deneme: form temizlenmedi, İrsaliye No hâlâ {kalan!r}"
+            f"F6 {deneme}. deneme: form temizlenmedi, "
+            f"İrsaliye No hâlâ {guvenilir_kalan!r}"
         )
 
-    # F6 REDDEDİLDİ — İKİNCİ YOLA GEÇ.
+    if guvenilir_kalan is None:
+        # HİÇBİR GÜVENİLİR ÖLÇÜM YAPILAMADI. Formun temiz olup olmadığını
+        # bilmiyoruz — ve BİLMEMEK, KİRLİ OLMAK DEĞİL. İşi burada durdurmak,
+        # sahada olan şeydi: temiz form, duran kuyruk, haksız yere `failed`
+        # işler.
+        #
+        # Devam etmek güvenli, çünkü asıl emniyet ağı bu proxy değil: her alan
+        # yazıldıktan sonra GERİ OKUNUYOR, alandan çıkılamazsa (`ilerle`) iş
+        # duruyor ve işlenmiş bir kayıt üstüne yazmaya çalışmak tam olarak bu
+        # şekilde yakalanıyor. F6 denetimi ek bir güvenceydi; ölçülemediğinde
+        # tek başına işi düşürmemeli.
+        log.append(
+            "F6 sonucu ölçülemedi (üç denemede de alan okunamadı); işe devam "
+            "ediliyor — her alan yazımdan sonra geri okunarak doğrulanacak."
+        )
+        return
+
+    # F6 REDDEDİLDİ — ÖLÇÜLDÜ, TAHMİN DEĞİL. İKİNCİ YOLA GEÇ.
     #
-    # Buraya gelindiğinde bildiğimiz şey kesin: odak doğru alandaydı, F6 üç kez
-    # gönderildi, alan boşalmadı. Tuşun neden yutulduğu ekrandan okunamıyor
-    # (mesaj satırı tuvale çizili). Menü ise okunabilir: maddenin yazısı da
-    # etkin olup olmadığı da API'den geliyor.
+    # Buraya yalnızca GÜVENİLİR bir okuma alanı dolu bulduğunda geliniyor.
+    # Tuşun neden yutulduğu ekrandan okunamıyor (mesaj satırı tuvale çizili).
+    # Menü ise okunabilir: maddenin yazısı da etkin olup olmadığı da API'den
+    # geliyor.
     if menu_ile_yenile(ana_pencere, log, sebep):
         return
 
     raise FormTemizlenemedi(
         f"Form yenilenemedi: F6 formu temizlemedi (3 deneme) ve menüden de "
-        f"boşaltılamadı; İrsaliye No alanında {kalan!r} kaldı. Odak doğru "
-        f"alandaydı, yani sorun odakta değil. {menu_ozeti(ana_pencere)}",
+        f"boşaltılamadı; İrsaliye No alanında {guvenilir_kalan!r} kaldı. Odak "
+        f"doğru alandaydı ve okuma güvenilirdi (canlı Edit), yani alan "
+        f"gerçekten dolu. {menu_ozeti(ana_pencere)}",
         retryable=True,
     )
 
@@ -720,6 +757,10 @@ def menu_ile_yenile(ana_pencere: int, log: list[str], sebep: str) -> bool:
 
     ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
     o = ui60.odak()
+    if not o["canli"]:
+        # Park edilmiş Edit okundu; "boşaldı" da "boşalmadı" da denemez.
+        log.append("menü: sonuç ölçülemedi, alan okunamadı (canlı Edit değil)")
+        return False
     kalan = (o.get("deger") or "").strip()
     if kalan:
         log.append(f"menü: form temizlenmedi, İrsaliye No hâlâ {kalan!r}")
@@ -752,7 +793,18 @@ def aciklama_kanidini_oku(ana_pencere: int, log: list[str]) -> str:
                     ui60.pencere_noktasina_tikla(ana_pencere, nokta, bekle_ms=200)
                 except Exception:
                     continue
-                deger = (ui60.odak().get("deger") or "").strip()
+                o = ui60.odak()
+                # PARK EDİLMİŞ EDIT BURADA EN TEHLİKELİ.
+                #
+                # Bu okuma "irsaliye kesin kesildi" kanıtı olarak kullanılıyor.
+                # Park edilmiş bir Edit en son düzenlediği değeri taşıyor — yani
+                # BİZİM az önce yazdığımız açıklamayı ya da stok kodunu. Onu
+                # uygulamanın yazdığı kanıt sanmak, gönderilmemiş bir irsaliyeyi
+                # "kanıtlanmış" ilan etmek olurdu. Sahte kanıt, kanıtsızlıktan
+                # çok daha kötü.
+                if not o["canli"]:
+                    continue
+                deger = (o.get("deger") or "").strip()
                 if deger:
                     satirlar.append(f"aralık {aralik}px satır {satir_no}: {deger!r}")
             if satirlar:
@@ -873,6 +925,11 @@ def main() -> int:
             "mdi_baslik": o["mdi_baslik"],
             "taninan_alan": alan_adi(o["mdi_ici"]),
             "taninan_grid_alani": alan_adi(o["mdi_ici"], grid_modu=True),
+            # `canli` false ise `deger` HAKKINDA HİÇBİR ŞEY SÖYLENEMEZ: odaktaki
+            # kontrol park edilmiş bir Edit ve eski değerini taşıyor. Sahada boş
+            # formda 'DC10095' okunmasının sebebi buydu.
+            "canli": o["canli"],
+            "rect": list(o["rect"]),
             # MENÜ: "formu ne boşaltıyor" sorusunun cevabı. F6 sahada reddedildi
             # ve tuşun neden yutulduğu ekrandan okunamıyor; menü maddeleri ise
             # yazısıyla ve etkin/pasif durumuyla okunabiliyor. Tanı modunda

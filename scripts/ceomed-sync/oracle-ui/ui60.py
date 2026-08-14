@@ -253,7 +253,42 @@ ODAK_BOS: dict = {
     "mdi_ici": (0, 0),
     "pencere_ici": (0, 0),
     "rect": (0, 0, 0, 0),
+    "canli": False,
 }
+
+
+# --- PARK EDİLMİŞ EDIT: `deger` HER ZAMAN OKUNABİLİR DEĞİL ---------------------
+#
+# Forms odaktaki alan için gerçek bir `Edit` açıp alanın üstüne taşıyor, odak
+# gidince onu SIFIR BOYUTA PARK EDİYOR — ama İÇİNDEKİ METNİ SİLMİYOR. Park
+# edilmiş Edit, en son düzenlediği değeri taşımaya devam ediyor ve konumu da
+# hizmet ettiği alanın yakınında kalıyor.
+#
+# SAHADA BUNA YAKALANDIK: form EKRANDA BOŞKEN sürücü İrsaliye No alanında
+# 'DC10095' okudu — önceki bir işin numarası. Konum denetimi geçti (park
+# edilmiş Edit doğru yerdeydi), değer doluydu, sürücü "F6 formu temizlemedi"
+# diye üç kez rapor etti ve kuyruğu durdurdu. Oysa form temizdi; YANLIŞ OLAN
+# ÖLÇÜMDÜ.
+#
+# Bu yüzden bir okumaya güvenmenin ön koşulu var: odaktaki kontrol gerçek bir
+# `Edit` OLMALI ve GÖRÜNÜR BİR BOYUTU olmalı. `alan_yaz` bundan etkilenmiyor,
+# çünkü o yazdığını geri okuyor; etkilenen tek şey "uygulamanın kendi yazdığı
+# değeri okumak" — F6 doğrulaması ve gönderim kanıtı tam olarak bunu yapıyor.
+PARK_ESIGI_PX = 4
+CANLI_ALAN_SINIFI = "Edit"
+
+
+def canli_alan_mi(o: dict) -> bool:
+    """Odaktaki kontrolün değeri OKUNMAYA DEĞER mi?
+
+    False dönerse `o["deger"]` hakkında hiçbir şey söylenemez — ne dolu ne boş.
+    "Okuyamadım" ile "boş" arasındaki farkı silmek, sahada temiz bir formu üç
+    kez kirli ilan ettirdi.
+    """
+    if not o.get("hwnd") or o.get("sinif") != CANLI_ALAN_SINIFI:
+        return False
+    l, t, r, b = o.get("rect") or (0, 0, 0, 0)
+    return (r - l) > PARK_ESIGI_PX and (b - t) > PARK_ESIGI_PX
 
 
 def odak() -> dict:
@@ -271,7 +306,7 @@ def odak() -> dict:
     mdi = mdi_belge_kokü(hwnd)
     taban = mdi or kok
     tr = dikdortgen(taban) if taban else (0, 0, 0, 0)
-    return {
+    sonuc = {
         **ODAK_BOS,
         "hwnd": hwnd,
         "sinif": sinif_adi(hwnd),
@@ -286,6 +321,11 @@ def odak() -> dict:
         "pencere_ici": (r[0] - kr[0], r[1] - kr[1]),
         "rect": r,
     }
+    # `canli`: `deger`e güvenilebilir mi? Park edilmiş Edit eski değerini
+    # taşımaya devam ediyor ve konumu da doğru görünüyor — ayrıntı
+    # `canli_alan_mi` gövdesinde.
+    sonuc["canli"] = canli_alan_mi(sonuc)
+    return sonuc
 
 
 def cocuk_metinleri(kok: int) -> list[str]:
@@ -379,10 +419,20 @@ MF_GRAYED = 0x0001
 MF_DISABLED = 0x0002
 MF_SEPARATOR = 0x0800
 
-# Bu maddeler asla otomatik tetiklenmez. Geri alınamaz ya da muhasebeye
-# dokunur; adı ne kadar uyarsa uysun aday sayılmaz.
+# Bu maddeler asla otomatik tetiklenmez. Geri alınamaz, muhasebeye dokunur ya
+# da otomasyonun altındaki zemini kaydırır; adı ne kadar uyarsa uysun aday
+# sayılmaz.
+#
+# İKİNCİ GRUP SAHADA ÖLÇÜLDÜKTEN SONRA EKLENDİ: bu formun menü çubuğunda
+# uygulama menüsü YOK, yalnızca MDI pencere menüsü var — "Önceki Boyut",
+# "Simge Durumuna Küçült", "İleri Ctrl+F6", "Pencere ▸ Basamakla/Döşe". Hiçbiri
+# eşleşmedi (desen yeterince dardı) ama "Simge Durumuna Küçült" ETKİNDİ:
+# gereğinden bir tık geniş bir desen, otomasyonun yazdığı pencereyi simge
+# durumuna küçültürdü. Pencere yönetimi maddeleri artık yapısal olarak dışarıda.
 MENU_YASAKLI = re.compile(
-    r"SIL|DELETE|KAYDET|SAVE|COMMIT|GONDER|CIK|EXIT|KAPAT|YAZDIR|PRINT|ONAYLA",
+    r"SIL|DELETE|KAYDET|SAVE|COMMIT|GONDER|CIK|EXIT|KAPAT|YAZDIR|PRINT|ONAYLA"
+    r"|KUCULT|BUYUT|BOYUT|SIMGE|BASAMAKLA|DOSE|TASI|PENCERE|WINDOW"
+    r"|MINIMIZE|MAXIMIZE|RESTORE|CASCADE|TILE",
     re.IGNORECASE,
 )
 
@@ -673,6 +723,20 @@ def alan_yaz(deger: str, etiket: str, bekle_ms: int = 250) -> str:
     bir alanda tekrar denemek değeri birleştirebilir ('m51016'+'12') — o yüzden
     orada tekrar YOK, doğrudan hata.
     """
+    # ODAK CANLI BİR ALANDA MI? Park edilmiş Edit'e yazmak sessizce başarılı
+    # görünür: tuşlar odaktaki (sıfır boyutlu, ekranda olmayan) kontrole gider,
+    # geri okuma yazdığımız değeri döndürür ve doğrulama GEÇER — forma hiçbir şey
+    # girmemişken. Yazmadan önce bakmak, bu sahte başarıyı yapısal olarak
+    # imkânsız kılıyor.
+    o = odak()
+    if not o["canli"]:
+        l, t, r, b = o["rect"]
+        raise AlanReddedildi(
+            f"{etiket}: odak canlı bir alanda değil — {o['sinif']!r} "
+            f"({r - l}×{b - t} px). Park edilmiş Edit'e yazmak forma hiçbir şey "
+            f"girmediği hâlde doğrulamayı geçirir; yazılmadı."
+        )
+
     alan_temizle()
     yaz(deger)
     time.sleep(bekle_ms / 1000.0)

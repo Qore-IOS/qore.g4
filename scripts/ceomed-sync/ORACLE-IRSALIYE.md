@@ -1274,3 +1274,98 @@ F6'nın neden reddedildiği hâlâ bilinmiyor — muhtemel sebep formun **işlen
 oluşturmayı engelliyor olabilir. Bir sonraki koşunun `menu_ozeti` çıktısı
 mekanizmanın var olup olmadığını gösterecek. Bulunmazsa sıradaki adım, aynı
 durumda operatörün elle **ne yaptığını** ölçmek.
+
+## ⚠ Sahte okuma: park edilmiş `Edit`, temiz formu üç kez "kirli" ilan etti
+
+**Tarih:** 2026-08-14 · **Operatör ölçüsü:** *"şu an boş formda bile bu hatayı
+veriyor"*
+
+Sürücü **boş** formda İrsaliye No alanında `'DC10095'` okudu — önceki bir işin
+numarası. Konum denetimi geçti, değer dolu göründü, F6 üç kez "tutmadı" diye
+raporlandı ve kuyruk durdu. **Form temizdi; yanlış olan ÖLÇÜMDÜ.**
+
+### Sebep bu belgede zaten yazılıydı
+
+Ölçüm 2'de kaydedilmiş (bkz. *Form alanları kontrol DEĞİL*):
+
+```
+[Edit] text='SI007787'  (L-1920, T1, R-1920, B1)   ← sıfır boyut
+```
+
+Forms odaktaki alan için gerçek bir `Edit` açıp alanın üstüne taşıyor, odak
+gidince **sıfır boyuta park ediyor — ama içindeki metni SİLMİYOR.** Park edilmiş
+Edit en son düzenlediği değeri taşımaya devam ediyor ve konumu da hizmet ettiği
+alanın yakınında kalıyor. Yani:
+
+* `pencere_ici` denetimi **geçiyor** (konum doğru görünüyor),
+* `deger` **eski işin değerini** döndürüyor,
+* kontrol görünmez olduğu için **ekranda hiçbir iz yok** — operatör boş form
+  görüyor, sürücü dolu alan okuyor.
+
+Bu davranış üç yıl önce ölçülmüştü ama sonucu yalnızca "geri okuma mümkün"
+diye kullanıldı. Ters yönü — **okuma ne zaman mümkün DEĞİL** — hiç yazılmadı.
+
+### `alan_yaz` neden bundan etkilenmedi
+
+Çünkü o yazdığını geri okuyor: değeri kendisi koyuyor, park edilmiş Edit'in eski
+içeriği eziliyor. Etkilenen tek şey **"uygulamanın kendi yazdığı değeri
+okumak"** — ve yeni eklenen iki doğrulama tam olarak bunu yapıyordu:
+
+| Okuma | Park edilmiş Edit'te ne olurdu |
+| --- | --- |
+| F6 sonucu (İrsaliye No boşaldı mı) | temiz form "kirli" görünür → **kuyruk durur** |
+| Gönderim kanıtı (açıklama 2-3. satır) | bizim yazdığımız metin "uygulamanın kanıtı" sanılır → **sahte kanıt** |
+
+İkincisi daha kötü: gönderilmemiş bir irsaliyeyi "kanıtlanmış" ilan ederdi.
+
+### Kural: `canli` olmadan `deger` okunmaz
+
+`ui60.canli_alan_mi(o)` — odaktaki kontrol `Edit` sınıfı **ve** 4 pikselden büyük
+olmalı. `odak()` bunu `canli` anahtarıyla döndürüyor. Ölçüm 3'le birebir uyumlu:
+22 odak olayının hepsi gerçek, **boyutlu** bir `Edit`'e düşmüştü.
+
+Üç çağrı yeri düzeltildi:
+
+1. **F6 doğrulaması** — yalnızca güvenilir okumalar karar veriyor. Üç denemede de
+   okunamazsa iş **durmuyor**: "bilmemek, kirli olmak değil". Devam etmek güvenli,
+   çünkü asıl emniyet ağı bu proxy değil — her alan yazımdan sonra geri okunuyor
+   ve alandan çıkılamazsa iş duruyor.
+2. **Gönderim kanıtı** — park edilmiş okuma yok sayılıyor. Sahte kanıt,
+   kanıtsızlıktan çok daha kötü.
+3. **`alan_yaz`** — yazmadan ÖNCE denetliyor. Park edilmiş Edit'e yazmak sessizce
+   başarılı görünürdü: tuşlar ekranda olmayan kontrole gider, geri okuma
+   yazdığımızı döndürür, doğrulama geçer — forma hiçbir şey girmemişken.
+
+### Ders
+
+Bir doğrulamanın kendisi de doğrulanmalı. "F6'ya bastım" ile "form yenilendi"
+arasındaki farkı kapatmak için sonuç ölçümü eklendi; ama **ölçüm aracının
+yanılabileceği** hesaba katılmadı ve bu kez yanlış cevap "başarısız" tarafına
+düştü — yani sessiz değil, gürültülü ama gerçek dışı bir hata. İyi tarafı:
+gürültülü hata bir günde bulundu.
+
+## Ölçüm: bu formun menü çubuğunda uygulama menüsü YOK
+
+Aynı koşunun `menu_ozeti` çıktısı (9 madde, 8'i etkin):
+
+```
+Önceki Boyut, Simge Durumuna Küçült, İleri Ctrl+F6,
+Pencere > Basamakla, Pencere > Döşe, Pencere > Simgeleri Yerleştir,
+Pencere > 1. ANA MENÜ, Pencere > 2. Çıkış İrsaliyesi
+```
+
+Bunların hepsi **MDI pencere menüsü**. Kayıt/Düzen gibi bir uygulama menüsü
+yok, dolayısıyla **menü, formu boşaltmanın bir yolu değil.** Kod duruyor —
+yokluğu kanıtlamak da bir sonuç ve teşhis çıktısı olarak değerli.
+
+Üç yan bulgu:
+
+* **`Pencere > 1. ANA MENÜ` / `2. Çıkış İrsaliyesi`** — açık iki MDI belgesi.
+  Gönderim sonrası odağın "başka bir MDI belgesine düşmesi" gözlemi bununla
+  tutarlı.
+* **`İleri  Ctrl+F6`** — bu uygulamada **Ctrl+F6 belge değiştiriyor.** F6'nın
+  neden formu temizlemek yerine yutulabildiğine dair bir ipucu.
+* **`Simge Durumuna Küçült` ETKİNDİ** ve desene bir tık uzaktı. Eşleşseydi
+  otomasyon yazdığı pencereyi simge durumuna küçültürdü. Desen yeterince dardı
+  ama bu şansa bırakılamaz: pencere yönetimi fiilleri (`KÜÇÜLT|BOYUT|SİMGE|
+  BASAMAKLA|DÖŞE|PENCERE|MINIMIZE|CASCADE|TILE`…) artık `MENU_YASAKLI` içinde.
