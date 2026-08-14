@@ -25,7 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 import { nanoid } from 'nanoid';
 import { buildDepotSelectableItems, type DepotSelectableStockItem } from '@/lib/spare-part-depot';
 import { filterByCompanyScope, filterByAssignedLabs, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { emitExternalStockUsage } from '@/lib/notifications';
@@ -36,6 +36,7 @@ type ModuleType = 'teknik-servis' | 'aplikasyon-paneli';
 
 type ActionRecord = {
   id: string;
+  companyId?: string;
   deviceId: string;
   cihazAdi?: string;
   seriNumarasi?: string;
@@ -84,11 +85,17 @@ type ActionRecord = {
     isManualEntry?: boolean;
     removedPartImageUrl?: string;
     usedPartImageUrl?: string;
+    addedAt?: { toDate?: () => Date };
+    addedByName?: string;
   }>;
   selectedMaintenanceTasks?: Array<{ id?: string; taskName?: string }>;
   egitimIcerigi?: string;
   egitimKatilanlar?: Array<{ name?: string }> | string[];
   moduleType?: ModuleType;
+  recordType?: 'action-form' | 'fault-closure';
+  faultOpenedByName?: string;
+  interventionType?: string;
+  supportPersonnelNames?: string[];
   isLabDeviceChild?: boolean;
 };
 
@@ -149,28 +156,89 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       setLoading(true);
       // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
       const dateConstraints = dateFilter.constraints('createdAt');
-      const [teknikSnap, aplikasyonSnap] = await Promise.all([
-        getDocs(scopedQuery(
+      const [teknikDocs, aplikasyonDocs, faultDocs] = await Promise.all([
+        getScopedDocs(
           getCollectionName('teknik-servis'),
           currentCompanyId,
           isSuperAdmin,
           ...dateConstraints,
           orderBy('createdAt', 'desc'),
           fsLimit(2000),
-        )),
-        getDocs(scopedQuery(
+        ),
+        getScopedDocs(
           getCollectionName('aplikasyon-paneli'),
           currentCompanyId,
           isSuperAdmin,
           ...dateConstraints,
           orderBy('createdAt', 'desc'),
           fsLimit(2000),
-        )),
+        ),
+        getScopedDocs(
+          'deviceFaultReports',
+          currentCompanyId,
+          isSuperAdmin,
+          ...dateFilter.constraints('closedAt'),
+          orderBy('closedAt', 'desc'),
+          fsLimit(2000),
+        ),
       ]);
-      const merged = [
-        ...teknikSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis' } as ActionRecord)),
-        ...aplikasyonSnap.docs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli' } as ActionRecord)),
+      const actionForms = [
+        ...teknikDocs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'teknik-servis', recordType: 'action-form' } as ActionRecord)),
+        ...aplikasyonDocs.map((d) => ({ id: d.id, ...d.data(), moduleType: 'aplikasyon-paneli', recordType: 'action-form' } as ActionRecord)),
       ];
+
+      // Kullanılan parçalar arıza belgesinin alt koleksiyonlarında tutulur.
+      // Yalnızca parça/hücre içeren kapanışları kontrollü gruplar halinde oku.
+      const faultClosures: ActionRecord[] = [];
+      const CHILD_READ_BATCH_SIZE = 20;
+      for (let start = 0; start < faultDocs.length; start += CHILD_READ_BATCH_SIZE) {
+        const faultBatch = faultDocs.slice(start, start + CHILD_READ_BATCH_SIZE);
+        const records = await Promise.all(faultBatch.map(async (faultDoc) => {
+          const [partsSnap, cellsSnap] = await Promise.all([
+            getDocs(collection(db, 'deviceFaultReports', faultDoc.id, 'partChanges')),
+            getDocs(collection(db, 'deviceFaultReports', faultDoc.id, 'hucreDegisimleri')),
+          ]);
+          if (partsSnap.empty && cellsSnap.empty) return null;
+
+          const data = faultDoc.data() as any;
+          const closedAt = data.closedAt;
+          const openedAt = data.openedAt;
+          return {
+            id: faultDoc.id,
+            companyId: data.companyId || '',
+            deviceId: data.deviceId || '',
+            cihazAdi: data.cihazAdi || data.model || '',
+            seriNumarasi: data.seriNumarasi || data.serial || '',
+            hospitalId: data.hospitalId || data.labId || '',
+            labName: data.labName || '',
+            aciklama: data.closeDescription || '',
+            islemTipi: 'cihaz',
+            islemTuru: 'ariza',
+            createdAt: closedAt,
+            createdByName: data.closedByName || '',
+            createdByUid: data.closedByUid || data.closedBy || '',
+            baslangicTarihi: openedAt?.toDate ? format(openedAt.toDate(), 'yyyy-MM-dd') : '',
+            baslangicSaati: openedAt?.toDate ? format(openedAt.toDate(), 'HH:mm') : '',
+            bitisTarihi: closedAt?.toDate ? format(closedAt.toDate(), 'yyyy-MM-dd') : '',
+            bitisSaati: closedAt?.toDate ? format(closedAt.toDate(), 'HH:mm') : '',
+            selectedFaultName: data.title || data.description || '',
+            faultName: data.description || '',
+            selectedTests: data.relatedTests || [],
+            actions: [
+              ...partsSnap.docs.map((part) => ({ id: part.id, type: 'part_change', ...part.data() })),
+              ...cellsSnap.docs.map((cell) => ({ id: cell.id, type: 'hucre_degisimi', action: 'hucre_degisimi', quantity: 1, ...cell.data() })),
+            ],
+            moduleType: data.faultType === 'aplikasyon' ? 'aplikasyon-paneli' : 'teknik-servis',
+            recordType: 'fault-closure',
+            faultOpenedByName: data.openedByName || '',
+            interventionType: data.interventionType || '',
+            supportPersonnelNames: data.supportPersonnelNames || (data.supportPersonnelName ? [data.supportPersonnelName] : []),
+          } as ActionRecord;
+        }));
+        faultClosures.push(...records.filter((record): record is ActionRecord => record !== null));
+      }
+
+      const merged = [...actionForms, ...faultClosures];
       const isAdminRole = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin';
       const scoped = filterByCompanyScope(merged, currentCompanyId, isSuperAdmin);
       const labScoped = filterByAssignedLabs(scoped, currentUserProfile?.assignedLaboratories, {
@@ -239,8 +307,9 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       }[value || ''] || prettifyActionText(value));
 
       const formRows = filteredForms.map((form) => ({
-        'Form No': form.formNo || form.id,
+        'Form No / Arıza No': form.formNo || form.id,
         'Form Kimliği': form.id,
+        'Kayıt Kaynağı': form.recordType === 'fault-closure' ? 'Yedek Parçalı Arıza Kapanışı' : 'İşlem Formu',
         Modül: form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon',
         Tarih: form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : (form.baslangicTarihi || ''),
         'Başlangıç Tarihi': form.baslangicTarihi || '',
@@ -254,6 +323,9 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
         'Cihaz Kimliği': form.deviceId || '',
         'İşlemi Yapan Kullanıcı': form.createdByName || '',
         'Kullanıcı Kimliği': form.createdByUid || '',
+        'Arızayı Açan Kullanıcı': form.faultOpenedByName || '',
+        'Müdahale Tipi': prettifyActionText(form.interventionType),
+        'Destek Personeli': form.supportPersonnelNames?.join(', ') || '',
         'İşlem Tipi': ISLEM_TIPI_LABELS[form.islemTipi || ''] || prettifyActionText(form.islemTipi),
         'İşlem Türü': ISLEM_TURU_LABELS[form.islemTuru || ''] || prettifyActionText(form.islemTuru),
         'Arıza': form.selectedFaultName || form.faultName || '',
@@ -270,13 +342,16 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       }));
 
       const actionRows = filteredForms.flatMap((form) => (form.actions || []).map((action, index) => ({
-        'Form No': form.formNo || form.id,
+        'Form No / Arıza No': form.formNo || form.id,
+        'Kayıt Kaynağı': form.recordType === 'fault-closure' ? 'Yedek Parçalı Arıza Kapanışı' : 'İşlem Formu',
         Modül: form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon',
         Tarih: form.createdAt?.toDate ? format(form.createdAt.toDate(), 'dd.MM.yyyy', { locale: tr }) : (form.baslangicTarihi || ''),
         Laboratuvar: form.labName || '',
         'Cihaz Adı': form.cihazAdi || '',
         'Cihaz Seri Numarası': form.seriNumarasi || '',
-        'İşlemi Yapan Kullanıcı': form.createdByName || '',
+        'İşlemi Yapan / Kapatan Kullanıcı': form.createdByName || '',
+        'Parçayı Ekleyen Kullanıcı': action.addedByName || '',
+        'Parça Ekleme Tarihi': action.addedAt?.toDate ? format(action.addedAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
         'Satır No': index + 1,
         'Kayıt Tipi': actionType(action.type),
         'Yapılan İşlem': prettifyActionText(action.action),
@@ -327,7 +402,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
               </span>
               <div>
                 <h1 className="text-lg sm:text-xl font-bold text-[var(--dashboard-text)]">{getTitle(moduleType)}</h1>
-                <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">Firma kapsamındaki tüm teknik servis ve aplikasyon işlem formları</p>
+              <p className="text-xs sm:text-sm text-[var(--dashboard-muted)]">İşlem formları ve yedek parça kullanılan arıza kapanışları</p>
               </div>
             </div>
             <Button
@@ -397,9 +472,9 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                   <TableBody>
                     {pagedForms.map((form) => (
                       <TableRow
-                        key={form.id}
+                        key={`${form.recordType || 'action-form'}-${form.moduleType || moduleType}-${form.id}`}
                         className="cursor-pointer border-[var(--dashboard-stroke)] hover:bg-[var(--dashboard-surface-2)]/50"
-                        onClick={() => router.push(`/${form.moduleType || moduleType}/tum-formlar/${form.id}`)}
+                        onClick={() => router.push(form.recordType === 'fault-closure' ? `/ariza-yonetimi/${form.id}` : `/${form.moduleType || moduleType}/tum-formlar/${form.id}`)}
                       >
                         <TableCell>
                           <div className="flex items-center gap-1.5">
@@ -409,8 +484,8 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                           <span className="text-xs text-[var(--dashboard-muted)] ml-[18px]">{form.createdAt?.toDate ? format(form.createdAt.toDate(), 'HH:mm', { locale: tr }) : ''}</span>
                         </TableCell>
                         <TableCell>
-                          <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.moduleType === 'teknik-servis' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-purple-50 text-purple-700 border border-purple-200/60')}>
-                            {form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon'}
+                          <span className={cn('text-xs px-2.5 py-1 rounded-full font-medium', form.recordType === 'fault-closure' ? 'bg-amber-50 text-amber-700 border border-amber-200/60' : form.moduleType === 'teknik-servis' ? 'bg-blue-50 text-blue-700 border border-blue-200/60' : 'bg-purple-50 text-purple-700 border border-purple-200/60')}>
+                            {form.recordType === 'fault-closure' ? 'Arıza Kapanışı' : form.moduleType === 'teknik-servis' ? 'Teknik Servis' : 'Aplikasyon'}
                           </span>
                         </TableCell>
                         <TableCell>
@@ -423,7 +498,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
                         </TableCell>
                         <TableCell className="text-sm">{form.createdByName || '-'}</TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
-                          <IrsaliyeOlusturHucresi form={form} />
+                          {form.recordType === 'fault-closure' ? <span className="text-xs text-[var(--dashboard-muted)]">—</span> : <IrsaliyeOlusturHucresi form={form} />}
                         </TableCell>
                         <TableCell><ChevronRight className="h-4 w-4 text-[var(--dashboard-muted)]" /></TableCell>
                       </TableRow>
