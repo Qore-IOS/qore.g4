@@ -639,19 +639,60 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
     # etti. Bu yüzden yalnızca GÜVENİLİR okumalar karar verir.
     guvenilir_kalan: str | None = None
     for deneme in range(1, 4):
+        # F6'NIN F6 OLARAK VARDIĞINI GARANTİ ET.
+        #
+        # Basılı kalmış bir CTRL, gönderdiğimiz F6'yı pencere menüsündeki
+        # "İleri Ctrl+F6" komutuna — yani BELGE DEĞİŞTİRMEYE — çevirir. Bu,
+        # sahada ölçülen "F6'dan sonra odak başka bir MDI belgesine düştü, form
+        # temizlenmedi" tablosunun birebir açıklaması. Ayrıntı:
+        # `ui60.degistiricileri_birak`.
+        birakilan = ui60.degistiricileri_birak()
+        if birakilan:
+            log.append(
+                f"F6 {deneme}. deneme: {'+'.join(birakilan)} BASILI KALMIŞTI, "
+                "bırakıldı — bu tuşlar basılıyken F6 başka bir komuta dönüşür"
+            )
+
+        # Belgeyi F6'dan ÖNCE not al: F6 sonrası belge değiştiyse tuş
+        # "temizle" değil "İleri" olarak işlenmiş demektir ve bu, hatanın
+        # sebebini ekran görüntüsüne bakmadan söyleyen tek sinyal.
+        onceki_belge = (o.get("mdi"), o.get("mdi_baslik"))
+
         ui60.tus("F6", bekle_ms=1200 * deneme)
 
         o = ui60.odak()
+        if (o.get("mdi"), o.get("mdi_baslik")) != onceki_belge:
+            log.append(
+                f"F6 {deneme}. deneme: ETKİN MDI BELGESİ DEĞİŞTİ "
+                f"({onceki_belge[1]!r} → {o.get('mdi_baslik')!r}). F6 'temizle' "
+                "olarak değil belge değiştirme olarak işlenmiş olabilir."
+            )
+
         if not irsaliye_noda_mi(o):
             # F6 odağı taşımış olabilir; okumak için geri dön.
             ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
             o = ui60.odak()
 
+        # TIKLAMADAN SONRA KONUMU YENİDEN DOĞRULA.
+        #
+        # Forms doğrulaması tamamlanmamış bir alandan çıkışa izin vermiyor;
+        # tıklamak odağı taşımayabilir. O durumda elimizdeki CANLI Edit BAŞKA
+        # BİR ALANA aittir ve onun değerini "İrsaliye No dolu" diye okumak,
+        # park edilmiş Edit hatasının aynısıdır — sadece kılık değiştirmiş hâli.
+        if not irsaliye_noda_mi(o):
+            log.append(
+                f"F6 {deneme}. deneme: okuma yapılmadı — odak İrsaliye No'ya "
+                f"dönmedi, pencere {o['pencere_ici']} konumunda kaldı"
+            )
+            continue
+
         if not o["canli"]:
             l, t, r, b = o["rect"]
             log.append(
                 f"F6 {deneme}. deneme: alan OKUNAMADI — odak {o['sinif']!r} "
-                f"({r - l}×{b - t} px). Park edilmiş Edit'in metni "
+                f"({r - l}×{b - t} px, "
+                f"{'görünür' if o['gorunur'] else 'GİZLİ'}). "
+                f"Park edilmiş Edit'in metni "
                 f"({(o.get('deger') or '')!r}) alanın değeri DEĞİL, "
                 "bu okuma yok sayılıyor."
             )
@@ -697,10 +738,12 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
         return
 
     raise FormTemizlenemedi(
-        f"Form yenilenemedi: F6 formu temizlemedi (3 deneme) ve menüden de "
-        f"boşaltılamadı; İrsaliye No alanında {guvenilir_kalan!r} kaldı. Odak "
-        f"doğru alandaydı ve okuma güvenilirdi (canlı Edit), yani alan "
-        f"gerçekten dolu. {menu_ozeti(ana_pencere)}",
+        f"Form yenilenemedi ({sebep}): F6 formu temizlemedi (3 deneme) ve "
+        f"menüden de boşaltılamadı; İrsaliye No alanında {guvenilir_kalan!r} "
+        f"kaldı. Odak doğru alandaydı ve okuma güvenilirdi (görünür, boyutlu "
+        f"Edit), yani alan gerçekten dolu. {menu_ozeti(ana_pencere)} "
+        "F6'nın neden yutulduğu ekrandan okunamıyor; "
+        "`python probe_f6.py` ile elle basılan F6 ile karşılaştırın.",
         retryable=True,
     )
 
