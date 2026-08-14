@@ -181,6 +181,10 @@ function submit(job) {
               // kuru koşu açıklaması. İkisi de tek satırlık özette görünmüyordu;
               // F6 uyarısı özellikle önemli, çünkü sıradaki iş DOLU forma yazar.
               not: parsed.uyari || parsed.not || null,
+              // Gönderim oldu ama form ekranda dolu kaldı. Sıradaki işi o
+              // formun üstüne sürmek onu da düşürür; worker bunu görünce
+              // kuyruğu durdurup formun boşaltılmasını bekliyor.
+              formKirli: parsed.formKirli === true,
             }
           : {
               ok: false,
@@ -188,6 +192,7 @@ function submit(job) {
               error: parsed.error || 'UI otomasyonu başarısız.',
               screenshotPath: parsed.screenshotPath,
               adimlar: parsed.log || [],
+              formKirli: parsed.formKirli === true,
             });
         return;
       }

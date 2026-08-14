@@ -358,6 +358,108 @@ def buton_bul(kok: int, metin: str) -> int:
     return bulunan[0] if bulunan else 0
 
 
+# --- Menü ---------------------------------------------------------------------
+#
+# NEDEN MENÜ: bu formun tuvaline çizilmiş her şey okunamıyor — alanlar, uyarı
+# metinleri, mesaj satırı. Menü ÇUBUĞU ise gerçek bir Windows menüsü; yazısı,
+# kimliği ve ETKİN OLUP OLMADIĞI okunabiliyor. Yani tuş göndermekten farklı
+# olarak burada eylemi ÖNCE görüp sonra tetikleyebiliyoruz.
+#
+# F6 sahada reddedildi (aynı işte 3 denemede de form temizlenmedi) ve tuşun
+# neden yutulduğu ekrandan anlaşılamıyor. Menü, aynı işi yapan ve teşhis
+# edilebilir olan ikinci yol.
+#
+# GÜVENLİK: menü ateşlemek en az tuş kadar tehlikeli — "Sil" ya da "Kaydet"
+# maddesi muhasebe kaydını değiştirir. Bu yüzden `menu_komutu_bul` yalnızca
+# ÇAĞIRANIN VERDİĞİ desene uyanı döner ve `MENU_YASAKLI` desenine uyan her
+# madde, eşleşse bile atılır.
+
+WM_COMMAND = 0x0111
+MF_GRAYED = 0x0001
+MF_DISABLED = 0x0002
+MF_SEPARATOR = 0x0800
+
+# Bu maddeler asla otomatik tetiklenmez. Geri alınamaz ya da muhasebeye
+# dokunur; adı ne kadar uyarsa uysun aday sayılmaz.
+MENU_YASAKLI = re.compile(
+    r"SIL|DELETE|KAYDET|SAVE|COMMIT|GONDER|CIK|EXIT|KAPAT|YAZDIR|PRINT|ONAYLA",
+    re.IGNORECASE,
+)
+
+
+def _menu_maddesi_metni(menu: int, indeks: int) -> str:
+    tampon = ctypes.create_unicode_buffer(256)
+    # MF_BYPOSITION = 0x0400
+    n = user32.GetMenuStringW(menu, indeks, tampon, 256, 0x0400)
+    return tampon.value if n else ""
+
+
+def menu_agaci(hwnd: int) -> list[dict]:
+    """Pencerenin menü çubuğunu düzleştirerek döner.
+
+    Her madde: `{"yol": "Kayıt > Temizle", "id": 1234, "etkin": True}`.
+    Alt menüsü olan maddeler yalnızca yol öneki olarak kullanılır, kendileri
+    tetiklenebilir madde sayılmaz (id'leri yoktur).
+
+    Teşhis için de tek başına değerli: F6 çalışmadığında bu ağacı log'a yazmak,
+    "bu formda hangi eylemler var" sorusunu ekran görüntüsüne bakmadan
+    cevaplıyor.
+    """
+    kok = user32.GetMenu(hwnd)
+    if not kok:
+        return []
+
+    maddeler: list[dict] = []
+
+    def gez(menu: int, onek: str, derinlik: int) -> None:
+        if derinlik > 3:
+            return
+        adet = user32.GetMenuItemCount(menu)
+        if adet <= 0:
+            return
+        for i in range(adet):
+            metin = _menu_maddesi_metni(menu, i).replace("&", "").strip()
+            durum = user32.GetMenuState(menu, i, 0x0400)
+            if durum != -1 and durum & MF_SEPARATOR:
+                continue
+            yol = f"{onek} > {metin}" if onek else metin
+            alt = user32.GetSubMenu(menu, i)
+            if alt:
+                gez(alt, yol, derinlik + 1)
+                continue
+            if not metin:
+                continue
+            etkin = durum == -1 or not (durum & (MF_GRAYED | MF_DISABLED))
+            maddeler.append({
+                "yol": yol,
+                "id": user32.GetMenuItemID(menu, i),
+                "etkin": bool(etkin),
+            })
+
+    gez(kok, "", 0)
+    return maddeler
+
+
+def menu_komutu_bul(hwnd: int, desen: re.Pattern) -> dict | None:
+    """Desene uyan ETKİN menü maddesi. Yasaklı maddeler hiç aday olmaz."""
+    for madde in menu_agaci(hwnd):
+        ad = normalize(madde["yol"])
+        if MENU_YASAKLI.search(ad):
+            continue
+        if desen.search(ad) and madde["etkin"] and madde["id"] > 0:
+            return madde
+    return None
+
+
+def menu_komutu_gonder(hwnd: int, komut_id: int) -> None:
+    """Menü maddesini pencereye WM_COMMAND olarak yollar.
+
+    Menüyü klavyeyle açıp gezmek yerine doğrudan komut: menü açıkken gönderilen
+    her tuş menüye gider ve otomasyonun geri kalanı kör kalır.
+    """
+    user32.PostMessageW(hwnd, WM_COMMAND, komut_id, 0)
+
+
 # --- Yazma --------------------------------------------------------------------
 
 def _gonder(girdiler: list[INPUT]) -> None:
