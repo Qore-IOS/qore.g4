@@ -1364,7 +1364,7 @@ export default function LaboratuvarSayimPage() {
               userName: currentUserProfile.name || currentUserProfile.email || 'System',
               adet: removeQty,
             };
-            batch.set(consRef, consumption);
+            batch.set(consRef, withCompanyScope(consumption, currentCompanyId));
           }
         } else {
           // Stock increased: add |diff| items to THIS specific lot/miad

@@ -27,6 +27,7 @@ import { getScopedDocs } from '@/lib/firestore-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';
+import { withCompanyScope } from '@/lib/company-scope';
 
 const MONTHS = Array.from({ length: 12 }, (_, i) => ({
   value: i,
@@ -696,7 +697,7 @@ export default function UrunKoduPanel() {
           else { skippedCount++; }
         } else {
           if (existing) { skippedCount++; }
-          else { batch.set(doc(collection(db, 'productCodes')), cleanedProductData); successCount++; }
+          else { batch.set(doc(collection(db, 'productCodes')), withCompanyScope(cleanedProductData, currentCompanyId)); successCount++; }
         }
       }
       if (successCount > 0 || updatedCount > 0) await batch.commit();

@@ -611,7 +611,7 @@ export default function TeknikServisDetayPage() {
     setIsDigerFirmaSaving(true);
     try {
       // Create a record for the other company fault
-      await addDoc(collection(db, 'digerFirmaArizalar'), {
+      await addDoc(collection(db, 'digerFirmaArizalar'), withCompanyScope({
         hospitalId,
         hospitalName: hospital?.name || '',
         digerFirmaAdi: digerFirmaAdi.trim(),
@@ -621,7 +621,7 @@ export default function TeknikServisDetayPage() {
         createdByUid: currentUser?.uid || '',
         createdByName: currentUserProfile?.name || currentUserProfile?.displayName || '',
         formType: 'teknik_servis',
-      });
+      }, currentCompanyId));
 
       toast({ title: 'Başarılı', description: 'Diğer firma arıza kaydı oluşturuldu.' });
 

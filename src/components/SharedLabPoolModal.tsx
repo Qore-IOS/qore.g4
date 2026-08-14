@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { LabSelector } from '@/components/common/LabSelector';
 import { useToast } from '@/hooks/use-toast';
 import type { Laboratory } from '@/lib/types';
+import { withCompanyScope } from '@/lib/company-scope';
 
 type Props = {
   open: boolean;
@@ -51,14 +52,14 @@ export default function SharedLabPoolModal({ open, onOpenChange }: Props) {
     const now = new Date();
     const docName = name?.trim() || `Ortak Havuz - ${now.toLocaleDateString('tr-TR')} ${now.toLocaleTimeString('tr-TR')}`;
 
-    await addDoc(collection(db, 'labPools'), {
+    await addDoc(collection(db, 'labPools'), withCompanyScope({
       name: docName,
       memberIds: Array.from(selected),
       active: true,
       createdAt: Timestamp.now(),
       createdByUid: currentUserProfile?.uid || '',
       createdByName: currentUserProfile?.name || currentUserProfile?.email || '—',
-    });
+    }, currentCompanyId));
 
     toast({ title: 'Oluşturuldu', description: 'Ortak havuz başarıyla kaydedildi.' });
     setSelected(new Set());

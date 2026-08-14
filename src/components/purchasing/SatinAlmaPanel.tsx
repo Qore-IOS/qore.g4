@@ -1235,7 +1235,7 @@ export default function SatinAlmaPanel() {
         if (data.completionChecklist?.length) taskPayload.completionChecklist = data.completionChecklist;
         if (data.expectedCompletionFileName) taskPayload.expectedCompletionFileName = data.expectedCompletionFileName;
 
-        batch.set(ref, taskPayload);
+        batch.set(ref, withCompanyScope(taskPayload, currentCompanyId));
       }
       await batch.commit();
 
@@ -1435,7 +1435,7 @@ export default function SatinAlmaPanel() {
           }
           toast.info('Çevrimdışı: görev yerel olarak kaydedildi ve senkron kuyruğuna alındı');
         } else {
-          const docRef = await addDoc(collection(db, 'purchasingTasks'), taskDoc);
+          const docRef = await addDoc(collection(db, 'purchasingTasks'), withCompanyScope(taskDoc, currentCompanyId));
           createdTaskId = docRef.id;
 
           if (data.workflowProjectId) {
@@ -1490,7 +1490,7 @@ export default function SatinAlmaPanel() {
                   ),
                 ],
               };
-              batch.set(doc(collection(db, 'purchasingTasks')), recurDoc);
+              batch.set(doc(collection(db, 'purchasingTasks')), withCompanyScope(recurDoc, currentCompanyId));
             }
             await batch.commit();
             toast.success(`${filteredFutureDates.length} tekrarlayan görev oluşturuldu`);

@@ -15,7 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { formatMiad } from "@/lib/date";
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
-import { filterByCompanyScope } from '@/lib/company-scope';
+import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { saveManualChangeSnapshot } from '@/lib/depotCountHistory';
 import { cn, playFeedback } from '@/lib/utils';
 import { parseBarcode as parseRocheBarcode } from '@/lib/utils';
@@ -329,7 +329,7 @@ export default function StockDetailPage() {
             laboratoryId: depotId,
         };
         batch.delete(doc(db, 'depoStok', item.id));
-        batch.set(doc(collection(db, 'tuketimKayitlari')), consumptionRecord);
+        batch.set(doc(collection(db, 'tuketimKayitlari')), withCompanyScope(consumptionRecord, currentCompanyId));
     });
 
     try {

@@ -859,7 +859,7 @@ export default function AplikasyonIslemFormuPage() {
     const batch = writeBatch(db);
 
     const depotStockRef = doc(collection(db, 'yedekParcaDepoStok'));
-    batch.set(depotStockRef, {
+    batch.set(depotStockRef, withCompanyScope({
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
@@ -871,10 +871,10 @@ export default function AplikasyonIslemFormuPage() {
       createdAt: Timestamp.fromDate(now),
       createdByUid: currentUserProfile.uid,
       createdByName: currentUserProfile.name || '',
-    });
+    }, currentCompanyId));
 
     const depoInLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-    batch.set(depoInLogRef, {
+    batch.set(depoInLogRef, withCompanyScope({
       action: 'stok_giris',
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
@@ -886,12 +886,12 @@ export default function AplikasyonIslemFormuPage() {
       createdAt: Timestamp.fromDate(now),
       createdByUid: currentUserProfile.uid,
       createdByName: currentUserProfile.name || '',
-    });
+    }, currentCompanyId));
 
     batch.delete(depotStockRef);
 
     const personalStockRef = doc(collection(db, 'personalStock'));
-    batch.set(personalStockRef, {
+    batch.set(personalStockRef, withCompanyScope({
       ownerUid: currentUserProfile.uid,
       ownerName: currentUserProfile.name || '',
       productCodeId: partChange.productCodeId || '',
@@ -904,10 +904,10 @@ export default function AplikasyonIslemFormuPage() {
       createdAt: Timestamp.fromDate(now),
       transferredByUid: currentUserProfile.uid,
       transferredByName: currentUserProfile.name || '',
-    });
+    }, currentCompanyId));
 
     const transferLogRef = doc(collection(db, 'sparePartTransferLogs'));
-    batch.set(transferLogRef, {
+    batch.set(transferLogRef, withCompanyScope({
       action: 'transfer_to_personnel',
       personalStockId: personalStockRef.id,
       productCodeId: partChange.productCodeId || '',
@@ -922,10 +922,10 @@ export default function AplikasyonIslemFormuPage() {
       createdByUid: currentUserProfile.uid,
       createdByName: currentUserProfile.name || '',
       notes: `Periyodik parça değişimine istinaden otomatik transfer (${device?.cihazAdi || device?.model || ''})`,
-    });
+    }, currentCompanyId));
 
     const depoOutLogRef = doc(collection(db, 'yedekParcaDepoLog'));
-    batch.set(depoOutLogRef, {
+    batch.set(depoOutLogRef, withCompanyScope({
       action: 'transfer_cikis',
       productCodeId: partChange.productCodeId || '',
       stokKodu: partChange.stokKodu,
@@ -939,7 +939,7 @@ export default function AplikasyonIslemFormuPage() {
       createdAt: Timestamp.fromDate(now),
       createdByUid: currentUserProfile.uid,
       createdByName: currentUserProfile.name || '',
-    });
+    }, currentCompanyId));
 
     await batch.commit();
 
@@ -1721,7 +1721,7 @@ export default function AplikasyonIslemFormuPage() {
 
   const createDepotBorrowRecord = (partChange: ActionItem, depotEntry: YedekParcaDepoStokItem, batch: any, currentDevice: Device, formId: string, now: Date) => {
     const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-    batch.set(borrowedRef, {
+    batch.set(borrowedRef, withCompanyScope({
       productCodeId: partChange.productCodeId || depotEntry.productCodeId || '',
       stokKodu: partChange.stokKodu,
       stokAdi: partChange.stokAdi,
@@ -1742,7 +1742,7 @@ export default function AplikasyonIslemFormuPage() {
       borrowedByName: currentUserProfile?.name || '',
       borrowedAt: Timestamp.fromDate(now),
       status: 'pending',
-    });
+    }, currentCompanyId));
   };
 
 
@@ -2135,7 +2135,7 @@ export default function AplikasyonIslemFormuPage() {
                     });
 
                     const useLogRef = doc(collection(db, 'sparePartTransferLogs'));
-                    batch.set(useLogRef, {
+                    batch.set(useLogRef, withCompanyScope({
                       action: 'use_on_device',
                       personalStockId: partChange.personalStockId,
                       stokKodu: partChange.stokKodu,
@@ -2150,7 +2150,7 @@ export default function AplikasyonIslemFormuPage() {
                       createdByUid: currentUserProfile?.uid || '',
                       createdByName: currentUserProfile?.name || '',
                       usageImageUrl: partChange.usedPartImageUrl || null,
-                    });
+                    }, currentCompanyId));
                 }
 
                 if (partChange.poolStockId) {
@@ -2176,7 +2176,7 @@ export default function AplikasyonIslemFormuPage() {
 
                 if (partChange.isManualEntry) {
                     const borrowedRef = doc(collection(db, 'borrowedSpareParts'));
-                    batch.set(borrowedRef, {
+                    batch.set(borrowedRef, withCompanyScope({
                         stokKodu: partChange.stokKodu,
                         stokAdi: partChange.stokAdi,
                         serialNumber: partChange.serialNumber,
@@ -2190,7 +2190,7 @@ export default function AplikasyonIslemFormuPage() {
                         borrowedByName: currentUserProfile?.name || '',
                         borrowedAt: Timestamp.fromDate(now),
                         status: 'pending',
-                    });
+                    }, currentCompanyId));
                 }
             }
 

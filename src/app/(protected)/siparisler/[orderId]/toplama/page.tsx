@@ -731,7 +731,7 @@ export default function ToplamaPage() {
           timestamp: new Date(),
           items: shipmentItems,
       };
-      batch.set(shipmentDocRef, { ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) });
+      batch.set(shipmentDocRef, withCompanyScope({ ...newShipment, timestamp: Timestamp.fromDate(newShipment.timestamp as Date) }, currentCompanyId));
 
       // Create transfers record (like direkt-transfer-panel for consistency)
       batch.set(transferRef, withCompanyScope({
@@ -791,7 +791,7 @@ export default function ToplamaPage() {
               stockDocId: item.id,
               adet: transferQty,
             };
-            batch.set(consumptionRef, consumptionRecord);
+            batch.set(consumptionRef, withCompanyScope(consumptionRecord, currentCompanyId));
             createdConsumptionDocIds.push(consumptionRef.id);
           } else if (isPartial) {
             batch.update(stokRef, { adet: originalQty - transferQty });

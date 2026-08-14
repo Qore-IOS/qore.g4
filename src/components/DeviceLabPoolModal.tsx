@@ -15,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import type { Hospital, Device, DeviceLabPool } from '@/lib/types';
+import { withCompanyScope } from '@/lib/company-scope';
 
 interface DeviceLabPoolModalProps {
   open: boolean;
@@ -128,7 +129,7 @@ export default function DeviceLabPoolModal({ open, onOpenChange, hospitals, devi
           createdByUid: currentUser?.uid || '',
           createdByName: currentUserProfile?.name || currentUser?.email || 'Bilinmeyen',
         };
-        await addDoc(collection(db, 'deviceLabPools'), poolData);
+        await addDoc(collection(db, 'deviceLabPools'), withCompanyScope(poolData, currentCompanyId));
         toast({ title: 'Başarılı', description: 'Cihaz laboratuvar grubu oluşturuldu.' });
       }
 
