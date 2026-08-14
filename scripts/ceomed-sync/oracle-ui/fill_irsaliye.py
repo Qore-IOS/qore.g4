@@ -35,6 +35,17 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ui60  # noqa: E402
 
+# Sonuç JSON'u Node'a boru üzerinden gidiyor ve Node onu UTF-8 okuyor. Windows'ta
+# Python'un stdout kodlaması varsayılan olarak cp1254/cp857 olduğu için Türkçe
+# karakterler bozuluyordu: worker log'unda "yaz ld " (yazıldı), "do ruland "
+# (doğrulandı) gibi okunamaz adımlar çıkıyordu. Adım log'u teşhis aracı;
+# okunamaz olması onu işlevsiz kılar.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except AttributeError:
+    pass  # Python 3.6 ve öncesi; bu makinede 3.7+ var.
+
 
 # Ölçülmüş alan konumları — MDI BELGE penceresinin sol üst köşesine göre.
 #
@@ -74,6 +85,15 @@ ALAN_KONUMLARI: dict[str, tuple[int, int]] = {
 # Grid ile alt Açıklama alanı farklı iç MDI document'lere bağlanabildiği
 # için bu iki bölge arasındaki tıklama ana pencereye göre yapılır.
 ACIKLAMA_PENCERE_KONUMU = (70, 698)
+# Açıklama tablosunun 2. ve 3. satırı — GÖNDERİM KANITI.
+#
+# Operatör ölçüsü: "açıklamanın 2. ve 3. satırına irsaliye bilgileri geldiğinde
+# irsaliye kesin kesilmiş oluyor". Bu, ekran otomasyonunun elindeki EN GÜÇLÜ
+# doğrulama: uygulamanın kendi yazdığı bir kayıt, bizim yazdığımız değil.
+#
+# Satır aralığı ÖLÇÜLMEDİ. Aşağıdaki adaylar sırayla denenip okunanlar log'a
+# yazılıyor; hangisinin tuttuğu ilk koşuda görülecek ve tek değere indirilecek.
+ACIKLAMA_SATIR_ARALIK_ADAYLARI = (11, 12, 13, 14)
 # Prova loglarında ilk Stok Kodu Edit'i ana pencereye göre tutarlı olarak
 # (14, 297) konumunda ölçüldü. Başlık ile grid de farklı iç MDI köklerine
 # bağlanabildiği için bölgeler arası geçişte bu karşılık kullanılır.
@@ -247,7 +267,31 @@ def baslik_doldur(degerler: dict[str, str], ana_pencere: int, log: list[str]) ->
             grid_stok_koduna_git(ana_pencere, log)
             return
 
-        if ad and degerler.get(ad):
+        if ad == "sevkAdresi" and degerler.get(ad):
+            # SEVK ADRESİ İKİNCİL BİLGİDİR — irsaliyeyi düşürmemeli.
+            #
+            # Sahada: adres Türkçe karakter içeriyor, Ceomed'in karakter kümesi
+            # bunları taşımıyor ('Ç' → '?'). alan_yaz geri okuyup karşılaştırdığı
+            # için uyuşmazlıkta iş duruyordu; yani Türkçe adresli HER ek hizmet
+            # işi bu alanda kalırdı. Değer ASCII'ye indirgenerek yazılıyor.
+            #
+            # Yine de yazılamazsa ATLANIYOR: cari kodu doğru olduğu sürece
+            # irsaliye kesilebilir, adres olmadan da muhasebe kaydı geçerlidir.
+            # Bu alan yüzünden gönderimi iptal etmek, ikincil bir bilgi için
+            # birincil işi feda etmek olurdu.
+            ascii_adres = ui60.ascii_indirge(degerler[ad])
+            try:
+                ui60.alan_yaz(ascii_adres, ad)
+                if ascii_adres != degerler[ad]:
+                    log.append(
+                        f"{ad}: {ascii_adres!r} yazıldı "
+                        f"(Türkçe karakterler ASCII'ye indirgendi)"
+                    )
+                else:
+                    log.append(f"{ad}: {ascii_adres!r} yazıldı ve geri okundu")
+            except Exception as exc:
+                log.append(f"{ad}: YAZILAMADI, atlandı — {exc}")
+        elif ad and degerler.get(ad):
             if ad in LOV_ALANLARI:
                 lov_ile_yaz(ad, degerler[ad], ana_pencere, log)
                 # Geri okuma için dönülen alandan sonraki alana yeniden
@@ -426,8 +470,19 @@ def aciklama_doldur(deger: str, ana_pencere: int, log: list[str],
             f"Tıklama: {tiklama!r}. Yazılmadı."
         )
 
-    ui60.alan_yaz(deger.strip(), "aciklama")
-    log.append(f"aciklama: {deger.strip()!r} yazıldı ve geri okundu")
+    # ASCII'ye indirgenerek yazılır. Sahada ölçüldü: 'PİNCH TUBE' alana
+    # "PA'NCH TUBE" olarak düştü — Ceomed karakter kümesi 'İ' harfini taşımıyor
+    # ve bozulma yalnızca gözle fark edilebiliyor, geri okuma yakalamıyor.
+    # Muhasebe açıklamasında bozuk karakter, okunabilir ASCII'den kötüdür.
+    ascii_aciklama = ui60.ascii_indirge(deger.strip())
+    ui60.alan_yaz(ascii_aciklama, "aciklama")
+    if ascii_aciklama != deger.strip():
+        log.append(
+            f"aciklama: {ascii_aciklama!r} yazıldı "
+            f"(Türkçe karakterler ASCII'ye indirgendi)"
+        )
+    else:
+        log.append(f"aciklama: {ascii_aciklama!r} yazıldı ve geri okundu")
 
 
 def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
@@ -451,8 +506,22 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
     # ODAK İRSALİYE NO'DA OLMALI. Sahada ölçüldü: başka bir alan seçiliyken F6
     # hiçbir şey yapmıyor — hata da vermiyor. Sessiz başarısızlık en kötüsü:
     # sürücü "yenilendi" sanıp sıradaki işi DOLU formun üstüne yazardı.
+    #
+    # DOĞRULAMA PENCERE KOORDİNATIYLA YAPILIR, MDI'yle DEĞİL.
+    #
+    # Sahada ölçüldü (HE20097): işin BAŞINDAKİ F6 çalıştı, gönderim
+    # SONRASINDAKİ çalışmadı ve odak "mdi (1334, 664) — tanınmayan alan" diye
+    # raporlandı. Sebep, gönderimden sonra odağın BAŞKA BİR MDI BELGESİNE
+    # düşmesi: o belgeye göre hesaplanan konum alan haritasıyla hiç örtüşmüyor,
+    # dolayısıyla doğru yere tıklanmış olsa bile "yanlış alan" görünüyor.
+    #
+    # Tıklamayı zaten ANA PENCEREYE göre yapıyoruz; doğrulamayı da aynı
+    # düzlemde yapmak tek tutarlı seçim.
+    def irsaliye_noda_mi(odak_bilgisi: dict) -> bool:
+        return konum_eslesiyor(odak_bilgisi["pencere_ici"], IRSALIYE_NO_PENCERE_KONUMU)
+
     o = ui60.odak()
-    if o["hwnd"] and alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+    if not o["hwnd"] or not irsaliye_noda_mi(o):
         ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
         o = ui60.odak()
 
@@ -461,18 +530,89 @@ def form_yenile(ana_pencere: int, log: list[str], sebep: str) -> None:
             "Form yenilenemedi: İrsaliye No alanına tıklandı ama odak alınamadı.",
             retryable=True,
         )
-    if alan_adi(o["mdi_ici"]) != "irsaliyeNo":
+    if not irsaliye_noda_mi(o):
         # F6'ya burada basmak sessizce hiçbir şey yapmaz; tahminle devam etmek
-        # yerine duruyoruz.
+        # yerine duruyoruz. Her iki koordinat da yazılıyor: hangi düzlemde
+        # sapma olduğu bir dahaki teşhiste doğrudan görünsün.
         raise Durdu(
-            f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı, "
-            f"{o['mdi_ici']} konumunda kaldı "
-            f"({alan_adi(o['mdi_ici']) or 'tanınmayan alan'}).",
+            f"Form yenilenemedi: F6 için odak İrsaliye No'da olmalı "
+            f"(pencere {IRSALIYE_NO_PENCERE_KONUMU}), odak pencere "
+            f"{o['pencere_ici']} / mdi {o['mdi_ici']} konumunda kaldı.",
             retryable=True,
         )
 
-    ui60.tus("F6", bekle_ms=1500)
-    log.append(f"F6 ile form yenilendi ({sebep}; odak İrsaliye No'ya alındı)")
+    # SONUCU DOĞRULA, MEKANİZMAYI DEĞİL.
+    #
+    # Sahada: imleç İrsaliye No'ya gidiyor, odak doğrulaması geçiyor, F6
+    # gönderiliyor — ama form temizlenmiyor. Yani "F6'ya bastım" ile "form
+    # yenilendi" aynı şey değil ve şimdiye kadar birincisini ikincisi sanıyorduk.
+    #
+    # Tek güvenilir ölçü alanın kendisi: temizlenmişse İrsaliye No BOŞALIR.
+    # Gönderimden hemen sonra uygulama hâlâ meşgul olabildiği için birkaç kez,
+    # aralarını açarak deneniyor.
+    for deneme in range(1, 4):
+        ui60.tus("F6", bekle_ms=1200 * deneme)
+
+        o = ui60.odak()
+        if not irsaliye_noda_mi(o):
+            # F6 odağı taşımış olabilir; okumak için geri dön.
+            ui60.pencere_noktasina_tikla(ana_pencere, IRSALIYE_NO_PENCERE_KONUMU)
+            o = ui60.odak()
+
+        kalan = (o.get("deger") or "").strip()
+        if not kalan:
+            log.append(
+                f"F6 ile form yenilendi ({sebep}; {deneme}. denemede, "
+                "İrsaliye No boşaldı)"
+            )
+            return
+
+        log.append(
+            f"F6 {deneme}. deneme: form temizlenmedi, İrsaliye No hâlâ {kalan!r}"
+        )
+
+    raise Durdu(
+        f"Form yenilenemedi: 3 denemede de F6 formu temizlemedi, İrsaliye No "
+        f"alanında {kalan!r} kaldı. Odak doğru alandaydı, yani sorun odakta "
+        "değil: uygulama bu durumda F6'yı kabul etmiyor olabilir.",
+        retryable=True,
+    )
+
+
+def aciklama_kanidini_oku(ana_pencere: int, log: list[str]) -> str:
+    """Açıklamanın 2-3. satırlarını okur — gönderimin uygulama tarafından
+    yazılmış kanıtı.
+
+    Operatör ölçüsü: bu satırlara irsaliye bilgileri geldiğinde irsaliye kesin
+    kesilmiştir. Bizim yazdığımız bir değer değil, UYGULAMANIN yazdığı — bu
+    yüzden ekrandan okunabilen en güçlü doğrulama.
+
+    ASLA THROW ETMEZ. Gönderim geri alınamaz; kanıt okunamadı diye işi
+    başarısız saymak, gerçekleşmiş bir gönderimi tekrar denemeye yol açardı.
+    """
+    satirlar: list[str] = []
+    try:
+        for aralik in ACIKLAMA_SATIR_ARALIK_ADAYLARI:
+            for satir_no in (2, 3):
+                nokta = (
+                    ACIKLAMA_PENCERE_KONUMU[0],
+                    ACIKLAMA_PENCERE_KONUMU[1] + aralik * (satir_no - 1),
+                )
+                try:
+                    ui60.pencere_noktasina_tikla(ana_pencere, nokta, bekle_ms=200)
+                except Exception:
+                    continue
+                deger = (ui60.odak().get("deger") or "").strip()
+                if deger:
+                    satirlar.append(f"aralık {aralik}px satır {satir_no}: {deger!r}")
+            if satirlar:
+                # Bu aralık okunabilir değer verdi; diğerlerini denemeye gerek yok.
+                break
+    except Exception as exc:
+        log.append(f"gönderim kanıtı okunamadı: {exc}")
+        return ""
+
+    return " | ".join(satirlar)
 
 
 def gonder_butonunu_dogrula(ana_pencere: int, log: list[str]) -> int:
@@ -495,6 +635,10 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--controls", required=False,
                         help="Geriye dönük uyumluluk; konumlar artık kodda ölçülmüş.")
+    parser.add_argument("--sevk-adresi-yok", action="store_true",
+                        help="Sevk Adresi alanına hiç dokunma. Alan forma yazılan "
+                             "en yeni alan; sahada sorun çıkarırsa bu bayrakla "
+                             "kapatılır ve otomasyon geri kalanıyla sürer.")
     parser.add_argument("--f6-yenileme-yok", action="store_true",
                         help="Formu F6 ile yenileme. Varsayılan: işin başında ve "
                              "gönderim sonrası F6 basılır, böylece sıradaki iş "
@@ -553,9 +697,19 @@ def main() -> int:
         )
 
     ana = pencereler[0]
+    # Bundan sonra tuşlar YALNIZCA Ceomed sürecine gidebilir. Sahada odak
+    # Chrome'a kaydı ve irsaliye numarası tarayıcıya yazıldı.
+    ui60.hedef_pencere_ayarla(ana)
     if not ui60.one_getir(ana):
-        return fail("Ceomed penceresi öne getirilemedi (oturum kilitli olabilir).",
-                    retryable=True)
+        # Küçültülmüş pencere artık one_getir içinde geri yükleniyor; geriye
+        # kalan sebepler operatörün kontrol edebileceği şeyler.
+        return fail(
+            "Ceomed penceresi öne getirilemedi. Olası sebepler: oturum kilitli "
+            "(kilitli oturumda tuş vuruşları hedefine ulaşmaz), ekranda kapatılmayı "
+            "bekleyen bir kip pencere var, ya da makinede o anda başka bir uygulama "
+            "kullanılıyor.",
+            retryable=True,
+        )
 
     if args.tani:
         o = ui60.odak()
@@ -606,6 +760,9 @@ def main() -> int:
             "irsaliyeNo": str(header.get("irsaliyeNo") or ""),
             "tarih": str(header.get("tarih") or ""),
             "cariKodu": str(header.get("cariKodu") or ""),
+            # Boşsa baslik_doldur alana dokunmaz; ek hizmet binası olmayan
+            # laboratuvarlarda bu alan boş kalmaya devam eder.
+            "sevkAdresi": "" if args.sevk_adresi_yok else str(header.get("sevkAdresi") or ""),
             "islemTipi": str(header.get("islemTipi") or ""),
             "depo": str(header.get("depo") or ""),
         }
@@ -646,6 +803,12 @@ def main() -> int:
         # kayıt bilgileri gönderimin kanıtıdır, F6 onları siler.
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-gonderildi")
 
+        # GÖNDERİM KANITI — okumaya çalış, ASLA işi düşürme.
+        # E-irsaliye zaten gönderildi; buradaki bir hata gönderimi geri almaz.
+        kanit = aciklama_kanidini_oku(ana, log)
+        if kanit:
+            log.append(f"gönderim kanıtı: {kanit}")
+
         # E-irsaliye GÖNDERİLDİ. Buradan sonraki hiçbir hata işi başarısız
         # saymamalı — gönderim geri alınamaz, tekrar denenirse mükerrer olur.
         yenileme_notu = None
@@ -669,6 +832,17 @@ def main() -> int:
             sonuc["uyari"] = yenileme_notu
         return emit(sonuc)
 
+    except ui60.YanlisPencere as exc:
+        # YENİDEN DENENEBİLİR: makinede biri başka bir uygulamaya geçmiş, form
+        # bozulmamış olabilir. Sürücü tuş göndermeden durduğu için Ceomed'e
+        # yanlış bir şey yazılmadı. Bir sonraki turda Ceomed öne alınıp
+        # baştan denenir.
+        goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-yanlis-pencere")
+        return fail(
+            f"{exc} Ceomed makinesinde otomasyon çalışırken başka uygulama "
+            "kullanılmamalı; tuş vuruşları ön plandaki pencereye gider.",
+            retryable=True, screenshot=goruntu, log=log,
+        )
     except ui60.TehlikeliOdak as exc:
         goruntu = ui60.ekran_goruntusu(ana, args.goruntu_dizini, f"{job_id}-tehlikeli")
         return fail(f"Güvenlik durdurması: {exc}", retryable=False, screenshot=goruntu, log=log)

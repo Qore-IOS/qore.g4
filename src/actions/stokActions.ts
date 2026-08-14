@@ -242,6 +242,41 @@ export async function getDepotStockForTransfer(
 }
 
 /**
+ * Reads the authoritative, current stock rows needed to prepare one transfer.
+ *
+ * This deliberately bypasses the browser SDK and React Query cache. Allocation
+ * and FEFO validation must use the same server snapshot; otherwise a row removed
+ * by a depot count can remain in the browser cache and be offered as a transfer.
+ */
+export async function getCurrentTransferStock(
+  depotId: string,
+  stockCodes: string[],
+  companyId?: string | null,
+  isSuperAdmin?: boolean,
+): Promise<DepoStokItem[]> {
+  const codes = Array.from(new Set(stockCodes.map(code => code.trim()).filter(Boolean)));
+  if (!depotId || codes.length === 0) return [];
+
+  const items: DepoStokItem[] = [];
+  for (let offset = 0; offset < codes.length; offset += 30) {
+    const snap = await adminDb
+      .collection('depoStok')
+      .where('depotId', '==', depotId)
+      .where('stokKodu', 'in', codes.slice(offset, offset + 30))
+      .select('stokKodu', 'stokAdi', 'seriNumarasi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'miad')
+      .get();
+
+    snap.forEach((docSnap) => {
+      const data = docSnap.data() as Record<string, any>;
+      if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
+      if (!isAvailableDepotStock(data)) return;
+      items.push(serializeFirestoreValue({ id: docSnap.id, ...data }) as DepoStokItem);
+    });
+  }
+  return items;
+}
+
+/**
  * All depot stock with field projection for the Siparişler panel min/max qty maps.
  * Uses two parallel Admin SDK queries (company + legacy) instead of the full-doc
  * web SDK fetch through IndexedDB. Fetches only the 7 fields needed for quantity

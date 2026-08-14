@@ -7,6 +7,7 @@ import {
   normalizeTarih,
   resolveLotValue,
   aciklamaKur,
+  cariCoz,
   ceomedIrsaliyeNo,
   ceomedNoOnEki,
   ceomedNumaraAlani,
@@ -415,4 +416,75 @@ test('çok uzun açıklama kesilir ve kesildiği görünür kılınır', () => {
   assert.ok(sonuc.length <= 200, `uzunluk ${sonuc.length}`);
   assert.ok(sonuc.endsWith('…'));
   assert.ok(sonuc.startsWith('Ahmet Yılmaz - Parca-0'));
+});
+
+// ---------------------------------------------------------------------------
+// Ek hizmet binaları: cari ANA LABDAN, sevk adresi KENDİNDEN
+//
+// Sahadan: ÇEKMEKÖY DEVLET HASTANESİ, SANCAKTEPE EAH'nin ek hizmeti. Ceomed'de
+// kendi carisi yok, Sancaktepe'nin carisi (M51009) üzerinden faturalanıyor.
+// Ama irsaliyenin doğru binaya gitmesi için sevk adresi Çekmeköy'ün olmalı.
+// ---------------------------------------------------------------------------
+
+const sancaktepe = { id: 'ana', name: 'SANCAKTEPE EAH', ceomedCariKodu: 'M51009', sevkAdresi: 'EMEK, NAMIK KEMAL CD. NO:7' };
+const cekmekoy = { id: 'ek', name: 'ÇEKMEKÖY DEVLET HASTANESİ', ceomedCariKodu: '', sevkAdresi: 'ÇEKMEKÖY ADRES' };
+
+test('ek hizmet binası ana labın carisini, kendi sevk adresini alır', () => {
+  const c = cariCoz(cekmekoy, sancaktepe);
+  assert.equal(c.cariKodu, 'M51009');
+  assert.equal(c.sevkAdresi, 'ÇEKMEKÖY ADRES');
+  assert.equal(c.kaynak, 'ana_lab');
+  assert.equal(c.anaLabAdi, 'SANCAKTEPE EAH');
+});
+
+test('kendi carisi olan lab ana laba bakmaz', () => {
+  const c = cariCoz(sancaktepe, null);
+  assert.equal(c.cariKodu, 'M51009');
+  assert.equal(c.sevkAdresi, 'EMEK, NAMIK KEMAL CD. NO:7');
+  assert.equal(c.kaynak, 'kendi');
+  assert.equal(c.anaLabAdi, null);
+});
+
+test('kendi carisi varsa ana lab onu EZMEZ', () => {
+  // Ek hizmet olarak işaretli bir laba ayrıca cari girilmişse bu bilinçli bir
+  // tercihtir; sessizce ezmek ana labın hesabına yanlış kayıt yazmak olurdu.
+  const kendiCarisiVar = { ...cekmekoy, ceomedCariKodu: 'M99999' };
+  const c = cariCoz(kendiCarisiVar, sancaktepe);
+  assert.equal(c.cariKodu, 'M99999');
+  assert.equal(c.kaynak, 'kendi');
+});
+
+test('ne kendi ne ana lab carisi varsa boş döner ve iş bloklanır', () => {
+  const c = cariCoz(cekmekoy, { id: 'a', name: 'A', ceomedCariKodu: '', sevkAdresi: '' });
+  assert.equal(c.cariKodu, '');
+  assert.equal(c.kaynak, 'yok');
+  // Sevk adresi yine de taşınır: cari sonradan girilince iş kurtarılabilsin.
+  assert.equal(c.sevkAdresi, 'ÇEKMEKÖY ADRES');
+});
+
+test('cari kodu büyük harfe normalize edilir, nereden gelirse gelsin', () => {
+  assert.equal(cariCoz({ ceomedCariKodu: ' m51009 ' }, null).cariKodu, 'M51009');
+  assert.equal(cariCoz({ ceomedCariKodu: '' }, { ceomedCariKodu: ' m51009 ' }).cariKodu, 'M51009');
+});
+
+test('lab hiç yoksa çökmez', () => {
+  const c = cariCoz(null, null);
+  assert.equal(c.cariKodu, '');
+  assert.equal(c.sevkAdresi, '');
+  assert.equal(c.kaynak, 'yok');
+});
+
+test('sevk adresi iş dokümanına taşınır', () => {
+  const r = buildIrsaliyeGirisDoc({ ...baseInput, sevkAdresi: 'ÇEKMEKÖY ADRES', cariKaynagi: 'ana_lab' });
+  assert.equal(r.outcome, 'ready');
+  if (r.outcome !== 'ready') return;
+  assert.equal(r.doc.sevkAdresi, 'ÇEKMEKÖY ADRES');
+  assert.equal(r.doc.cariKaynagi, 'ana_lab');
+});
+
+test('sevk adresi tanımsızsa boş geçilir — alan silinmez', () => {
+  const r = buildIrsaliyeGirisDoc(baseInput);
+  assert.equal(r.outcome, 'ready');
+  if (r.outcome !== 'ready') return;
+  assert.equal(r.doc.sevkAdresi, '');
 });

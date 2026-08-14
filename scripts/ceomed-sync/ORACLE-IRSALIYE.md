@@ -1065,3 +1065,108 @@ python -m py_compile scripts/ceomed-sync/oracle-ui/fill_irsaliye.py
 
 …ve çağrı/tanım dengesi gözle doğrulanmalı: `--check` ve `py_compile`
 sözdizimine bakar, **tanımsız fonksiyon çağrısını yakalamaz**.
+
+---
+
+## Ölçüm: gönderim doğrulaması hangi uç noktadan yapılabilir?
+
+**Tarih:** 2026-08-11 · **Numara:** `BK10138` (aynı gün başarıyla gönderildi)
+
+`verify-irsaliye.bat --kesfet` ile `selectIrsaliyeMaster` altı belge tipi için
+tarandı:
+
+| BELGE_TIPI | Sonuç | Dönen kayıt |
+|---|---|---|
+| 0 | yok | 2 |
+| 1 | yok | 1 |
+| 2 | yok | 1 |
+| 3, 4, 5 | yok | 0 |
+
+**Sonuç: uç nokta erişilebilir ama çıkış irsaliyesini görmüyor.**
+
+Sorgular çalıştı ve kayıt döndü — yani kimlik, ağ ve tarih doğru. Aranan belge
+bu uç noktanın kapsamında değil.
+
+Sebep, `selectIrsaliyeMaster`'ın bir **sevk modülü** uç noktası olması:
+`watch.js` onu "KURUMA SEVK EDİLDİ" irsaliyelerini okumak için kullanıyor.
+Ceomed masaüstündeki **Çıkış İrsaliyesi** ayrı bir belge ailesi.
+
+Bu, yazma tarafındaki bulguyla tutarlı: 187 uç noktalık katalogda çıkış
+irsaliyesi **oluşturan** uç nokta da yoktu. Anlaşılan çıkış irsaliyesi web
+API'sinin kapsamı dışında — ne yazılabiliyor ne okunabiliyor.
+
+### Bundan sonra
+
+Doğrulama katmanı `CEOMED_DOGRULAMA=0` (varsayılan) ile KAPALI kalmalı. Yanlış
+uç noktayla açmak her işi "bulunamadı" diye işaretler, gürültü üretir ve
+katmanın güvenilirliğini baştan bitirir.
+
+Denenebilecek iki yol:
+
+1. **Doğru okuma uç noktasını bulmak.** app.js içinde irsaliye geçen tüm
+   uç noktaları çıkarıp çıkış irsaliyesine bakanı aramak:
+   ```powershell
+   $js = (Invoke-WebRequest -Uri "http://192.168.1.5:8081/build/app.js?v=1.30" -UseBasicParsing).Content
+   [regex]::Matches($js, 'a\.api\("(?:GET|POST)","[^"]*(?:irsaliye|Irsaliye|IRSALIYE)[^"]*"') |
+     ForEach-Object { $_.Value } | Sort-Object -Unique
+   ```
+
+2. **Oracle veritabanını doğrudan okumak.** `ifrun60.exe` 192.168.1.5:1521'e
+   bağlanıyor. Salt-okunur bir bağlantı, UI'dan tamamen bağımsız ve en kesin
+   doğrulama olurdu; karşılığında ayrı kimlik ve sürücü gerektiriyor.
+
+Katman kodu hazır ve bekliyor: doğru uç nokta bulunduğunda `irsaliyeVarMi`
+içindeki sorguyu değiştirmek yetiyor, worker bağlantısı olduğu gibi kalıyor.
+
+
+### Sonuç: çıkış irsaliyesi web API'sinin kapsamı dışında — KAPANDI
+
+`probe-irsaliye-uclari.bat` ile app.js'ten çıkarılan **sekiz `select*` uç
+noktası** tarandı (2026-08-11, `BK10138`). Hiçbiri numarayı görmedi:
+
+| Uç nokta | Yanıt |
+|---|---|
+| `/irsaliye/selectIrsaliyeMasterListesi` | 206 bayt, kayıt yok |
+| `/irsaliye/selectKurumGirisIrsaliye` | 206 bayt, kayıt yok |
+| `/irsaliye/selectIrsaliyeImportListesi` | 209 bayt, kayıt yok |
+| `/sevk/selectCeomedIrsaliye` | 127 bayt, kayıt yok |
+| `/sevk/selectIrsaliyeMaster` | 2 kayıt — sevk ailesi |
+| `/dogrulama/selectIrsaliyeMaster` | **591 kayıt** — aşağıya bakın |
+| `/dogrulama/selectIrsaliyeListesi` | 64 bayt |
+| `/dogrulama/selectMMSIrsaliyeListesi` | 179 bayt |
+
+591 kayıtlık uç nokta tek gerçek adaydı. İlk kaydı:
+
+```json
+{ "ID": 9866043, "TARIH": "28/07/2026", "SAYIM_ONAY": 0,
+  "DURUM": "DOĞRULAMA DEVAM EDİYOR", "IRSALIYE_NO": "RD36323", "DEPO_KODU": "77" }
+```
+
+`DEPO_KODU`, `SAYIM_ONAY`, "DOĞRULAMA DEVAM EDİYOR" ve `RD` önekli numara —
+bu **depo barkod doğrulama** ailesi, yani GELEN malın depoda sayılması. Bizim
+kestiğimiz müşteri çıkış irsaliyesiyle ilgisi yok.
+
+**İki taraflı kesin sonuç:**
+
+* **Yazma:** 187 uç nokta tarandı, çıkış irsaliyesi oluşturan yok.
+* **Okuma:** 8 uç nokta + 6 belge tipi tarandı, çıkış irsaliyesini listeleyen yok.
+
+Çıkış İrsaliyesi Ceomed web API'sinin kapsamı dışında. UI otomasyonu bir tercih
+değil, tek yol — ve bu artık ölçülmüş bir sonuç, varsayım değil.
+
+### Doğrulama katmanının durumu
+
+Kod yazıldı ve **uykuda**: `CEOMED_DOGRULAMA=0` (varsayılan). Worker bağlantısı,
+tek yönlü karar kuralı (`bulundu` → sent, `bulunamadı` → hiçbir şey) ve
+`lib/ceomedDogrula.js` yerinde duruyor.
+
+Açılabilmesi için çıkış irsaliyesini gören bir kaynak gerekiyor. Kalan tek
+aday **Oracle veritabanı**: `ifrun60.exe` zaten `192.168.1.5:1521`'e bağlanıyor.
+Salt-okunur bir bağlantı UI'dan tamamen bağımsız ve en kesin doğrulama olurdu —
+karşılığında Ceomed'den ayrı bir izin, kimlik ve sürücü gerektiriyor.
+
+O gün geldiğinde değişecek tek yer `irsaliyeVarMi` içindeki sorgu; worker
+tarafına dokunmak gerekmiyor.
+
+**Bu araştırma kapandı.** Yeni uç nokta denemeye gerek yok; katalog iki yönde de
+tükendi.

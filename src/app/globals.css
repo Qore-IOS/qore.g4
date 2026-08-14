@@ -52,17 +52,20 @@
     --z-float: 1200;
 
     /* Dashboard neumorphic tokens (light mode) */
-    --dashboard-bg: #eae9e5;
-    --dashboard-surface: #eae9e5;
-    --dashboard-surface-2: #eae9e5;
-    --dashboard-stroke: rgba(0, 0, 0, .045);
-    --dashboard-text: #2B2F33;
-    --dashboard-muted: #6C727A;
+    /* CLAY: cihaz-* / yedek parça ailesinin tamamı bu tokenlardan beslenir.
+       Tokenları clay'e bağlayınca panel dosyalarına dokunmadan tüm aile
+       (kartlar, tool item'lar, action tile'lar, pressed durumlar) clay olur. */
+    --dashboard-bg: var(--qc-bg0);
+    --dashboard-surface: var(--qc-surface);
+    --dashboard-surface-2: var(--qc-surface2);
+    --dashboard-stroke: var(--qc-line);
+    --dashboard-text: var(--qc-ink1);
+    --dashboard-muted: var(--qc-ink2);
     --dashboard-accent: #F2994A;
     --dashboard-focus-glow: rgba(185, 182, 214, .55);
-    --dashboard-raised: -10px -10px 22px rgba(255,255,255,.85), 10px 10px 22px rgba(120,120,120,.16);
-    --dashboard-raised-soft: -6px -6px 14px rgba(255,255,255,.75), 6px 6px 14px rgba(120,120,120,.14);
-    --dashboard-pressed: inset -8px -8px 16px rgba(255,255,255,.80), inset 8px 8px 16px rgba(120,120,120,.16);
+    --dashboard-raised: var(--qc-clay);
+    --dashboard-raised-soft: var(--qc-clay-flat);
+    --dashboard-pressed: var(--qc-clay-inset);
 
     /* Device management module tokens */
     --device-bg: #eae9e5;
@@ -114,17 +117,17 @@
     --ring: 30 51% 54%;
 
     /* Dashboard neumorphic tokens (dark mode) */
-    --dashboard-bg: #000000;
-    --dashboard-surface: #111111;
-    --dashboard-surface-2: #0A0A0A;
-    --dashboard-stroke: rgba(255, 255, 255, 0.08);
-    --dashboard-text: #F0F0F0;
-    --dashboard-muted: #9CA3AF;
+    --dashboard-bg: var(--qc-bg0);
+    --dashboard-surface: var(--qc-surface);
+    --dashboard-surface-2: var(--qc-surface2);
+    --dashboard-stroke: var(--qc-line);
+    --dashboard-text: var(--qc-ink1);
+    --dashboard-muted: var(--qc-ink2);
     --dashboard-accent: #F2994A;
     --dashboard-focus-glow: rgba(245, 158, 11, 0.30);
-    --dashboard-raised: 0 2px 10px rgba(0, 0, 0, 0.5);
-    --dashboard-raised-soft: 0 1px 6px rgba(0, 0, 0, 0.4);
-    --dashboard-pressed: inset 0 2px 8px rgba(0, 0, 0, 0.5);
+    --dashboard-raised: var(--qc-clay);
+    --dashboard-raised-soft: var(--qc-clay-flat);
+    --dashboard-pressed: var(--qc-clay-inset);
 
     /* Device management module tokens (dark mode) */
     --device-bg: #000000;
@@ -7165,6 +7168,28 @@ html.dark body.mg-edge-body {
   --qc-clay-inset: inset 0 2px 5px rgba(178,160,128,0.30), inset 0 -1px 0 rgba(255,255,255,0.55);
   --qc-clay-flat: inset 0 1px 1px rgba(255,255,255,0.85), 0 4px 12px -7px rgba(150,128,96,0.28);
   --qc-shell-bg: linear-gradient(120deg, var(--qc-glow-1) 0%, transparent 55%), linear-gradient(225deg, var(--qc-glow-2) 0%, transparent 55%), #EFEAE0;
+
+  /* Malzemenin ışığı yakaladığı iç parlaklık. Açık temada beyaz, koyu temada
+     bronz bir kırıntı — panellerde `rgba(255,255,255,.7)` sabitlemek yerine
+     bu token kullanılır, böylece koyu tema kirlenmez. */
+  --qc-hi: rgba(255,255,255,0.70);
+  --qc-hi-strong: rgba(255,255,255,0.90);
+  /* Kısayol döşemesinin ikon yüzeyi (radial clay). */
+  --qc-tile-face: radial-gradient(120% 120% at 30% 24%, #FFFFFF, #ECE4D4 82%);
+  /* "Sık Kullanılanlar" bronz panelin gradyan durakları + üstündeki metin.
+     Ton, accent'e göre bilerek koyu: beyaz metin eski bronzda 2.89:1 kalıyordu,
+     bu ramp 4.57–6.59:1 veriyor (skill §14: metinde 4.5:1 pazarlık dışı). */
+  --qc-brown-top: #9C6B42;
+  --qc-brown-mid: #8C5F3A;
+  --qc-brown-deep: #7D5433;
+  --qc-on-brown: #FFFFFF;
+  /* Kısayol döşemesinin ikonu — accent açık yüzeyde 2.89:1 ile grafik öğe
+     eşiğinin (3:1) altında kalıyor; döşemede bir tık koyu tonu kullanılır. */
+  --qc-tile-glyph: #AB754A;
+  /* Yüzen katmanların (grafik ipucu) gölgesi. */
+  --qc-float-shadow: 0 12px 26px -10px rgba(90,72,40,0.5);
+  /* Yeşil ilerleme çubuğunun açık ucu. */
+  --qc-water-hi: #8FD3A6;
 }
 
 .dark,
@@ -7194,6 +7219,17 @@ html.dark body.mg-edge-body {
   --qc-clay-inset: inset 0 2px 7px rgba(0,0,0,0.6), inset 0 -1px 0 rgba(212,170,110,0.07);
   --qc-clay-flat: inset 0 1px 1px rgba(212,170,110,0.07), 0 5px 14px -8px rgba(0,0,0,0.65);
   --qc-shell-bg: radial-gradient(120% 80% at 8% 0%, #2A1E11 0%, transparent 42%), radial-gradient(120% 80% at 100% 100%, #211A12 0%, transparent 44%), #0C0C0C;
+
+  --qc-hi: rgba(212,170,110,0.10);
+  --qc-hi-strong: rgba(212,170,110,0.16);
+  --qc-tile-face: radial-gradient(120% 120% at 30% 24%, #302C27, #201E1B 82%);
+  --qc-brown-top: #8A5C33;
+  --qc-brown-mid: #6E4726;
+  --qc-brown-deep: #55371C;
+  --qc-on-brown: #F7EADA;
+  --qc-tile-glyph: var(--qc-accent);
+  --qc-float-shadow: 0 14px 30px -10px rgba(0,0,0,0.80);
+  --qc-water-hi: #A8D9B8;
 }
 
 /* Koyu modda sayfa zemini: siyah taban + sıcak bronz ışıma */
@@ -7207,6 +7243,38 @@ html.dark body.mg-edge-body {
 .dark .clay-shell,
 [data-theme="dark"] .clay-shell {
   background: transparent;
+}
+
+/* --------------------------------------------------------------------------
+   Clay kontrolleri için erişilebilirlik yardımcıları.
+   Clay panelleri kontrollerini inline stille (`all: unset`) kuruyor; bu da
+   tarayıcının odak halkasını siliyor. Aşağıdaki sınıflar odak halkasını ve
+   dokunmatik hedef alanını tek noktadan geri verir — apple-design skill'inin
+   masaüstü (klavye) ve mobil (44pt hedef) zorunluluklarının karşılığı.
+   -------------------------------------------------------------------------- */
+.clay-focusable:focus-visible {
+  outline: 2px solid var(--qc-accent);
+  outline-offset: 2px;
+}
+@media (prefers-contrast: more) {
+  .clay-focusable:focus-visible {
+    outline-width: 3px;
+    outline-color: var(--qc-ink1);
+  }
+}
+
+/* Görsel boyut korunur, dokunma alanı 44px'e tamamlanır. */
+@media (pointer: coarse) {
+  .clay-touch-target { position: relative; }
+  .clay-touch-target::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+    transform: translate(-50%, -50%);
+  }
 }
 .dark *::-webkit-scrollbar-thumb,
 [data-theme="dark"] *::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); }
@@ -7470,7 +7538,6 @@ body > main,
   button:has(> svg:only-child):not([class*="w-"]):not([style*="width"]) {
     aspect-ratio: 1 / 1;
     flex: 0 0 auto;
-    padding-inline: 0;
   }
 
   /* Form kontrolleri iOS zoom'una düşmez ve kart dışına taşmaz. */
@@ -7495,3 +7562,8 @@ body > main,
     padding-bottom: calc(var(--dock-h, 76px) + var(--dock-gap, 16px) + env(safe-area-inset-bottom, 0px)) !important;
   }
 }
+.cihaz-focus-ring:focus-visible { box-shadow: 0 0 0 3px var(--qc-accent-glow) !important; }
+.cihaz-section-label { color: var(--qc-ink2); }
+/* Vurgulu ikon/aksiyon renkleri clay bronzuna çekilir */
+.cihaz-action-tile:hover, .cihaz-tool-item:hover { box-shadow: var(--qc-clay) !important; }
+.cihaz-action-tile:active, .cihaz-tool-item:active { box-shadow: var(--qc-clay-press) !important; }

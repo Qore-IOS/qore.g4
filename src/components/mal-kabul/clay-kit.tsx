@@ -42,6 +42,27 @@ export const MK_C = {
   accentA80: 'color-mix(in srgb, var(--qc-accent) 80%, transparent)',
   amberA27: 'color-mix(in srgb, var(--qc-amber) 27%, transparent)',
   ink3A40: 'color-mix(in srgb, var(--qc-ink3) 40%, transparent)',
+  // Durum renklerinin yumuşak zeminleri. Daha önce panellerde `rgba(111,181,133,0.14)`
+  // gibi açık-tema sabitleriyle yazılıyordu; token'a bağlanınca koyu temada da
+  // doğru tonu alıyorlar.
+  waterA14: 'color-mix(in srgb, var(--qc-water-solid) 14%, transparent)',
+  waterA09: 'color-mix(in srgb, var(--qc-water-solid) 9%, transparent)',
+  dangerA12: 'color-mix(in srgb, var(--qc-danger) 12%, transparent)',
+  dangerA18: 'color-mix(in srgb, var(--qc-danger) 18%, transparent)',
+  skyA16: 'color-mix(in srgb, var(--qc-sky) 16%, transparent)',
+  violetA16: 'color-mix(in srgb, var(--qc-violet) 16%, transparent)',
+  // Malzemenin ışığı yakaladığı iç parlaklık (açık: beyaz, koyu: bronz kırıntı).
+  hi: 'var(--qc-hi)',
+  hiStrong: 'var(--qc-hi-strong)',
+  // Kısayol döşemesinin ikon yüzeyi ve bronz panelin gradyan durakları.
+  tileFace: 'var(--qc-tile-face)',
+  brownTop: 'var(--qc-brown-top)',
+  brownMid: 'var(--qc-brown-mid)',
+  brownDeep: 'var(--qc-brown-deep)',
+  onBrown: 'var(--qc-on-brown)',
+  tileGlyph: 'var(--qc-tile-glyph)',
+  floatShadow: 'var(--qc-float-shadow)',
+  waterHi: 'var(--qc-water-hi)',
   radius: 24,
   radiusSm: 16,
   radiusLg: 32,

@@ -64,6 +64,19 @@ async function collectTargetUidsFromTargets(targets: string[], actorUid?: string
   return targetUids;
 }
 
+/**
+ * Teslimatı KULLANICI TERCİHİNE bağlı türler.
+ *
+ * Diğer türlerde `targets` (ör. `audience:all`) kimin alacağını belirliyor ve
+ * tercihe bakılmıyor. Bu kümedeki türlerde ise tercih zorunlu: kullanıcı
+ * yönetiminden açıkça seçmemiş kimse bildirim almaz.
+ *
+ * Ceomed irsaliyesi bilgilendirici bir bildirim — muhasebe ve ilgili teknik
+ * personel için değerli, herkes için gürültü. Herkese gitmesi, bir süre sonra
+ * tüm bildirimlerin görmezden gelinmesine yol açar.
+ */
+const TERCIH_ZORUNLU_TURLER = new Set(['ceomed_irsaliye_olusturuldu']);
+
 export const onNotificationCreated = functions
   .region('europe-west1')
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
@@ -208,6 +221,37 @@ export const onNotificationCreated = functions
 
         logger.info(
           `[fanOut] Fault strict filter: removed ${removedByStrictFilter} tokens (require ${requiredRole}${requiredLab ? ` AND ${requiredLab}` : ''})`
+        );
+      }
+
+      // --- Tercih zorunlu türler ---
+      //
+      // `audience:all` hedefi Kaynak A üzerinden HERKESE ulaşıyor ve tercihe
+      // hiç bakmıyor. Ceomed irsaliyesi bildirimi kullanıcı yönetimindeki
+      // bildirim seçeneklerine eklendi; oradaki anahtar gerçekten teslimatı
+      // yönetmezse işlevsiz bir düğme olurdu — hiç düğme olmamasından kötü.
+      //
+      // Bu tür için yalnızca AÇIKÇA tercih etmiş kullanıcılar alır.
+      if (TERCIH_ZORUNLU_TURLER.has(data.type || '')) {
+        let prefsQuery = db
+          .collection('users')
+          .where('notificationsEnabled', '==', true)
+          .where('notificationPreferences', 'array-contains', data.type) as FirebaseFirestore.Query;
+        if (sourceCompanyId) {
+          prefsQuery = prefsQuery.where('companyId', '==', sourceCompanyId);
+        }
+        const izinliSnap = await prefsQuery.get();
+        const izinliUids = new Set(izinliSnap.docs.map((d) => d.id));
+
+        let elenen = 0;
+        for (const [key, tokenData] of tokenMap.entries()) {
+          if (!tokenData.uid || !izinliUids.has(tokenData.uid)) {
+            tokenMap.delete(key);
+            elenen++;
+          }
+        }
+        logger.info(
+          `[fanOut] Tercih filtresi (${data.type}): ${izinliUids.size} kullanıcı seçmiş, ${elenen} token elendi`
         );
       }
 
