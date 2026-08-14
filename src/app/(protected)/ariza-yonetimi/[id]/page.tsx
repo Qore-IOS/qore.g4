@@ -1289,7 +1289,7 @@ export default function FaultDetailPage() {
           usedAt: Timestamp.fromDate(now),
           usedOnDeviceId: fault.deviceId,
           usedOnDeviceName: fault.model || '',
-          usedOnLabId: fault.labId || fault.hospitalId || '',
+          usedOnLabId: fault.labId || (fault as any).hospitalId || '',
           usedOnLabName: fault.labName || '',
           usedOnFormId: fault.id,
           usedOnFormType: 'ariza_yonetimi',

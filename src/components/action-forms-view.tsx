@@ -99,6 +99,22 @@ type ActionRecord = {
   isLabDeviceChild?: boolean;
 };
 
+type UsedPersonalStockRecord = {
+  id: string;
+  ownerName?: string;
+  stokKodu?: string;
+  stokAdi?: string;
+  serialNumber?: string;
+  hucreNumarasi?: string;
+  quantity?: number;
+  status?: string;
+  usedAt?: { toDate?: () => Date };
+  usedOnDeviceId?: string;
+  usedOnDeviceName?: string;
+  usedOnLabName?: string;
+  usedOnFormId?: string;
+};
+
 const ISLEM_TURU_LABELS: Record<string, string> = {
   rutin_kurum_ziyareti: 'Rutin Kurum Ziyareti',
   periyodik_bakim: 'Periyodik Bakım',
@@ -135,6 +151,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
   const { currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();
   const [loading, setLoading] = useState(true);
   const [forms, setForms] = useState<ActionRecord[]>([]);
+  const [usedPersonalStock, setUsedPersonalStock] = useState<UsedPersonalStockRecord[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [filterModuleType, setFilterModuleType] = useState<'all' | ModuleType>('all');
   const [filterLab, setFilterLab] = useState('all');
@@ -156,7 +173,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       setLoading(true);
       // Tarih penceresi + hard cap. Önceki sürüm tüm tutanakları indiriyordu.
       const dateConstraints = dateFilter.constraints('createdAt');
-      const [teknikDocs, aplikasyonDocs, faultDocs] = await Promise.all([
+      const [teknikDocs, aplikasyonDocs, faultDocs, usedPersonalStockDocs] = await Promise.all([
         getScopedDocs(
           getCollectionName('teknik-servis'),
           currentCompanyId,
@@ -180,6 +197,12 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
           ...dateFilter.constraints('closedAt'),
           orderBy('closedAt', 'desc'),
           fsLimit(2000),
+        ),
+        getScopedDocs(
+          'personalStock',
+          currentCompanyId,
+          isSuperAdmin,
+          where('status', 'in', ['used', 'pending_return']),
         ),
       ]);
       const actionForms = [
@@ -239,6 +262,7 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
       }
 
       const merged = [...actionForms, ...faultClosures];
+      setUsedPersonalStock(usedPersonalStockDocs.map((item) => ({ id: item.id, ...item.data() } as UsedPersonalStockRecord)));
       const isAdminRole = currentUserProfile?.role === 'admin' || currentUserProfile?.role === 'super_admin';
       const scoped = filterByCompanyScope(merged, currentCompanyId, isSuperAdmin);
       const labScoped = filterByAssignedLabs(scoped, currentUserProfile?.assignedLaboratories, {
@@ -373,15 +397,47 @@ export function ActionFormsListView({ moduleType }: { moduleType: ModuleType }) 
         'Çıkan Parça Görseli': action.removedPartImageUrl || '',
       })));
 
+      const usageByPersonalStockId = new Map<string, { labName: string; deviceName: string; formId: string }>();
+      filteredForms.forEach((form) => {
+        (form.actions || []).forEach((action) => {
+          if (!action.personalStockId || usageByPersonalStockId.has(action.personalStockId)) return;
+          usageByPersonalStockId.set(action.personalStockId, {
+            labName: form.labName || '',
+            deviceName: form.cihazAdi || '',
+            formId: form.id,
+          });
+        });
+      });
+      const usedStockRows = usedPersonalStock.map((item) => {
+        const formUsage = usageByPersonalStockId.get(item.id);
+        return {
+          'Stok Kayıt Kimliği': item.id,
+          Personel: item.ownerName || '',
+          'Ürün Kodu': item.stokKodu || '',
+          'Ürün Adı': item.stokAdi || '',
+          'Seri No': item.serialNumber || '',
+          'Hücre No': item.hucreNumarasi || '',
+          Adet: item.quantity || 1,
+          Durum: item.status === 'pending_return' ? 'İade Bekliyor' : 'Kullanıldı',
+          'Kullanım Tarihi': item.usedAt?.toDate ? format(item.usedAt.toDate(), 'dd.MM.yyyy HH:mm', { locale: tr }) : '',
+          'Kullanıldığı Lab': item.usedOnLabName || formUsage?.labName || '',
+          'Kullanıldığı Cihaz': item.usedOnDeviceName || formUsage?.deviceName || '',
+          'İlgili Form / Arıza No': item.usedOnFormId || formUsage?.formId || '',
+        };
+      });
+
       const workbook = XLSX.utils.book_new();
       const formsSheet = XLSX.utils.json_to_sheet(formRows);
       const actionsSheet = XLSX.utils.json_to_sheet(actionRows.length > 0 ? actionRows : [{ Bilgi: 'İşlem veya yedek parça detayı bulunmuyor.' }]);
+      const usedStockSheet = XLSX.utils.json_to_sheet(usedStockRows.length > 0 ? usedStockRows : [{ Bilgi: 'Kullanılmış personel stoğu bulunmuyor.' }]);
       formsSheet['!cols'] = Object.keys(formRows[0]).map((key) => ({ wch: Math.min(45, Math.max(14, key.length + 2)) }));
       actionsSheet['!cols'] = Object.keys(actionRows[0] || { Bilgi: '' }).map((key) => ({ wch: Math.min(45, Math.max(14, key.length + 2)) }));
+      usedStockSheet['!cols'] = Object.keys(usedStockRows[0] || { Bilgi: '' }).map((key) => ({ wch: Math.min(45, Math.max(14, key.length + 2)) }));
       XLSX.utils.book_append_sheet(workbook, formsSheet, 'İşlem Formları');
       XLSX.utils.book_append_sheet(workbook, actionsSheet, 'İşlem ve Yedek Parçalar');
+      XLSX.utils.book_append_sheet(workbook, usedStockSheet, 'Kullanılmış Personel Stoku');
       XLSX.writeFile(workbook, `tum-islem-formlari-${format(new Date(), 'yyyy-MM-dd')}.xlsx`);
-      toast({ title: 'İşlem formları indirildi', description: `${filteredForms.length} form ve ${actionRows.length} işlem/parça satırı Excel dosyasına aktarıldı.` });
+      toast({ title: 'İşlem formları indirildi', description: `${filteredForms.length} form, ${actionRows.length} işlem/parça satırı ve ${usedStockRows.length} kullanılmış personel stoğu Excel dosyasına aktarıldı.` });
     } catch (error) {
       console.error('Action forms export error', error);
       toast({ title: 'İndirme başarısız', description: 'İşlem formları Excel dosyası oluşturulamadı.', variant: 'destructive' });
