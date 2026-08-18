@@ -13,6 +13,24 @@ import { resolveEntities, extractQueryIntent, type ExtractedQueryIntent } from '
 import { QueryType, type QueryPlan } from './queryPlanner';
 import { aiLogger } from '@/lib/logger';
 import { FIRESTORE_COLLECTIONS, QUERY_COLLECTION_MAP } from './firestoreSchema';
+// Miad çözümünde TEK KAYNAK — `depoStok.miad` metin, Timestamp ve Date olarak
+// gelebiliyor; üçünü de doğru çözen tek yer burasıdır.
+import { parseMiad } from '@/lib/lojistik/miad';
+
+/**
+ * Miadı model bağlamı için tek ve tutarlı biçime (`dd.MM.yyyy`) çevirir.
+ *
+ * Eskiden `data.miad?.toDate?.() || data.miad` yazılıyordu: Timestamp'lerde
+ * `Date`, metinlerde ham metin dönüyordu. Model aynı listede iki farklı tip
+ * görüyor ve tarihleri güvenilir biçimde karşılaştıramıyordu.
+ */
+function miadMetni(ham: unknown): string {
+  const tarih = parseMiad(ham);
+  if (!tarih) return '';
+  const gun = String(tarih.getDate()).padStart(2, '0');
+  const ay = String(tarih.getMonth() + 1).padStart(2, '0');
+  return `${gun}.${ay}.${tarih.getFullYear()}`;
+}
 
 // ============================================
 // TYPES
@@ -350,7 +368,7 @@ async function fetchHospitalStockEnhanced(params: FetchParams) {
     groupedByProduct[key].miktar += 1;
     groupedByProduct[key].lots.push({
       lot: data.lotNumarasi,
-      miad: data.miad?.toDate?.() || data.miad,
+      miad: miadMetni(data.miad),
     });
   }
 
@@ -383,7 +401,7 @@ async function fetchProductStockEnhanced(params: FetchParams) {
     grouped[key].miktar += 1;
     grouped[key].lots.push({
       lot: data.lotNumarasi,
-      miad: data.miad?.toDate?.() || data.miad,
+      miad: miadMetni(data.miad),
       depo: data.depotName,
     });
   }
@@ -544,25 +562,59 @@ async function fetchConsumptionEnhanced(params: FetchParams) {
   };
 }
 
+/**
+ * Miad taramasında okunacak azami belge sayısı.
+ *
+ * `miad` metin olarak saklandığı için Firestore tarafında tarih aralığı
+ * filtresi KURULAMAZ (aşağıya bakınız); eleme bellekte yapılır. Tavan, tek bir
+ * sohbet yanıtının sınırsız okuma tetiklemesini engeller. Tavana ulaşılırsa
+ * sonuç `kismi: true` ile işaretlenir — modelin eksik veriyi tam sanıp
+ * "yaklaşan miad yok" demesi, bu fonksiyonun düzeltilen asıl hatasıydı.
+ */
+const MIAD_TARAMA_TAVANI = 5000;
+
 async function fetchExpiringStockEnhanced(params: FetchParams) {
   const days = params.days || 90;
-  const expiryDate = new Date();
-  expiryDate.setDate(expiryDate.getDate() + days);
 
+  // NEDEN SUNUCU TARAFINDA ARALIK FİLTRESİ YOK
+  //
+  // Eskiden sorgu `.where('miad', '<=', expiryDate)` idi ve `expiryDate` bir
+  // `Date`ti. Ama `depoStok.miad` bu sistemde Timestamp değil, `dd.MM.yyyy`
+  // METNİdir (`mal-kabul/write.ts` → `normalizeMiad`). Firestore değerleri önce
+  // TÜRE göre sıralar ve zaman damgaları metinlerden önce gelir; bu yüzden bir
+  // `Date` ile yapılan `<=` karşılaştırması metin değerli hiçbir belgeyle
+  // EŞLEŞMEZ. Sorgu her çalıştığında sıfır belge dönüyordu, yani "miad takibi"
+  // yeteneği her soruda "yaklaşan miad yok" cevabı veriyordu.
+  //
+  // Metin biçimi leksikografik olarak da sıralanamaz ("01.02.2028" < "31.12.2026"),
+  // dolayısıyla şema değişmeden sunucu tarafı aralık filtresi mümkün değildir.
+  // Eleme bellekte, `parseMiad` ile yapılır.
   const query = adminDb.collection('depoStok')
-    .where('miad', '<=', expiryDate)
-    .limit(500);
+    .select('stokKodu', 'stokAdi', 'lotNumarasi', 'miad', 'isShipped', 'hedefKurum', 'hedefKurumId', 'depotName')
+    .limit(MIAD_TARAMA_TAVANI);
 
   const snapshot = await query.get();
+  const kismi = snapshot.size >= MIAD_TARAMA_TAVANI;
   const items: unknown[] = [];
+  const bugun = new Date();
+  bugun.setHours(0, 0, 0, 0);
 
   for (const doc of snapshot.docs) {
     const data = doc.data();
 
     if (params.hospitalId && data.hedefKurumId !== params.hospitalId && data.isShipped) continue;
 
-    const miadDate = data.miad?.toDate?.() || data.miad;
-    const daysUntilExpiry = miadDate ? Math.ceil((miadDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24)) : null;
+    // `data.miad?.toDate?.()` metin değerlerde undefined döner, `|| data.miad`
+    // ile metnin kendisi geçerdi ve bir satır sonra `miadDate.getTime()`
+    // TypeError fırlatırdı. Çözüm tek kaynağa devredilir.
+    const miadDate = parseMiad(data.miad);
+    if (!miadDate) continue;
+
+    const gun = new Date(miadDate.getFullYear(), miadDate.getMonth(), miadDate.getDate());
+    const daysUntilExpiry = Math.round((gun.getTime() - bugun.getTime()) / 86400000);
+
+    // Yalnızca istenen pencere: süresi dolmuşlar ve `days` gün içinde dolacaklar.
+    if (daysUntilExpiry > days) continue;
 
     items.push({
       stokKodu: data.stokKodu,
@@ -571,7 +623,7 @@ async function fetchExpiringStockEnhanced(params: FetchParams) {
       miad: miadDate,
       daysUntilExpiry,
       location: data.isShipped ? data.hedefKurum : data.depotName,
-      isExpired: daysUntilExpiry !== null && daysUntilExpiry < 0,
+      isExpired: daysUntilExpiry < 0,
     });
   }
 
@@ -582,6 +634,10 @@ async function fetchExpiringStockEnhanced(params: FetchParams) {
 
   return {
     total: items.length,
+    // Tavan dolduysa sayılar ALT SINIRDIR. Modelin bunu tam sayı gibi
+    // sunmaması için açıkça bildirilir.
+    kismi,
+    ...(kismi ? { uyari: `Tarama ${MIAD_TARAMA_TAVANI} kayıtla sınırlandı; sayılar alt sınırdır.` } : {}),
     expired: { count: expired.length, items: expired.slice(0, 10) },
     critical: { count: critical.length, items: critical.slice(0, 10) },
     warning: { count: warning.length, items: warning.slice(0, 10) },
