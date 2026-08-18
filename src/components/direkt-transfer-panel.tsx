@@ -434,6 +434,8 @@ function DTTransferBtn({ enabled, onClick, loading }: { enabled: boolean; onClic
   const [pressed, setPressed] = useState(false);
   return (
     <button
+      data-testid="dt-transfer-et"
+      data-loading={loading ? '1' : '0'}
       onClick={enabled && !loading ? onClick : undefined}
       onPointerDown={() => enabled && !loading && setPressed(true)}
       onPointerUp={() => setPressed(false)}
@@ -1653,7 +1655,10 @@ export default function DirektTransferPanel() {
               <DTFieldLabel>Kaynak Depo</DTFieldLabel>
               <div style={{ marginBottom: 8 }}>
                 <Select value={selectedDepotId} onValueChange={setSelectedDepotId} disabled={prereqsLoading}>
-                  <SelectTrigger className="w-full border-0" style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radiusSm, height: 44 }}>
+                  {/* data-testid: uçtan uca testlerin tutunma noktası. Metne göre
+                      seçim burada güvenilmez — panel tek depo varsa onu KENDİ
+                      seçtiği için placeholder hiç render edilmez. */}
+                  <SelectTrigger data-testid="dt-kaynak-depo" className="w-full border-0" style={{ background: C.surface2, boxShadow: C.clayInset, borderRadius: C.radiusSm, height: 44 }}>
                     <SelectValue placeholder="Kaynak depo seçin" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1665,7 +1670,7 @@ export default function DirektTransferPanel() {
               {!isBorcMode && (
                 <>
                   <DTFieldLabel>Hedef Laboratuvar</DTFieldLabel>
-                  <div style={{ marginBottom: 8 }}>
+                  <div style={{ marginBottom: 8 }} data-testid="dt-hedef-lab">
                     <LabSelector
                       label=""
                       labs={hospitals.map(l => ({ id: l.id, name: l.name ?? '', kod: l.kod }))}

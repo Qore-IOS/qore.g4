@@ -8,10 +8,28 @@ const serviceAccountKeyFromEnv = process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
 let serviceAccount: admin.ServiceAccount;
 
+/**
+ * Emülatör kipi. Admin SDK, `FIRESTORE_EMULATOR_HOST` ve
+ * `FIREBASE_AUTH_EMULATOR_HOST` ortam değişkenlerini KENDİLİĞİNDEN okur ve
+ * trafiği emülatöre yönlendirir — ek bir bağlantı çağrısı gerekmez.
+ *
+ * Değişmesi gereken tek şey başlatma: emülatörde gerçek bir kimlik bilgisi
+ * yoktur, `applicationDefault()` hata verir. Bu yüzden yalnız `projectId` ile
+ * başlatılır. Emülatör dışında davranış birebir eskisi gibidir.
+ */
+const EMULATOR_MODE = Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+
 // Initialize the app only if it's not already initialized.
 if (!admin.apps.length) {
   try {
-    if (serviceAccountKeyFromEnv) {
+    if (EMULATOR_MODE) {
+        admin.initializeApp({
+            projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+              || process.env.GCLOUD_PROJECT
+              || 'qore-e2e',
+        });
+        console.log(`Firebase Admin SDK initialized against emulator (${process.env.FIRESTORE_EMULATOR_HOST}).`);
+    } else if (serviceAccountKeyFromEnv) {
         serviceAccount = JSON.parse(serviceAccountKeyFromEnv);
         admin.initializeApp({
             credential: admin.credential.cert(serviceAccount),
