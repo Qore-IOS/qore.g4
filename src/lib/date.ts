@@ -8,27 +8,37 @@ function hasToDate(v: any): v is { toDate: () => Date } {
   return v && typeof v === "object" && typeof v.toDate === "function";
 }
 
-/** Metinsel tarihleri olası formatlarda parse eder (YYYY-MM-DD, DD.MM.YYYY, DD/MM/YYYY vb.) */
+/**
+ * Metinsel tarihleri olası formatlarda parse eder (DD.MM.YYYY, DD/MM/YYYY,
+ * YYYYMMDD, ISO/RFC).
+ *
+ * SIRA ÖNEMLİDİR — açık gün.ay.yıl kalıpları `new Date(str)`'den ÖNCE denenir.
+ * Eskiden ilk deneme `new Date(str)` idi ve V8'in hoşgörülü ayrıştırıcısı
+ * `"01.02.2027"` (1 Şubat 2027) değerini ABD kuralıyla **2 Ocak 2027** olarak
+ * kabul ediyordu. Yani günü 12'den küçük her tarihte gün ile ay yer
+ * değiştiriyordu: `"05.11.2026"` (5 Kasım) 11 Mayıs'a, altı ay erkene kayıyordu.
+ * `depoStok.miad` alanı `normalizeMiad` ile tam olarak bu biçimde (`dd.MM.yyyy`
+ * metni) yazıldığı için hata doğrudan miad gösterimini ve FEFO sıralamasını
+ * bozuyordu. Açık kalıplar öne alınınca ISO metinleri (`2027-12-31`) yine son
+ * çare `new Date(str)` ile çözülür — o kalıplar bu regexlere uymaz.
+ */
 function parseStringDate(s: string): Date | null {
   const str = s.trim();
   if (!str) return null;
 
-  // ISO / RFC date first
-  const iso = new Date(str);
-  if (!isNaN(iso.getTime())) return iso;
-
-  // DD.MM.YYYY
-  const dmY = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/;
-  const dmYSlash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-
-  let m = str.match(dmY);
-  if (!m) m = str.match(dmYSlash);
+  // DD.MM.YYYY / DD/MM/YYYY / DD-MM-YYYY (Türkiye biçimi — gün önde)
+  const trTarih = /^(\d{1,2})[./-](\d{1,2})[./-](\d{4})$/;
+  const m = str.match(trTarih);
   if (m) {
     const d = parseInt(m[1], 10);
     const mo = parseInt(m[2], 10) - 1;
     const y = parseInt(m[3], 10);
-    const dt = new Date(y, mo, d);
-    return isNaN(dt.getTime()) ? null : dt;
+    if (d >= 1 && d <= 31 && mo >= 0 && mo <= 11) {
+      const dt = new Date(y, mo, d);
+      // `new Date(2027, 1, 31)` 3 Mart'a taşar; taşan tarih geçersizdir.
+      if (!isNaN(dt.getTime()) && dt.getDate() === d && dt.getMonth() === mo) return dt;
+    }
+    return null;
   }
 
   // YYYYMMDD
@@ -41,6 +51,10 @@ function parseStringDate(s: string): Date | null {
     const dt = new Date(y, mo, d);
     return isNaN(dt.getTime()) ? null : dt;
   }
+
+  // ISO / RFC ve diğer motor tarafından tanınan biçimler
+  const iso = new Date(str);
+  if (!isNaN(iso.getTime())) return iso;
 
   return null;
 }

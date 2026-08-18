@@ -24,6 +24,7 @@ import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
 import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
+import { chunkForIn } from '@/lib/firestore-chunk';
 import { scopedQuery } from '@/lib/firestore-helpers';
 import fs from 'fs/promises';
 import path from 'path';
@@ -247,6 +248,13 @@ export async function getDepotStockForTransfer(
  * This deliberately bypasses the browser SDK and React Query cache. Allocation
  * and FEFO validation must use the same server snapshot; otherwise a row removed
  * by a depot count can remain in the browser cache and be offered as a transfer.
+ *
+ * The `in` batches run in PARALLEL. They used to be awaited one after another,
+ * so a transfer touching 90 distinct stock codes paid three full Firestore
+ * round trips back to back before the FEFO dialog could open. The batches are
+ * independent reads; only the merge needs to wait for all of them. Results are
+ * de-duplicated by document id because `chunkForIn` batches are disjoint but the
+ * merge must stay id-unique for the FEFO index built on top of it.
  */
 export async function getCurrentTransferStock(
   depotId: string,
@@ -254,22 +262,29 @@ export async function getCurrentTransferStock(
   companyId?: string | null,
   isSuperAdmin?: boolean,
 ): Promise<DepoStokItem[]> {
-  const codes = Array.from(new Set(stockCodes.map(code => code.trim()).filter(Boolean)));
-  if (!depotId || codes.length === 0) return [];
+  const chunks = chunkForIn(stockCodes.map(code => code.trim()).filter(Boolean));
+  if (!depotId || chunks.length === 0) return [];
+
+  const batches = await Promise.all(
+    chunks.map(part =>
+      adminDb
+        .collection('depoStok')
+        .where('depotId', '==', depotId)
+        .where('stokKodu', 'in', part)
+        .select('stokKodu', 'stokAdi', 'seriNumarasi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'miad')
+        .get(),
+    ),
+  );
 
   const items: DepoStokItem[] = [];
-  for (let offset = 0; offset < codes.length; offset += 30) {
-    const snap = await adminDb
-      .collection('depoStok')
-      .where('depotId', '==', depotId)
-      .where('stokKodu', 'in', codes.slice(offset, offset + 30))
-      .select('stokKodu', 'stokAdi', 'seriNumarasi', 'lotNumarasi', 'adet', 'isShipped', 'companyId', 'miad')
-      .get();
-
+  const seen = new Set<string>();
+  for (const snap of batches) {
     snap.forEach((docSnap) => {
+      if (seen.has(docSnap.id)) return;
       const data = docSnap.data() as Record<string, any>;
       if (!matchesScopedQueryCompany(data, companyId, isSuperAdmin)) return;
       if (!isAvailableDepotStock(data)) return;
+      seen.add(docSnap.id);
       items.push(serializeFirestoreValue({ id: docSnap.id, ...data }) as DepoStokItem);
     });
   }

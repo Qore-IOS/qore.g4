@@ -23,6 +23,16 @@ import {
   buildTransferHeader,
   type TransferWriteContext,
 } from '@/lib/direkt-transfer/write';
+// FEFO sıralaması, tahsis ve uyarı taraması da TEK KAYNAK — miad bir kez
+// çözülür, tahsis ile uyarı aynı anlık stok görüntüsünü paylaşır.
+import {
+  allocateGroupRows,
+  buildStockSnapshot,
+  findFefoViolations,
+  type AllocatedStockItem,
+  type AllocationResult,
+  type StockSnapshot,
+} from '@/lib/direkt-transfer/fefo';
 
 // Logging integration
 import { direktTransferLogger } from '@/lib/logger';
@@ -60,8 +70,6 @@ import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { compareAsc, parse as parseDate } from 'date-fns';
-import { formatMiad } from '@/lib/date';
 import BackButton from '@/components/BackButton';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useBarcodeParser } from '@/hooks/useBarcodeParser';
@@ -639,83 +647,6 @@ function DirektTransferSkeleton() {
 }
 
 
-// Allocation and FEFO share one authoritative server snapshot. This is a pure,
-// in-memory pass so opening the warning dialog adds no further network latency.
-const checkFefoOptimized = (
-  itemsToShip: DepoStokItem[],
-  currentStock: DepoStokItem[],
-): FefoViolation[] => {
-  const violations: FefoViolation[] = [];
-
-  // Transfer listesindeki benzersiz stok kodlarını bul
-  const uniqueStokKodlari = Array.from(new Set(itemsToShip.map(i => i.stokKodu)));
-
-  if (uniqueStokKodlari.length === 0) return violations;
-
-  const relevantCodes = new Set(uniqueStokKodlari);
-  const allProductStock = currentStock.filter(item => relevantCodes.has(item.stokKodu));
-
-  // Group stock by stokKodu for efficient lookups
-  const stockByCode = new Map<string, DepoStokItem[]>();
-  allProductStock.forEach(item => {
-    const existing = stockByCode.get(item.stokKodu) || [];
-    existing.push(item);
-    stockByCode.set(item.stokKodu, existing);
-  });
-
-  // Create a Set of item IDs being shipped for O(1) lookup
-  const shippingIds = new Set(itemsToShip.map(i => i.id));
-
-  // FEFO check for each item being shipped
-  for (const item of itemsToShip) {
-    try {
-      const itemMiadStr = formatMiad(item.miad, '');
-      const itemDate = parseDate(itemMiadStr, 'dd.MM.yyyy', new Date());
-
-      const productStockInDepot = stockByCode.get(item.stokKodu) || [];
-
-      // Depodaki, transfer listesinde OLMAYAN ve miadı daha eski olan ürünleri bul
-      const earlierItems = productStockInDepot.filter(s => {
-        // Kendisi veya transfer listesindeki başka bir item olmamalı
-        if (shippingIds.has(s.id)) return false;
-
-        // Tarih kontrolü
-        try {
-          const sMiadStr = formatMiad(s.miad, '');
-          const stockDate = parseDate(sMiadStr, 'dd.MM.yyyy', new Date());
-          // Stoktaki tarih < Transfer edilen tarih ise violation vardır
-          return compareAsc(stockDate, itemDate) < 0;
-        } catch {
-          return false;
-        }
-      });
-
-      if (earlierItems.length > 0) {
-        // En eski tarihli olanı öneri olarak ekle
-        earlierItems.sort((a, b) => {
-          try {
-            return compareAsc(
-              parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date()),
-              parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date())
-            );
-          } catch {
-            return 0;
-          }
-        });
-
-        violations.push({ scannedItem: item, recommendedItem: earlierItems[0] });
-      }
-    } catch (e) {
-      direktTransferLogger.warn('Tarih parslama hatası, FEFO kontrolü atlanıyor', {
-        stokKodu: item.stokKodu,
-        miad: item.miad,
-      });
-    }
-  }
-
-  return violations;
-};
-
 
 export default function DirektTransferPanel() {
   const { toast } = useToast();
@@ -820,7 +751,8 @@ export default function DirektTransferPanel() {
   const [selectedFormatId, setSelectedFormatId] = useState<FormatValue>('__auto__');
   
   const [fefoViolations, setFefoViolations] = useState<FefoViolation[]>([]);
-  const [preparedTransferItems, setPreparedTransferItems] = useState<DepoStokItem[]>([]);
+  // Tahsis edilmiş kalemler `transferAdet` taşır — belgeden alınacak birim.
+  const [preparedTransferItems, setPreparedTransferItems] = useState<AllocatedStockItem[]>([]);
 
   // Ölçülebilir uygulama maliyeti: senkron JS ve React'in acil UI commit süresi.
   const { startScanMeasurement, controller: scanPerformanceController } = useScanPerformance();
@@ -1142,107 +1074,26 @@ export default function DirektTransferPanel() {
     if (isCameraScannerOpen) setIsCameraScannerOpen(false);
   };
 
-  // OPTIMIZED: Batch allocate all groups at once instead of one query per group
-  const batchAllocateForGroups = useCallback((groupRows: TransferRow[], allStock: DepoStokItem[]): { allocations: Map<string, DepoStokItem[]>; error: TransferRow | null } => {
-    const alreadyAllocatedIds = new Set(
-      directTransferItems
-        .filter(item => !item.isGroup)
-        .map(item => item.id)
-    );
+  // Tahsis ve FEFO uyarısı `@/lib/direkt-transfer/fefo` içinde TEK KAYNAK
+  // olarak yaşar; panel yalnızca ürün takip modunu ve halihazırda tekil satır
+  // olarak rezerve edilmiş belgeleri sağlar.
+  const isQuantityTrackedRow = useCallback((row: TransferRow) => {
+    const trackingMode = productTracking[row.stokKodu] || resolveDefaultTrackingMode({ stokAdi: row.stokAdi } as any);
+    return trackingMode === 'qty_manual' || trackingMode === 'qty_barcode';
+  }, [productTracking]);
 
-    // Collect unique stokKodu values from all groups
-    const uniqueStokKodlari = Array.from(new Set(groupRows.map(r => r.stokKodu)));
+  const batchAllocateForGroups = useCallback(
+    (groupRows: TransferRow[], snapshot: StockSnapshot): AllocationResult =>
+      allocateGroupRows({
+        groupRows,
+        snapshot,
+        reservedIds: directTransferItems.filter(item => !item.isGroup).map(item => item.id),
+        isQuantityTracked: isQuantityTrackedRow,
+      }),
+    [directTransferItems, isQuantityTrackedRow],
+  );
 
-    if (uniqueStokKodlari.length === 0) {
-      return { allocations: new Map(), error: null };
-    }
-
-    // Group stock by stokKodu and lotNumarasi for efficient allocation
-    const stockByCodeAndLot = new Map<string, DepoStokItem[]>();
-    const stockByCode = new Map<string, DepoStokItem[]>();
-    allStock.forEach(item => {
-      const key = `${item.stokKodu}__${item.lotNumarasi || ''}`;
-      const existing = stockByCodeAndLot.get(key) || [];
-      existing.push(item);
-      stockByCodeAndLot.set(key, existing);
-
-      const codeExisting = stockByCode.get(item.stokKodu) || [];
-      codeExisting.push(item);
-      stockByCode.set(item.stokKodu, codeExisting);
-    });
-
-    // Sort each group by FEFO (earliest expiry first)
-    stockByCodeAndLot.forEach((items, key) => {
-      items.sort((a, b) => {
-        try {
-          const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
-          const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
-          return compareAsc(ad, bd);
-        } catch {
-          return 0;
-        }
-      });
-    });
-    stockByCode.forEach((items, key) => {
-      items.sort((a, b) => {
-        try {
-          const ad = parseDate(formatMiad(a.miad, ''), 'dd.MM.yyyy', new Date());
-          const bd = parseDate(formatMiad(b.miad, ''), 'dd.MM.yyyy', new Date());
-          return compareAsc(ad, bd);
-        } catch {
-          return 0;
-        }
-      });
-    });
-
-    // Allocate for each group
-    const allocations = new Map<string, (DepoStokItem & { transferAdet?: number })[]>();
-    const usedIds = new Set<string>(alreadyAllocatedIds);
-
-    for (const row of groupRows) {
-      const trackingMode = productTracking[row.stokKodu] || resolveDefaultTrackingMode({ stokAdi: row.stokAdi } as any);
-      const isQuantityTracked = trackingMode === 'qty_manual' || trackingMode === 'qty_barcode';
-
-      const key = `${row.stokKodu}__${row.lotNumarasi || ''}`;
-      const sourcePool = isQuantityTracked && !row.lotNumarasi
-        ? (stockByCode.get(row.stokKodu) || [])
-        : (stockByCodeAndLot.get(key) || []);
-      
-      const pool = sourcePool.filter(s => !usedIds.has(s.id));
-
-      const need = Math.max(1, row.adet ?? 1);
-      let accumulated = 0;
-      const picks: (DepoStokItem & { transferAdet?: number })[] = [];
-
-      for (const docItem of pool) {
-        if (accumulated >= need) break;
-
-        const docQty = getStockItemQuantity(docItem);
-        const remainingToNeed = need - accumulated;
-        const take = Math.min(docQty, remainingToNeed);
-
-        picks.push({ ...docItem, transferAdet: take });
-        accumulated += take;
-        
-        // If we took EVERYTHING from this document, mark it as used
-        if (take === docQty) {
-          usedIds.add(docItem.id);
-        }
-        // If we only took PART of it, we don't mark it as fully used 
-        // because another pick might take the rest, but for simplicity in memory
-        // we'll track it in a more refined way if needed. For now, usedIds works for full takes.
-      }
-
-      if (accumulated < need) {
-        return { allocations: new Map(), error: row };
-      }
-      allocations.set(row.key, picks);
-    }
-
-    return { allocations, error: null };
-  }, [directTransferItems, productTracking]);
-
-  const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = [], preparedItems: DepoStokItem[] = preparedTransferItems) => {
+  const processTransfer = useCallback(async (confirmedViolations: FefoViolation[] = [], preparedItems: AllocatedStockItem[] = preparedTransferItems) => {
     if (!currentUser || !currentUserProfile) return;
 
     if (!isBorcMode && !selectedLabId) {
@@ -1427,7 +1278,11 @@ export default function DirektTransferPanel() {
       const stockCodes = Array.from(new Set(directTransferItems.map(item => item.stokKodu)));
       const { getCurrentTransferStock } = await import('@/actions/stokActions');
       const currentStock = await getCurrentTransferStock(selectedDepotId, stockCodes, currentCompanyId, isSuperAdmin);
-      const itemsToShip: DepoStokItem[] = [];
+
+      // Miad çözümü ve FEFO sıralaması burada BİR KEZ yapılır; tahsis de uyarı
+      // taraması da aynı anlık görüntüyü kullanır, ikisi asla ayrışamaz.
+      const snapshot = buildStockSnapshot(currentStock);
+      const itemsToShip: AllocatedStockItem[] = [];
 
       // OPTIMIZED: Use batch allocation for all groups at once
       const groupRows = directTransferItems.filter(row => row.isGroup);
@@ -1435,7 +1290,7 @@ export default function DirektTransferPanel() {
 
       // Batch allocate all groups in one query
       if (groupRows.length > 0) {
-        const { allocations, error } = batchAllocateForGroups(groupRows, currentStock);
+        const { allocations, error } = batchAllocateForGroups(groupRows, snapshot);
 
         if (error) {
           toast({
@@ -1467,15 +1322,12 @@ export default function DirektTransferPanel() {
       }
 
       // Tahsis ve FEFO aynı, sunucudan anlık alınan stok görüntüsünü kullanır.
-      const violations = checkFefoOptimized(itemsToShip, currentStock);
+      // `findFefoViolations` sonucu kalem başına zaten tekildir.
+      const violations = findFefoViolations(itemsToShip, snapshot);
       setPreparedTransferItems(itemsToShip);
 
       if (violations.length > 0) {
-        // Benzersiz violationları filtrele
-        const uniqueViolations = violations.filter((v, i, a) =>
-          a.findIndex(t => t.scannedItem.id === v.scannedItem.id) === i
-        );
-        setFefoViolations(uniqueViolations);
+        setFefoViolations(violations);
       } else {
         processTransfer([], itemsToShip);
       }
