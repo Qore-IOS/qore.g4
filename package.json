@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 9002 --hostname 0.0.0.0",
-    "build": "npm run check:conflicts && npm run check:scan-performance && npm run check:miad && next build",
+    "build": "npm run check:conflicts && npm run check:scan-performance && npm run check:miad && npm run check:dead && next build",
     "analyze": "ANALYZE=true next build",
     "start": "next start",
     "lint": "next lint",
@@ -20,7 +20,9 @@
     "sync": "git checkout main && git pull origin main",
     "check:scan-performance": "node scripts/check-scan-performance-source.js",
     "check:miad": "node scripts/audit-miad.js --max-risk 38",
+    "check:dead": "node scripts/audit-routes.js --max-dead 122",
     "audit:miad": "node scripts/audit-miad.js",
+    "audit:routes": "node scripts/audit-routes.js",
     "check:conflicts": "node scripts/check-conflict-markers.js",
     "build:terminal": "vite build --config vite.config.terminal.ts",
     "dev:terminal": "vite --config vite.config.terminal.ts",
