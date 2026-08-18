@@ -68,6 +68,7 @@ function daysUntilStockExpiry(value: unknown): number | null {
   if (!expiryDate) return null;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
+  // audit-miad: guvenli — `expiryDate` zaten `Date`; bu bir kopya, metin ayrıştırma değil.
   const expiry = new Date(expiryDate);
   expiry.setHours(0, 0, 0, 0);
   return Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));

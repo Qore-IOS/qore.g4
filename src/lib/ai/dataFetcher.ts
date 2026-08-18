@@ -1,7 +1,9 @@
 import { adminDb } from '@/lib/firebase-admin';
 import { QueryType } from './queryPlanner';
-import type { Timestamp, Query, DocumentData } from 'firebase-admin/firestore';
+import type { Query, DocumentData } from 'firebase-admin/firestore';
 import { aiLogger } from '@/lib/logger';
+// Miad çözümünde TEK KAYNAK — biçim çeşitliliğini burada karşılamak zorundayız.
+import { parseMiad } from '@/lib/lojistik/miad';
 
 // Simplified types for AI context
 interface StockItem {
@@ -70,11 +72,35 @@ export interface FetchedData {
   errors?: string[];
 }
 
-// Helper: Firestore Timestamp to string
-function timestampToString(ts: Timestamp | Date | undefined): string {
-  if (!ts) return '';
-  if (ts instanceof Date) return ts.toISOString().split('T')[0];
-  return (ts as Timestamp).toDate().toISOString().split('T')[0];
+/**
+ * Firestore alanını AI bağlamı için `yyyy-MM-dd` metnine çevirir.
+ *
+ * Eski hâli imzasına (`Timestamp | Date`) güveniyor ve başka her şeyde
+ * `ts.toDate()` çağırıyordu. Ama `depoStok.miad` bu sistemde Timestamp DEĞİL,
+ * `dd.MM.yyyy` METNİ olarak saklanıyor (`mal-kabul/write.ts` → `normalizeMiad`).
+ * Sonuç: stok sorgularında ilk belgede `TypeError: ts.toDate is not a function`
+ * fırlıyor, `fetchDataForQueries` içindeki catch bunu yutuyor ve AI paneli
+ * stoğu hiç göremiyordu — sessiz, kalıcı bir arıza.
+ *
+ * İkinci hata: `toISOString()` UTC'ye çevirir. Yerel gece yarısı olarak kurulmuş
+ * bir tarih UTC+3'te bir gün GERİYE düşüyordu (31.12 → 30.12). Biçimleme artık
+ * yerel takvim alanlarından yapılır.
+ *
+ * Çözüm `parseMiad`'a devredilir: Timestamp, Date, ISO, `dd.MM.yyyy` ve yalnız
+ * ay/yıl taşıyan değerlerin tamamını tek elden çözen kaynak odur.
+ */
+function timestampToString(ts: unknown): string {
+  const tarih = parseMiad(ts);
+  if (!tarih) return '';
+  const ay = String(tarih.getMonth() + 1).padStart(2, '0');
+  const gun = String(tarih.getDate()).padStart(2, '0');
+  return `${tarih.getFullYear()}-${ay}-${gun}`;
+}
+
+/** Miadı bilinmeyen kayıt sıralamanın SONUNA gider — öne almak yanlış taraftır. */
+function miadSiraDegeri(miad: string | undefined): number {
+  const tarih = parseMiad(miad);
+  return tarih ? tarih.getTime() : Number.POSITIVE_INFINITY;
 }
 
 // Fetch stock by product code
@@ -396,9 +422,13 @@ async function fetchExpiringStock(params: Record<string, unknown>): Promise<Stoc
     }
   }
 
-  return Object.values(grouped).sort((a, b) =>
-    new Date(a.miad || '').getTime() - new Date(b.miad || '').getTime()
-  );
+  // `Infinity - Infinity` NaN verir; farkla değil, açık karşılaştırmayla sırala.
+  return Object.values(grouped).sort((a, b) => {
+    const ma = miadSiraDegeri(a.miad);
+    const mb = miadSiraDegeri(b.miad);
+    if (ma === mb) return 0;
+    return ma < mb ? -1 : 1;
+  });
 }
 
 // Fetch product info
