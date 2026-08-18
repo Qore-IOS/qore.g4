@@ -121,7 +121,19 @@ function dosyadanRota(mutlak) {
 
 // ── import grafiği ──────────────────────────────────────────────────────────
 
-const UZANTILAR = ['.ts', '.tsx', '/index.ts', '/index.tsx'];
+/**
+ * Uzantı deneme sırası — Next.js/webpack ile AYNI olmak zorundadır.
+ *
+ * webpack `resolve.extensions` sırası `.tsx` → `.ts`'dir. Bu sıra ters
+ * yazılırsa, aynı adı hem `.ts` hem `.tsx` ile taşıyan bir modülde denetim
+ * CANLI dosyayı ölü, ÖLÜ dosyayı canlı gösterir — silinmemesi gereken kod
+ * silinir. (Depoda tam olarak bu durum vardı: `useScanPerformance`.)
+ *
+ * Not: TypeScript'in kendi çözümlemesi `.ts`'i önceler, yani böyle bir çiftte
+ * derleyici ile çalışma zamanı FARKLI dosyaya bakar. Bu, gölgelenen dosyanın
+ * silinmesi için ayrıca bir sebeptir.
+ */
+const UZANTILAR = ['.tsx', '.ts', '/index.tsx', '/index.ts'];
 
 /** Bir import belirtecini depo içindeki gerçek dosyaya çözer; harici ise null. */
 function importCoz(kaynakDosya, belirtec) {

@@ -136,21 +136,62 @@ gösteriyor. Canlı AI yolu `chat.ts → smartQueryEngine.ts`.
 
 ## Mandal
 
-`npm run check:dead` ölü modül sayısını **122** tavanında tutar ve `npm run
-build` zincirine bağlıdır. Erişilemeyen yeni dosya eklenirse derleme kırılır.
-Silme turları ilerledikçe tavan düşürülür.
+`npm run check:dead` ölü modül sayısını tavanda tutar ve `npm run build`
+zincirine bağlıdır. Erişilemeyen yeni dosya eklenirse derleme kırılır. Tavan
+her silme turunda düşürülür: **122 → 85**.
 
-## Sıradaki adım
+Aynı turda `check:miad` tavanı da **38 → 37**'ye indi: `services/searchService.ts`
+silinince bir miad riski kendiliğinden ortadan kalktı.
 
-Silme bir ürün kararıdır ve bu turda **yapılmadı**. Önerilen sıra:
+## Birinci silme turu — tamamlandı
 
-1. **Tartışmasız olanlar** (~10.000 satır): `components/purchasing` ölü kümesi,
-   üç `ErrorBoundary`, `services/searchService.ts`, `lib/ai` ölü kümesi,
-   dört eskimiş rota. Hiçbirinin canlı referansı yok.
-2. **Karar gerektirenler**: yasal sayfa üçlüsü (mağaza listelemesi kontrol
-   edilmeli), `/urun-kullanim-istatistik`, `nobet` ve `maliyet-sayim` kümeleri
-   (ürün yol haritasında geri gelecekler mi?).
-3. **Asla**: `/health`.
+**39 dosya, 16.298 satır silindi.** `src` 267.502 → 251.204 satıra indi.
+
+| Küme | Satır | Neden silindi |
+|---|---:|---|
+| `components/purchasing` ölü kümesi + 2 rota | 8.141 | `/satin-alma` `PlanlamaPanel` render ediyor; eski panel ailesi erişilemez |
+| Beş bağlanmamış `ErrorBoundary` | 2.294 | Yazılmış, hiçbiri bağlanmamış |
+| `lib/ai` v1 kümesi | 2.065 | Canlı yol `chat.ts → smartQueryEngine.ts`; v1'e giriş yok |
+| Rota taklidi bileşenler (`components/**/page.tsx`) | 1.206 | `src/app` altında değil; hiçbir yerden import edilmiyor |
+| Eskimiş servisler (`searchService`, `qorEngineService`) | 924 | Canlı olan `actions/searchActions.ts` |
+| Eskimiş rotalar + panelleri | 743 | `/kullanim-dogrulama`, `/laboratuvar-yonetimi`, `/cihaz-yonetimi-ana` canlı karşılıkları |
+| `src/functions/` kopyası | 480 | Dağıtılan dizin `functions/`; bu stray kopya |
+| `hooks/useScanPerformance.ts` | 135 | Gölgeleyen eskimiş sürüm — aşağıya bakınız |
+
+### Gölgeleme hatası — denetim aracının kendisi yakalayamıyordu
+
+`useScanPerformance` hem `.ts` hem `.tsx` olarak vardı. Paneller
+`@/hooks/useScanPerformance` import ediyor ve iki çözümleyici **farklı dosyaya**
+bakıyordu:
+
+- **webpack/Next.js**: `.tsx` önce → canlı sürüm (`ScanCommitProbe`,
+  `ScanPerformanceBadge` export eder)
+- **TypeScript**: `.ts` önce → eskimiş sürüm (bu export'lar yok)
+
+Sonuç: uygulama doğru çalışıyor ama derleyici yanlış dosyayı denetliyordu. 561
+baseline tip hatasının **5'i** bundandı. Gölge dosya silinince tip hataları
+561 → 514'e indi.
+
+Denetim aracı da ilk sürümünde `.ts`'i önceliyordu, yani **canlı dosyayı ölü,
+ölü dosyayı canlı** gösteriyordu — silinseydi uygulama kırılırdı. Uzantı sırası
+webpack ile hizalandı (`scripts/audit-routes.js`, `UZANTILAR`).
+
+## Kalan — ürün kararı bekliyor
+
+Silme turundan sonra: **85 ölü modül, 19.353 satır.**
+
+| Küme | Satır | Soru |
+|---|---:|---|
+| `maliyet-sayim` + `toplu-maliyet-sayim` | 3.868 | Yol haritasında geri gelecek mi? |
+| `cost-dashboard-panel` + `cost-observation/*` | 2.300 | `/cost-dashboard` canlı ama başka panel kullanıyor |
+| `nobet` kümesi | 2.133 | Özellik rafta mı, iptal mi? |
+| `dashboard-panel.tsx` | 1.107 | `dashboard-v2` ile değiştirilmiş görünüyor |
+| Yasal sayfa üçlüsü | 386 | **Mağaza listelemesinden bağlantı var mı?** |
+| `/urun-kullanim-istatistik` + paneli | 601 | Kullanılıyor mu? |
+| Kullanılmayan `ui/*` (shadcn) | 1.159 | Zararsız; istenirse silinir |
+| Diğer küçük modüller | ~7.800 | Dilim taşınırken temizlenir |
+
+**Asla silinmemeli:** `/health` — altyapı çağırıyor.
 
 Silme her dilimin "bitti" tanımının bir parçası olduğu için, kalanlar ilgili
 dilim taşınırken temizlenebilir.
