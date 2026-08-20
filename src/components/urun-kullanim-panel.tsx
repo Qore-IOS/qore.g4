@@ -437,7 +437,12 @@ export default function UrunKullanimPanel() {
   const { data: devices = [] } = useDevices();
 
   // Use TanStack Query for barcode formats with caching
-  const { data: barcodeFormats = [], isLoading: formatsLoading } = useBarcodeFormatsQuery();
+  const {
+    data: barcodeFormats = [],
+    isLoading: formatsLoading,
+    isError: formatsFailed,
+    error: formatsError,
+  } = useBarcodeFormatsQuery();
   const { invalidateConsumption, invalidateDepoStok } = useInvalidateQueries();
 
   // Fetch min/max rules for selected lab (for trash bin product filtering)
@@ -1299,7 +1304,12 @@ export default function UrunKullanimPanel() {
   // Lab stoğu yalnızca bir laboratuvar seçilince yüklenir; seçili lab yokken
   // "yükleniyor" değil "lab seçilmeyi bekliyor" durumundadır (takılı görünmez).
   const labSelected = Boolean(selectedLabId);
-  const stepFmtOk   = !formatsLoading && barcodeFormats.length > 0;
+  // KALICI HATA DA BİR SONUÇTUR. Bu adım eskiden yalnızca `barcodeFormats.length > 0`
+  // arıyordu; format okuması KALICI olarak düştüğünde (sunucu tarafı 500 veriyordu)
+  // uzunluk sonsuza kadar 0 kalıyor, `systemReady` hiç true olmuyor ve panelde
+  // DÜŞÜM YAPILAMIYORDU — ekranda yalnızca bitmeyen bir "YÜKLENİYOR" rozeti vardı.
+  // Artık başarısızlık adımı tamamlar, sebep aşağıda metin olarak gösterilir.
+  const stepFmtOk   = !formatsLoading && (barcodeFormats.length > 0 || formatsFailed);
   const stepProdOk  = !isLoading;
   // Stok adımı YALNIZCA canlı okumaya bakar. Geçmiş onarımı (transferlerden
   // kurtarma) arka planda sürerken panel bloke edilmez — havuza dâhil bir
@@ -1308,6 +1318,12 @@ export default function UrunKullanimPanel() {
   // asılı kalmaz; hata durumu tamamlanmış sayılır ve stok boş listelenir.
   const stepStockOk = labSelected && !labPoolsLoading && (!labStockLoading || labStockFailed);
   const systemReady = stepFmtOk && stepProdOk && stepStockOk;
+
+  // Barkod formatları okunamadıysa panel çalışır ama okutma çözümlenemez;
+  // kullanıcı sebebi görsün diye kartta metin olarak gösterilir.
+  const formatsErrorText = formatsFailed
+    ? `Barkod formatları okunamadı${(formatsError as any)?.message ? ` (${(formatsError as any).message})` : ''}. Okutulan barkodlar çözümlenemeyebilir; sayfayı yenileyin, sorun sürerse sistem yöneticisine bildirin.`
+    : null;
 
   const safeName = useCallback(
     (code: string, fallback: string) => productNames[code] || fallback || code,
@@ -2282,13 +2298,18 @@ export default function UrunKullanimPanel() {
                   )}
                 </div>
               ) : systemReady ? (
-                <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center py-4">Barkod okutmaya hazır.</p>
+                <div className="py-4 space-y-1.5">
+                  <p className="text-foreground/60 dark:text-foreground/50 text-sm text-center">Barkod okutmaya hazır.</p>
+                  {formatsErrorText && (
+                    <p className="text-[11px] leading-snug text-destructive/90 text-center">{formatsErrorText}</p>
+                  )}
+                </div>
               ) : (
                 /* Veriler yüklenirken 3-adım göstergesi.
                    state: 'done' | 'loading' | 'waiting' (lab seçilmeyi bekliyor) */
                 <div className="py-2 space-y-2">
                   {([
-                    { label: 'Barkod formatları', state: stepFmtOk ? 'done' : 'loading' },
+                    { label: 'Barkod formatları', state: formatsFailed ? 'failed' : stepFmtOk ? 'done' : 'loading' },
                     { label: 'Ürün & laboratuvar listesi', state: stepProdOk ? 'done' : 'loading' },
                     {
                       label: poolMemberIds.length > 1 ? 'Havuz stoğu' : 'Lab stoğu',
@@ -2300,12 +2321,16 @@ export default function UrunKullanimPanel() {
                         "w-4 h-4 rounded-full flex items-center justify-center shrink-0 border",
                         step.state === 'done'
                           ? "bg-green-500/20 border-green-500/40 text-green-500"
+                          : step.state === 'failed'
+                            ? "bg-destructive/15 border-destructive/40 text-destructive"
                           : step.state === 'waiting'
                             ? "bg-amber-500/15 border-amber-500/30 text-amber-500"
                             : "bg-foreground/5 border-foreground/15"
                       )}>
                         {step.state === 'done'
                           ? <CheckCircle className="w-2.5 h-2.5" />
+                          : step.state === 'failed'
+                            ? <XCircle className="w-2.5 h-2.5" />
                           : step.state === 'waiting'
                             ? <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
                             : <Loader2 className="w-2.5 h-2.5 animate-spin text-foreground/40" />}
@@ -2313,15 +2338,20 @@ export default function UrunKullanimPanel() {
                       <span className={cn(
                         "text-xs",
                         step.state === 'done' ? "text-foreground/70"
+                          : step.state === 'failed' ? "text-destructive"
                           : step.state === 'waiting' ? "text-amber-600/80 dark:text-amber-400/80"
                           : "text-foreground/40"
                       )}>
                         {step.label}
                         {step.state === 'waiting' && ' — önce laboratuvar seçin'}
+                        {step.state === 'failed' && ' — yüklenemedi'}
                       </span>
                       {step.state === 'done' && <CheckCircle className="w-3 h-3 text-green-500 ml-auto shrink-0" />}
                     </div>
                   ))}
+                  {formatsErrorText && (
+                    <p className="text-[11px] leading-snug text-destructive/90 pt-1">{formatsErrorText}</p>
+                  )}
                 </div>
               )}
             </div>

@@ -184,7 +184,7 @@ function DTReloadBtn({ onReload }: { onReload: () => void }) {
   );
 }
 
-function DTPreparingView({ stage, pct, onReload }: { stage: number; pct: number; onReload: () => void }) {
+function DTPreparingView({ stage, pct, onReload, loadError }: { stage: number; pct: number; onReload: () => void; loadError?: string | null }) {
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
@@ -201,10 +201,24 @@ function DTPreparingView({ stage, pct, onReload }: { stage: number; pct: number;
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, fontWeight: 700, color: C.ink3, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Sistem Durumu</div>
-          <div style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-0.01em', color: C.amber, marginTop: 2 }}>Sistem Hazırlanıyor…</div>
+          <div style={{ fontSize: 16.5, fontWeight: 800, letterSpacing: '-0.01em', color: loadError ? '#B4453C' : C.amber, marginTop: 2 }}>
+            {loadError ? 'Veriler Yüklenemedi' : 'Sistem Hazırlanıyor…'}
+          </div>
         </div>
         <DTReloadBtn onReload={onReload} />
       </div>
+      {/* Bir kaynak KALICI olarak düştüyse ilerleme çubuğunu sonsuza kadar
+          döndürmek yerine sebebi söyle. Panel eskiden %60'ta asılı kalıyor,
+          kullanıcı neyin beklendiğini göremiyordu. */}
+      {loadError && (
+        <div style={{
+          marginTop: 12, padding: '10px 12px', borderRadius: C.radiusSm,
+          background: 'rgba(180,69,60,0.10)', color: '#8E3630',
+          fontSize: 12.5, fontWeight: 600, lineHeight: 1.45,
+        }}>
+          {loadError}
+        </div>
+      )}
       <div style={{ margin: '16px 0 14px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, marginBottom: 7 }}>
           <span style={{ color: C.ink3, letterSpacing: '0.04em', textTransform: 'uppercase' }}>Veriler</span>
@@ -320,10 +334,11 @@ function DTScanStatusView({ lastItem, itemCount, totalAdet, pulse, onReload }: {
   );
 }
 
-function DTReadinessCard({ stage, ready, pct, lastItem, itemCount, totalAdet, pulse, onReload }: {
+function DTReadinessCard({ stage, ready, pct, lastItem, itemCount, totalAdet, pulse, onReload, loadError }: {
   stage: number; ready: boolean; pct: number;
   lastItem: { name: string; code: string; qty: number; unit: string } | null;
   itemCount: number; totalAdet: number; pulse: boolean; onReload: () => void;
+  loadError?: string | null;
 }) {
   const readyShadow = `${C.clay}, 0 0 0 1.5px rgba(111,181,133,0.55), 0 0 16px -3px rgba(111,181,133,0.25)`;
   const loadingShadow = `${C.clay}, 0 0 0 1.5px rgba(224,163,62,0.32)`;
@@ -337,7 +352,7 @@ function DTReadinessCard({ stage, ready, pct, lastItem, itemCount, totalAdet, pu
     }}>
       {ready
         ? <DTScanStatusView lastItem={lastItem} itemCount={itemCount} totalAdet={totalAdet} pulse={pulse} onReload={onReload} />
-        : <DTPreparingView stage={stage} pct={pct} onReload={onReload} />}
+        : <DTPreparingView stage={stage} pct={pct} onReload={onReload} loadError={loadError} />}
     </div>
   );
 }
@@ -658,7 +673,12 @@ export default function DirektTransferPanel() {
 
   // Optimized fetching with TanStack Query
   const { data: allDepots = [], isLoading: depotsLoading } = useDepots();
-  const { data: products = [], isLoading: productsLoading } = useProductCodes();
+  const {
+    data: products = [],
+    isLoading: productsLoading,
+    isError: productsFailed,
+    error: productsError,
+  } = useProductCodes();
   const { data: hospitals = [], isLoading: hospitalsLoading } = useHospitals();
   const { data: borcDepots = [], isLoading: borcLoading } = useBorcDepots();
 
@@ -722,17 +742,31 @@ export default function DirektTransferPanel() {
     // still streaming in via the slower getScopedDocs path — the first scan then
     // hit an empty formats/products array and failed to parse, while a retry a
     // second later (data arrived) succeeded. Gating on length closes that race.
+    //
+    // KALICI HATA DA BİR SONUÇTUR. Bu adımlar eskiden yalnızca "veri geldi mi"
+    // diye bakıyordu; ürün kodları okuması KALICI olarak düştüğünde (sunucu
+    // tarafı 500 veriyordu) `products.length` sonsuza kadar 0 kalıyor ve panel
+    // asla %100'e ulaşmıyordu — kullanıcıya yalnızca bitmeyen bir "Yükleniyor"
+    // görünüyordu. Artık başarısızlık adımı TAMAMLAR; sebep DTPreparingView
+    // içinde metin olarak gösterilir ve panel kilitli kalmaz.
     const sourcesReady = [
       !depotsLoading,
-      !productsLoading && products.length > 0,
+      !productsLoading && (products.length > 0 || productsFailed),
       !hospitalsLoading,
       !formatsLoading && barcodeFormats.length > 0,
       Boolean(selectedDepotId) && !depotStockPending,
     ];
     return Math.round((sourcesReady.filter(Boolean).length / sourcesReady.length) * 100);
-  }, [depotsLoading, productsLoading, products.length, hospitalsLoading, formatsLoading, barcodeFormats.length, selectedDepotId, depotStockPending]);
+  }, [depotsLoading, productsLoading, products.length, productsFailed, hospitalsLoading, formatsLoading, barcodeFormats.length, selectedDepotId, depotStockPending]);
   const isTransferDataLoading = transferDataProgress < 100;
   const transferDataReady = !isTransferDataLoading;
+
+  // Hazırlık kartında gösterilecek kalıcı hata metni (varsa).
+  const masterDataError = useMemo(() => {
+    if (!productsFailed) return null;
+    const detail = (productsError as any)?.message ? ` (${(productsError as any).message})` : '';
+    return `Ürün kodları okunamadı${detail}. Barkod çözümleme ve stok eşleştirme çalışmayacak — sayfayı yenileyin, sorun sürerse sistem yöneticisine bildirin.`;
+  }, [productsFailed, productsError]);
 
   const [selectedLabId, setSelectedLabId] = useState<string>('');
   const [isBorcMode, setIsBorcMode] = useState<boolean>(false);
@@ -1648,6 +1682,7 @@ export default function DirektTransferPanel() {
               totalAdet={stepperState.totalAdet}
               pulse={pulseActive}
               onReload={() => window.location.reload()}
+              loadError={masterDataError}
             />
 
             {/* Kaynak & Hedef */}

@@ -488,7 +488,12 @@ export function useDock() {
       trackListener("useDock-notifications", "cleanup");
       unsub();
     };
-  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable]);
+    // `currentCompanyId` / `isSuperAdmin` YUKARIDA scopedQuery içinde kullanılıyor;
+    // bağımlılık listesinde olmamaları auth-context'teki personelGruplari
+    // dinleyicisiyle aynı arızayı üretiyordu: şirket kimliği yerleşmeden kurulan
+    // sorgu FİLTRESİZ oluyor, güvenlik kuralları `list` için reddediyor ve
+    // dinleyici bir daha kurulmadığı için bildirimler oturum boyunca hiç gelmiyor.
+  }, [membershipKeysString, uid, notificationsAllowed, peekDockStable, currentCompanyId, isSuperAdmin, currentUserProfile?.role, currentUserProfile?.assignedLaboratories]);
 
   const unreadCount = useMemo(() => {
     if (!uid || !notificationsAllowed) return 0;

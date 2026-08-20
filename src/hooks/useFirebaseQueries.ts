@@ -52,6 +52,7 @@ import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { isDepoStokKey, isWholeCollectionDepoStokKey } from '@/lib/stock-cache-keys';
 import { isAvailableDepotStock } from '@/lib/stock-quantity';
 
 // Helper to convert Firestore timestamps
@@ -82,9 +83,11 @@ export function useProductCodes() {
   return useQuery({
     queryKey: ['productCodes', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const { getProductCodesAction } = await import('@/actions/stokActions');
-      const items = await getProductCodesAction(currentCompanyId, isSuperAdmin ?? false);
-      return items as ProductCode[];
+      // İki kaynaklı okuma: Admin SDK server action'ı düşerse istemci SDK'sına
+      // geçilir. Tek arıza noktası tüm panelleri kilitlemesin (bkz. master-data-resilient.ts).
+      const { fetchProductCodesResilient } = await import('@/lib/master-data-resilient');
+      const { items } = await fetchProductCodesResilient(currentCompanyId, isSuperAdmin ?? false);
+      return items;
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
@@ -394,9 +397,9 @@ export function useBarcodeFormatsQuery() {
   return useQuery({
     queryKey: ['barcodeFormats', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
-      const { getBarcodeFormatsAction } = await import('@/actions/stokActions');
-      const items = await getBarcodeFormatsAction(currentCompanyId, isSuperAdmin ?? false);
-      return items as BarcodeFormat[];
+      const { fetchBarcodeFormatsResilient } = await import('@/lib/master-data-resilient');
+      const { items } = await fetchBarcodeFormatsResilient(currentCompanyId, isSuperAdmin ?? false);
+      return items;
     },
     enabled: !!currentCompanyId || isSuperAdmin,
     staleTime: 60 * 60 * 1000,
@@ -685,7 +688,11 @@ export function useActiveDepoStok() {
 export function useShippedDepoStok() {
   const { currentCompanyId, isSuperAdmin } = useAuth();
   return useQuery({
-    queryKey: ['depoStok', 'shipped', currentCompanyId, isSuperAdmin],
+    // 'shipped-all' — 'shipped' DEĞİL. useLabStock da ['depoStok','shipped',...]
+    // kullanıyor; aynı ikinci parça iki farklı maliyetteki sorguyu tek prefix
+    // altında topluyordu ve koleksiyon geneli olanı ucuz olanla birlikte
+    // yeniliyordu. Ayrıştırıldı.
+    queryKey: ['depoStok', 'shipped-all', currentCompanyId, isSuperAdmin],
     queryFn: async () => {
       const snap = await getDocs(scopedQuery(
         'depoStok',
@@ -1486,38 +1493,109 @@ export async function touchStockMetadata() {
   }
 }
 
+/** Kapsamlı (depo/lab filtreli) sorgular için toplama penceresi. */
+const SCOPED_INVALIDATION_DEBOUNCE_MS = 1500;
+/** Koleksiyon geneli sorgular için en sık yenileme aralığı. */
+const WHOLE_COLLECTION_INVALIDATION_INTERVAL_MS = 60_000;
+
 /**
  * Hook that listens to stock metadata changes and invalidates cache
  * Uses Firestore onSnapshot for real-time updates (single document = very cheap)
  *
  * Usage: Call this hook once in a high-level component (e.g., layout or provider)
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * OKUMA PATLAMASI — bu hook üretimde günlük Firestore kotasını tüketiyordu.
+ *
+ * Bu dinleyici QueryProvider içinde, yani HER SAYFADA ve HER KULLANICIDA açık.
+ * Eskiden tek yaptığı şey şuydu:
+ *
+ *     queryClient.invalidateQueries({ queryKey: ['depoStok'] });
+ *
+ * `invalidateQueries` varsayılan olarak `refetchType: 'active'` ile çalışır:
+ * eşleşen ve o an EKRANDA olan her sorguyu ANINDA yeniden çalıştırır. Anahtar
+ * eşleşmesi de ÖN EK bazlıdır, yani `['depoStok']` altındaki HER ŞEY —
+ * depo/lab filtreli ucuz sorgular kadar, koleksiyonun tamamını okuyan
+ * `['depoStok','forOrders']` gibi sorgular da — kapsama giriyordu.
+ *
+ * Sonuç zincir reaksiyonu: bir kullanıcı tek bir düşüm/transfer yapar →
+ * `touchStockMetadata()` metadata belgesini yazar → AÇIK OLAN TÜM sekmelerde
+ * bu dinleyici tetiklenir → her sekme `depoStok` koleksiyonunu BAŞTAN SONA
+ * yeniden okur.
+ *
+ *     okuma ≈ (yazma sayısı) × (açık sekme sayısı) × (depoStok belge sayısı)
+ *
+ * Faturalandırma bunu net gösteriyordu: bir saatte 190 yazmaya karşılık
+ * 4,2 MİLYON okuma. Kota dolunca Firestore istekleri reddetmeye başladı,
+ * paneller veri alamadı ve "her şey yükleniyorda kaldı".
+ *
+ * ÇÖZÜM — yenilemeyi maliyetine göre ayır:
+ *
+ *   - depo/lab filtreli sorgular ucuzdur ve kullanıcı tam onlara bakar;
+ *     anında yenilenirler, yalnızca kısa bir pencerede toplanırlar (yazma
+ *     akınlarında tek yenileme).
+ *   - koleksiyon geneli sorgular pahalıdır ve saniyelik tazelik gerektirmez;
+ *     en fazla dakikada bir yenilenirler.
+ *
+ * Canlılık korunur, çarpan ortadan kalkar.
  */
 export function useStockUpdateListener() {
   const queryClient = useQueryClient();
   const isFirstLoad = useRef(true);
 
   useEffect(() => {
+    let scopedTimer: ReturnType<typeof setTimeout> | null = null;
+    let wholeCollectionTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastWholeCollectionRun = 0;
+
+    const invalidateScoped = () => {
+      scopedTimer = null;
+      queryClient.invalidateQueries({
+        predicate: q => isDepoStokKey(q.queryKey) && !isWholeCollectionDepoStokKey(q.queryKey),
+      });
+    };
+
+    const invalidateWholeCollection = () => {
+      wholeCollectionTimer = null;
+      lastWholeCollectionRun = Date.now();
+      queryClient.invalidateQueries({
+        predicate: q => isWholeCollectionDepoStokKey(q.queryKey),
+      });
+    };
+
+    const scheduleInvalidation = () => {
+      if (!scopedTimer) {
+        scopedTimer = setTimeout(invalidateScoped, SCOPED_INVALIDATION_DEBOUNCE_MS);
+      }
+      if (!wholeCollectionTimer) {
+        const sinceLast = Date.now() - lastWholeCollectionRun;
+        const wait = Math.max(0, WHOLE_COLLECTION_INVALIDATION_INTERVAL_MS - sinceLast);
+        wholeCollectionTimer = setTimeout(invalidateWholeCollection, wait);
+      }
+    };
+
     const unsubscribe = onSnapshot(
       doc(db, STOCK_METADATA_DOC),
       (snapshot) => {
         // Skip invalidation on first load (initial fetch)
         if (isFirstLoad.current) {
           isFirstLoad.current = false;
+          lastWholeCollectionRun = Date.now();
           return;
         }
 
-        // Invalidate all depoStok queries when metadata changes
-        if (snapshot.exists()) {
-          queryClient.invalidateQueries({ queryKey: ['depoStok'] });
-          queryClient.invalidateQueries({ queryKey: ['depoStokPaginated'] });
-        }
+        if (snapshot.exists()) scheduleInvalidation();
       },
       (error) => {
         console.error('Stock metadata listener error:', error);
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      if (scopedTimer) clearTimeout(scopedTimer);
+      if (wholeCollectionTimer) clearTimeout(wholeCollectionTimer);
+      unsubscribe();
+    };
   }, [queryClient]);
 }
 

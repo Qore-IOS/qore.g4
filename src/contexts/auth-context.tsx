@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import type { User, AppView } from '@/lib/types';
 import { LEGACY_COMPANY_ID } from '@/lib/types';
+import { normalizeCompanyId } from '@/lib/company-scope';
 import { VIEWS } from '@/lib/constants';
 import { safeSignOut } from '@/lib/presence-client';
 import { scopedQuery } from '@/lib/firestore-helpers';
@@ -396,8 +397,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, [currentUser]);
 
   // Auto-logout based on personnel group's autoLogoutTime
+  //
+  // BAĞIMLILIKLAR ÖNEMLİ. Bu etki eskiden yalnızca `[currentUser]`'a bağlıydı ve
+  // dinleyici, şirket kimliği HENÜZ YERLEŞMEDEN kuruluyordu: `onAuthStateChanged`
+  // geri çağrısı ilk iş olarak `setCurrentUser(user)` yapıyor, `companyId` ise
+  // ancak `await getDoc(...)` bittikten sonra geliyor. Aradaki commit'te
+  // `currentCompanyId` hâlâ başlangıç değeri `__legacy__` olduğu için
+  // `scopedQuery` FİLTRESİZ bir koleksiyon sorgusu üretiyordu — güvenlik
+  // kuralları bunu `list` için reddediyor:
+  //
+  //   Error listening to personnel groups: FirebaseError:
+  //   Missing or insufficient permissions.
+  //
+  // Bağımlılık listesi eksik olduğu için gerçek şirket kimliği geldiğinde
+  // dinleyici YENİDEN KURULMUYOR; oturum boyunca reddedilmiş kalıyor ve
+  // otomatik çıkış saati hiç uygulanmıyordu. Artık scope yerleşmeden sorgu
+  // açılmaz ve yerleştiğinde dinleyici yeniden kurulur.
   useEffect(() => {
+    if (isLoadingAuth) return;
     if (!currentUser || currentUser.isAnonymous) return;
+    // Süper admin filtresiz okuyabilir; diğerleri için şirket kimliği şart.
+    if (!isSuperAdmin && normalizeCompanyId(currentCompanyId) === LEGACY_COMPANY_ID) return;
 
     let intervalId: NodeJS.Timeout | null = null;
     let currentAutoLogoutTime: string | null = null;
@@ -447,7 +467,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (intervalId) clearInterval(intervalId);
       unsubGroups();
     };
-  }, [currentUser]);
+  }, [currentUser, currentCompanyId, isSuperAdmin, isLoadingAuth]);
 
   // PERF (Faz 1): AuthProvider tüm uygulamayı sarıyor. Daha önce bu obje her
   // render'da yeniden oluşuyordu (fonksiyonlar da dahil), bu yüzden alakasız bir

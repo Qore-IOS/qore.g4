@@ -806,7 +806,9 @@ let notificationAudio: HTMLAudioElement | null = null;
 const getNotificationAudio = () => {
   if (typeof window === 'undefined') return null;
   if (!notificationAudio) {
-    notificationAudio = new Audio('/notif.mp3');
+    // Dosyanın adı public/notif.wav — '/notif.mp3' diye bir varlık hiç olmadı,
+    // her bildirimde 404 üretiyor ve ses hiç çalmıyordu.
+    notificationAudio = new Audio('/notif.wav');
     notificationAudio.volume = 0.5;
     // Removed preload='auto' to avoid aggressive early loading
   }
