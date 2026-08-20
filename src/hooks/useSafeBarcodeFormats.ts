@@ -11,7 +11,8 @@ type State = {
 };
 
 /**
- * Loads barcode formats via Admin SDK server action (bypasses IndexedDB).
+ * Loads barcode formats via the dual-source reader (Admin SDK server action,
+ * falling back to the client SDK when that path is down — see master-data-resilient.ts).
  * Falls back to withLegacy([]) on error so callers always get a usable array.
  */
 export function useSafeBarcodeFormats(): State {
@@ -24,10 +25,10 @@ export function useSafeBarcodeFormats(): State {
     async function load() {
       setState(prev => ({ ...prev, loading: true, error: undefined }));
       try {
-        const { getBarcodeFormatsAction } = await import('@/actions/stokActions');
-        const items = await getBarcodeFormatsAction(currentCompanyId, isSuperAdmin ?? false) as BarcodeFormat[];
-        const sorted = items.slice().sort((a, b) => ((a as any).priority ?? 10) - ((b as any).priority ?? 10));
-        if (!canceled) setState({ formats: withLegacy(sorted), loading: false });
+        // İki kaynaklı okuma (Admin SDK → istemci SDK yedeği); bkz. master-data-resilient.ts.
+        const { fetchBarcodeFormatsResilient } = await import('@/lib/master-data-resilient');
+        const { items } = await fetchBarcodeFormatsResilient(currentCompanyId, isSuperAdmin ?? false);
+        if (!canceled) setState({ formats: withLegacy(items), loading: false });
       } catch (err: any) {
         if (!canceled) {
           setState({
