@@ -958,7 +958,7 @@ declare module "@/lib/types" {
   }
 
   // ---------- Spare Parts / Yedek Parça ----------
-  export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
+  export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return' | 'pending_approval';
   export type PersonalStockSource = 'depot' | 'device';
 
   export interface PersonalStockItem {

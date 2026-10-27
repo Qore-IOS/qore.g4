@@ -891,7 +891,7 @@ export interface PeriodicPartChangeStatus {
 export type PersonalStockSource = 'depot' | 'device';
 
 // Şahsi stoktaki yedek parça durumu
-export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return';
+export type PersonalStockStatus = 'in_stock' | 'used' | 'pending_return' | 'pending_approval';
 
 // Transfer log aksiyonları
 export type SparePartTransferAction =

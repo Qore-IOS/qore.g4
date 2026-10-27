@@ -507,7 +507,7 @@ export function validateManualLotPayload(
 ): { success: true; data: ManualLotPayload } | { success: false; errors: z.ZodError } {
   const result = ManualLotPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    return { success: true, data: { ...result.data, code: result.data.code, name: result.data.name, lot: result.data.lot, miad: result.data.miad, qty: result.data.qty } };
   }
   return { success: false, errors: result.error };
 }
@@ -522,7 +522,7 @@ export function validateManualQtyPayload(
 ): { success: true; data: ManualQtyPayload } | { success: false; errors: z.ZodError } {
   const result = ManualQtyPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    return { success: true, data: { ...result.data, code: result.data.code, name: result.data.name, qty: result.data.qty } };
   }
   return { success: false, errors: result.error };
 }
