@@ -2,13 +2,13 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import type { MinMaxRule, ProductCode, YedekParcaDepoStokItem } from '@/lib/types';
-import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, getDocs, Timestamp } from '../../../../../lib/data/client';
 import { ArrowLeft, CheckCircle2, ClipboardList, History, Loader2, Plus, RefreshCw, ShoppingCart, Trash2, Warehouse } from 'lucide-react';
 
 interface SparePartOrderItem {

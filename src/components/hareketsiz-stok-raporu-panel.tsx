@@ -1,8 +1,8 @@
 
 'use client';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, Timestamp, query, where, writeBatch, doc, orderBy } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, getDocs, Timestamp, query, where, writeBatch, doc, orderBy } from '../lib/data/client';
 import { format, subMonths, isValid } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -22,7 +22,7 @@ import type { DepoStokItem, Shipment, ConsumptionRecord, ProductCode } from '@/l
 import { Checkbox } from '@/components/ui/checkbox';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface ReportRow {

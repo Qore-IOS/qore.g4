@@ -3,14 +3,14 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, onSnapshot, orderBy, query, Timestamp, getDocs, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, orderBy, query, Timestamp, getDocs, limit } from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import type { Device, Hospital, ProductCode } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { differenceInMinutes, subMonths, format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { filterByCompanyScope } from '@/lib/company-scope';

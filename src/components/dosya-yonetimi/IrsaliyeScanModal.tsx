@@ -8,8 +8,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Scan, AlertTriangle, CheckCircle, Trash2, Wand2, FileText, Calendar, Building2 } from 'lucide-react';
 import { extractTextFromPdf, renderPdfPagesToImages } from '@/lib/pdf';
 import type { BekleyenIrsaliyeItem, ProductCode } from '@/lib/types';
-import { db } from '@/lib/firebase';
-import { addDoc, collection, Timestamp, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { addDoc, collection, Timestamp, deleteDoc, doc } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 

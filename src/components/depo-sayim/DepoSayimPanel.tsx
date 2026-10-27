@@ -2,12 +2,12 @@
 
 import React from 'react';
 import { useRouter } from 'next/navigation';
-import { getDocs, where } from 'firebase/firestore';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getDocs, where } from '../../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { isAvailableDepotStock } from '@/lib/stock-quantity';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useProductCodes, useHospitals, useLabPools, useDeviceLabPools, useAllMinMaxRules } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useHospitals, useLabPools, useDeviceLabPools, useAllMinMaxRules } from '@/hooks/useDatabaseQueries';
 import type { DepoStokItem, Depot } from '@/lib/types';
 import {
   AC, MlStyles, MlToast, MlPageHead, MLIco, useContainerMode, type Mode,

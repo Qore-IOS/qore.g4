@@ -2,10 +2,10 @@
 'use client';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { collection, onSnapshot, orderBy, query, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, orderBy, query, where } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import type { BarcodeFormat } from '@/lib/barcode';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 export function useBarcodeFormats() {
   const { currentCompanyId, isSuperAdmin } = useAuth();

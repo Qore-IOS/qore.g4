@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useStockUpdateListener } from '@/hooks/useFirebaseQueries';
+import { useStockUpdateListener } from '@/hooks/useDatabaseQueries';
 
 // Create a stable query client
 const queryClient = new QueryClient({

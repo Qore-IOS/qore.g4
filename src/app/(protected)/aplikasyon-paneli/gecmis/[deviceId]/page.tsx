@@ -2,8 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/auth-context';
 import { useParams, useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, query, where, orderBy, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from 'firebase/firestore';
+import { db } from '../../../../../lib/data/client';
+import { doc, getDoc, collection, query, where, orderBy, getDocs, limit, startAfter, QueryDocumentSnapshot, DocumentData } from '../../../../../lib/data/client';
 import type { Device, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
@@ -18,7 +18,7 @@ import { tr } from 'date-fns/locale';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import AplikasyonTutanakPDFButton from '@/components/exports/AplikasyonTutanakPDFButton';
 import { cn } from '@/lib/utils';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import PostClosurePartChangeButton from '@/components/PostClosurePartChangeButton';
 
 // Operation types

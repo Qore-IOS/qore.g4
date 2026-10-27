@@ -1,5 +1,6 @@
+import type * as DocumentStore from '../../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 import { normalizeCompanyId } from '@/lib/company-scope';
 
 const STOCK_CODE_CHUNK_SIZE = 30;
@@ -110,12 +111,12 @@ async function fetchIndexedDepotStockDocs(params: {
   stokKodlari: string[];
   companyId: string;
   isSuperAdmin: boolean;
-}): Promise<FirebaseFirestore.QueryDocumentSnapshot[]> {
+}): Promise<DocumentStore.QueryDocumentSnapshot[]> {
   const { depotId, stokKodlari, companyId, isSuperAdmin } = params;
   const codeChunks = chunkArray(stokKodlari, STOCK_CODE_CHUNK_SIZE);
   const companyScopes = !isSuperAdmin && companyId !== '__legacy__' ? [companyId, '__legacy__'] : [null];
   const snapshots = await Promise.all(companyScopes.flatMap((companyScope) => codeChunks.map((codes) => {
-    let query: FirebaseFirestore.Query = adminDb.collection('depoStok')
+    let query: DocumentStore.Query = adminDb.collection('depoStok')
       .where('depotId', '==', depotId)
       .where('isShipped', '==', false)
       .where('stokKodu', 'in', codes);
@@ -123,7 +124,7 @@ async function fetchIndexedDepotStockDocs(params: {
     return query.get();
   })));
 
-  const docsById = new Map<string, FirebaseFirestore.QueryDocumentSnapshot>();
+  const docsById = new Map<string, DocumentStore.QueryDocumentSnapshot>();
   snapshots.forEach((snapshot) => {
     snapshot.docs.forEach((doc) => docsById.set(doc.id, doc));
   });
@@ -159,7 +160,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, items: [], explanations: {}, totalNeeded: 0, itemCount: 0, indexed: true });
     }
 
-    let stockDocs: FirebaseFirestore.QueryDocumentSnapshot[] = [];
+    let stockDocs: DocumentStore.QueryDocumentSnapshot[] = [];
     try {
       stockDocs = await fetchIndexedDepotStockDocs({ depotId, stokKodlari: Array.from(wantedCodes), companyId, isSuperAdmin });
     } catch (error) {

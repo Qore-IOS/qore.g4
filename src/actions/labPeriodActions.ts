@@ -1,6 +1,8 @@
 'use server';
+import type * as DocumentStore from '../lib/data/admin';
 
-import { adminDb } from '@/lib/firebase-admin';
+
+import { adminDb } from '../lib/data/admin';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import {
   birlestir,
@@ -18,8 +20,8 @@ import {
 
 const KOLEKSIYON = 'labPeriodSnapshots';
 
-type AdminQuery = FirebaseFirestore.Query;
-type AdminDocSnap = FirebaseFirestore.QueryDocumentSnapshot;
+type AdminQuery = DocumentStore.Query;
+type AdminDocSnap = DocumentStore.QueryDocumentSnapshot;
 
 /** Şirket + `__legacy__` kapsamında sorgu çalıştırır (getScopedDocs'un Admin SDK karşılığı). */
 async function kapsamliCalistir(

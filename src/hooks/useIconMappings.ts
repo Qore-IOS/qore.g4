@@ -1,8 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { db } from '@/lib/firebase';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { doc, onSnapshot, setDoc } from '../lib/data/client';
 
 export interface IconMappings {
   dock: Record<string, string>;       // dock item key -> icon filename

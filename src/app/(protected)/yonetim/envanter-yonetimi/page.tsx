@@ -9,11 +9,11 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, doc, setDoc, deleteDoc, orderBy, query, writeBatch } from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { readExcelDataSmart, exportDataToExcel } from '@/lib/utils';
 import * as XLSX from 'xlsx';

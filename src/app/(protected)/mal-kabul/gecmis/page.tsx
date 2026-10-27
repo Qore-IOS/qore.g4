@@ -3,9 +3,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query } from 'firebase/firestore';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { db } from '../../../../lib/data/client';
+import { collection, doc, getDocs, orderBy, query } from '../../../../lib/data/client';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { exportDataToExcel } from '@/lib/utils';
 import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';

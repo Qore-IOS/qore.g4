@@ -4,8 +4,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../lib/data/client';
+import { db } from '../lib/data/client';
 import type { Device, Hospital, DeviceLabPool, MaintenanceDefinition, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
@@ -36,7 +36,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/contexts/auth-context';
 import DeviceLabPoolModal from '@/components/DeviceLabPoolModal';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { resolveDeviceLabPool } from '@/lib/maintenance';
 
 // Periyot birimi etiketleri

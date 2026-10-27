@@ -6,7 +6,7 @@ import type { Device, DeviceLabPool, Hospital, MaintenanceDefinition, Maintenanc
 import BakimTakipPanel from '@/components/bakim-takip-panel';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { useDeviceLabPools, useDevicesForLabs, useHospitals, useMaintenanceDefinitions, useMaintenanceLogs, useMaintenancePlans } from '@/hooks/useFirebaseQueries';
+import { useDeviceLabPools, useDevicesForLabs, useHospitals, useMaintenanceDefinitions, useMaintenanceLogs, useMaintenancePlans } from '@/hooks/useDatabaseQueries';
 import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
 
 export default function BakimTakipPage() {

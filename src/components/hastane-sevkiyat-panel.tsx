@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, doc, getDocs, serverTimestamp, setDoc } from 'firebase/firestore';
+import { collection, doc, getDocs, serverTimestamp, setDoc } from '../lib/data/client';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -17,14 +17,14 @@ import {
   Star,
   Truck,
 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { donemiYururlugeAl } from '@/lib/min-max-donem-guard';
-import { useDepots } from '@/hooks/useFirebaseQueries';
+import { useDepots } from '@/hooks/useDatabaseQueries';
 import type { MinMaxRule, ProductCode } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import {

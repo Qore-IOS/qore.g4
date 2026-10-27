@@ -15,7 +15,7 @@
  *
  * Gerçek gönderim modunda (`ORACLE_FILL_ONLY=0`) bu durum hiç oluşmaz.
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 
 const COLLECTION = 'ceomedIrsaliyeGirisJobs';
 
@@ -26,16 +26,13 @@ const tirnaksiz = (v) => {
 };
 
 async function main() {
-  const projectId = tirnaksiz(process.env.FIREBASE_PROJECT_ID);
+  const projectId = tirnaksiz(process.env.APP_BASE_URL);
   const companyId = tirnaksiz(process.env.CEOMED_COMPANY_ID);
   const yalnizcaListele = process.argv.includes('--listele');
 
-  if (!projectId) throw new Error('FIREBASE_PROJECT_ID tanımsız.');
+  if (!projectId) throw new Error('APP_BASE_URL tanımsız.');
 
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    projectId,
-  });
+  admin.initializeApp();
   const db = admin.firestore();
 
   let q = db.collection(COLLECTION).where('status', '==', 'awaiting_review');

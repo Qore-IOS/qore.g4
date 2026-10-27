@@ -15,11 +15,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, doc, getDocs, onSnapshot, updateDoc, query, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDocs, onSnapshot, updateDoc, query, orderBy } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, Hospital, Device, AssignedDevice, MinMaxRule } from '@/lib/types';
 import { useIsMobile } from '@/components/maliyet-gozlem/useIsMobile';

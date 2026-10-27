@@ -4,7 +4,7 @@ import React from 'react';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Truck, FileText, AlertCircle, PackagePlus, History as HistoryIcon } from 'lucide-react';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../../lib/data/client';
 import { cn } from '@/lib/utils';
 
 export type PartialDeliveryItem = {

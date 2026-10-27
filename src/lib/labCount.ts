@@ -1,12 +1,12 @@
 'use client';
-import { db } from '@/lib/firebase';
+import { db } from './data/client';
 import {
   collection,
   doc,
   setDoc,
   Timestamp,
   type WriteBatch,
-} from 'firebase/firestore';
+} from './data/client';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { OlcumGirdisi } from '@/lib/lab-period/types';
 

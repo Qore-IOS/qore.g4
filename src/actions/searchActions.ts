@@ -1,5 +1,7 @@
 'use server';
-import { adminDb } from '@/lib/firebase-admin';
+import type * as DocumentStore from '../lib/data/admin';
+
+import { adminDb } from '../lib/data/admin';
 import type { DepoStokItem, Shipment, ConsumptionRecord, Depot, ProductCode, User, Transfer } from '@/lib/types';
 import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 
@@ -455,7 +457,7 @@ export async function searchProductLedger(
   // `serialHistory` yalnızca olay akışıdır ve şirket etiketi taşımaz; defter
   // ise her `ürün kodu + seri no` çifti için tek, kapsamlı bir satır tutar.
   if (searchType === 'serial') {
-    let ledgerQuery: FirebaseFirestore.Query = adminDb
+    let ledgerQuery: DocumentStore.Query = adminDb
       .collection('serialLedger')
       .where('seriNumarasi', '==', needleOriginal);
     if (!isSuperAdmin) ledgerQuery = ledgerQuery.where('companyId', '==', normalizeCompanyId(companyId));

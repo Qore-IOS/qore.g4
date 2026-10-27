@@ -9,12 +9,12 @@ import {
   query,
   Timestamp,
   where,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
 import type { Order, ProductCode } from '@/lib/types';
 import {

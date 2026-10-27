@@ -26,13 +26,13 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import type { Order, OrderItem, DepoStokItem, ProductCode, PickingListItem as PickingListItemType, Shipment, ShipmentItem, DeviceGroup, Hospital, Depot, ConsumptionRecord } from '@/lib/types';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc, limit } from 'firebase/firestore';
+import { db } from '../../../../../lib/data/client';
+import { collection, doc, getDoc, writeBatch, serverTimestamp, query, where, getDocs, Timestamp, setDoc, limit } from '../../../../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { archiveCompletedOrderInBatch, getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useLoading } from '@/contexts/loading-context';
 import { parse as parseDate, compareAsc } from 'date-fns';

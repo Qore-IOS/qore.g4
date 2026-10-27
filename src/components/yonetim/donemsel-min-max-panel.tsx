@@ -1,12 +1,12 @@
 'use client';
 
 import React, { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, serverTimestamp, setDoc, writeBatch } from '../../lib/data/client';
 import { CalendarRange, Check, Download, FileSpreadsheet, Loader2, Plus, Save, Search, Upload, X } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
-import { useDepots, useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes } from '@/hooks/useDatabaseQueries';
 import { withCompanyScope } from '@/lib/company-scope';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import type { MinMaxPeriodConfig, MinMaxRule } from '@/lib/types';

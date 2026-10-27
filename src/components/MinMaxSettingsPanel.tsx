@@ -2,8 +2,8 @@
 'use client';
 import React, { useState, useEffect, useMemo, ChangeEvent } from 'react';
 import type { Depot, Hospital, ProductCode, MinMaxRule } from '@/lib/types';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, getDocs, writeBatch, addDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, doc, getDoc, getDocs, writeBatch, addDoc, serverTimestamp } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { Checkbox } from '@/components/ui/checkbox';

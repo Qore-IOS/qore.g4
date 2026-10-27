@@ -21,8 +21,8 @@ import {
   type DocumentData,
   type DocumentSnapshot,
   type WriteBatch,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from './data/client';
+import { db } from './data/client';
 
 export const ORDERS_COLLECTION = 'orders';
 export const ORDERS_ARCHIVE_COLLECTION = 'ordersArchive';

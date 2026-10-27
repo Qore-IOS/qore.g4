@@ -20,7 +20,7 @@ import {
   useRecentConsumption,
   useEfficiencyHistory,
   useInvalidateQueries,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 import { useToast } from '@/hooks/use-toast';
 
 /**

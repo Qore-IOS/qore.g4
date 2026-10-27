@@ -1,5 +1,6 @@
+import type * as DocumentStore from '../../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 import { normalizeCompanyId } from '@/lib/company-scope';
 
 /**
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
 
     let base = adminDb
       .collection('depoStok')
-      .where('isShipped', '==', true) as FirebaseFirestore.Query;
+      .where('isShipped', '==', true) as DocumentStore.Query;
     if (!body.isSuperAdmin && normalized !== '__legacy__') {
       base = base.where('companyId', '==', normalized);
     }
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     // labId → stokKodu → satır sayısı (sayfalı okuma — bellek güvenli)
     const counts = new Map<string, Map<string, number>>();
     let totalRows = 0;
-    let last: FirebaseFirestore.QueryDocumentSnapshot | null = null;
+    let last: DocumentStore.QueryDocumentSnapshot | null = null;
 
     for (;;) {
       let q = base.limit(PAGE_SIZE);

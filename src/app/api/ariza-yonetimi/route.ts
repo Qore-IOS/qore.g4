@@ -1,5 +1,6 @@
+import type * as DocumentStore from '../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../lib/data/admin';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 // Firestore Timestamp to Date converter
@@ -15,7 +16,7 @@ function convertTimestamp(timestamp: any): string | null {
 }
 
 // Serialize fault report data
-function serializeFaultReport(doc: FirebaseFirestore.DocumentSnapshot): any {
+function serializeFaultReport(doc: DocumentStore.DocumentSnapshot): any {
   const data = doc.data();
   if (!data) return null;
 

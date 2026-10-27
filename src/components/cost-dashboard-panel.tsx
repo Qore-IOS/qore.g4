@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query } from '../lib/data/client';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import type { ProductCode, Currency } from '@/lib/types';
 // exceljs is dynamically imported in handleExportExcel to avoid SSR/bundler issues
 import { PieChart, ResponsiveContainer, Pie, Cell, Tooltip as RechartsTooltip, LineChart, Line, XAxis, YAxis } from 'recharts';
@@ -30,7 +30,7 @@ import CapitalEfficiency from '@/components/cost-observation/CapitalEfficiency';
 import ExpiryRiskCard from '@/components/cost-observation/ExpiryRiskCard';
 import ProductGroupBreakdown from '@/components/cost-observation/ProductGroupBreakdown';
 import { useToast } from '@/hooks/use-toast';
-import { useMaliyetSayimSessions, useExchangeRates } from '@/hooks/useFirebaseQueries';
+import { useMaliyetSayimSessions, useExchangeRates } from '@/hooks/useDatabaseQueries';
 import {
   calculateTotalCostForRange,
   calculateTurnoverMetrics,

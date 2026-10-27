@@ -9,12 +9,12 @@ import {
   onSnapshot,
   query,
   where,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 // Turkey-wide bounds (no region restriction)
 const TURKEY_CENTER: [number, number] = [39.0, 35.0];

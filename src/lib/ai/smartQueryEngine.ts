@@ -8,7 +8,7 @@
  * → Lab stok durumu + Cihaz arizalari + Tuketim verileri + Verimlilik kayitlari
  */
 
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../data/admin';
 import { resolveEntities, extractQueryIntent, type ExtractedQueryIntent } from './entityResolver';
 import { QueryType, type QueryPlan } from './queryPlanner';
 import { aiLogger } from '@/lib/logger';

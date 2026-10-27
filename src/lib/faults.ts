@@ -2,14 +2,14 @@
 
 
 'use client';
-import { db } from '@/lib/firebase';
+import { db } from './data/client';
 import {
   addDoc, collection, doc, serverTimestamp, Timestamp, updateDoc, getDoc, writeBatch, query, where, getDocs
-} from 'firebase/firestore';
+} from './data/client';
 import { createNotification, emitFaultOpened, emitFaultTransferred } from '@/lib/notifications';
 import type { DeviceFaultStatus, InterventionType } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 export type DeviceFaultEventType = 'opened' | 'note' | 'status_change' | 'closed' | 'assigned' | 'intervention_started' | 'location_verified';
 

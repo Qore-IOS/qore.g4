@@ -9,12 +9,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { PlusCircle, Edit3, Trash2, Loader2, Users, Bell, ShieldAlert, Search, Building2, ShieldCheck } from 'lucide-react';
-import { collection, getDocs, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, setDoc, deleteDoc, doc } from '@/lib/data/client';
+import { db } from '@/lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { User as AppUser, Hospital, Depot, AppView, ProductCode, Company } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { VIEWS } from '@/lib/constants';
 import { Checkbox } from '@/components/ui/checkbox';
 import BackButton from '@/components/BackButton';
@@ -79,7 +79,7 @@ const DEFAULT_ROLE_VIEW_PRESETS: Partial<Record<string, AppView[]>> = {
 
 export default function KullaniciPanel() {
   const { toast } = useToast();
-  const { signup, currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
+  const { currentUserProfile, isSuperAdmin, currentCompanyId } = useAuth();
   const [users, setUsers] = useState<AppUser[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [depots, setDepots] = useState<Depot[]>([]);
@@ -90,7 +90,6 @@ export default function KullaniciPanel() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentUser, setCurrentUser] = useState<Partial<AppUser & { notificationsEnabled?: boolean; notificationPreferences?: NotificationTypeUI[] }>>({});
-  const [password, setPassword] = useState('');
 
   const fetchData = useCallback(async () => {
     setIsLoading(true);
@@ -164,7 +163,6 @@ export default function KullaniciPanel() {
         assignedLabGroups: [],
       });
     }
-    setPassword('');
     setIsModalOpen(true);
   };
 
@@ -210,12 +208,8 @@ export default function KullaniciPanel() {
         await setDoc(doc(db, 'users', currentUser.uid), payload, { merge: true });
         toast({ title: 'Başarılı', description: 'Kullanıcı güncellendi.' });
       } else {
-        if (!password) {
-          toast({ title: 'Hata', description: 'Yeni kullanıcı için şifre zorunludur.', variant: 'destructive' });
-          setIsLoading(false);
-          return;
-        }
-        await signup(currentUser.email, password, withCompanyScope(payload, currentUser.companyId || currentUserProfile?.companyId));
+        const ref=doc(collection(db,'users'));
+        await setDoc(ref,{...payload,uid:ref.id,email:currentUser.email,createdAt:new Date()});
         toast({ title: 'Başarılı', description: 'Yeni kullanıcı oluşturuldu.' });
       }
       fetchData();
@@ -228,7 +222,7 @@ export default function KullaniciPanel() {
   };
 
   const handleDelete = async (uid: string) => {
-    if (confirm('Bu kullanıcıyı silmek istediğinizden emin misiniz? Bu işlem, kullanıcının sadece Firestore veritabanı kaydını siler. Girişini engellemek için Firebase Authentication panelinden de silmeniz gerekir.')) {
+    if (confirm('Bu personel kaydını silmek istediğinizden emin misiniz?')) {
       await deleteDoc(doc(db, 'users', uid));
       toast({ title: 'Silindi', description: 'Kullanıcı veritabanından silindi.', variant: 'destructive' });
       fetchData();
@@ -440,7 +434,6 @@ export default function KullaniciPanel() {
               <CardContent className="space-y-3">
                 <Input placeholder="Adı Soyadı" value={currentUser.name || ''} onChange={(e) => setCurrentUser({ ...currentUser, name: e.target.value })} />
                 <Input placeholder="E-posta" type="email" value={currentUser.email || ''} onChange={(e) => setCurrentUser({ ...currentUser, email: e.target.value })} disabled={!!currentUser.uid} />
-                {!currentUser.uid && <Input placeholder="Şifre" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />}
 
                 <div className="space-y-2">
                   <Label>Rol</Label>

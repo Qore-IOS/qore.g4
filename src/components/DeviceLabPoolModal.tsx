@@ -9,11 +9,11 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Loader2, Users, FlaskConical, Trash2, Edit3, Plus, ArrowLeft, Server } from 'lucide-react';
-import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, Timestamp, query, orderBy, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, Timestamp, query, orderBy, where } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import type { Hospital, Device, DeviceLabPool } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 

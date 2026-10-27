@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Building2, CalendarClock, ChevronLeft, ChevronRight, Eye, History, Loader2, Package2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import {
   onSnapshot,
   orderBy,
@@ -13,13 +13,13 @@ import {
   getDocsFromServer,
   getCountFromServer,
   type QueryDocumentSnapshot,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { Transfer, Depot, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import BackButton from '@/components/BackButton';
 import { transferGecmisLogger } from '@/lib/logger';
 import {

@@ -14,7 +14,7 @@
  *   node backfillCompanyId.js
  *
  * Gerekli env:
- *   GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID
+ *   GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL
  *   CEOMED_COMPANY_ID  (pendingCeomedIrsaliye için bu env kullanılır)
  *
  * ceomedDepoStok: her doküman bir depot.id ile eşleştiği için companyId
@@ -22,14 +22,11 @@
  *
  * Idempotent: companyId zaten yazılmış kayıtlar atlanır.
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }

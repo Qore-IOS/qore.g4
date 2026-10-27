@@ -1,8 +1,8 @@
 'use client';
 import { extractTextFromPdf, renderPdfPagesToImages } from '@/lib/pdf';
 import type { BekleyenIrsaliyeItem, ProductCode } from '@/lib/types';
-import { addDoc, collection, Timestamp, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { addDoc, collection, Timestamp, deleteDoc, doc } from './data/client';
+import { db } from './data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 
 /**

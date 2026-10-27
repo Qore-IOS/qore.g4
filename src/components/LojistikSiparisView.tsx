@@ -1,3 +1,4 @@
+import type * as DocumentStore from '../lib/data/admin';
 'use client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
@@ -12,12 +13,12 @@ import {
   getDocs,
   serverTimestamp,
   updateDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/document-helpers';
 import { ORDERS_ARCHIVE_COLLECTION, mergeOrdersById } from '@/lib/orders-archive';
-import { useHospitals, useProductCodes, useDepots } from '@/hooks/useFirebaseQueries';
+import { useHospitals, useProductCodes, useDepots } from '@/hooks/useDatabaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import type { Order, Hospital, ProductCode, DepoStokItem, PeripheralFulfillmentItem, Depot } from '@/lib/types';
 import { format as formatDate, compareAsc, parse as parseDate } from 'date-fns';
@@ -379,7 +380,7 @@ export default function LojistikSiparisView() {
         // Primary key: hedefKurumId. Fallback for legacy docs missing that field:
         // match by hedefKurum (hospital name or 'ad' alias). isShipped filter is
         // applied client-side so no composite index is required.
-        const queryPromises: Array<Promise<FirebaseFirestore.QuerySnapshot> | null> = [];
+        const queryPromises: Array<Promise<DocumentStore.QuerySnapshot> | null> = [];
         queryPromises.push(
           getDocs(scopedQuery('depoStok', currentCompanyId, isSuperAdmin, where('hedefKurumId', '==', hospital.id))) as any
         );

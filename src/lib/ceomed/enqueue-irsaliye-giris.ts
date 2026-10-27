@@ -22,7 +22,7 @@ import {
   where,
   type Firestore,
   type WriteBatch,
-} from 'firebase/firestore';
+} from '../data/client';
 
 import {
   buildIrsaliyeGirisDoc,

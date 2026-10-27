@@ -2,19 +2,19 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import UrunKullanimIstatistikPanel from '@/components/urun-kullanim-istatistik-panel';
-import { db } from '@/lib/firebase';
+import { db } from '../../../lib/data/client';
 import {
   collection,
   getDocs,
   query,
   where,
   Timestamp
-} from 'firebase/firestore';
+} from '../../../lib/data/client';
 import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 

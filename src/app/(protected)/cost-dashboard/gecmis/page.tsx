@@ -3,8 +3,8 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { doc, getDocs, orderBy, limit, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { db } from '../../../../lib/data/client';
+import { doc, getDocs, orderBy, limit, serverTimestamp, updateDoc } from '../../../../lib/data/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2, History, Search, ChevronRight, ArrowLeft,
@@ -16,7 +16,7 @@ import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { useToast } from '@/hooks/use-toast';

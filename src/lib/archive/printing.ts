@@ -1,7 +1,7 @@
 'use client';
 
-import { db } from '@/lib/firebase';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { db } from '../data/client';
+import { addDoc, collection, serverTimestamp } from '../data/client';
 import type { Rack } from '@/lib/types';
 import { todayYmd } from './rack-utils';
 

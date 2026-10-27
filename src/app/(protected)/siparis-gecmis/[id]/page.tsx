@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { collection, doc, getDoc, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDoc, Timestamp } from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import { getOrderDocWithArchiveFallback } from '@/lib/orders-archive';
 import { useToast } from '@/hooks/use-toast';
 

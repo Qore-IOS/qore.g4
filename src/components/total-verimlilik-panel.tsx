@@ -80,11 +80,11 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { LabSelector } from '@/components/common/LabSelector';
 import { Label } from '@/components/ui/label';
-import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup, addDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, query, orderBy, doc, setDoc, getDoc, Timestamp, where, collectionGroup, addDoc, onSnapshot, serverTimestamp } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
+import { getScopedDocs, scopedQuery } from '@/lib/document-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { LabDonemSnapshot, OlcumGirdisi } from '@/lib/lab-period/types';

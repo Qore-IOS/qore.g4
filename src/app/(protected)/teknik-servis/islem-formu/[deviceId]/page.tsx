@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '../../../../../lib/data/client';
+import { doc, getDoc, collection, addDoc, serverTimestamp, query, getDocs, where, orderBy, updateDoc, Timestamp, writeBatch, setDoc, deleteDoc } from '../../../../../lib/data/client';
 import type { Device, Hospital, ProductCode, User, MaintenancePlan, MaintenanceLog, PersonalStockItem, PeriodicPartChange, PeriodicPartChangeLog, MaintenancePeriodUnit, FaultDefinition, DraftActionLog, PoolWarehouseStockItem, Depot, DeviceLabPool, YedekParcaDepoStokItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { WizardFormSkeleton } from '@/components/perf/PanelSkeletons';
@@ -42,7 +42,7 @@ import {
   useMinMaxRules,
   useMaintenancePlansForDevice,
   useMaintenanceLogsForDevice,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 
 // Operation types (Yapılan İşlem)
 type OperationType =
@@ -345,7 +345,7 @@ export default function IslemFormuPage() {
 
   // Periodic part changes for periyodik bakım — kept as raw fetches because the
   // form submission writes to the same collections and we don't yet expose a
-  // shared cache invalidation contract for those (see useFirebaseQueries TODO).
+  // shared cache invalidation contract for those (see useDatabaseQueries TODO).
   const [periodicPartChanges, setPeriodicPartChanges] = useState<PeriodicPartChange[]>([]);
   const [periodicPartChangeLogs, setPeriodicPartChangeLogs] = useState<PeriodicPartChangeLog[]>([]);
   const [selectedPeriodicParts, setSelectedPeriodicParts] = useState<string[]>([]);
@@ -599,7 +599,7 @@ export default function IslemFormuPage() {
     return raw.map((data) => ({
       ...data,
       id: data.id,
-      // useFirebaseQueries already runs processTimestamp; guard for legacy data.
+      // useDatabaseQueries already runs processTimestamp; guard for legacy data.
       completedAt: data.completedAt instanceof Date
         ? data.completedAt
         : (data.completedAt?.toDate ? data.completedAt.toDate() : new Date(data.completedAt)),
@@ -1260,7 +1260,7 @@ export default function IslemFormuPage() {
     }
   };
 
-  // Upload removed part image to Firebase Storage with timeout
+  // Upload removed part image to dosya deposu with timeout
   const uploadPartImage = async (file: File, pathPrefix: 'removed-parts' | 'used-parts'): Promise<string | null> => {
     setIsUploadingImage(true);
     try {

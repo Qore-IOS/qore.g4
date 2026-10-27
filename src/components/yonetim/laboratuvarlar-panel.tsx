@@ -1,8 +1,8 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import type { Depot, Hospital, ProductCode, AddressDefinition, LabPool, DepoStokItem, EfficiencyPool } from '@/lib/types';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc, where } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc, writeBatch, Timestamp, query, orderBy, updateDoc, where } from '../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -25,9 +25,9 @@ import ProductOrderModal from '@/components/ProductOrderModal';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { useHospitals, useProductCodes, useAddressDefinitions, useLabPools, useEfficiencyPools, useDepots } from '@/hooks/useFirebaseQueries';
+import { useHospitals, useProductCodes, useAddressDefinitions, useLabPools, useEfficiencyPools, useDepots } from '@/hooks/useDatabaseQueries';
 
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {

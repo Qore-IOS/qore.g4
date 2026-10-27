@@ -36,10 +36,10 @@ import type {
 import { ActivitiesPanel, InsightsCard, MiniStat, SectionHeader, Card, KpiBreakdownModal, type KpiBreakdownRow } from './primitives';
 import { formatCompactTL } from './charts';
 import { useIsMobile } from './useIsMobile';
-import { collection, getDocs, query, orderBy, where, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, query, orderBy, where, Timestamp } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { getLatestByLocation, getSessionDate, type SayimSession } from '@/lib/cost-analytics';

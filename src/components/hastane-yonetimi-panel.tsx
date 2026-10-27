@@ -12,11 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, getDocs, doc, deleteDoc, getDocFromServer, writeBatch, Timestamp } from '../lib/data/client';
 import type { DepoStokItem, Laboratory, MinMaxRule } from '@/lib/types';
 import { Loader2, Search, ListChecks, History, FileSpreadsheet, MoreVertical, Eye, AlertCircle, AlertTriangle, Upload, CheckCircle, Pencil, Check, X, Trash2, ChevronDown, ChevronUp } from 'lucide-react';
-import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { touchStockMetadata, useLabStock, useLabPools, useHospitals, useProductCodes, useInvalidateQueries } from '@/hooks/useDatabaseQueries';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
@@ -591,7 +591,7 @@ export default function LaboratuvarYonetimiPanel({ appearance = 'default' }: Lab
         // All deletions failed
         toast({
           title: 'Silme Başarısız',
-          description: `Kayıtlar silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.`,
+          description: `Kayıtlar silinemedi. Veritabanı veya sunucu bağlantısını kontrol edin. Lütfen yönetici ile iletişime geçin.`,
           variant: 'destructive'
         });
       } else if (failCount > 0) {

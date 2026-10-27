@@ -1,9 +1,9 @@
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs, deleteDoc, doc, query, where, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, deleteDoc, doc, query, where, orderBy } from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import type { MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device, Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import BackButton from '@/components/BackButton';

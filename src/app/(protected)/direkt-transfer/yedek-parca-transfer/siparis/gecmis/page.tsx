@@ -2,12 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { collection, getDocs, Timestamp } from 'firebase/firestore';
+import { collection, getDocs, Timestamp } from '../../../../../../lib/data/client';
 import { ArrowLeft, ClipboardList, History, Loader2, RefreshCw } from 'lucide-react';
 
 interface SparePartOrderHistoryRow {

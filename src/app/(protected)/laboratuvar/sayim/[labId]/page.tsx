@@ -2,13 +2,13 @@
 'use client';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import {
   collection, doc, getDocs, where, Timestamp, writeBatch, getDoc, updateDoc,
-} from 'firebase/firestore';
+} from '../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
   Loader2,

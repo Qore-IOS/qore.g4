@@ -21,9 +21,9 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { doc, getDoc, onSnapshot } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot } from '../lib/data/client';
 import { useEffect } from 'react';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { normalizeCompanyId } from '@/lib/company-scope';

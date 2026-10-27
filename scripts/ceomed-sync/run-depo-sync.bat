@@ -31,12 +31,9 @@ if not defined CEOMED_PAROLA (
   echo [HATA] CEOMED_PAROLA tanimli degil. >> sync-depo.log
   exit /b 1
 )
-if not defined GOOGLE_APPLICATION_CREDENTIALS (
-  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> sync-depo.log
-  exit /b 1
-)
-if not defined FIREBASE_PROJECT_ID (
-  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> sync-depo.log
+
+if not defined APP_BASE_URL (
+  echo [HATA] APP_BASE_URL tanimli degil. >> sync-depo.log
   exit /b 1
 )
 

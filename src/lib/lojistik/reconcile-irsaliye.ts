@@ -15,7 +15,7 @@
  *     vs. partially delivered.
  */
 
-import { db } from "@/lib/firebase";
+import { db } from "../data/client";
 import {
   collection,
   doc,
@@ -26,11 +26,11 @@ import {
   updateDoc,
   where,
   writeBatch,
-} from "firebase/firestore";
+} from "../data/client";
 import { archiveCompletedOrderInBatch } from "@/lib/orders-archive";
 import type { Order } from "@/lib/types";
 import { emitOrderReconciled } from "@/lib/notifications";
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   planReconciliation,
   type AcceptedItem,

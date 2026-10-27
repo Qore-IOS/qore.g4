@@ -1,5 +1,6 @@
+import type * as DocumentStore from '../../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 
 /**
  * Transfer Raporu API
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest) {
     // Build query for transfers — company-scoped (cross-tenant isolation)
     let query = adminDb.collection('transfers')
       .where('sourceDepotId', '==', sourceDepotId)
-      .where('mode', '==', 'lab') as FirebaseFirestore.Query;
+      .where('mode', '==', 'lab') as DocumentStore.Query;
     if (!isSuperAdmin) {
       const normalizedCompanyId = (companyId && companyId.trim()) || '__legacy__';
       query = query.where('companyId', '==', normalizedCompanyId);

@@ -21,7 +21,7 @@
  * gets a "if nothing found, try widening" pass for free.
  */
 
-import type { Query, DocumentData, Firestore } from 'firebase-admin/firestore';
+import type { Query, DocumentData, Firestore } from '../../data/admin';
 import { aiLogger } from '@/lib/logger';
 
 export type FilterOp = '==' | '<=' | '>=' | '<' | '>' | '!=';

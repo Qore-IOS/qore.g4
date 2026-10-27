@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Dot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { LiquidGlassSurface } from '@/components/ui/liquid-glass';
 import { useAuth } from '@/contexts/auth-context';
-import { usePurchasingTasks } from '@/hooks/useFirebaseQueries';
+import { usePurchasingTasks } from '@/hooks/useDatabaseQueries';
 
 const MONTHS = [
   'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',

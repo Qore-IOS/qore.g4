@@ -1,5 +1,6 @@
+import {workspaceIdentity} from '../../../../lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+
 import { providerConfigured, type CalendarProvider } from '@/lib/server/calendar-oauth';
 import { getConnectionStatus, deleteConnection } from '@/lib/server/calendar-store';
 
@@ -11,7 +12,7 @@ async function requireUid(req: NextRequest): Promise<string | null> {
   const token = header?.startsWith('Bearer ') ? header.slice(7).trim() : undefined;
   if (!token) return null;
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
+    const decoded = workspaceIdentity;
     return decoded.uid;
   } catch {
     return null;

@@ -3,16 +3,16 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Order } from '@/lib/types';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import {
   collection, query, where, orderBy, limit,
   onSnapshot, updateDoc, doc, deleteDoc,
   serverTimestamp, Timestamp,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots } from '@/hooks/useFirebaseQueries';
+import { useDepots } from '@/hooks/useDatabaseQueries';
 import { useToast } from '@/hooks/use-toast';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { LOJISTIK_SEVKIYAT_PATH } from '@/lib/lojistik/navigation';
 import LojistikSiparisView from '@/components/LojistikSiparisView';

@@ -6,12 +6,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch';
 import type { ProductCode, Currency } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { doc, addDoc, collection, getDocs, query, where, updateDoc, writeBatch } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { CostInput } from './CostInput';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import TrackingModeSelect from './TrackingModeSelect';
 import { TrackingMode, resolveDefaultTrackingMode, TRACKING_MODE_LABEL } from '@/lib/tracking';
 import BarcodeFormatSelect from './BarcodeFormatSelect';

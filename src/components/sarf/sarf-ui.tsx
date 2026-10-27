@@ -5,16 +5,15 @@
    birebir uygulama içi karşılığı. Krem/bej claymorphism. */
 
 import React from 'react';
-import { Plus_Jakarta_Sans } from 'next/font/google';
+import localFont from 'next/font/local';
 import QRCodeLib from 'qrcode';
 import { IconSearch, IconQr, IconCheck } from './sarf-icons';
 import type { SarfTransferItem } from '@/lib/types';
 import './sarf-theme.css';
 
-export const sarfFont = Plus_Jakarta_Sans({
-  subsets: ['latin', 'latin-ext'],
-  weight: ['400', '500', '600', '700', '800'],
-  display: 'swap',
+export const sarfFont = localFont({
+ src: [{path:'../../../node_modules/@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-wght-normal.woff2'},{path:'../../../node_modules/@fontsource-variable/plus-jakarta-sans/files/plus-jakarta-sans-latin-ext-wght-normal.woff2'}],
+ weight:'200 800',display:'swap',
 });
 
 /* Tek sıcak aksan paleti (demo "Kum") */

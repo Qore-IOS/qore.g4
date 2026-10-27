@@ -30,7 +30,7 @@ import {
 } from "./ui/sidebar";
 import Image from "next/image";
 import { useIconMappings, getIconSrc } from "@/hooks/useIconMappings";
-import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers, useHospitals } from "@/hooks/useFirebaseQueries";
+import { useProductCodes, useBarcodeFormatsQuery, useDepots, useAddressDefinitions, useUsers, useHospitals } from "@/hooks/useDatabaseQueries";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -49,14 +49,10 @@ import {
 } from "@/components/ui/tooltip";
 import { AnimatePresence } from "framer-motion";
 import { CalendarDockPanel } from "./dock/CalendarDockPanel";
-import { PushNotificationsErrorBoundary } from "./PushNotificationsErrorBoundary";
 import dynamic from 'next/dynamic';
 
 const MobileDock = dynamic(() => import('./MobileDock'), { ssr: false });
-const PushNotificationsClient = dynamic(
-  () => import("./PushNotificationsClient"),
-  { ssr: false }
-);
+
 const QoreTechnicShell = dynamic(() => import('./qore-technic-shell'), { ssr: false });
 const LojistikTerminalShell = dynamic(() => import('./lojistik-terminal-shell'), { ssr: false });
 
@@ -142,7 +138,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (!isLoadingAuth && !currentUser) {
-      router.replace("/login");
+      router.replace("/dashboard");
     }
   }, [currentUser, isLoadingAuth, router]);
 
@@ -164,9 +160,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <>
         <MasterDataPrefetch />
-        <PushNotificationsErrorBoundary>
-          <PushNotificationsClient />
-        </PushNotificationsErrorBoundary>
         <PresenceManager />
         <AutoRedirectOnLogin />
         <PersistentNotificationToast />
@@ -181,9 +174,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <>
         <MasterDataPrefetch />
-        <PushNotificationsErrorBoundary>
-          <PushNotificationsClient />
-        </PushNotificationsErrorBoundary>
         <PresenceManager />
         <AutoRedirectOnLogin />
         <OnlyUsageAutoRedirect />
@@ -203,9 +193,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <>
         <MasterDataPrefetch />
-        <PushNotificationsErrorBoundary>
-          <PushNotificationsClient />
-        </PushNotificationsErrorBoundary>
         <PresenceManager />
         <AutoRedirectOnLogin />
         <OnlyUsageAutoRedirect />
@@ -228,9 +215,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     return (
       <SidebarProvider>
         <MasterDataPrefetch />
-        <PushNotificationsErrorBoundary>
-          <PushNotificationsClient />
-        </PushNotificationsErrorBoundary>
         <Sidebar>
           <SidebarHeader>
             <div className="flex items-center gap-2 p-2">
@@ -334,9 +318,6 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen flex-col items-center">
       <MasterDataPrefetch />
       <PresenceManager />
-      <PushNotificationsErrorBoundary>
-        <PushNotificationsClient />
-      </PushNotificationsErrorBoundary>
       <AutoRedirectOnLogin />
       <OnlyUsageAutoRedirect />
       <main className="flex w-full flex-1 flex-col items-center">

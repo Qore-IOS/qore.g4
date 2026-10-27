@@ -11,10 +11,10 @@ import type { ProductCode } from '@/lib/types';
 import { CameraCapture } from './CameraCapture';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp, where } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, query, orderBy, onSnapshot, Timestamp, where } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {

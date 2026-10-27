@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, CheckCircle, Trash2, ChevronRight, Inbox, FileText, Wand2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 import {
   collection,
   onSnapshot,
@@ -14,12 +14,12 @@ import {
   doc,
   writeBatch,
   deleteDoc,
-} from 'firebase/firestore';
+} from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import type { BekleyenIrsaliye, BekleyenIrsaliyeItem } from '@/lib/types';
-import { touchStockMetadata, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { touchStockMetadata, useInvalidateQueries } from '@/hooks/useDatabaseQueries';
 import { normalizeMiad } from '@/lib/date';
 import { generateId } from '@/lib/utils';
 import TimestampText from '@/components/TimestampText';

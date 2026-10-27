@@ -15,10 +15,10 @@
  *   2. Siparişin kapanışı (tam karşılandıysa arşive, kısmiyse `kismi`)
  */
 
-import { doc, serverTimestamp, type WriteBatch } from 'firebase/firestore';
+import { doc, serverTimestamp, type WriteBatch } from '../data/client';
 import { compareAsc, parse as parseDate } from 'date-fns';
 
-import { db } from '@/lib/firebase';
+import { db } from '../data/client';
 import { archiveCompletedOrderInBatch } from '@/lib/orders-archive';
 import { getStockItemQuantity } from '@/lib/stock-quantity';
 import { aggregateOrderItemsByProduct } from '@/lib/siparisler/picking';

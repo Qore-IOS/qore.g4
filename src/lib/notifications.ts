@@ -1,7 +1,7 @@
 
 "use client";
 
-import { db } from "@/lib/firebase";
+import { db } from "./data/client";
 import {
   addDoc,
   collection,
@@ -9,8 +9,8 @@ import {
   updateDoc,
   doc,
   arrayUnion,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
+} from "./data/client";
+import { getAuth } from "./workspace";
 
 async function readCompanyIdFromClaims(): Promise<string | undefined> {
   try {

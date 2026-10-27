@@ -1,6 +1,7 @@
 'use server';
 
-import { adminDb } from '@/lib/firebase-admin';
+
+import { adminDb } from '../lib/data/admin';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import {
   DEFAULT_MIN_MAX_PERIOD_CONFIG,

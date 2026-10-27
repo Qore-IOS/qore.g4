@@ -20,14 +20,14 @@ import { cn } from '@/lib/utils';
 import { motion } from 'framer-motion';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
+import { useDailyConsumptionStats } from '@/hooks/useDatabaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getDocs, Timestamp, orderBy, limit as fsLimit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, query, where, getDocs, Timestamp, orderBy, limit as fsLimit } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';
@@ -36,7 +36,7 @@ import {
   useDeviceFaultReports,
   usePurchasingTasks,
   useExpiringProductsCount
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
 

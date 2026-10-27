@@ -5,12 +5,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogC
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { PlusCircle, Trash2, Loader2, MapPin } from 'lucide-react';
-import { collection, getDocs, addDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, deleteDoc, doc } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { AddressDefinition } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 

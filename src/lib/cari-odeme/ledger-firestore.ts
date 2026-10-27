@@ -1,4 +1,4 @@
-import { db } from "../firebase";
+import { db } from "../data/client";
 import {
   collection,
   doc,
@@ -11,9 +11,9 @@ import {
   orderBy,
   runTransaction,
   serverTimestamp,
-} from "firebase/firestore";
+} from "../data/client";
 import type { LedgerEntry } from "./finance-types";
-import { getScopedDocs, scopedQuery } from "../firestore-helpers";
+import { getScopedDocs, scopedQuery } from "../document-helpers";
 
 const LEDGER_COLLECTION = "cariLedgerEntries";
 const FIRMALAR_COLLECTION = "cariFirmalar";

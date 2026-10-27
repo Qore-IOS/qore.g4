@@ -44,8 +44,8 @@ export const PATTERNS = {
   /** Transaction ID pattern */
   TRANSACTION_ID: /^MK-[A-Za-z0-9]{8,20}$/,
   /** Firebase document ID pattern */
-  FIREBASE_DOC_ID: /^[A-Za-z0-9]{20}$/,
-  /** User ID (Firebase UID) pattern */
+  DOCUMENT_ID: /^[A-Za-z0-9_-]{1,128}$/,
+  /** User ID (Personel kimliği) pattern */
   USER_ID: /^[A-Za-z0-9]{20,128}$/,
   /** Email pattern */
   EMAIL: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,

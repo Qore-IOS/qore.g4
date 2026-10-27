@@ -23,9 +23,9 @@ import {
   writeBatch,
   type WriteBatch,
   type DocumentReference,
-} from 'firebase/firestore';
+} from '../data/client';
 
-import { db } from '@/lib/firebase';
+import { db } from '../data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 import { normalizeMiad } from '@/components/common/ExpiryDateInput';

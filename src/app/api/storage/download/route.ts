@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 // Side-effect import to ensure admin SDK is initialized
-import '@/lib/firebase-admin';
+import '../../../../lib/data/admin';
 import { resolveStorageBucket } from '@/lib/server/storage-bucket';
 
 

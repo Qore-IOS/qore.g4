@@ -11,7 +11,7 @@ import {
   setDoc,
   updateDoc,
   where,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
@@ -31,14 +31,14 @@ import {
   Send,
   Star,
 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 import { donemiYururlugeAl } from '@/lib/min-max-donem-guard';
-import { useDepots } from '@/hooks/useFirebaseQueries';
+import { useDepots } from '@/hooks/useDatabaseQueries';
 import type {
   BrandDefinition,
   MinMaxRule,

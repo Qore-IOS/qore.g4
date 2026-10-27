@@ -1,12 +1,12 @@
 'use client';
 
 import React, { useMemo, useState } from 'react';
-import { addDoc, collection, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { addDoc, collection, serverTimestamp, Timestamp } from '../lib/data/client';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ArrowLeft, Plus, Search, User } from 'lucide-react';
 import type { Device, DeviceLabPool, Hospital, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '@/lib/types';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';

@@ -38,7 +38,6 @@ export const VIEWS: { key: string; label: string; icon: React.ElementType; type:
 export const DOCK_ACTIONS: { key: string; label: string; icon: React.ElementType; type: 'action' }[] = [
   { key: 'notifications', label: 'Bildirimler', icon: Bell, type: 'action' },
   { key: 'theme', label: 'Temayı Değiştir', icon: Moon, type: 'action' },
-  { key: 'logout', label: 'Çıkış Yap', icon: LogOut, type: 'action' },
 ];
 
 

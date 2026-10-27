@@ -13,7 +13,7 @@
  *
  * `def_*` tanım koleksiyonları kasıtlı olarak ORTAKTIR: kuralları
  * `isSignedIn()` (şirket filtresi yok) ve istemci tarafında
- * `GLOBAL_DEFINITION_COLLECTIONS` (src/lib/firestore-helpers.ts) üzerinden
+ * `GLOBAL_DEFINITION_COLLECTIONS` (src/lib/document-helpers.ts) üzerinden
  * şirketten bağımsız sorgulanırlar. Bunlara companyId yazmak bugün etkisiz,
  * yarın biri kuralı sıkılaştırırsa markaların/grupların tek şirkete hapsolması
  * demek.

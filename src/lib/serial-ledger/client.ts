@@ -20,8 +20,8 @@ import {
   where,
   writeBatch,
   type WriteBatch,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../data/client';
+import { db } from '../data/client';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import {
   buildSerialLedgerId,

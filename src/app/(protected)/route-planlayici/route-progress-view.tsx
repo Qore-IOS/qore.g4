@@ -5,7 +5,7 @@ import { Check, Circle, MapPin, Navigation } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import type { Timestamp } from 'firebase/firestore';
+import type { Timestamp } from '../../../lib/data/client';
 
 type RouteStop = {
   order: number;

@@ -1,5 +1,6 @@
+import type * as DocumentStore from '../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../lib/data/admin';
 
 function toIsoString(value: any): string | null {
   if (!value) return null;
@@ -14,9 +15,9 @@ const LAB_IDS_IN_CHUNK_SIZE = 30;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
 
-type HistoryOrder = FirebaseFirestore.DocumentData & { id: string };
+type HistoryOrder = DocumentStore.DocumentData & { id: string };
 
-function getCreatedAtMillis(order: FirebaseFirestore.DocumentData): number {
+function getCreatedAtMillis(order: DocumentStore.DocumentData): number {
   if (typeof order.createdAt?.toDate === 'function') return order.createdAt.toDate().getTime();
   if (order.createdAt?._seconds) return order.createdAt._seconds * 1000;
   if (order.createdAt instanceof Date) return order.createdAt.getTime();
@@ -40,7 +41,7 @@ function uniqueById(orders: HistoryOrder[]): HistoryOrder[] {
   });
 }
 
-function isProductRequestOrder(order: FirebaseFirestore.DocumentData): boolean {
+function isProductRequestOrder(order: DocumentStore.DocumentData): boolean {
   if (!Array.isArray(order.items)) return false;
   if (!order.requestSource) return !!order.labId; // Legacy product requests did not persist requestSource.
   if (order.requestSource === 'depot_to_office') return !!order.depotId || order.isDepotRequest === true;

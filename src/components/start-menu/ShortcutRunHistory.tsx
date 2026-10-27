@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, addDoc, limit, onSnapshot, orderBy, query as firestoreQuery, serverTimestamp, where } from 'firebase/firestore';
+import { collection, addDoc, limit, onSnapshot, orderBy, query as firestoreQuery, serverTimestamp, where } from '../../lib/data/client';
 import { AlertCircle, FileText, Play, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 import { cn } from '@/lib/utils';
 
 type TimestampLike = { toDate?: () => Date; seconds?: number } | Date | string | number | null | undefined;

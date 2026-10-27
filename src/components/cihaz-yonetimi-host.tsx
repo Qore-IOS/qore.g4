@@ -13,7 +13,7 @@ import {
   useAplikasyonActionForms,
   useMaintenancePlans,
   useMaintenanceLogs,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 import {
   Building,
   School,
@@ -35,8 +35,8 @@ import {
   ClayPage, Card, KpiTile, GhostBtn, NavBtn, PageHead, C, AC, PAL,
 } from '@/components/cihaz-yonetimi/clay-kit';
 import { useToast } from '@/hooks/use-toast';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { addDoc, collection, serverTimestamp } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
 import QoreAIPanel from '@/components/QoreAIPanel';

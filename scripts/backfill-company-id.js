@@ -25,12 +25,12 @@
  *     GOOGLE_APPLICATION_CREDENTIALS -> service account JSON'un GERÇEK yolu
  *   Var olmayan bir yol verilirse script ne yapılacağını söyleyerek durur.
  *
- *   FIREBASE_PROJECT_ID isteğe bağlıdır; verilmezse `.firebaserc` kullanılır.
+ *   APP_BASE_URL isteğe bağlıdır; verilmezse `.firebaserc` kullanılır.
  */
-const admin = require('firebase-admin');
+const admin = require('./db/script-store.cjs');
 const fs = require('fs');
 const path = require('path');
-const { initAdmin } = require('./lib/firebase-project');
+const { initAdmin } = require('./lib/database-project');
 const { NEVER_SCOPE, discoverCollections } = require('./lib/tenant-collections');
 
 const LEGACY_TAG = '__legacy__';

@@ -31,13 +31,13 @@
  *
  * Env (.env):
  *   CEOMED_BASE_URL, CEOMED_EPOSTA, CEOMED_PAROLA
- *   GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID, CEOMED_COMPANY_ID
+ *   GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL, CEOMED_COMPANY_ID
  *   CEOMED_WATCH_IRSALIYE_SEC   (varsayılan 60)  irsaliye yoklama aralığı
  *   CEOMED_WATCH_DEPO_SEC       (varsayılan 120) depo stoğu yoklama aralığı
  *   CEOMED_WATCH_LOOKBACK_DAYS  (varsayılan 7)   irsaliye taramasında geriye bakış
  *   CEOMED_AUTO_TRANSFER        (varsayılan 1)   0 ise otomatik lab aktarımı kapalı
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 const { login } = require('./login');
 const { fetchIrsaliyeMaster } = require('./fetchIrsaliyeMaster');
 const { fetchOkutulanBarkod } = require('./fetchOkutulanBarkod');
@@ -71,10 +71,7 @@ const errLog = (tag, msg) => console.error(`[${ts()}] [${tag}] ${msg}`);
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }

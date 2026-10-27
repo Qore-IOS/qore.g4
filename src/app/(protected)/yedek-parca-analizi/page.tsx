@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { where, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { where, Timestamp } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import { Search, Building2, X } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -14,7 +14,7 @@ import { useRouter } from 'next/navigation';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import {
   ClayPage, PageHead, Card, CardHead, KpiTile, MiniInfo, Pill, GhostBtn,
   ClaySearch, HBar, ClayLoader, C, PAL, useMode, fmtInt,
@@ -71,30 +71,7 @@ interface PartDetail {
   changeHistory: ChangeHistoryEntry[];
 }
 
-function logFirestoreIndexHint(error: unknown, context: string) {
-  const err = (error as { message?: string; code?: string; name?: string } | null) || {};
-  const message = err.message || '';
-  const code = err.code || 'unknown';
-  const name = err.name || 'UnknownError';
-  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
-
-  console.error(`[${context}] Firestore sorgu hatası`, { code, name, message });
-
-  if (indexUrlMatch) {
-    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
-    return;
-  }
-
-  if (code === 'failed-precondition') {
-    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
-    console.error(`[${context}] Hata mesajında otomatik index linki bulunamadı. Firebase Console > Firestore > Indexes bölümünden kontrol edin.`);
-    return;
-  }
-
-  if (code.includes('cors') || message.toLowerCase().includes('cors') || message.includes('ERR_FAILED') || message.includes('302')) {
-    console.error(`[${context}] Bu hata index değil, ağ/CORS/proxy kaynaklı görünüyor. Index linki bu yüzden üretilemiyor.`);
-  }
-}
+function logDatabaseError(error:unknown,context:string){console.error(`[${context}] Veritabanı sorgusu başarısız`,error);}
 
 export default function YedekParcaAnaliziPage() {
   const router = useRouter();
@@ -270,7 +247,7 @@ export default function YedekParcaAnaliziPage() {
               })
         );
       } catch (error) {
-        logFirestoreIndexHint(error, 'yedek-parca-analizi/fetchData');
+        logDatabaseError(error, 'yedek-parca-analizi/fetchData');
         console.error('Yedek parça analizi veri hatası:', error);
       } finally {
         setLoading(false);
@@ -374,7 +351,7 @@ export default function YedekParcaAnaliziPage() {
         changeHistory,
       });
     } catch (error) {
-      logFirestoreIndexHint(error, 'yedek-parca-analizi/selectPart');
+      logDatabaseError(error, 'yedek-parca-analizi/selectPart');
       console.error('Parça detay hatası:', error);
     } finally {
       setDetailLoading(false);

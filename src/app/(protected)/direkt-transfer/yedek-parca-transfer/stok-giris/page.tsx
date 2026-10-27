@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import {
   collection,
   getDocs,
@@ -12,10 +12,10 @@ import {
   addDoc,
   setDoc,
   updateDoc,
-} from 'firebase/firestore';
+} from '../../../../../lib/data/client';
 import type { ProductCode } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';

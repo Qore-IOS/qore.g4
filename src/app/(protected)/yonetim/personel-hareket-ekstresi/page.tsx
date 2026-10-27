@@ -4,11 +4,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   collection, getDocs, query, where, orderBy, limit, startAfter,
   DocumentData, Query, QueryConstraint, QueryDocumentSnapshot
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   Card, CardHeader, CardTitle, CardDescription, CardContent
 } from '@/components/ui/card';

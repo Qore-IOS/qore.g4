@@ -1,10 +1,10 @@
 'use client';
 import { useState } from 'react';
-import { getDocs, where } from 'firebase/firestore';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { getDocs, where } from '../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes } from '@/hooks/useDatabaseQueries';
 import type { Depot, DepoStokItem } from '@/lib/types';
 import {
   findLastDepoSayimV2Session, buildPreCountLeftoverPreview, applyPreCountLeftoverBackfill,

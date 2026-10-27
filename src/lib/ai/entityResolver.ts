@@ -7,7 +7,7 @@
  * - Turkce karakter ve yazim hatalarini tolere eder
  */
 
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../data/admin';
 import { aiLogger } from '@/lib/logger';
 
 // ============================================

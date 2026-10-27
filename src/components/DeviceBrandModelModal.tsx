@@ -10,13 +10,13 @@ import {
   Loader2, Plus, Trash2, Edit3, ArrowLeft, ChevronRight,
   Upload, Download, Search, X, Server, Check,
 } from 'lucide-react';
-import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, deleteDoc, updateDoc, doc, serverTimestamp } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { cn, readExcelData, exportDataToExcel } from '@/lib/utils';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 // ============================================================================
 // TYPES

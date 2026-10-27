@@ -11,7 +11,7 @@
  * firestore.rules bu koleksiyona tüm client erişimini reddeder; yalnızca
  * Admin SDK (bu dosya) okuyup yazabilir.
  */
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../data/admin';
 import {
   type CalendarProvider,
   encryptToken,
@@ -51,7 +51,7 @@ export async function saveConnection(
 
 export async function deleteConnection(uid: string, provider: CalendarProvider): Promise<void> {
   const ref = adminDb.collection(COLLECTION).doc(uid);
-  const FieldValue = (await import('firebase-admin')).firestore.FieldValue;
+  const {FieldValue} = await import('../data/admin');
   await ref.set({ [provider]: FieldValue.delete() }, { merge: true });
 }
 

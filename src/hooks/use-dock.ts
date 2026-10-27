@@ -13,7 +13,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { VIEWS, DOCK_ACTIONS } from "@/lib/constants";
-import { db } from "@/lib/firebase";
+import { db } from "../lib/data/client";
 import { trackListener } from "@/lib/listener-monitor";
 import {
   collection,
@@ -25,7 +25,7 @@ import {
   updateDoc,
   doc,
   arrayUnion,
-} from "firebase/firestore";
+} from "../lib/data/client";
 import type { NotificationDoc } from "@/lib/notifications";
 import {
   Bell,
@@ -68,7 +68,7 @@ import {
 } from "lucide-react";
 import type { AppView } from "@/lib/types";
 import { playNotificationSound } from "@/lib/utils";
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 export type NotificationItem = { id: string } & NotificationDoc;
 

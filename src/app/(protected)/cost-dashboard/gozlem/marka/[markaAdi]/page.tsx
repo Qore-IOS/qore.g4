@@ -2,12 +2,12 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { getDocs, orderBy } from 'firebase/firestore';
+import { getDocs, orderBy } from '../../../../../../lib/data/client';
 import { ArrowLeft, FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useDatabaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import type { Currency, ProductCode } from '@/lib/types';
 import { getLatestByLocation, getProductCostInCurrency, getSessionDate, type SayimSession } from '@/lib/cost-analytics';

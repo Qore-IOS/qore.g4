@@ -20,14 +20,14 @@ import {
   orderBy,
   serverTimestamp,
   updateDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../../../../../lib/data/client';
+import { db } from '../../../../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { Hospital, LabPool, PersonnelCostConfig } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 const CONFIG_COLLECTION = 'personnelCostConfig';
 

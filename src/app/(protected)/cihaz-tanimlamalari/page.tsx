@@ -4,11 +4,11 @@ import React, { useState, useEffect } from 'react';
 import CihazTanimlamaClient from '@/components/CihazTanimlamaClient';
 import { getDeviceImages } from '@/actions/stokActions';
 import { Loader2 } from 'lucide-react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import type { Hospital } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 
 export default function CihazTanimlamalariPage() {

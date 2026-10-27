@@ -21,7 +21,7 @@
  * Bu betik yalnızca kuyruğa YAZAR. Formu doldurmak ve göndermek worker'ın işi;
  * `ORACLE_FILL_ONLY=1` iken gönderim yapılmaz.
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 
 const COLLECTION = 'ceomedIrsaliyeGirisJobs';
 
@@ -53,10 +53,10 @@ function varsayilanIrsaliyeNo() {
 }
 
 async function main() {
-  const projectId = tirnaksiz(process.env.FIREBASE_PROJECT_ID);
+  const projectId = tirnaksiz(process.env.APP_BASE_URL);
   const companyId = tirnaksiz(process.env.CEOMED_COMPANY_ID);
 
-  if (!projectId) throw new Error('FIREBASE_PROJECT_ID tanımsız.');
+  if (!projectId) throw new Error('APP_BASE_URL tanımsız.');
   if (!companyId) throw new Error('CEOMED_COMPANY_ID tanımsız — worker işi bulamaz.');
 
   const irsaliyeNo = argOku('irsaliye-no', varsayilanIrsaliyeNo());
@@ -85,10 +85,7 @@ async function main() {
     );
   }
 
-  admin.initializeApp({
-    credential: admin.credential.applicationDefault(),
-    projectId,
-  });
+  admin.initializeApp();
   const db = admin.firestore();
 
   const bugun = new Date().toISOString().slice(0, 10); // YYYY-MM-DD

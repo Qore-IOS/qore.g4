@@ -2,11 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { collection, doc, getDoc, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs } from '../../../../../lib/data/client';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Check, Download, Loader2, X } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';

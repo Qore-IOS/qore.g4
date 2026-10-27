@@ -7,7 +7,7 @@ import {
   getDocs,
   Timestamp,
   type Firestore,
-} from 'firebase/firestore';
+} from './data/client';
 
 import {
   Document,

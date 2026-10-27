@@ -33,7 +33,7 @@
 import type { BarcodeFormat } from '@/lib/barcode';
 import type { ProductCode } from '@/lib/types';
 import { fetchBarcodeFormats, fetchProductCodes } from '@/lib/master-data';
-import { firebaseLogger } from '@/lib/logger';
+import { databaseLogger } from '@/lib/logger';
 
 export type MasterDataResult<T> = {
   items: T[];
@@ -64,14 +64,14 @@ async function readWithFallback<T>(
     return { items: await viaServerAction(), degraded: false };
   } catch (actionError) {
     const reason = describe(actionError);
-    firebaseLogger.warn(
+    databaseLogger.warn(
       `${label}: sunucu tarafı (Admin SDK) okuma başarısız, Web SDK yedeğine düşülüyor`,
       { reason },
     );
     try {
       return { items: await viaWebSdk(), degraded: true, reason };
     } catch (webSdkError) {
-      firebaseLogger.error(`${label}: Web SDK yedeği de başarısız`, webSdkError, { reason });
+      databaseLogger.error(`${label}: Web SDK yedeği de başarısız`, webSdkError, { reason });
       throw new Error(`${label} okunamadı. Sunucu: ${reason} · İstemci: ${describe(webSdkError)}`);
     }
   }

@@ -28,7 +28,7 @@
  *   ORACLE_DRY_RUN=0 node oracleIrsaliyeWorker.js
  *
  * Env (.env):
- *   GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID, CEOMED_COMPANY_ID
+ *   GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL, CEOMED_COMPANY_ID
  *   ORACLE_DRY_RUN            (varsayılan 1)  0 = gerçekten gönder
  *   ORACLE_FILL_ONLY          (varsayılan 0)  1 = formu doldur, gönderme;
  *                              operatör onayına kadar sıradakini beklet
@@ -45,7 +45,7 @@
  *   CEOMED_CIKIS_BELGE_TIPI   (varsayılan 0)  çıkış irsaliyelerinin belge tipi;
  *                              verify-irsaliye.bat --kesfet ile ölçülür
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 const os = require('os');
 
 const { COLLECTION, validateJob, describeJob } = require('./lib/irsaliyeJob');
@@ -57,7 +57,7 @@ const num = (v, def) => {
 };
 
 // .env, `run-oracle-worker.bat` içinde `set "%A=%B"` ile yükleniyor; değer
-// tırnaklı yazılmışsa TIRNAK DEĞERİN PARÇASI olur. Sahada FIREBASE_PROJECT_ID
+// tırnaklı yazılmışsa TIRNAK DEĞERİN PARÇASI olur. Sahada APP_BASE_URL
 // `"invpilot"` diye yüklendi, worker o adda bir proje arayıp
 // `PERMISSION_DENIED` aldı ve hata mesajındaki tırnaklar Google'ın
 // biçimlendirmesi sanıldığı için sebep uzun süre görünmedi.
@@ -65,7 +65,7 @@ const num = (v, def) => {
 // Yapılandırma değerlerinin hiçbiri meşru olarak tırnakla başlayıp bitmez,
 // dolayısıyla soymak güvenlidir.
 for (const anahtar of [
-  'FIREBASE_PROJECT_ID', 'CEOMED_COMPANY_ID', 'GOOGLE_APPLICATION_CREDENTIALS',
+  'APP_BASE_URL', 'CEOMED_COMPANY_ID', 'GOOGLE_APPLICATION_CREDENTIALS',
   'ORACLE_DRY_RUN', 'ORACLE_FILL_ONLY', 'ORACLE_DRIVER', 'ORACLE_PYTHON',
   'ORACLE_MAX_ATTEMPTS', 'ORACLE_MAX_PER_DAY', 'ORACLE_STALE_CLAIM_MIN',
   'ORACLE_POLL_SEC', 'ORACLE_ALLOW_POST_QUANTITY_WARNING', 'ORACLE_DATE_SEP',
@@ -149,10 +149,7 @@ function formKirliBekleniyorMu() {
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }
@@ -576,8 +573,8 @@ async function main() {
     log('kapalı', 'Oracle/Ceomed yazma entegrasyonu acil devre kesiciyle kapalı. Hiçbir kuyruk işi alınmayacak.');
     return;
   }
-  if (!process.env.FIREBASE_PROJECT_ID) {
-    throw new Error('FIREBASE_PROJECT_ID env değişkeni zorunlu.');
+  if (!process.env.APP_BASE_URL) {
+    throw new Error('APP_BASE_URL env değişkeni zorunlu.');
   }
 
   const db = initFirestore();

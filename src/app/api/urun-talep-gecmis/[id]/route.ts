@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 
 function toIsoString(value: any): string | null {
   if (!value) return null;

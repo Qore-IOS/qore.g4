@@ -8,16 +8,13 @@
  *
  * Günde 1 kez çalıştırılması önerilir.
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 const { login } = require('./login');
 const { fetchMerkezDepoListesi, extractDepoStock } = require('./fetchMerkezDepoListesi');
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }

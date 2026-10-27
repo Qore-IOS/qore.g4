@@ -1,9 +1,12 @@
-
 'use server';
+import type * as DocumentStore from '../lib/data/admin';
+import {workspaceIdentity} from '../lib/workspace';
 
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
-import { db } from '@/lib/firebase';
+
+
+import { adminDb } from '../lib/data/admin';
+import { FieldValue } from '../lib/data/admin';
+import { db } from '../lib/data/server-client';
 import type { DepoStokItem } from '@/lib/types';
 import {
   collection,
@@ -19,20 +22,20 @@ import {
   setDoc,
   getDoc,
   serverTimestamp,
-} from 'firebase/firestore';
+} from '../lib/data/server-client';
 import { safeCompareByMiad, toDateSafe } from "@/lib/date";
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { filterByCompanyScope, matchesCompanyScope, matchesScopedQueryCompany, normalizeCompanyId } from '@/lib/company-scope';
 import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
-import { chunkForIn } from '@/lib/firestore-chunk';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { chunkForIn } from '@/lib/document-chunk';
+import { scopedQuery } from '@/lib/document-helpers';
 import fs from 'fs/promises';
 import path from 'path';
 
 // ─── Admin SDK scoping helper ────────────────────────────────────────────────
 // Mirrors getScopedDocs queries 1+2 (company + legacy) but skips the unscoped
 // fallback which reads entire collections through IndexedDB on the client.
-type AdminDocSnap = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
+type AdminDocSnap = DocumentStore.QueryDocumentSnapshot<DocumentStore.DocumentData>;
 
 /**
  * Deep-convert Admin SDK Firestore values (Timestamp, GeoPoint, DocumentRef)
@@ -390,7 +393,7 @@ export async function getLabCountStockForPeriod(
         ref.where('year', '==', year).where('month', '==', monthIndex).get(),
       ]);
 
-      const sessions = new Map<string, FirebaseFirestore.DocumentData>();
+      const sessions = new Map<string, DocumentStore.DocumentData>();
       for (const snap of [byPeriod, byYearMonth]) {
         snap.docs.forEach(d => sessions.set(d.id, d.data()));
       }
@@ -515,7 +518,7 @@ export async function getCihazUstuForPeriod(
   try {
     const base = adminDb.collection('cihazUstuGecmisi');
     const runScoped = async (
-      build: (q: FirebaseFirestore.Query) => FirebaseFirestore.Query,
+      build: (q: DocumentStore.Query) => DocumentStore.Query,
     ): Promise<AdminDocSnap[]> => {
       if (isSuperAdmin) return (await build(base).get()).docs as AdminDocSnap[];
       const normalized = normalizeCompanyId(companyId);
@@ -927,7 +930,7 @@ export async function getToplamaBootstrapData(
     ] as const;
 
     // Build depoStok queries (depot filter + field projection)
-    const makeDepoStokQuery = (extraWhere?: [string, FirebaseFirestore.WhereFilterOp, string]) => {
+    const makeDepoStokQuery = (extraWhere?: [string, DocumentStore.WhereFilterOp, string]) => {
       let q = adminDb.collection('depoStok').where('depotId', '==', depotId);
       if (extraWhere) q = q.where(extraWhere[0], extraWhere[1], extraWhere[2]);
       return q.select(...depoStokSelectFields);
@@ -1292,7 +1295,7 @@ export async function getRecoverableTransferredLabStock(
   // partilere bölünerek tüm üyeler kapsanır.
   const ids = Array.from(new Set(labIds.filter(Boolean)));
   if (ids.length === 0) return [];
-  const decoded = await adminAuth.verifyIdToken(idToken);
+  const decoded = workspaceIdentity;
   const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
   const userData = userSnap.data() as Record<string, any> | undefined;
   const role = String(decoded.role ?? userData?.role ?? '');
@@ -1444,7 +1447,7 @@ export async function cleanupDuplicateDepotSerials(params: {
   };
   if (!depotId) return empty;
 
-  const decoded = await adminAuth.verifyIdToken(idToken);
+  const decoded = workspaceIdentity;
   const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
   const userData = userSnap.data() as Record<string, any> | undefined;
   const role = String(decoded.role ?? userData?.role ?? '');
@@ -1477,7 +1480,7 @@ export async function cleanupDuplicateDepotSerials(params: {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  const operations: Array<{ type: 'delete' | 'normalize'; ref: FirebaseFirestore.DocumentReference }> = [];
+  const operations: Array<{ type: 'delete' | 'normalize'; ref: DocumentStore.DocumentReference }> = [];
   let duplicateSerialCount = 0;
   let deletedDocumentCount = 0;
   let removedUnitCount = 0;
@@ -1584,8 +1587,8 @@ export async function getPaginatedDepotStock(params: {
   const isCeomedDepot = !!(depotDoc.exists && (depotDoc.data() as any)?.ceomedEnabled);
 
   let allItems: DepoStokItem[] = [];
-  let rulesSnap: FirebaseFirestore.QuerySnapshot;
-  let productsSnap: FirebaseFirestore.QuerySnapshot;
+  let rulesSnap: DocumentStore.QuerySnapshot;
+  let productsSnap: DocumentStore.QuerySnapshot;
 
   if (isCeomedDepot) {
     // Ceomed entegre depo: ceomedDepoStok/{depotId} dokümanından oku
@@ -1990,7 +1993,7 @@ function archivedDocMillis(data: Record<string, any>): number {
  * dropped. The detail screen re-reads the full doc by id when the user opens a
  * specific order, so detail data is never downloaded until then.
  */
-function summarizeArchivedDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+function summarizeArchivedDoc(d: DocumentStore.QueryDocumentSnapshot): Record<string, any> {
   const data = d.data();
   const items = Array.isArray(data.items) ? data.items : [];
   const kalemCount = items.length;
@@ -2050,7 +2053,7 @@ export async function getArchivedOrders(
   const fromMs = fromDate ? fromDate.getTime() : 0;
   const toMs = toDate ? toDate.getTime() : Number.POSITIVE_INFINITY;
 
-  type Cand = { doc: FirebaseFirestore.QueryDocumentSnapshot; ms: number };
+  type Cand = { doc: DocumentStore.QueryDocumentSnapshot; ms: number };
 
   const passesDateFilter = (ms: number) =>
     (fromMs === 0 || ms >= fromMs) && (toMs === Number.POSITIVE_INFINITY || ms <= toMs);
@@ -2073,12 +2076,12 @@ export async function getArchivedOrders(
   // back to a depot-only read + in-memory status filter.
   const fetchLeftoverCompleted = async (): Promise<Cand[]> => {
     const base = adminDb.collection('orders').where('depotId', '==', depotId);
-    let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+    let docs: DocumentStore.QueryDocumentSnapshot[];
     try {
       docs = (await base.where('status', '==', 'completed').limit(1000).get())
-        .docs as FirebaseFirestore.QueryDocumentSnapshot[];
+        .docs as DocumentStore.QueryDocumentSnapshot[];
     } catch {
-      docs = ((await base.limit(1000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      docs = ((await base.limit(1000).get()).docs as DocumentStore.QueryDocumentSnapshot[])
         .filter(d => d.data().status === 'completed');
     }
     return docs
@@ -2089,7 +2092,7 @@ export async function getArchivedOrders(
   const hasFilters = !!(term || labTerm || fromDate || toDate);
 
   try {
-    let archiveColl: FirebaseFirestore.Query = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
+    let archiveColl: DocumentStore.Query = adminDb.collection('ordersArchive').where('depotId', '==', depotId);
 
     // Apply Firestore-side date range to the archive query when filters are set.
     // This keeps the scanned set small before the in-memory text filter runs.
@@ -2102,7 +2105,7 @@ export async function getArchivedOrders(
     // while keeping the fetch bounded (SCAN_CAP docs max).
     if (hasFilters) {
       const SCAN_CAP = 1000;
-      let archiveDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+      let archiveDocs: DocumentStore.QueryDocumentSnapshot[];
       try {
         archiveDocs = (await archiveColl.orderBy('archivedAt', 'desc').limit(SCAN_CAP).get()).docs as any;
       } catch {
@@ -2130,7 +2133,7 @@ export async function getArchivedOrders(
     }
 
     // No filters: cursor pagination over archive first, then leftovers.
-    let archivePage: FirebaseFirestore.QueryDocumentSnapshot[];
+    let archivePage: DocumentStore.QueryDocumentSnapshot[];
     try {
       let q = archiveColl.orderBy('archivedAt', 'desc');
       // Admin SDK, Timestamp alani icin JS Date'i kabul eder.
@@ -2138,7 +2141,7 @@ export async function getArchivedOrders(
       archivePage = (await q.limit(pageSize + 1).get()).docs as any;
     } catch {
       // Composite index missing — read a capped window and page in memory.
-      const all = ((await archiveColl.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      const all = ((await archiveColl.limit(2000).get()).docs as DocumentStore.QueryDocumentSnapshot[])
         .map(d => ({ doc: d, ms: archivedDocMillis(d.data()) }))
         .filter(c => c.ms < boundaryMs)
         .sort((a, b) => b.ms - a.ms);
@@ -2193,7 +2196,7 @@ export interface CompletedShipmentFilters {
 }
 
 /** Bir shipment dokümanını hafif kart özetine indirger (items detayı taşınmaz). */
-function summarizeShipmentDoc(d: FirebaseFirestore.QueryDocumentSnapshot): Record<string, any> {
+function summarizeShipmentDoc(d: DocumentStore.QueryDocumentSnapshot): Record<string, any> {
   const data = d.data();
   const items = Array.isArray(data.items) ? data.items : [];
   const kalemCount = items.length;
@@ -2275,16 +2278,16 @@ export async function getCompletedShipments(
     if (needsScan) {
       // Arama: eşitlik filtreleriyle (depotId + lab) sınırlı geniş pencere tara,
       // tarih/arama/cursor'ı bellekte uygula.
-      let scanBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      let scanBase: DocumentStore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
       if (lab) scanBase = scanBase.where('recipientHospital', '==', lab);
       const SCAN_CAP = 1500;
-      let docs: FirebaseFirestore.QueryDocumentSnapshot[];
+      let docs: DocumentStore.QueryDocumentSnapshot[];
       try {
         docs = (await scanBase.orderBy('timestamp', 'desc').limit(SCAN_CAP).get()).docs as any;
       } catch {
         docs = (await scanBase.limit(SCAN_CAP).get()).docs as any;
       }
-      const all = (docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      const all = (docs as DocumentStore.QueryDocumentSnapshot[])
         .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
         .filter(c => passesDate(c.ms) && passesSearch(c.doc.data()))
         .sort((a, b) => b.ms - a.ms);
@@ -2299,12 +2302,12 @@ export async function getCompletedShipments(
 
     // Filtresiz VEYA yalnızca lab/tarih: gerçek cursor sayfalama.
     // base = depotId [+ recipientHospital==lab] [+ timestamp aralığı]
-    let base: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+    let base: DocumentStore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
     if (lab) base = base.where('recipientHospital', '==', lab);
     if (fromDate) base = base.where('timestamp', '>=', fromDate);
     if (toDate) base = base.where('timestamp', '<=', toDate);
 
-    let pageDocs: FirebaseFirestore.QueryDocumentSnapshot[];
+    let pageDocs: DocumentStore.QueryDocumentSnapshot[];
     try {
       let q = base.orderBy('timestamp', 'desc');
       if (Number.isFinite(boundaryMs)) q = q.startAfter(new Date(boundaryMs));
@@ -2312,9 +2315,9 @@ export async function getCompletedShipments(
     } catch {
       // Bileşik indeks yoksa: yalnızca eşitlik filtreleriyle pencere çekip
       // tarih + cursor'ı bellekte uygula (range+orderBy indeksi gerektirmez).
-      let eqBase: FirebaseFirestore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
+      let eqBase: DocumentStore.Query = adminDb.collection('shipments').where('depotId', '==', depotId);
       if (lab) eqBase = eqBase.where('recipientHospital', '==', lab);
-      const all = ((await eqBase.limit(2000).get()).docs as FirebaseFirestore.QueryDocumentSnapshot[])
+      const all = ((await eqBase.limit(2000).get()).docs as DocumentStore.QueryDocumentSnapshot[])
         .map(d => ({ doc: d, ms: shipmentMillis(d.data()) }))
         .filter(c => passesDate(c.ms) && c.ms < boundaryMs)
         .sort((a, b) => b.ms - a.ms);

@@ -1,6 +1,6 @@
 /**
  * Development-only listener monitoring to detect infinite loops
- * This helps catch runaway Firebase listeners before they cause production issues
+ * This helps catch runaway document listeners before they cause production issues
  */
 
 interface ListenerEntry {
@@ -11,7 +11,7 @@ interface ListenerEntry {
 const listenerRegistry = new Map<string, ListenerEntry>();
 
 /**
- * Track Firebase listener lifecycle events
+ * Track document listener lifecycle events
  * @param componentName - Name of the component/hook creating the listener
  * @param action - Whether the listener is being created or cleaned up
  */

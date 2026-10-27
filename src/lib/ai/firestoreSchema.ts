@@ -90,7 +90,7 @@ export const FIRESTORE_COLLECTIONS = {
   users: {
     description: 'Kullanıcı profilleri ve yetkileri',
     fields: {
-      uid: 'Firebase Auth kullanıcı kimliği',
+      uid: 'Personel kayıt kimliği',
       email: 'E-posta adresi',
       role: "Rol ('admin' | 'user' | 'teknik_servis' | 'aplikasyon' | 'teknisyen')",
       name: 'Kullanıcı adı',

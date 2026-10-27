@@ -3,14 +3,14 @@ import React, { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import type { Hospital, Device, AssignedDevice, DeviceLabPool } from '@/lib/types';
 import { useToast } from "@/hooks/use-toast";
-import { collection, doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, setDoc, serverTimestamp } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import {
   useHospitals,
   useDevicesForLabs,
   useDeviceLabPools,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 import AplikasyonPanel from '@/components/aplikasyon-panel';
 import { HospitalGridPanelSkeleton } from '@/components/perf/PanelSkeletons';
 import { Download, Upload } from 'lucide-react';

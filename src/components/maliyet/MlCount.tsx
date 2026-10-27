@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { collection, getDocs, addDoc, serverTimestamp } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { OlcumGirdisi } from '@/lib/lab-period/types';

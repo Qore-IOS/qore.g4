@@ -11,7 +11,7 @@
  * from useAuth().
  */
 
-import { db } from '@/lib/firebase';
+import { db } from './data/client';
 import {
   collection,
   doc,
@@ -22,7 +22,7 @@ import {
   where,
   orderBy,
   Timestamp,
-} from 'firebase/firestore';
+} from './data/client';
 import { format, startOfDay, endOfDay, eachDayOfInterval } from 'date-fns';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import type { DailyConsumptionStats, ConsumptionRecord } from '@/lib/types';

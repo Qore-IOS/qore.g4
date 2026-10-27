@@ -66,7 +66,7 @@ const config = {
 
   // Experimental features
   experimental: {
-    serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas"],
+    serverComponentsExternalPackages: ["@napi-rs/canvas", "canvas", "pg", "@electric-sql/pglite"],
     // PERF (Faz 1): Barrel paketlerden yalnızca kullanılan export'ları al →
     // paylaşılan/rota bundle'larını küçültür. lucide-react 268 dosyada import
     // ediliyor; date-fns/recharts/framer-motion ağır barrel'lar.

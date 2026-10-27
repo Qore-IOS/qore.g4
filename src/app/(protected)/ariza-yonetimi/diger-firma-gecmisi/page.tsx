@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, onSnapshot, orderBy, query, Timestamp, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, orderBy, query, Timestamp, deleteDoc, doc } from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import {
   Card,
   CardHeader,
@@ -41,7 +41,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   AlertDialog,
   AlertDialogAction,

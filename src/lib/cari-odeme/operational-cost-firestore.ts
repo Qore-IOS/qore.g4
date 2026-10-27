@@ -1,4 +1,4 @@
-import { db } from "../firebase";
+import { db } from "../data/client";
 import {
   collection,
   doc,
@@ -7,9 +7,9 @@ import {
   orderBy,
   where,
   type QueryConstraint,
-} from "firebase/firestore";
+} from "../data/client";
 import type { OperationalCostLink } from "./operational-cost-types";
-import { getScopedDocs } from "../firestore-helpers";
+import { getScopedDocs } from "../document-helpers";
 import { withCompanyScope } from "../company-scope";
 import type { Scope } from "./firestore";
 

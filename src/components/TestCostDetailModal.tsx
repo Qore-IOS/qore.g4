@@ -7,8 +7,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Loader2, AlertCircle, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { collection, getDocs, query, orderBy, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, query, orderBy, where } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import {
   calculateTestCost,
   calculateSystemTotal,
@@ -27,7 +27,7 @@ import type {
   Currency,
 } from '../lib/types';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { fetchDepoStokCounts, aggregateDepoStokRows } from '@/lib/depo-stok-ozet';

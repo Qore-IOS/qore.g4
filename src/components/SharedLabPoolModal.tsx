@@ -1,9 +1,9 @@
 'use client';
 import React, { useEffect, useMemo, useState } from 'react';
-import { db } from '@/lib/firebase';
-import { addDoc, collection, getDocs, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { addDoc, collection, getDocs, Timestamp } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';

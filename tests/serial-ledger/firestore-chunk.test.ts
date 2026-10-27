@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chunkForIn, FIRESTORE_IN_LIMIT } from '../../src/lib/firestore-chunk';
+import { chunkForIn, FIRESTORE_IN_LIMIT } from '../../src/lib/document-chunk';
 
 test('30 üyeye kadar tek parti üretilir', () => {
   const ids = Array.from({ length: 30 }, (_, i) => `lab-${i}`);

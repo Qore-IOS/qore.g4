@@ -1,5 +1,5 @@
 // src/lib/date.ts
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "./data/client";
 import type { TimestampLike } from "@/lib/types";
 import { format as formatDateFns } from 'date-fns';
 

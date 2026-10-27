@@ -1,11 +1,11 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, doc, getDocs, query, where, writeBatch, Timestamp, getDoc, updateDoc, arrayUnion } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';

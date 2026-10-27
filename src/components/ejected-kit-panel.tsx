@@ -59,8 +59,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs, scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
+import { getScopedDocs, scopedQuery } from '@/lib/document-helpers';
+import { db } from '../lib/data/client';
 import {
     collection,
     getDocs,
@@ -70,7 +70,7 @@ import {
     onSnapshot,
     serverTimestamp,
     Timestamp,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import type {
     Hospital,
     Device,

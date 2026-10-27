@@ -14,13 +14,13 @@
 
 import React, { useCallback, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { getDocs, where } from 'firebase/firestore';
+import { getDocs, where } from '../../../lib/data/client';
 import { Loader2 } from 'lucide-react';
 
 import { useAuth } from '@/contexts/auth-context';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 // Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
 // BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel
 // geçişinde ağ beklenir (donmanın sebebi buydu). Bkz. terminal-prefetch.ts.

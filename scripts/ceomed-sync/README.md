@@ -1,3 +1,8 @@
+> Güncel altyapı: Vercel / Neon PostgreSQL. Bu belgedeki eski Firebase,
+> servis hesabı, kural yayımlama ve oturum adımları artık geçersizdir.
+> Güncel kurulum için depodaki `docs/vercel-postgresql.md` belgesini kullanın.
+> Terminal paketi `NEXT_PUBLIC_API_BASE_URL`, ERP işçileri `APP_BASE_URL` kullanır.
+
 # Ceomed → Firebase Sync Worker
 
 Local network'teki Ceomed ERP'den irsaliyeleri çekip Excel/PDF olarak Firebase Storage'a, metadata'yı Firestore'a yazan standalone Node worker'ı.
@@ -52,8 +57,6 @@ npm install
 
 Firebase service account JSON'unu indir (Firebase Console → Project Settings → Service accounts → Generate new private key) ve yolunu `.env`'e yaz:
 ```
-GOOGLE_APPLICATION_CREDENTIALS=C:\path\to\firebase-service-account.json
-FIREBASE_PROJECT_ID=your-firebase-project-id
 CEOMED_COMPANY_ID=your-company-id
 ```
 
@@ -162,8 +165,6 @@ ayrıntı için `docs/firestore-rules-rollout.md`.
 CEOMED_BASE_URL=http://192.168.1.5:8081
 CEOMED_EPOSTA=merkez
 CEOMED_PAROLA=12345
-GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\firebase-sa.json
-FIREBASE_PROJECT_ID=your-project-id
 CEOMED_COMPANY_ID=your-company-id
 ```
 

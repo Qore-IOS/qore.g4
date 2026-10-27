@@ -1,4 +1,0 @@
-# Derleme çıktısı. `firebase.json` içindeki predeploy hook'u deploy öncesi
-# `npm run build` çalıştırdığı için lib/ deploy anında yeniden üretilir;
-# depoda tutulduğunda her derlemede gereksiz diff ve merge çakışması üretir.
-lib/

@@ -32,9 +32,9 @@
  * depoda durur.
  */
 
-import { onSnapshot, where, type DocumentData, type Unsubscribe } from 'firebase/firestore';
+import { onSnapshot, where, type DocumentData, type Unsubscribe } from './data/client';
 
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { withLegacyBarcodeFormat } from '@/hooks/useSafeBarcodeFormats';
 import type { BarcodeFormat } from '@/lib/barcode';
 import type { DepoStokItem, Depot, Hospital, Order, ProductCode } from '@/lib/types';

@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useMemo, useCallback, Suspense, useRef } from 'react';
 import dynamic from 'next/dynamic';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, query, where, writeBatch, doc, orderBy, limit, Timestamp, serverTimestamp } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, getDocs, query, where, writeBatch, doc, orderBy, limit, Timestamp, serverTimestamp } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Trash2, Upload, Camera, Download, History, ScanLine, FileSpreadsheet, Package, AlertTriangle, ShieldAlert, ClipboardList, Info, X, ChevronDown } from 'lucide-react';
 import type { Hospital, Depot, ProductCode, DepoStokItem, DestroyedKitRecord } from '@/lib/types';
@@ -23,7 +23,7 @@ import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import * as XLSX from 'xlsx';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';

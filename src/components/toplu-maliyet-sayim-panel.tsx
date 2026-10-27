@@ -7,8 +7,8 @@
 //   2. Marka + ürün grubu + dönem seç
 //   3. Giriş ekranı — Excel şablonu indir/yükle, arayüzde gözden geçir, kaydet
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, serverTimestamp } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import type { ProductCode, MinMaxRule } from '@/lib/types';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';

@@ -2,8 +2,8 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { doc, getDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../../../../../../../lib/data/client';
+import { doc, getDoc, Timestamp } from '../../../../../../../lib/data/client';
 import { ArrowLeft, ClipboardList, Loader2 } from 'lucide-react';
 
 interface ComparisonRow {

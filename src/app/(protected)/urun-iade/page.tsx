@@ -16,9 +16,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Barcode, Trash2, CheckCircle, Loader2, Search, AlertTriangle, Undo, Info, History } from 'lucide-react';
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot, deleteField } from 'firebase/firestore';
-import { touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { db } from '../../../lib/data/client';
+import { collection, writeBatch, doc, getDocs, query, where, serverTimestamp, addDoc, onSnapshot, deleteField } from '../../../lib/data/client';
+import { touchStockMetadata } from '@/hooks/useDatabaseQueries';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { LabSelector } from '@/components/common/LabSelector';
@@ -29,7 +29,7 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { resolveDefaultTrackingMode, TrackingMode } from '@/lib/tracking';
 
 

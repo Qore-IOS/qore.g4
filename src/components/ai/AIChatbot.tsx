@@ -10,7 +10,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useAI } from '@/contexts/ai-context';
 import { useAuth } from '@/contexts/auth-context';
-import { getAuth } from 'firebase/auth';
+import { getAuth } from '../../lib/workspace';
 
 const QoreOrb3D = dynamic(() => import('./QoreOrb3D'), { ssr: false });
 

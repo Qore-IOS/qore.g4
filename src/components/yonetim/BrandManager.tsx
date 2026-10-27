@@ -13,10 +13,10 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { Plus, Trash2, Loader2, Pencil, Mail, Phone, MapPin, Clock } from 'lucide-react';
-import { collection, addDoc, deleteDoc, doc, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, addDoc, deleteDoc, doc, updateDoc } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { BrandDefinition } from '@/lib/types';

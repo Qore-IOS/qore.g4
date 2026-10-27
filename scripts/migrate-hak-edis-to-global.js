@@ -18,10 +18,10 @@
  *
  * Gerekli env:
  *   GOOGLE_APPLICATION_CREDENTIALS  -> service account JSON path
- *   FIREBASE_PROJECT_ID
+ *   APP_BASE_URL
  */
-const admin = require('firebase-admin');
-const { initAdmin } = require('./lib/firebase-project');
+const admin = require('./db/script-store.cjs');
+const { initAdmin } = require('./lib/database-project');
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');

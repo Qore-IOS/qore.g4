@@ -12,10 +12,10 @@
  *   node scripts/snapshot-test-costs.js --dry-run
  *
  * Gerekli env:
- *   GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID
+ *   GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL
  */
-const admin = require('firebase-admin');
-const { initAdmin } = require('./lib/firebase-project');
+const admin = require('./db/script-store.cjs');
+const { initAdmin } = require('./lib/database-project');
 
 const args = process.argv.slice(2);
 const DRY_RUN = args.includes('--dry-run');

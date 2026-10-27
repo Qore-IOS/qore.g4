@@ -20,7 +20,7 @@
 'use client';
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
-import { Timestamp, where, type QueryConstraint } from 'firebase/firestore';
+import { Timestamp, where, type QueryConstraint } from '../lib/data/client';
 import type { DateRange } from 'react-day-picker';
 import { addDays, startOfDay, endOfDay } from 'date-fns';
 

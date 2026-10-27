@@ -12,9 +12,9 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { ArrowLeft, CheckCircle2, Edit3, Loader2, LogOut, Save, Users, Search, Clock } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   collection,
   doc,
@@ -25,10 +25,8 @@ import {
   updateDoc,
   where,
   documentId,
-} from 'firebase/firestore';
-import { getFunctions, httpsCallable } from 'firebase/functions';
+} from '../../../../../lib/data/client';
 import BackButton from '@/components/BackButton';
-import { getApp } from 'firebase/app';
 
 
 type AppUser = {
@@ -177,7 +175,7 @@ export default function GroupDetailPage() {
 
   const memberSet = useMemo(() => new Set(group?.memberIds || []), [group]);
   const members = useMemo(() => users.filter((u) => memberSet.has(u.id)), [users, memberSet]);
-  
+
   const presenceMap = usePresenceMap(members.map((m) => m.id));
   const onlineCount = useMemo(() => members.filter(m => presenceMap[m.id]).length, [members, presenceMap]);
 
@@ -224,53 +222,13 @@ export default function GroupDetailPage() {
     }
   };
 
-  // ---- remote sign out (single or bulk) ----
-  const functions = getFunctions(getApp(), FUNCTIONS_REGION);
-  const revokeFn = httpsCallable<{ uids: string[] }, { success: boolean; processed: number; failed?: string[] }>(
-    functions,
-    'revokeUserSessions'
-  );
-
-  const revokeFor = async (uids: string[]) => {
-    if (!uids.length) return;
-    try {
-      const res = await revokeFn({ uids }).then(r => r.data);
-      if (!res.success && res.failed?.length) {
-        throw new Error(`Bazı kullanıcılar işlenemedi: ${res.failed.join(', ')}`);
-      }
-      toast({
-        title: 'Oturumlar sonlandırıldı',
-        description: `${res.processed} hesap için işlem uygulandı.`,
-      });
-    } catch (e: any) {
-      const msg =
-        e?.message ||
-        e?.code ||
-        'Oturumları sonlandırırken beklenmeyen bir hata oluştu.';
-      toast({ title: 'İşlem hatası', description: msg, variant: 'destructive' });
-    }
-  };
 
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <BackButton fallback="/yonetim/personel-yonetimi" />
-
-        {!edit && (
-          <Button
-            size="sm"
-            variant="destructive"
-            className="gap-2"
-            onClick={() => revokeFor(members.map(m => m.id))}
-            disabled={members.length === 0}
-            title="Listedeki tüm hesapların oturumlarını geçersiz kılar"
-          >
-            <LogOut className="h-4 w-4" />
-            Listedeki Tüm Hesaplardan Çıkış Yap
-          </Button>
-        )}
       </div>
-      
+
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between">
           <div className="flex flex-col gap-2">
@@ -373,16 +331,7 @@ export default function GroupDetailPage() {
                           </div>
                           <div className="flex items-center gap-2">
                             {m.role && <Badge variant="outline">{m.role}</Badge>}
-                            <Button
-                              size="sm"
-                              variant="secondary"
-                              className="gap-2"
-                              onClick={() => revokeFor([m.id])}
-                              title="Bu hesabın oturumlarını geçersiz kıl"
-                            >
-                              <LogOut className="h-4 w-4" />
-                              Oturumu Kapat
-                            </Button>
+
                           </div>
                         </li>
                       );

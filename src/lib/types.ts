@@ -621,8 +621,8 @@ export interface EfficiencyData {
 export interface UploadedReport {
   id: string; // Firestore doc ID
   name: string;
-  url: string; // Firebase Storage download URL
-  path: string; // Full path in Firebase Storage for deletion
+  url: string; // Application file download URL
+  path: string; // File path for deletion
   uploadedAt: TimestampLike;
   uploaderName: string;
   uploaderId: string;
@@ -1098,14 +1098,7 @@ export interface YedekParcaDepoLog {
   createdByName: string;
 }
 
-export interface FirebaseConfig {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-}
+
 
 export type ParsedResult = {
   refNo: string;

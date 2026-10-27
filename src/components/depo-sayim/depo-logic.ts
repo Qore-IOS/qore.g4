@@ -1,8 +1,8 @@
 'use client';
 
-import { collection, doc, setDoc, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, doc, setDoc, writeBatch, Timestamp } from '../../lib/data/client';
 import { nanoid } from 'nanoid';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 import { resolveDefaultTrackingMode } from '@/lib/tracking';
 import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';

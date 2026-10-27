@@ -1,9 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { addDoc, collection, deleteDoc, doc, serverTimestamp, updateDoc } from '../lib/data/client';
+import { db } from '../lib/data/client';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { useAuth } from '@/contexts/auth-context';
 import type { TestAutoSumDefinition } from '@/lib/qore-hesaplama/auto-sum-definitions';
 

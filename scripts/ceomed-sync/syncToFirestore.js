@@ -15,14 +15,14 @@
  * Gerekli env:
  *   CEOMED_BASE_URL, CEOMED_EPOSTA, CEOMED_PAROLA
  *   GOOGLE_APPLICATION_CREDENTIALS  -> service account JSON path
- *   FIREBASE_PROJECT_ID             -> Firebase project id
+ *   APP_BASE_URL             -> Firebase project id
  *   CEOMED_COMPANY_ID               -> bu Ceomed kurulumunun ait olduğu firma id'si
  *                                      (multi-tenancy: yazılan tüm dokümanlar bu firmaya tag'lenir;
  *                                      yoksa scopedQuery panellerden veriyi göstermez)
  */
 const fs = require('fs');
 const path = require('path');
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 const { login } = require('./login');
 const { fetchIrsaliyeMaster } = require('./fetchIrsaliyeMaster');
 const { fetchOkutulanBarkod } = require('./fetchOkutulanBarkod');
@@ -37,10 +37,7 @@ const ALLOWED_STATUSES = [
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }

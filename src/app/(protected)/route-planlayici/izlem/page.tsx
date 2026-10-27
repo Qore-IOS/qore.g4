@@ -13,14 +13,14 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Eye, Truck, MapPin, Navigation, Check, Clock, LogOut, Flag, Car, Search, X, Building2, Plus, ArrowUpDown, Send, AlertCircle } from 'lucide-react';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
+import { db } from '../../../../lib/data/client';
+import { collection, doc, getDocs, onSnapshot, query, serverTimestamp, setDoc, Timestamp, where } from '../../../../lib/data/client';
 import type { User as AppUser, Hospital, RouteRequest } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 
 type Vehicle = {

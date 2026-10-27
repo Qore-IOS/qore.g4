@@ -2,9 +2,9 @@
 
 import { create } from 'zustand';
 import { devtools } from 'zustand/middleware';
-import { collection, getDocs, writeBatch, doc, query, setDoc, where, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { collection, getDocs, writeBatch, doc, query, setDoc, where, getDoc } from '../lib/data/client';
+import { db } from '../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { nanoid } from 'nanoid';
 import { format } from 'date-fns';
 import {
