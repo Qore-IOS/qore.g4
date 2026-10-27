@@ -26,7 +26,7 @@ import {
   setDoc,
   where,
   writeBatch,
-} from 'firebase/firestore';
+} from '../../../../../lib/data/client';
 import { compareAsc, format as formatDateFns, parse as parseDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
@@ -44,7 +44,7 @@ import {
   Truck,
 } from 'lucide-react';
 
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import { archiveCompletedOrderInBatch } from '@/lib/orders-archive';
 import type {
   Depot,
@@ -81,7 +81,7 @@ import { cn } from '@/lib/utils';
 import { formatMiad, toDateFromAny } from '@/lib/date';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 
 type LabStockInfo = {

@@ -1,10 +1,10 @@
 
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, doc, getDocs, orderBy, query, setDoc, deleteDoc, deleteField } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/types'; // Check your types import path
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';

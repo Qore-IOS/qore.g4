@@ -11,7 +11,7 @@
 import * as XLSX from 'xlsx';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../data/client';
 import type { Order } from '@/lib/types';
 
 function tsToDate(value: unknown): Date | null {

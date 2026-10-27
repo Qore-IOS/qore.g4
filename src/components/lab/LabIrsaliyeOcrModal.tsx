@@ -8,10 +8,10 @@ import { extractTextFromPdf } from '@/lib/pdf';
 import { parseIrsaliyeText, IrsaliyeParseResult } from '@/lib/irsaliye-parser';
 import type { ProductCode } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { db } from '@/lib/firebase';
-import { collection, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, query, orderBy, onSnapshot, Timestamp } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { matchesCompanyScope } from '@/lib/company-scope';
 
 interface SavedIrsaliyeFile {

@@ -9,10 +9,10 @@
  */
 import {
   collection, doc, getDoc, getDocs, serverTimestamp, setDoc, updateDoc, where, writeBatch,
-} from 'firebase/firestore';
+} from './data/client';
 import { compareAsc, parse } from 'date-fns';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { db } from './data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { generateId } from '@/lib/utils';
 import type { DepoStokItem, Hospital, SarfTransfer, SarfTransferItem, TimestampLike } from '@/lib/types';

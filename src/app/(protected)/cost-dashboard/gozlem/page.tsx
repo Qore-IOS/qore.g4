@@ -2,7 +2,7 @@
 
 import React from 'react';
 import CostDashboardPanel from '@/components/cost-dashboard-panel';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useDatabaseQueries';
 import { Loader2 } from 'lucide-react';
 
 export default function CostGozlemPage() {

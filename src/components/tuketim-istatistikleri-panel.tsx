@@ -21,7 +21,7 @@ import {
   CalendarClock,
   User as UserIcon,
 } from "lucide-react";
-import { fetchConsumptionByDateRange } from "@/hooks/useFirebaseQueries";
+import { fetchConsumptionByDateRange } from "@/hooks/useDatabaseQueries";
 import { format, isValid, addDays, endOfDay } from "date-fns";
 import { tr } from "date-fns/locale";
 import { DatePickerWithRange } from "@/components/ui/date-range-picker";

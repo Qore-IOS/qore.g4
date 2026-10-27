@@ -47,8 +47,8 @@ jobs:
       - name: Bağımlılıkları kur
         run: npm ci --no-audit --no-fund
 
-      - name: Firebase istemci anahtarlarını hazırla
-        run: node scripts/env-from-apphosting.js
+      - name: API adresini hazırla
+        run: echo "NEXT_PUBLIC_API_BASE_URL=${{ vars.APP_BASE_URL }}" > .env.local
 
       - name: Arayüz paketini üret
         run: npm run build:terminal:android

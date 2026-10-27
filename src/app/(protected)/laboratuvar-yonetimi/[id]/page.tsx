@@ -6,15 +6,15 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Trash2, AlertCircle } from 'lucide-react';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, getDoc, getDocFromServer, writeBatch, deleteDoc } from 'firebase/firestore';
+import { db } from '../../../../lib/data/client';
+import { collection, query, where, getDocs, doc, getDoc, getDocFromServer, writeBatch, deleteDoc } from '../../../../lib/data/client';
 import type { DepoStokItem, ConsumptionRecord } from '@/lib/types';
 import BackButton from '@/components/BackButton';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { formatMiad } from "@/lib/date";
 import TimestampText from '@/components/TimestampText';
 import { AlertTriangle } from 'lucide-react';
@@ -193,7 +193,7 @@ export default function LabStockDetailPage() {
         console.error(`[LAB-DELETE] VERIFICATION FAILED (SERVER): Item ${id} still exists after delete!`);
         toast({
           title: 'Silme Başarısız',
-          description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
+          description: 'Kayıt silinemedi. Veritabanı veya sunucu bağlantısını kontrol edin. Lütfen yönetici ile iletişime geçin.',
           variant: 'destructive'
         });
         return;
@@ -290,7 +290,7 @@ export default function LabStockDetailPage() {
         console.error(`[LAB-DEDUCT] VERIFICATION FAILED (SERVER): Item ${id} still exists after delete!`);
         toast({
           title: 'Stoktan Düşme Başarısız',
-          description: 'Kayıt silinemedi. Firebase Security Rules silme işlemine izin vermiyor olabilir. Lütfen yönetici ile iletişime geçin.',
+          description: 'Kayıt silinemedi. Veritabanı veya sunucu bağlantısını kontrol edin. Lütfen yönetici ile iletişime geçin.',
           variant: 'destructive'
         });
         return;

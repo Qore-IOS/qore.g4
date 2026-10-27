@@ -1,6 +1,7 @@
 'use server';
-import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, writeBatch, Timestamp } from 'firebase/firestore';
+
+import { db } from './data/server-client';
+import { collection, query, where, getDocs, writeBatch, Timestamp } from './data/server-client';
 
 /**
  * Reverts Firestore document changes made on a specific date (July 29, 2025).

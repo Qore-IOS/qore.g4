@@ -25,17 +25,17 @@ import {
   type DocumentData,
   type QueryConstraint,
   type QueryDocumentSnapshot,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { chunkForIn } from '@/lib/firestore-chunk';
+} from './data/client';
+import { db } from './data/client';
+import { scopedQuery } from '@/lib/document-helpers';
+import { chunkForIn } from '@/lib/document-chunk';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { getStockItemQuantity, isAvailableDepotStock } from '@/lib/stock-quantity';
 import type { DepoStokItem } from '@/lib/types';
 
 export const DEPO_STOK_COLLECTION = 'depoStok';
 
-export { chunkForIn, FIRESTORE_IN_LIMIT } from '@/lib/firestore-chunk';
+export { chunkForIn, FIRESTORE_IN_LIMIT } from '@/lib/document-chunk';
 
 export interface StockScope {
   companyId: string | null | undefined;

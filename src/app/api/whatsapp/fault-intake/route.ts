@@ -1,8 +1,9 @@
+import type * as DocumentStore from '../../../../lib/data/admin';
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile } from 'fs/promises';
 import path from 'path';
-import { adminDb } from '../../../../lib/firebase-admin';
-import * as admin from 'firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
+import {FieldValue} from '../../../../lib/data/model';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -38,7 +39,7 @@ type AiExtraction = {
 
 type DeviceMatch = {
   deviceId: string;
-  data: FirebaseFirestore.DocumentData;
+  data: DocumentStore.DocumentData;
   score: number;
   reasons: string[];
 };
@@ -291,14 +292,14 @@ async function resolveHospital() {
   return { id: '', data: { name: DEFAULT_HOSPITAL_NAME } };
 }
 
-function deviceMatchesLine(data: FirebaseFirestore.DocumentData, lineNo: number): boolean {
+function deviceMatchesLine(data: DocumentStore.DocumentData, lineNo: number): boolean {
   const candidates = [data.lineNo, data.line, data.lineName, data.labLine, data.hatNo, data.hat, data.cihazAdi, data.model, data.name, data.deviceName]
     .filter((x) => x !== undefined && x !== null)
     .map(String);
   return candidates.some((candidate) => extractLineNo(candidate) === lineNo || normalizeText(candidate).includes(`line ${lineNo}`) || normalizeText(candidate).includes(`hat ${lineNo}`));
 }
 
-function deviceMatchesModule(data: FirebaseFirestore.DocumentData, moduleCode: string): boolean {
+function deviceMatchesModule(data: DocumentStore.DocumentData, moduleCode: string): boolean {
   const normalizedModule = normalizeModuleCode(moduleCode);
   if (!normalizedModule) return false;
   const candidates = [data.moduleCode, data.module, data.modul, data.modulKodu, data.cihazAdi, data.model, data.name, data.deviceName]
@@ -361,7 +362,7 @@ function buildFaultDescription(ai: AiExtraction, input: IncomingMessage, lineNo:
 }
 
 async function createFaultReport(input: IncomingMessage, lineNo: number, ai: AiExtraction, hospital: { id: string; data: any }, device: DeviceMatch | null) {
-  const now = admin.firestore.FieldValue.serverTimestamp();
+  const now = FieldValue.serverTimestamp();
   const description = buildFaultDescription(ai, input, lineNo);
   const deviceData = device?.data || {};
   const hospitalName = hospital.data?.name || DEFAULT_HOSPITAL_NAME;
@@ -501,7 +502,7 @@ export async function POST(request: NextRequest) {
         status: 'ignored_from_me',
         sourceGroupId: incoming.groupId || null,
         raw: rawPayload,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     }
     return NextResponse.json({ success: true, ignored: true, reason: 'from_me' });
@@ -513,7 +514,7 @@ export async function POST(request: NextRequest) {
         status: 'ignored_wrong_group',
         sourceGroupId: incoming.groupId || null,
         raw: rawPayload,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: FieldValue.serverTimestamp(),
       }, { merge: true });
     }
     return NextResponse.json({ success: true, ignored: true, reason: 'wrong_group' });
@@ -528,7 +529,7 @@ export async function POST(request: NextRequest) {
       sourceGroupId: incoming.groupId,
       raw: rawPayload,
       whatsappReply: wa,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     }, { merge: true });
     return NextResponse.json({ success: false, error: 'Line bilgisi gerekli.', whatsappReply: wa }, { status: 422 });
   }
@@ -540,7 +541,7 @@ export async function POST(request: NextRequest) {
       const body = `⚠️ Line ${lineNo} bilgisi alındı ancak fotoğraftan modül kodu okunamadı. Lütfen AU1/AU2/AU3/AU4 bilgisini yazın.`;
       const wa = await sendWhatsAppText(SOURCE_GROUP_ID, body).catch((error: any) => ({ success: false, error: error?.message || String(error) }));
       await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({
-        status: 'missing_module', lineNo, aiExtraction: ai, raw: rawPayload, whatsappReply: wa, createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'missing_module', lineNo, aiExtraction: ai, raw: rawPayload, whatsappReply: wa, createdAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       return NextResponse.json({ success: false, error: 'Modül kodu okunamadı.', ai, whatsappReply: wa }, { status: 422 });
     }
@@ -551,7 +552,7 @@ export async function POST(request: NextRequest) {
       const body = `⚠️ Line ${lineNo} ve ${ai.moduleCode} okundu ancak Göztepe Merkez cihaz eşleşmesi bulunamadı. Lütfen cihaz eşleştirme kaydını kontrol edin.`;
       const wa = await sendWhatsAppText(SOURCE_GROUP_ID, body).catch((error: any) => ({ success: false, error: error?.message || String(error) }));
       await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({
-        status: 'device_not_matched', lineNo, moduleCode: ai.moduleCode, aiExtraction: ai, raw: rawPayload, whatsappReply: wa, createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'device_not_matched', lineNo, moduleCode: ai.moduleCode, aiExtraction: ai, raw: rawPayload, whatsappReply: wa, createdAt: FieldValue.serverTimestamp(),
       }, { merge: true });
       return NextResponse.json({ success: false, error: 'Cihaz eşleşmesi bulunamadı.', ai, whatsappReply: wa }, { status: 422 });
     }
@@ -559,7 +560,7 @@ export async function POST(request: NextRequest) {
     const created = await createFaultReport(incoming, lineNo, ai, hospital, device);
     const reply = buildSuccessReply(created.reportId, lineNo, ai, device, created.duplicate);
     const wa = await sendWhatsAppText(SOURCE_GROUP_ID, reply).catch((error: any) => ({ success: false, error: error?.message || String(error) }));
-    await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({ whatsappReply: wa, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await adminDb.collection('whatsappFaultIntakeLogs').doc(incoming.messageId).set({ whatsappReply: wa, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
 
     return NextResponse.json({ success: true, data: { faultReportId: created.reportId, duplicate: created.duplicate, lineNo, moduleCode: ai.moduleCode, deviceId: device.deviceId, whatsappReply: wa } });
   } catch (error: any) {
@@ -567,7 +568,7 @@ export async function POST(request: NextRequest) {
       status: 'error',
       error: error?.message || String(error),
       raw: rawPayload,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: FieldValue.serverTimestamp(),
     }, { merge: true });
     return NextResponse.json({ success: false, error: error?.message || 'WhatsApp arıza alımı başarısız.' }, { status: 500 });
   }

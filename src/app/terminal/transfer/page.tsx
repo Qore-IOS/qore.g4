@@ -16,15 +16,15 @@
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, writeBatch } from '../../../lib/data/client';
 import { FileDown, Loader2, Minus, Plus, Trash2 } from 'lucide-react';
 
-import { db } from '@/lib/firebase';
+import { db } from '../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
-import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useDatabaseQueries';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 // Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)

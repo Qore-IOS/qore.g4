@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, limit, onSnapshot, orderBy, query as firestoreQuery, where } from 'firebase/firestore';
+import { collection, limit, onSnapshot, orderBy, query as firestoreQuery, where } from '../../lib/data/client';
 import {
   Download, ExternalLink, FileText, Inbox, Mail, MessageCircle,
   Monitor, RefreshCw,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 import {
   C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, Pill, EmptyBlock,
 } from '@/components/raporlama/rapor-kit';

@@ -15,8 +15,8 @@ import {
   writeBatch,
   serverTimestamp,
   updateDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode, TestDefinitionGlobal } from '@/lib/types';
 import { useRouter } from 'next/navigation';
@@ -28,10 +28,10 @@ import { cn } from '@/lib/utils';
 import * as XLSX from 'xlsx';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { filterByCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';
-import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries';
+import { useProductCodes, useTestDefinitions } from '@/hooks/useDatabaseQueries';
 
 const COLLECTION = 'testDefinitions';
 

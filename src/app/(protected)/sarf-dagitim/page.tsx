@@ -6,11 +6,11 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs, onSnapshot, orderBy, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, onSnapshot, orderBy, where } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import type { Hospital, SarfTransfer } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';
 import {

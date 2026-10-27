@@ -13,12 +13,12 @@ import {
   serverTimestamp,
   getDocs,
   setDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
-import { useDepots, useHospitals, useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes } from '@/hooks/useDatabaseQueries';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {

@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { collection, getDocs } from '../lib/data/client';
+import { db } from '../lib/data/client';
+import { getScopedDocs } from '@/lib/document-helpers';
 import type { Hospital, LabPool, ProductCode } from '@/lib/types';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useDatabaseQueries';
 
 export type CalculationProductRow = {
   stokKodu: string;

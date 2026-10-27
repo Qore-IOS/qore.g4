@@ -1,7 +1,7 @@
-import { collection, getDocs, doc, getDoc, query, where, type QueryConstraint } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, query, where, type QueryConstraint } from './data/client';
 import { buildPersonnelCode } from '@/lib/form-number';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { db } from './data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 
 let _fontBase64: string | null = null;
 let _headerLogo: string | null = null;

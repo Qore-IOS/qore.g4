@@ -1,3 +1,8 @@
+> Güncel altyapı: Vercel / Neon PostgreSQL. Bu belgedeki eski Firebase,
+> servis hesabı, kural yayımlama ve oturum adımları artık geçersizdir.
+> Güncel kurulum için depodaki `docs/vercel-postgresql.md` belgesini kullanın.
+> Terminal paketi `NEXT_PUBLIC_API_BASE_URL`, ERP işçileri `APP_BASE_URL` kullanır.
+
 # Qore Terminal (masaüstü)
 
 Depo terminali için Electron kabuğu. Terminal arayüzünü tam ekran, tek işlik

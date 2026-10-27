@@ -5,12 +5,12 @@ import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogClose } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { PlusCircle, Edit3, Trash2, Loader2, Building } from 'lucide-react';
-import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, setDoc, deleteDoc, doc } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { Depot } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { YonetimShell, YonetimHeader, YonetimCard } from '@/components/yonetim-ui/YonetimHub';
 

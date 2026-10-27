@@ -17,7 +17,7 @@ import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // CommonJS yardımcı: `.env.local` yokken anahtarların yedek kaynağı.
-import { readApphostingPublicEnv } from './scripts/apphosting-env.js';
+
 
 const ROOT = path.resolve(__dirname);
 const TERMINAL_ROOT = path.join(ROOT, 'terminal-app');
@@ -89,8 +89,7 @@ function injectCsp(target: 'desktop' | 'android'): Plugin {
     "img-src 'self' data: blob:",
     // Kamera önizlemesi: `<video>` MediaStream ile beslenir.
     "media-src 'self' blob:",
-    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com " +
-      'https://*.cloudfunctions.net wss://*.firebaseio.com wss://*.googleapis.com',
+    "connect-src 'self' https:",
     "frame-src 'none'",
     "object-src 'none'",
     "base-uri 'none'",
@@ -119,15 +118,7 @@ function injectCsp(target: 'desktop' | 'android'): Plugin {
  * gönderilirler ve gizli değildirler; erişimi Firestore kuralları belirler.
  */
 const PUBLIC_ENV_KEYS = [
-  'NEXT_PUBLIC_FIREBASE_API_KEY',
-  'NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN',
-  'NEXT_PUBLIC_FIREBASE_PROJECT_ID',
-  'NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET',
-  'NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID',
-  'NEXT_PUBLIC_FIREBASE_APP_ID',
-  'NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID',
-  'NEXT_PUBLIC_FIREBASE_VAPID_KEY',
-  'NEXT_PUBLIC_FB_FUNCTION_REGION',
+ 'NEXT_PUBLIC_API_BASE_URL',
 ] as const;
 
 /**
@@ -191,26 +182,7 @@ export default defineConfig(({ mode }) => {
    */
   const fileEnv = loadEnv(mode, ROOT, '');
   const env: Record<string, string> = { ...fileEnv };
-  for (const [key, value] of Object.entries(readApphostingPublicEnv(ROOT))) {
-    if (!env[key]) env[key] = value;
-  }
-
-  const missing = PUBLIC_ENV_KEYS.filter(
-    key => key.includes('FIREBASE_API_KEY') || key.includes('FIREBASE_PROJECT_ID'),
-  ).filter(key => !env[key]);
-
-  if (missing.length > 0) {
-    // Buraya düşmek artık gerçek bir yapılandırma sorunu demek: hem
-    // `.env.local` yok hem de `apphosting.yaml` okunamıyor/eksik. Sessizce
-    // eksik yapılandırmayla paketlemek, sahada "Firebase: Error
-    // (auth/invalid-api-key)" olarak ortaya çıkar ve nedeni anlaşılmaz.
-    throw new Error(
-      `[terminal] Zorunlu ortam değişkenleri eksik: ${missing.join(', ')}.\n` +
-        'apphosting.yaml okunamadı ya da bu anahtarları içermiyor.\n' +
-        'Depo kökünde şunu çalıştırıp .env.local üretin:\n' +
-        '  node scripts/env-from-apphosting.js',
-    );
-  }
+  if (!env.NEXT_PUBLIC_API_BASE_URL) throw new Error('NEXT_PUBLIC_API_BASE_URL is required for a packaged terminal.');
 
   const define: Record<string, string> = {
     // Paket damgası: kurulu uygulamanın hangi derleme olduğu ekranda görünsün.

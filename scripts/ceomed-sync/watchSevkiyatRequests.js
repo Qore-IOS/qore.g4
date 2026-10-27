@@ -7,9 +7,9 @@
  *
  * Bu bir long-running process'tir — PC'de sürekli açık kalmalı (run-sevkiyat-watcher.bat ile başlat).
  *
- * Gerekli env: CEOMED_*, GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID
+ * Gerekli env: CEOMED_*, GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 const { login } = require('./login');
 const { fetchIrsaliyeMaster } = require('./fetchIrsaliyeMaster');
 const { fetchOkutulanBarkod } = require('./fetchOkutulanBarkod');
@@ -18,10 +18,7 @@ const SEVK_EDILDI = 'KURUMA SEVK EDILDI';
 
 function initFirestore() {
   if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.applicationDefault(),
-      projectId: process.env.FIREBASE_PROJECT_ID,
-    });
+    admin.initializeApp();
   }
   return admin.firestore();
 }

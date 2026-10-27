@@ -1,17 +1,17 @@
-ll
- p# Firebase Studio
+# Qore
 
+Next.js 14 ve PostgreSQL tabanlı stok yönetimi uygulaması. Üretim hedefi Vercel,
+veritabanı Neon PostgreSQL, dosya deposu private Vercel Blob'dur. Uygulama ortak
+çalışma alanı olarak girişsiz çalışır.
 
-This is a NextJS starter in Firebase Studio.
+Kurulum, dağıtım değişkenleri, erişim koruması ve kontroller:
+[docs/vercel-postgresql.md](docs/vercel-postgresql.md).
 
-To get started, take a look at src/app/page.tsx.
+```sh
+pnpm install --frozen-lockfile
+export QORE_LOCAL_DATABASE=/tmp/qore-local-db
+pnpm db:local
+pnpm dev
+```
 
-## Quality assurance
-
-Node 22's built-in test runner is wired to validate the barcode utilities that power supply-chain workflows. Run the following commands for local guardrails:
-
-- `pnpm typecheck` – TypeScript static analysis
-- `pnpm lint` – Next.js ESLint
-- `pnpm test` – Compile a focused test bundle and execute Node's native test runner
-
-For more detail, see [docs/quality-assurance.md](docs/quality-assurance.md).
+Kontroller: `pnpm test`, `pnpm test:db`, `pnpm test:e2e`, `pnpm build`.

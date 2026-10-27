@@ -23,7 +23,7 @@
  *   check-stock-usage.bat --stok-kodu 03753379001
  *   check-stock-usage.bat --stok-kodu 03753379001 --gun 2026-08-11
  */
-const admin = require('firebase-admin');
+const admin = require('../db/script-store.cjs');
 
 const STOK_KOLEKSIYONLARI = ['personalStock', 'poolWarehouseStock'];
 const FORM_KOLEKSIYONLARI = {
@@ -53,8 +53,8 @@ const tarihMetni = (t) => {
 };
 
 async function main() {
-  const projectId = tirnaksiz(process.env.FIREBASE_PROJECT_ID);
-  if (!projectId) throw new Error('FIREBASE_PROJECT_ID tanımsız.');
+  const projectId = tirnaksiz(process.env.APP_BASE_URL);
+  if (!projectId) throw new Error('APP_BASE_URL tanımsız.');
 
   const stokKodu = argOku('stok-kodu', null);
   if (!stokKodu) {
@@ -64,7 +64,7 @@ async function main() {
   }
   const gun = argOku('gun', new Date().toISOString().slice(0, 10));
 
-  admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId });
+  admin.initializeApp();
   const db = admin.firestore();
 
   yaz(`Stok kodu : ${stokKodu}`);

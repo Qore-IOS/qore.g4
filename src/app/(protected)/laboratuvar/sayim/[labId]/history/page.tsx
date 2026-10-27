@@ -2,8 +2,8 @@
 'use client';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { collection, query, orderBy, getDocs, getDoc, doc, updateDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../../../../../../lib/data/client';
+import { collection, query, orderBy, getDocs, getDoc, doc, updateDoc, Timestamp } from '../../../../../../lib/data/client';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription, CardFooter } from '@/components/ui/card';
 import { Table, TableHeader, TableHead, TableBody, TableRow, TableCell } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';

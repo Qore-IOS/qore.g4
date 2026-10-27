@@ -10,14 +10,14 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Loader2, Check, X, User, Calendar, Wallet } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp, Timestamp } from 'firebase/firestore';
+import { db } from '../../../../../lib/data/client';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, serverTimestamp, Timestamp } from '../../../../../lib/data/client';
 import BackButton from '@/components/BackButton';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 type ExpenseCategory =
   | 'Ulaşım'

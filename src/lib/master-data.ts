@@ -16,7 +16,7 @@
  * kendiliğinden yerel önbellekten cevaplanır.
  */
 
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import type { BarcodeFormat } from '@/lib/barcode';
 import type { ProductCode } from '@/lib/types';
 

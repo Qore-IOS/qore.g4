@@ -25,14 +25,14 @@ import { ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
 import { cn } from '@/lib/utils';
 import ConsumptionTrendModal from '@/components/ConsumptionTrendModal';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { toDateFromAny } from '@/lib/time';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { useDailyConsumptionStats } from '@/hooks/useFirebaseQueries';
+import { useDailyConsumptionStats } from '@/hooks/useDatabaseQueries';
 import { formatDateKey } from '@/lib/dailyConsumptionStats';
-import { collection, onSnapshot, query, where, getDocs, doc, setDoc, Timestamp, limit as fsLimit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, query, where, getDocs, doc, setDoc, Timestamp, limit as fsLimit } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { VIEWS } from '@/lib/constants';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import { withCompanyScope } from '@/lib/company-scope';
@@ -43,7 +43,7 @@ import {
   useOpenDeviceFaultReports,
   usePurchasingTasks,
   useTestDefinitions,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 import { useCompanyStats } from '@/hooks/useCompanyStats';
 import { Skeleton } from '@/components/ui/skeleton';
 import { haptic } from '@/lib/haptics';

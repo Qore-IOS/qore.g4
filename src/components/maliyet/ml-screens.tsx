@@ -1,9 +1,9 @@
 'use client';
 
 import React from 'react';
-import { collection, getDocs, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { collection, getDocs, deleteDoc, doc } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { subscribeToUserSessions, joinSession, declineSession, type MaliyetSayimOturum } from '@/lib/maliyet-session';
 import { useAuth } from '@/contexts/auth-context';

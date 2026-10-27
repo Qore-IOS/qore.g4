@@ -9,8 +9,9 @@ import { StartMenuProvider } from '@/contexts/start-menu-context';
 import { StartMenu } from '@/components/start-menu/StartMenu';
 
 export default function ProtectedPagesLayout({ children }: { children: React.ReactNode }) {
-    // This layout wraps all pages that require authentication.
+    // Workspace pages share a Suspense boundary for query-string navigation.
     return (
+        <React.Suspense fallback={null}>
         <AIProvider>
             <StartMenuProvider>
                 <AppLayout>
@@ -21,5 +22,6 @@ export default function ProtectedPagesLayout({ children }: { children: React.Rea
             </StartMenuProvider>
             <AIChatbot />
         </AIProvider>
+        </React.Suspense>
     );
 }

@@ -10,11 +10,11 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { PlusCircle, Trash2, Loader2, Filter, Search, Eye, Pencil, ChevronLeft, Package, ChevronDown, Upload, Download } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, deleteDoc, doc, query, where, setDoc, writeBatch } from '../../../../../lib/data/client';
+import { db } from '../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import type { Hospital, Depot, Asset } from '@/lib/types';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';

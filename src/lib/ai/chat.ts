@@ -1,7 +1,7 @@
 import { MAX_TOKENS, ERROR_MESSAGES } from './config';
 import { executeSmartQuery, SmartQueryResult } from './smartQueryEngine';
 import { generateWithGemini } from './geminiClient';
-import { generateWithOpenAIExtension, isOpenAIExtensionConfigured } from './openaiExtensionClient';
+import { generateWithOpenAI, isOpenAIConfigured } from './openaiClient';
 import { aiLogger } from '@/lib/logger';
 import { TOTAL_VERIMLILIK_ANALIZ_RAPORU } from './efficiencyReportContext';
 
@@ -78,12 +78,12 @@ function classifyError(error: unknown): string {
   if (error instanceof Error) {
     const msg = error.message.toLowerCase();
 
-    if (msg.includes('openai extension response timed out')) {
-      return 'ChatGPT uzantısından zamanında cevap alınamadı. Lütfen Firebase Extension koleksiyon yolu, response alanı ve Cloud Functions loglarını kontrol edin.';
+    if (msg.includes('timeout')) {
+      return 'OpenAI isteği zaman aşımına uğradı. Lütfen tekrar deneyin.';
     }
     if (msg.includes('401') || msg.includes('api key') || msg.includes('authentication') || msg.includes('unauthorized')) {
-      return isOpenAIExtensionConfigured()
-        ? 'OpenAI API anahtarı geçersiz veya süresi dolmuş. Lütfen Firebase Extension OPENAI_API_KEY secret değerini kontrol edin.'
+      return isOpenAIConfigured()
+        ? 'OpenAI API anahtarı geçersiz veya süresi dolmuş. Lütfen OPENAI_API_KEY ortam değişkenini kontrol edin.'
         : 'API anahtari gecersiz veya suresi dolmus. Lutfen Gemini API anahtarinizi kontrol edin.';
     }
     if (msg.includes('429') || msg.includes('rate')) {
@@ -151,8 +151,8 @@ export async function smartChat(
       { role: 'user', content: contextualPrompt },
     ];
 
-    const response = isOpenAIExtensionConfigured()
-      ? await generateWithOpenAIExtension({
+    const response = isOpenAIConfigured()
+      ? await generateWithOpenAI({
         systemPrompt: ENHANCED_SYSTEM_PROMPT,
         messages,
         temperature: 0.1,

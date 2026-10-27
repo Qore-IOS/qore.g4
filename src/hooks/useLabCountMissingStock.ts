@@ -2,7 +2,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import {
   collection,
   doc,
@@ -12,7 +12,7 @@ import {
   where,
   writeBatch,
   serverTimestamp
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import type { DepoStokItem, ProductCode } from '@/lib/types';
 import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } from '@/lib/barcode';
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';

@@ -1,6 +1,5 @@
 
-import { Urbanist } from "next/font/google";
-import Script from "next/script";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider } from "@/contexts/auth-context";
@@ -9,12 +8,11 @@ import { Toaster } from "@/components/ui/toaster";
 import MobileResponsiveFix from "@/components/responsive/MobileResponsiveFix";
 import WebVitalsReporter from "@/components/perf/WebVitalsReporter";
 import React from "react";
+import LegacyServiceCleanup from "@/components/LegacyServiceCleanup";
 
-const urbanist = Urbanist({
-  subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-  variable: "--font-urbanist",
-  display: "swap",
+const urbanist = localFont({
+  src: [{path:"../../node_modules/@fontsource-variable/urbanist/files/urbanist-latin-wght-normal.woff2"},{path:"../../node_modules/@fontsource-variable/urbanist/files/urbanist-latin-ext-wght-normal.woff2"}],
+  variable: "--font-urbanist", weight: "100 900", display: "swap",
 });
 
 export default function RootLayout({
@@ -52,6 +50,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
+            <LegacyServiceCleanup />
             <QueryProvider>
               <MobileResponsiveFix />
               {children}
@@ -62,21 +61,7 @@ export default function RootLayout({
         </ThemeProvider>
         {/* PDF.js is loaded lazily where needed - see src/lib/pdf.ts */}
         
-        {/* Google Analytics via next/script lazyOnload */}
-        <Script
-          src="https://www.googletagmanager.com/gtag/js?id=G-TGHCKJKWEZ"
-          strategy="lazyOnload"
-        />
-        <Script id="google-analytics" strategy="lazyOnload">
-          {`
-            window.dataLayer = window.dataLayer || [];
-            function gtag(){dataLayer.push(arguments);}
-            gtag('js', new Date());
-            gtag('config', 'G-TGHCKJKWEZ', {
-              page_path: window.location.pathname,
-            });
-          `}
-        </Script>
+
       </body>
     </html>
   );

@@ -18,12 +18,12 @@ import {
   FileSpreadsheet,
   Filter,
 } from 'lucide-react';
-import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch, getDoc, updateDoc, deleteDoc, query, where } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
+import { addDoc, collection, doc, getDocs, increment, orderBy, serverTimestamp, writeBatch, getDoc, updateDoc, deleteDoc, query, where } from '../lib/data/client';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from '../lib/data/files';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { db, storage } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { db, storage } from '../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';

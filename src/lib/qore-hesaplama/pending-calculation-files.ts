@@ -1,6 +1,6 @@
-import { db, storage } from '@/lib/firebase';
+import { db, storage } from '../data/client';
 import { normalizeCompanyId, withCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import {
   collection,
   deleteDoc,
@@ -12,14 +12,14 @@ import {
   where,
   type QueryDocumentSnapshot,
   type DocumentData,
-} from 'firebase/firestore';
+} from '../data/client';
 import {
   deleteObject,
   getBytes,
   getDownloadURL,
   ref as storageRef,
   uploadBytes,
-} from 'firebase/storage';
+} from '../data/files';
 
 export type PendingCalculationKind = 'cihazUstu' | 'kumulatif';
 
@@ -195,11 +195,6 @@ export async function savePendingCalculationFiles(opts: {
       uploadedPaths.push(path);
       const uploadResult = await uploadBytes(storageRef(storage, path), file, {
         contentType: type,
-        customMetadata: {
-          companyId,
-          pendingCalculationId: pendingDocRef.id,
-          originalFileName: file.name,
-        },
       });
       const downloadUrl = await getDownloadURL(uploadResult.ref);
       files.push({

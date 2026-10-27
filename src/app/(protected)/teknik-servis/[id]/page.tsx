@@ -19,8 +19,8 @@ import {
   serverTimestamp,
   Timestamp,
   setDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../../../../lib/data/client';
+import { db } from '../../../../lib/data/client';
 import type { Hospital, Device, DeviceFaultReport, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { Package, ArrowLeftRight, Warehouse } from 'lucide-react';
@@ -30,7 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
 import { getAffectedDeviceIds } from '@/lib/device-faults';
 import {

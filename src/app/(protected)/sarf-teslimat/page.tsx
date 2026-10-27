@@ -7,10 +7,10 @@
    sekmesinden "Teslim Et" ile mahal QR'ı okutarak tamamlar. */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { onSnapshot } from 'firebase/firestore';
+import { onSnapshot } from '../../../lib/data/client';
 import type { SarfTransfer } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import {
   SarfShell, TabBar, SarfEmpty, SarfSuccessOverlay, SoftBtn, sarfMono, SARF_AC,

@@ -12,7 +12,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Plus, Users, Search, History } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../lib/data/client';
 import {
   addDoc,
   collection,
@@ -20,11 +20,11 @@ import {
   orderBy,
   query,
   serverTimestamp,
-} from 'firebase/firestore';
+} from '../../../../../lib/data/client';
 import BackButton from '@/components/BackButton';
 import Link from 'next/link';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 type AppUser = {
   id: string;

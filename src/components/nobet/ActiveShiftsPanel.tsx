@@ -15,10 +15,10 @@ import {
 import { cn } from '@/lib/utils';
 import { format, isWithinInterval, isBefore, isAfter, parseISO, eachDayOfInterval, differenceInDays } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { collection, query, getDocs, doc, updateDoc, where } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, query, getDocs, doc, updateDoc, where } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import { toDateFromAny } from '@/lib/time';
 import type { Hospital, User as UserType, ShiftSchedule, ShiftDateRange } from '@/lib/types';

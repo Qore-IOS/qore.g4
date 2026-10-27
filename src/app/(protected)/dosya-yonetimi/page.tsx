@@ -2,9 +2,9 @@
 
 import React, { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
-import { useDepots, useHospitals } from '@/hooks/useFirebaseQueries';
+import { scopedQuery } from '@/lib/document-helpers';
+import { db } from '../../../lib/data/client';
+import { useDepots, useHospitals } from '@/hooks/useDatabaseQueries';
 import { matchesCompanyScope, normalizeCompanyId } from '@/lib/company-scope';
 import {
   collection,
@@ -18,7 +18,7 @@ import {
   where,
   getDocs,
   updateDoc,
-} from 'firebase/firestore';
+} from '../../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import {
   FileText,
@@ -38,7 +38,7 @@ import {
 import CeomedIrsaliyePanel from '@/components/ceomed/CeomedIrsaliyePanel';
 import CeomedIrsaliyeGirisKuyrugu from '@/components/ceomed/CeomedIrsaliyeGirisKuyrugu';
 import IrsaliyeScanModal from '@/components/dosya-yonetimi/IrsaliyeScanModal';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useDatabaseQueries';
 import { matchLocationFromFileName, type LocationCandidate } from '@/lib/match-location-from-filename';
 import { autoScanIrsaliyeFile } from '@/lib/irsaliye-auto-scan';
 import {

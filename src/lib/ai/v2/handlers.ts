@@ -6,8 +6,8 @@
  * allowed to see.
  */
 
-import { adminDb } from '@/lib/firebase-admin';
-import type { Query, DocumentData, Timestamp } from 'firebase-admin/firestore';
+import { adminDb } from '../../data/admin';
+import type { Query, DocumentData, Timestamp } from '../../data/admin';
 import { aiLogger } from '@/lib/logger';
 import type { PermissionContext, ToolCallResult } from './types';
 import {

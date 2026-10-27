@@ -1,5 +1,6 @@
+import {workspaceIdentity} from '../../../../lib/workspace';
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+
 import {
   type CalendarProvider,
   type CalendarTask,
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
 
   let uid: string;
   try {
-    uid = (await adminAuth.verifyIdToken(token)).uid;
+    uid = (workspaceIdentity).uid;
   } catch {
     return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
   }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { access, readFile } from 'fs/promises';
 import path from 'path';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 
 type SimilarFaultSummary = {
   id: string;

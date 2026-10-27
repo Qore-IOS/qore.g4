@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '../lib/data/client';
 import { loadTotalEfficiencyRows } from '@/lib/total-efficiency-record-storage';
 import { Calendar, History, Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { totalVerimlilikLogger } from '@/lib/logger';
 import { calculateEfficiencyMetrics } from '@/lib/verimlilik/validation';

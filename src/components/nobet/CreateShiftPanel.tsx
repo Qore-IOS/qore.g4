@@ -14,8 +14,8 @@ import { ArrowLeft, Plus, Trash2, Wrench, FlaskConical, User, Building2, Calenda
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, addDoc, serverTimestamp } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
 import { useToast } from '@/hooks/use-toast';

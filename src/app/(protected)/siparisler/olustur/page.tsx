@@ -2,12 +2,12 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../lib/data/client';
 import {
   collection, doc, setDoc, getDocs, Timestamp,
-} from 'firebase/firestore';
+} from '../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { useDepots, useHospitals, useProductCodes, useDepoStokForOrders } from '@/hooks/useFirebaseQueries';
+import { useDepots, useHospitals, useProductCodes, useDepoStokForOrders } from '@/hooks/useDatabaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import { filterOperationalSourceDepots } from '@/lib/depot-access';
 import { getStockItemQuantity } from '@/lib/stock-quantity';

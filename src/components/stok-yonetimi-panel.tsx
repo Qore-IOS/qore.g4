@@ -24,8 +24,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from './ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, getDoc, query, where, writeBatch, doc, Timestamp, serverTimestamp } from '../lib/data/client';
+import { db } from '../lib/data/client';
 import {
   PackageSearch, Warehouse, FileSpreadsheet, Loader2,
   SlidersHorizontal, X, Filter, Nfc, ChevronUp, ChevronDown,
@@ -38,7 +38,7 @@ import { exportDataToExcel } from '@/lib/utils';
 import { differenceInDays, parse, isValid, compareAsc } from 'date-fns';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { C, AC, PAL, ClayPage, useMode } from '@/components/cihaz-yonetimi/clay-kit';
@@ -59,7 +59,7 @@ import {
   useDepotMinMaxRules,
   usePaginatedDepotStock,
   useUnshippedDepoStokByDepot,
-} from '@/hooks/useFirebaseQueries';
+} from '@/hooks/useDatabaseQueries';
 
 /* ────────────────────────────────────────────
    Filter Dialog (kept for marka/urunGrubu filters)
@@ -754,8 +754,8 @@ export default function StokYonetimiPanel() {
     let cancelled = false;
     (async () => {
       try {
-        const { doc, getDoc } = await import('firebase/firestore');
-        const { db } = await import('@/lib/firebase');
+        const { doc, getDoc } = await import('../lib/data/client');
+        const { db } = await import('../lib/data/client');
         const snap = await getDoc(doc(db, 'ceomedDepoStok', selectedDepotId));
         if (cancelled || !snap.exists()) return;
         const data = snap.data() as any;

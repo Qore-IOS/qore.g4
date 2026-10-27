@@ -46,7 +46,7 @@ export type LogModule =
   | 'verimlilik-gecmis'
   | 'total-verimlilik'
   | 'auth'
-  | 'firebase'
+  | 'database'
   | 'ocr'
   | 'barcode'
   | 'ai'
@@ -506,9 +506,9 @@ export const malKabulLogger = createLogger('mal-kabul');
 export const authLogger = createLogger('auth');
 
 /**
- * Firebase module logger
+ * Database module logger
  */
-export const firebaseLogger = createLogger('firebase');
+export const databaseLogger = createLogger('database');
 
 /**
  * OCR module logger

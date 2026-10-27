@@ -31,8 +31,7 @@ if not defined ENV_LOADED (
   echo   CEOMED_BASE_URL=http://192.168.1.5:8081
   echo   CEOMED_EPOSTA=merkez
   echo   CEOMED_PAROLA=12345
-  echo   GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
-  echo   FIREBASE_PROJECT_ID=invpilot
+  echo   APP_BASE_URL=invpilot
   echo   CEOMED_COMPANY_ID=your-company-id
   exit /b 1
 )
@@ -51,14 +50,11 @@ if not defined CEOMED_PAROLA (
   echo [HATA] CEOMED_PAROLA tanimli degil. >> watch.log
   exit /b 1
 )
-if not defined FIREBASE_PROJECT_ID (
-  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> watch.log
+if not defined APP_BASE_URL (
+  echo [HATA] APP_BASE_URL tanimli degil. >> watch.log
   exit /b 1
 )
-if not defined GOOGLE_APPLICATION_CREDENTIALS (
-  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> watch.log
-  exit /b 1
-)
+
 if not defined CEOMED_COMPANY_ID (
   echo [HATA] CEOMED_COMPANY_ID tanimli degil - yazilan dokumanlar panelde gorunmez. >> watch.log
   exit /b 1

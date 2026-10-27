@@ -16,8 +16,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Barcode, Trash2, CheckSquare, Loader2, Search, AlertTriangle } from 'lucide-react';
 import { Switch } from "@/components/ui/switch";
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, writeBatch, doc, getDocs, query } from '../../lib/data/client';
 import { cn, generateId, playFeedback } from '@/lib/utils';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -28,7 +28,7 @@ import { parseAnyBarcode, resolveProductFromParsed, parseAndResolveBarcode } fro
 import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { withCompanyScope } from '@/lib/company-scope';
 
 type ScanRow = ScannedItem & {

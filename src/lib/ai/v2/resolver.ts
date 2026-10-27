@@ -15,7 +15,7 @@
  * Only candidates >= 0.55 are returned. Top-N is configurable.
  */
 
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../data/admin';
 import { aiLogger } from '@/lib/logger';
 import type { PermissionContext, ResolvedDevice, ResolvedHospital, ResolvedProduct } from './types';
 import { canSeeBrand, canSeeLab } from './permissions';

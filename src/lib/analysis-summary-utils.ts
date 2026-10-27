@@ -5,8 +5,8 @@
  * gerekli fonksiyonları içerir.
  */
 
-import { collection, doc, getDoc, getDocs, setDoc, query, where, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDoc, getDocs, setDoc, query, where, writeBatch } from './data/client';
+import { db } from './data/client';
 import type { StageStats, AggregatedRecord } from '@/store/lbys-data-store';
 import {
   type DailySummary,

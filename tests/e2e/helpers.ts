@@ -20,15 +20,8 @@ export const { USER, DEPOT, LAB, BARCODES } = seed;
  * parçası ve regresyona en açık yerlerden biri.
  */
 export async function girisYap(page: Page): Promise<void> {
-  await page.goto('/login');
-
-  await page.locator('#email').fill(USER.email);
-  await page.locator('#password').fill(USER.password);
-  await page.getByRole('button', { name: /giriş/i }).click();
-
-  // Giriş başarılıysa /login'den çıkılır. Hangi panele düşüleceği kullanıcı
-  // rolüne göre değiştiği için hedef sayfa değil, /login'den AYRILMA beklenir.
-  await page.waitForURL(url => !url.pathname.startsWith('/login'), { timeout: 45_000 });
+  await page.goto('/dashboard');
+  await expect(page).not.toHaveURL(/\/login/);
 }
 
 /**

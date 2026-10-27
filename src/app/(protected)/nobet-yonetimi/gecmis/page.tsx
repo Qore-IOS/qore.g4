@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ArrowLeft, History, Eye, Loader2, Wrench, FlaskConical, Building2, Calendar, XCircle, CheckCircle } from 'lucide-react';
-import { useDutyShiftsByStatus, useHospitals, useAllDutyShifts } from '@/hooks/useFirebaseQueries';
+import { useDutyShiftsByStatus, useHospitals, useAllDutyShifts } from '@/hooks/useDatabaseQueries';
 import { format, differenceInDays } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import type { DutyShift } from '@/lib/types';

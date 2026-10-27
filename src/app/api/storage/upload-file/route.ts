@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import '@/lib/firebase-admin';
+import '../../../../lib/data/admin';
 import { resolveStorageBucket } from '@/lib/server/storage-bucket';
 
 const ALLOWED_FOLDERS = new Set(['irsaliyeler', 'purchasing-tasks']);

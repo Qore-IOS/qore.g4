@@ -1,4 +1,4 @@
-import { db } from "../firebase";
+import { db } from "../data/client";
 import {
   collection,
   doc,
@@ -10,11 +10,11 @@ import {
   orderBy,
   runTransaction,
   serverTimestamp,
-} from "firebase/firestore";
+} from "../data/client";
 import type { Receipt } from "./invoice-types";
 import type { LedgerEntry } from "./finance-types";
 import type { CariFirma } from "./types";
-import { getScopedDocs, scopedQuery } from "../firestore-helpers";
+import { getScopedDocs, scopedQuery } from "../document-helpers";
 import { createAuditEvent, type Scope } from "./firestore";
 
 const RECEIPT_COLLECTION = "cariReceipts";

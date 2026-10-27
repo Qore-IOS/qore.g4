@@ -26,9 +26,9 @@ import {
   doc,
   type WriteBatch,
   type DocumentReference,
-} from 'firebase/firestore';
+} from '../data/client';
 
-import { db } from '@/lib/firebase';
+import { db } from '../data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 import { getStockItemQuantity } from '@/lib/stock-quantity';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';

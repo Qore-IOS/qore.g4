@@ -15,8 +15,8 @@
  * ağırlıklarınca (adet alanı) düşülür: yetmeyen kısım için doküman tamamen
  * silinir, kalan kısım için `adet` alanı kısmi olarak azaltılır.
  */
-import { collection, doc, writeBatch, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, writeBatch, Timestamp } from './data/client';
+import { db } from './data/client';
 import { withCompanyScope } from '@/lib/company-scope';
 import { appendSerialEventToBatch } from '@/lib/serial-ledger/client';
 

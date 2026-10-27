@@ -22,8 +22,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { db } from '@/lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { doc, getDoc } from '../lib/data/client';
 import { loadTotalEfficiencyRows } from '@/lib/total-efficiency-record-storage';
 import { useToast } from '@/hooks/use-toast';
 import { totalVerimlilikLogger } from '@/lib/logger';

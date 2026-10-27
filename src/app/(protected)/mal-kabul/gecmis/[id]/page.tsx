@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDoc, getDocs, orderBy, query } from 'firebase/firestore';
+import { db } from '../../../../../lib/data/client';
+import { collection, doc, getDoc, getDocs, orderBy, query } from '../../../../../lib/data/client';
 import { MK_C, MkClayStyles } from '@/components/mal-kabul/clay-kit';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';

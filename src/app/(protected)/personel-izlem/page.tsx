@@ -17,9 +17,9 @@ import {
 } from '@/lib/performance-calculator';
 import { exportPersonnelToPdf } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs } from 'firebase/firestore';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
+import { collection, getDocs } from '../../../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
+import { db } from '../../../lib/data/client';
 import type { Hospital } from '@/lib/types';
 import {
   ClayPage, PageHead, Card, CardHead, KpiTile, Pill, GhostBtn, Segmented,

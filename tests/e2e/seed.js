@@ -20,10 +20,10 @@
  * testin kendisi kanıtlar.
  */
 
-const admin = require('firebase-admin');
+const admin = require('../../scripts/db/script-store.cjs');
 
 const PROJECT_ID = process.env.E2E_PROJECT_ID || 'qore-e2e';
-const COMPANY_ID = process.env.E2E_COMPANY_ID || 'e2e-co';
+const COMPANY_ID = '__legacy__';
 
 const USER = {
   uid: 'e2e-user-0001',
@@ -86,29 +86,8 @@ const ACCESSIBLE_VIEWS = [
 ];
 
 async function tohumla() {
-  if (!process.env.FIRESTORE_EMULATOR_HOST) {
-    throw new Error('FIRESTORE_EMULATOR_HOST tanımlı değil — tohumlama gerçek projeye yazmayı reddediyor.');
-  }
-  if (!process.env.FIREBASE_AUTH_EMULATOR_HOST) {
-    throw new Error('FIREBASE_AUTH_EMULATOR_HOST tanımlı değil — Auth emülatörü olmadan oturum açılamaz.');
-  }
-
-  admin.initializeApp({ projectId: PROJECT_ID });
-  const db = admin.firestore();
-  const auth = admin.auth();
-
-  // ── kullanıcı ──────────────────────────────────────────────────────────
-  await auth.deleteUser(USER.uid).catch(() => {});
-  await auth.createUser({
-    uid: USER.uid,
-    email: USER.email,
-    password: USER.password,
-    displayName: USER.name,
-    emailVerified: true,
-  });
-  // Kuralların okuduğu tek doğruluk kaynağı bu talep.
-  await auth.setCustomUserClaims(USER.uid, { companyId: COMPANY_ID });
-
+  if (!['127.0.0.1','localhost'].includes(new URL(process.env.APP_BASE_URL || '').hostname)) throw new Error('E2E fixtures require a loopback API.');
+  const db=admin.firestore();
   const scope = { companyId: COMPANY_ID };
 
   await db.collection('users').doc(USER.uid).set({

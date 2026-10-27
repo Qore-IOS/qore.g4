@@ -23,13 +23,13 @@ import {
   Timestamp,
   where,
   serverTimestamp,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../lib/data/client';
+import { db } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { kullanimDogrulamaLogger } from '@/lib/logger';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 const NFC_TAG_REGEX = /^[0-9A-F]{2}(:[0-9A-F]{2}){7}$/;
 const NFC_INPUT_ID = 'nfc-tag-input';

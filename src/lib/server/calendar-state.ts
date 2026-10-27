@@ -5,7 +5,7 @@
  * Yalnızca sunucu tarafı (Admin SDK).
  */
 import crypto from 'crypto';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../data/admin';
 import type { CalendarProvider } from './calendar-oauth';
 
 const COLLECTION = 'calendarOAuthStates';

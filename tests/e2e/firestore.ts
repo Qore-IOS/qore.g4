@@ -11,7 +11,7 @@
  * kalan tek şey test edilen akışın kendisidir.
  */
 
-import * as admin from 'firebase-admin';
+const admin = require('../../scripts/db/script-store.cjs');
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { PROJECT_ID, COMPANY_ID, DEPOT } = require('./seed.js') as {
@@ -20,12 +20,9 @@ const { PROJECT_ID, COMPANY_ID, DEPOT } = require('./seed.js') as {
   DEPOT: { id: string; name: string };
 };
 
-function db(): admin.firestore.Firestore {
-  if (!process.env.FIRESTORE_EMULATOR_HOST) {
-    throw new Error('FIRESTORE_EMULATOR_HOST yok — testler gerçek projeye bağlanmayı reddediyor.');
-  }
-  if (!admin.apps.length) admin.initializeApp({ projectId: PROJECT_ID });
-  return admin.firestore();
+function db(): any {
+ if (!['127.0.0.1','localhost'].includes(new URL(process.env.APP_BASE_URL || '').hostname)) throw new Error('E2E requires loopback API');
+ return admin.firestore();
 }
 
 export interface StokGirdisi {

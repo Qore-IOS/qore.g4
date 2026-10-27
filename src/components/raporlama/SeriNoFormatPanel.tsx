@@ -1,9 +1,9 @@
 'use client';
 import React, { useEffect, useState, useCallback } from 'react';
-import { db } from '@/lib/firebase';
-import { doc, setDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { doc, setDoc, deleteDoc, deleteField } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import type { BarcodeFormat, ExpiryPattern } from '@/lib/types';
 import { Loader2, PlusCircle, Check, Trash2, Edit3, SlidersHorizontal, Info, Barcode } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';

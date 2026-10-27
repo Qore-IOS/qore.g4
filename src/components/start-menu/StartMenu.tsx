@@ -26,9 +26,9 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { useAI } from '@/contexts/ai-context';
 import { useStartMenu } from '@/contexts/start-menu-context';
-import { addDoc, collection, limit, onSnapshot, orderBy, query as firestoreQuery, serverTimestamp, updateDoc, doc, where, getDocs } from 'firebase/firestore';
+import { addDoc, collection, limit, onSnapshot, orderBy, query as firestoreQuery, serverTimestamp, updateDoc, doc, where, getDocs } from '../../lib/data/client';
 import { toast } from 'sonner';
-import { db } from '@/lib/firebase';
+import { db } from '../../lib/data/client';
 
 import { VIEWS } from '@/lib/constants';
 import { ShortcutBuilderModal } from './ShortcutBuilderModal';

@@ -4,13 +4,13 @@ import React, { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import type { Hospital } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, onSnapshot, query, orderBy } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import { Loader2 } from 'lucide-react';
 import BackButton from '@/components/BackButton';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 const DeviceMapPanel = dynamic(() => import('@/components/DeviceMapPanel'), { ssr: false });
 

@@ -1,15 +1,15 @@
 
 'use client';
 
-import { db } from '@/lib/firebase';
+import { db } from './data/client';
 import {
   collection, doc, addDoc, updateDoc, deleteField, onSnapshot,
   serverTimestamp, getDoc, getDocs, query, where, orderBy, Timestamp,
   arrayUnion, arrayRemove, setDoc,
-} from 'firebase/firestore';
+} from './data/client';
 import type { User } from '@/lib/types';
 import { normalizeCompanyId } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 // ============================================================================
 // TYPES

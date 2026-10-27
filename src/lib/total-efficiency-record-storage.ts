@@ -1,5 +1,5 @@
-import { collection, doc, getDocs, orderBy, query, setDoc, type DocumentData } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDocs, orderBy, query, setDoc, type DocumentData } from './data/client';
+import { db } from './data/client';
 
 const MAX_INLINE_ROWS_JSON_BYTES = 850_000;
 const ROW_CHUNK_SIZE = 250;

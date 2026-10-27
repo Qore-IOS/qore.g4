@@ -36,7 +36,7 @@ import {
 
 // Logging integration
 import { direktTransferLogger } from '@/lib/logger';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import {
   collection,
   getDocs,
@@ -51,9 +51,9 @@ import {
   where,
   onSnapshot,
   limit,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
-import { useDepotStockLite, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useFirebaseQueries';
+import { useDepotStockLite, touchStockMetadata, useDepots, useProductCodes, useHospitals, useBorcDepots, useInvalidateQueries } from '@/hooks/useDatabaseQueries';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Loader2, Camera, Truck, Plus, CheckCircle2, History, DatabaseZap, ChevronsUpDown, Check, Trash2, AlertTriangle, Package, FileText, ListChecks, ArrowRight, Minus, MoreHorizontal, X, ChevronDown, ChevronUp, Search, QrCode, RefreshCw } from 'lucide-react';
@@ -65,7 +65,7 @@ import BarcodeFormatSelect, { type FormatValue } from '@/components/BarcodeForma
 import { cn, playFeedback, sanitizeGS1, generateId } from '@/lib/utils';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope, matchesScopedQueryCompany, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { appendSerialEvents } from '@/lib/serial-ledger/client';
 import type { SerialEventInput } from '@/lib/serial-ledger/core';
 import { Switch } from '@/components/ui/switch';

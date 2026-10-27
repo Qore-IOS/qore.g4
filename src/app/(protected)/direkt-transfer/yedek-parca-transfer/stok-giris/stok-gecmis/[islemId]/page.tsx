@@ -2,9 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '../../../../../../../lib/data/client';
 import { ChevronLeft } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../../../lib/data/client';
 
 export default function StokGecmisDetayPage() {
   const router = useRouter();

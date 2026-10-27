@@ -6,18 +6,18 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Trash2, Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, Timestamp } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, writeBatch, doc, getDocs, Timestamp } from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useToast } from '@/hooks/use-toast';
 import Image from 'next/image';
 import { Label } from '@/components/ui/label';
 import { Input } from './ui/input';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useLightDashboardData } from './dashboard/useDashboardData';
-import { useMinMaxRules, useDevices } from '@/hooks/useFirebaseQueries';
+import { useMinMaxRules, useDevices } from '@/hooks/useDatabaseQueries';
 
 export default function CopKutusuPanel() {
   const { currentUser, currentUserProfile, currentCompanyId, isSuperAdmin } = useAuth();

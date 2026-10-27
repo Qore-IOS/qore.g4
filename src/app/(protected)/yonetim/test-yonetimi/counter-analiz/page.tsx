@@ -1,15 +1,15 @@
 'use client';
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { orderBy } from 'firebase/firestore';
+import { orderBy } from '../../../../../lib/data/client';
 import {
   BarChart3, FileSpreadsheet, Loader2, ChevronDown, Check,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs } from '@/lib/firestore-helpers';
-import { useProductCodes, useTestDefinitions } from '@/hooks/useFirebaseQueries';
+import { getScopedDocs } from '@/lib/document-helpers';
+import { useProductCodes, useTestDefinitions } from '@/hooks/useDatabaseQueries';
 import { useToast } from '@/hooks/use-toast';
 import {
   C, AC, ClayPage, useMode, Card, RaporHead, SoftBtn, FieldLabel,

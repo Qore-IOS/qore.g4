@@ -1,4 +1,4 @@
-import { doc, runTransaction, Timestamp, type Firestore } from 'firebase/firestore';
+import { doc, runTransaction, Timestamp, type Firestore } from './data/client';
 
 type FormTypeLetter = 'T' | 'A';
 

@@ -16,11 +16,11 @@ import {
   XCircle,
   FileSpreadsheet,
 } from 'lucide-react';
-import { addDoc, collection, getDocs, orderBy, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, getDocs, orderBy, serverTimestamp } from '../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { db } from '../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { labDonemineYaz } from '@/lib/lab-period/kaydet';
 import type { Hospital } from '@/lib/types';
 import { exportDataToExcel } from '@/lib/utils';

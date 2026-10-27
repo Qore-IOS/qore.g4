@@ -6,9 +6,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Archive, Loader2, Printer, Settings, History, Trash2, Nfc, Bot, Box, Grid3X3 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
+import { scopedQuery } from '@/lib/document-helpers';
+import { db } from '../../../lib/data/client';
+import { collection, getDocs, doc, setDoc } from '../../../lib/data/client';
 import type { Hospital as Laboratory, Rack } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';

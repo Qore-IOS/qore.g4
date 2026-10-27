@@ -33,8 +33,8 @@ import {
   type QueryConstraint,
   type DocumentData,
   type OrderByDirection,
-} from 'firebase/firestore';
-import { scopedQuery } from '@/lib/firestore-helpers';
+} from '../lib/data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 
 export interface UseCursorPaginationOptions<T> {
   collectionName: string;

@@ -1,8 +1,8 @@
 'use client';
 
-import { getDocs, where, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { getDocs, where, orderBy, limit, Timestamp } from './data/client';
 import { subDays } from 'date-fns';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import type { User, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog, Device } from '@/lib/types';
 import { isUnavailableAt, toDateValue, type PersonnelAvailabilityRecord } from '@/lib/personnel-availability';
 

@@ -1,4 +1,7 @@
 'use server';
+import type * as DocumentStore from '../lib/data/admin';
+import {workspaceIdentity} from '../lib/workspace';
+
 
 /**
  * Seri No Defteri — sunucu tarafı sorgular ve geriye dönük doldurma (backfill).
@@ -12,8 +15,8 @@
  * belge kimliği kullanılır, tekrar çalıştırmak mükerrer satır üretmez.
  */
 
-import { adminAuth, adminDb } from '@/lib/firebase-admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { adminDb } from '../lib/data/admin';
+import { FieldValue } from '../lib/data/admin';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import { isAvailableDepotStock } from '@/lib/stock-quantity';
 import {
@@ -86,7 +89,7 @@ function safeEventId(parts: Array<string | number>): string {
 }
 
 async function requireAdmin(idToken: string) {
-  const decoded = await adminAuth.verifyIdToken(idToken);
+  const decoded = workspaceIdentity;
   const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
   const userData = userSnap.data() as Record<string, any> | undefined;
   const role = str(decoded.role ?? userData?.role);
@@ -486,14 +489,14 @@ export async function lookupSerialLedger(params: {
   const serial = (seriNumarasi || '').trim();
   if (!isTrackableSerial(serial)) return [];
 
-  const decoded = await adminAuth.verifyIdToken(idToken);
+  const decoded = workspaceIdentity;
   const userSnap = await adminDb.collection('users').doc(decoded.uid).get();
   const userData = userSnap.data() as Record<string, any> | undefined;
   const role = str(decoded.role ?? userData?.role);
   const isSuperAdmin = role === 'super_admin' || role === 'admin_developer';
   const companyId = normalizeCompanyId(str(decoded.companyId ?? userData?.companyId));
 
-  let queryRef: FirebaseFirestore.Query = adminDb.collection(LEDGER).where('seriNumarasi', '==', serial);
+  let queryRef: DocumentStore.Query = adminDb.collection(LEDGER).where('seriNumarasi', '==', serial);
   if (!isSuperAdmin) queryRef = queryRef.where('companyId', '==', companyId);
   if (stokKodu) queryRef = queryRef.where('stokKodu', '==', stokKodu);
 

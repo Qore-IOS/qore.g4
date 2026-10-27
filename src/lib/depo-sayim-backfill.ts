@@ -12,9 +12,9 @@
  * that existed BEFORE that count closed. Anything dated at/after the count
  * (mal kabul received afterwards) is left completely untouched.
  */
-import { collection, doc, getDocs, limit as fbLimit, orderBy, setDoc, writeBatch } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { collection, doc, getDocs, limit as fbLimit, orderBy, setDoc, writeBatch } from './data/client';
+import { db } from './data/client';
+import { scopedQuery } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 import { isSerialClassified, qtyOf, docTimeMillis } from '@/components/depo-sayim/depo-logic';
 import type { DepoStokItem, ProductCode } from '@/lib/types';

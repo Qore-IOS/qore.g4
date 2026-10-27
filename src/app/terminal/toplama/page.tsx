@@ -20,15 +20,15 @@
 
 import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { collection, doc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, writeBatch } from '../../../lib/data/client';
 import { Check, Minus, Plus, Trash2 } from 'lucide-react';
 
-import { db } from '@/lib/firebase';
+import { db } from '../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';
 import useHidScanner from '@/hooks/useHidScanner';
 import { parseAndResolveBarcode } from '@/lib/barcode';
-import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useFirebaseQueries';
+import { useInvalidateQueries, touchStockMetadata } from '@/hooks/useDatabaseQueries';
 import { useTerminalDepot } from '@/hooks/useTerminalDepot';
 // Veri TEK KAYNAKTAN: önyükleme deposu. TanStack hook'ları (`useDepots` vb.)
 // BİLEREK kullanılmaz — `getDocs` ile sorgu atarlar ve çevrimdışıyken panel

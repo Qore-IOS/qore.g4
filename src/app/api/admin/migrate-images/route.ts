@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { adminDb } from '@/lib/firebase-admin';
+import { adminDb } from '../../../../lib/data/admin';
 import { resolveStorageBucket } from '@/lib/server/storage-bucket';
-import { toStorageUrl } from '@/lib/image-utils';
+import {workspaceIdentity} from '../../../../lib/workspace';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -10,7 +10,7 @@ const STORAGE_FOLDER = 'device-images';
 /**
  * POST /api/admin/migrate-images
  *
- * One-time migration: uploads every image in public/ to Firebase Storage
+ * One-time migration: uploads every image in public/ to dosya deposu
  * under "device-images/" and updates all Firestore device & deviceGroup
  * records with the resulting Storage URLs.
  *
@@ -18,23 +18,6 @@ const STORAGE_FOLDER = 'device-images';
  */
 export async function POST(request: NextRequest) {
   try {
-    // Simple auth check – caller must pass ?uid=<adminUid>
-    const uid = new URL(request.url).searchParams.get('uid');
-    if (!uid) {
-      return NextResponse.json(
-        { error: 'uid query parametresi gerekli.' },
-        { status: 400 },
-      );
-    }
-    const userSnap = await adminDb.collection('users').doc(uid).get();
-    const userData = userSnap.data() as any;
-    if (!userSnap.exists || userData?.role !== 'admin') {
-      return NextResponse.json(
-        { error: 'Bu işlem için admin yetkisi gerekli.' },
-        { status: 403 },
-      );
-    }
-
     const bucket = await resolveStorageBucket();
 
     // ── 1. Discover image files in public/ ──
@@ -90,10 +73,7 @@ export async function POST(request: NextRequest) {
           resumable: false,
         });
 
-        // Make publicly readable
-        await bucketFile.makePublic();
-
-        const storageUrl = toStorageUrl(file);
+        const [storageUrl] = await bucketFile.getSignedUrl();
         results.push({ file, storageUrl, status: 'uploaded' });
       } catch (err: any) {
         results.push({ file, storageUrl: '', status: `error: ${err.message}` });
@@ -150,7 +130,7 @@ export async function POST(request: NextRequest) {
     // ── 6. Store migration metadata ──
     await adminDb.collection('systemConfig').doc('imageMigration').set({
       migratedAt: new Date(),
-      migratedBy: uid,
+      migratedBy: workspaceIdentity.uid,
       totalFiles: imageFiles.length,
       successCount: results.filter((r) => r.status === 'uploaded').length,
       errorCount: results.filter((r) => r.status !== 'uploaded').length,

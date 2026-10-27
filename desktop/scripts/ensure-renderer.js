@@ -93,7 +93,7 @@ if (result.error || result.status !== 0) {
       // olarak bu yaşandı: yeni bağımlılıklar pnpm-lock.yaml'a girmemişti ve
       // mesaj yanlış komutu öneriyordu.
       `  • Bağımlılıklar güncel değil → repo kökünde \`${manager} install\`\n` +
-      '  • Firebase anahtarları okunamıyor → `node scripts/env-from-apphosting.js`\n' +
+      '  • API adresi eksik → .env.local içinde NEXT_PUBLIC_API_BASE_URL ayarlayın\n' +
       '    (anahtarlar normalde apphosting.yaml içinden otomatik alınır)',
   );
 }

@@ -10,11 +10,11 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, orderBy, query } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { filterByCompanyScope } from '@/lib/company-scope';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery, getScopedDocs } from '@/lib/firestore-helpers';
+import { scopedQuery, getScopedDocs } from '@/lib/document-helpers';
 import { getExchangeRates } from '@/lib/exchange-rates';
 import type { ProductCode, Currency } from '@/lib/types';
 import {

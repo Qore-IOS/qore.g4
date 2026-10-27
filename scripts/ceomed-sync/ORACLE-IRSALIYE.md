@@ -1,3 +1,8 @@
+> Güncel altyapı: Vercel / Neon PostgreSQL. Bu belgedeki eski Firebase,
+> servis hesabı, kural yayımlama ve oturum adımları artık geçersizdir.
+> Güncel kurulum için depodaki `docs/vercel-postgresql.md` belgesini kullanın.
+> Terminal paketi `NEXT_PUBLIC_API_BASE_URL`, ERP işçileri `APP_BASE_URL` kullanır.
+
 # Qore → Ceomed muhasebe irsaliyesi (YAZMA)
 
 `watch.js` Ceomed'den Qore'a **okur**. Bu belge ters yönü anlatır: bir teknik

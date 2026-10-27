@@ -12,9 +12,9 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Save, Loader2, Calendar, Clock } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
-import { useUsers, useHospitals } from '@/hooks/useFirebaseQueries';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, Timestamp } from 'firebase/firestore';
+import { useUsers, useHospitals } from '@/hooks/useDatabaseQueries';
+import { db } from '../../../../lib/data/client';
+import { collection, addDoc, Timestamp } from '../../../../lib/data/client';
 import type { DutyShiftRole } from '@/lib/types';
 import { withCompanyScope } from '@/lib/company-scope';
 

@@ -37,10 +37,10 @@ import {
   serverTimestamp,
   type QueryConstraint,
   type FirestoreDataConverter,
-} from "firebase/firestore";
-import { getAuth } from "firebase/auth";
-import { db } from "@/lib/firebase";
-import { scopedQuery } from "@/lib/firestore-helpers";
+} from "../data/client";
+import { getAuth } from "../workspace";
+import { db } from "../data/client";
+import { scopedQuery } from "@/lib/document-helpers";
 import { withCompanyScope } from "@/lib/company-scope";
 import type {
   Payment,

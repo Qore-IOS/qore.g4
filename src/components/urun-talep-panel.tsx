@@ -33,8 +33,8 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { getScopedDocs } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
+import { getScopedDocs } from '@/lib/document-helpers';
+import { db } from '../lib/data/client';
 import {
   collection,
   getDocs,
@@ -42,7 +42,7 @@ import {
   setDoc,
   serverTimestamp,
   where,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import type { Depot, Hospital, ProductCode, MinMaxRule, OrderItem, OrderUrgency, User } from '@/lib/types';
 import { Textarea } from '@/components/ui/textarea';
 import { AlertTriangle, AlertCircle, Flame } from 'lucide-react';
@@ -51,7 +51,7 @@ import BackButton from '@/components/BackButton';
 import { emitOrderCreatedFromRequest } from '@/lib/notifications';
 import { useRouter } from 'next/navigation';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useFirebaseQueries';
+import { useActiveDutyShifts, useUpcomingDutyShifts } from '@/hooks/useDatabaseQueries';
 import type { DutyShift } from '@/lib/types';
 import { format as formatDate } from 'date-fns';
 import { tr } from 'date-fns/locale';

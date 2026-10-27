@@ -12,8 +12,8 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, onSnapshot, query, updateDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDoc, onSnapshot, query, updateDoc, serverTimestamp } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { Button } from '@/components/ui/button';

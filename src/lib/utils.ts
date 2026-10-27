@@ -2,7 +2,7 @@
 import { type ClassValue, clsx } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { BarcodeFormat, ProductCode, ParsedResult } from './types';
-import { where, type QueryConstraint, type WhereFilterOp } from 'firebase/firestore';
+import { where, type QueryConstraint, type WhereFilterOp } from './data/client';
 
 
 export function cn(...inputs: ClassValue[]) {

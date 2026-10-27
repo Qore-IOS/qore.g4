@@ -7,8 +7,8 @@ import {
   doc,
   serverTimestamp,
   setDoc,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+} from '../data/client';
+import { db } from '../data/client';
 import { normalizeCompanyId } from '@/lib/company-scope';
 import type { Rack } from '@/lib/types';
 import { todayYmd } from './rack-utils';

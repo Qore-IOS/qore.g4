@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db } from '../lib/data/client';
 import {
   collection,
   query,
@@ -11,7 +11,7 @@ import {
   writeBatch,
   doc,
   Timestamp,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import {
   Card,
   CardHeader,
@@ -45,7 +45,7 @@ import {
 } from '@/components/ui/accordion';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 // Types
 interface BorcTransfer {

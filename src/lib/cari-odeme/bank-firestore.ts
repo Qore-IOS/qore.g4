@@ -1,4 +1,4 @@
-import { db } from "../firebase";
+import { db } from "../data/client";
 import {
   collection,
   doc,
@@ -6,10 +6,10 @@ import {
   runTransaction,
   serverTimestamp,
   orderBy,
-} from "firebase/firestore";
+} from "../data/client";
 import type { BankTransaction } from "./bank-types";
 import type { BankAccount } from "./types";
-import { getScopedDocs, scopedQuery } from "../firestore-helpers";
+import { getScopedDocs, scopedQuery } from "../document-helpers";
 import { createAuditEvent, type Scope } from "./firestore";
 
 const BANK_TX_COLLECTION = "cariBankTransactions";

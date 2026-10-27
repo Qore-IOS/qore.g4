@@ -9,10 +9,10 @@ import {
   where,
   type DocumentData,
   type QueryDocumentSnapshot,
-} from 'firebase/firestore';
+} from '../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { db } from '../lib/data/client';
+import { getScopedDocs } from '@/lib/document-helpers';
 import {
   buildGroupNameById,
   buildLabCountOverview,

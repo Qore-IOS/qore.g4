@@ -1,9 +1,10 @@
+import {workspaceIdentity} from '../workspace';
 /**
  * Takvim OAuth API route'ları için ortak yardımcılar (connect & callback akışı).
  * Yalnızca sunucu tarafı.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { adminAuth } from '@/lib/firebase-admin';
+
 import {
   type CalendarProvider,
   providerConfigured,
@@ -35,7 +36,7 @@ export async function handleConnect(
 
   let uid: string;
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
+    const decoded = workspaceIdentity;
     uid = decoded.uid;
   } catch {
     return NextResponse.redirect(`${base}${PANEL_PATH}?calendar=${provider}-auth-required`);

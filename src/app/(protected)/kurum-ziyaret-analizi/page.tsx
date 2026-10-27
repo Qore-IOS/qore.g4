@@ -8,8 +8,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Checkbox } from '@/components/ui/checkbox';
 import { DatePickerWithRange } from '@/components/ui/date-range-picker';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, limit } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDoc, getDocs, orderBy, query, serverTimestamp, setDoc, Timestamp, limit } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import { Building2, Users, Search, X, ChevronsUpDown, Settings2, CalendarDays } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
@@ -18,7 +18,7 @@ import { useRouter } from 'next/navigation';
 import type { Hospital, LabPool, User } from '@/lib/types';
 import type { DateRange } from 'react-day-picker';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { useDateRangeFilter } from '@/hooks/useDateRangeFilter';
 import { DateRangeFilterBar } from '@/components/common/DateRangeFilterBar';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -93,30 +93,7 @@ interface AggregatedVisit {
   records: PersonnelVisitRecord[];
 }
 
-function logFirestoreIndexHint(error: unknown, context: string) {
-  const err = (error as { message?: string; code?: string; name?: string } | null) || {};
-  const message = err.message || '';
-  const code = err.code || 'unknown';
-  const name = err.name || 'UnknownError';
-  const indexUrlMatch = message.match(/https:\/\/console\.firebase\.google\.com\/[^\s]+/);
-
-  console.error(`[${context}] Firestore sorgu hatası`, { code, name, message });
-
-  if (indexUrlMatch) {
-    console.error(`[${context}] Firestore index gerekli. Oluşturma linki: ${indexUrlMatch[0]}`);
-    return;
-  }
-
-  if (code === 'failed-precondition') {
-    console.error(`[${context}] Firestore sorgusu index bekliyor. Hata:`, error);
-    console.error(`[${context}] Hata mesajında otomatik index linki bulunamadı. Firebase Console > Firestore > Indexes bölümünden kontrol edin.`);
-    return;
-  }
-
-  if (code.includes('cors') || message.toLowerCase().includes('cors') || message.includes('ERR_FAILED') || message.includes('302')) {
-    console.error(`[${context}] Bu hata index değil, ağ/CORS/proxy kaynaklı görünüyor. Index linki bu yüzden üretilemiyor.`);
-  }
-}
+function logDatabaseError(error:unknown,context:string){console.error(`[${context}] Veritabanı sorgusu başarısız`,error);}
 
 export default function KurumZiyaretAnaliziPage() {
   const router = useRouter();
@@ -391,7 +368,7 @@ export default function KurumZiyaretAnaliziPage() {
           }), currentCompanyId, isSuperAdmin)
         );
       } catch (error) {
-        logFirestoreIndexHint(error, 'kurum-ziyaret-analizi/fetchData');
+        logDatabaseError(error, 'kurum-ziyaret-analizi/fetchData');
         console.error('Kurum ziyaret analizi veri hatası:', error);
       } finally {
         setLoading(false);

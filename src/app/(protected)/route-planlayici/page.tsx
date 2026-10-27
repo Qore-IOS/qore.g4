@@ -11,13 +11,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useToast } from '@/hooks/use-toast';
 import { MapIcon, History, Flag, LogOut, Plus, Truck, ListOrdered, MapPin, Eye, Navigation, Wifi, WifiOff, Locate, LocateOff, AlertCircle } from 'lucide-react';
 import RouteProgressView from './route-progress-view';
-import { db } from '@/lib/firebase';
+import { db } from '../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   collection, doc, getDocs, onSnapshot, query,
   serverTimestamp, Timestamp, updateDoc, where
-} from 'firebase/firestore';
+} from '../../../lib/data/client';
 import type { User as AppUser } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';

@@ -19,15 +19,15 @@ import {
   addDoc,
   serverTimestamp,
   setDoc,
-} from 'firebase/firestore';
+} from '../../../../lib/data/client';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../lib/data/client';
 import type { Hospital, Device, PersonalStockItem, MaintenancePlan, MaintenanceLog, PeriodicPartChange, PeriodicPartChangeLog } from '@/lib/types';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { useToast } from '@/hooks/use-toast';
 import { matchesCompanyScope, withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { classifyStopFault } from '@/lib/stop-fault';
 import { getAffectedDeviceIds } from '@/lib/device-faults';
 import { useAuth } from '@/contexts/auth-context';

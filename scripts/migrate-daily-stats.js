@@ -21,10 +21,10 @@
  *   node scripts/migrate-daily-stats.js --days 365 --apply
  *   node scripts/migrate-daily-stats.js --days 365 --apply --delete-legacy
  *
- * Env: GOOGLE_APPLICATION_CREDENTIALS, FIREBASE_PROJECT_ID
+ * Env: GOOGLE_APPLICATION_CREDENTIALS, APP_BASE_URL
  */
-const admin = require('firebase-admin');
-const { initAdmin } = require('./lib/firebase-project');
+const admin = require('./db/script-store.cjs');
+const { initAdmin } = require('./lib/database-project');
 
 function parseArgs() {
   const args = process.argv.slice(2);

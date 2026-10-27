@@ -2,13 +2,13 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs } from '../../../../../../lib/data/client';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { ChevronLeft, History, Loader2 } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 interface DepoLogRow {
   id: string;

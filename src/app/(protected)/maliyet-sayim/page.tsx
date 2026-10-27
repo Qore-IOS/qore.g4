@@ -2,7 +2,7 @@
 'use client';
 import React, { Suspense } from 'react';
 import MaliyetPanel from '@/components/maliyet/MaliyetPanel';
-import { useProductCodes, useHospitals, useDepots } from '@/hooks/useFirebaseQueries';
+import { useProductCodes, useHospitals, useDepots } from '@/hooks/useDatabaseQueries';
 import { Loader2 } from 'lucide-react';
 
 function MaliyetSayimContent() {

@@ -3,14 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Loader2, Plus, Trash2, Wrench, FlaskConical, AlertTriangle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, query, where, orderBy } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, addDoc, deleteDoc, doc, Timestamp, query, where, orderBy } from '../../../lib/data/client';
+import { db } from '../../../lib/data/client';
 import BackButton from '@/components/BackButton';
 import type { FaultDefinition, FaultDefinitionType } from '@/lib/types';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';

@@ -3,15 +3,15 @@
 import React, { useState, useEffect } from 'react';
 import { Palette, Image, Layout, Settings2, MousePointer2, Droplets, Check, Sun, Moon, X, ImageIcon, Monitor, Smartphone, Package, Loader2, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import { cn } from '@/lib/utils';
 import NextImage from 'next/image';
 import { resolveImageSrc } from '@/lib/image-utils';
 import { VIEWS } from '@/lib/constants';
 import { useIconMappings, getIconSrc } from '@/hooks/useIconMappings';
 import Link from 'next/link';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, getDocs, orderBy, query } from '../../lib/data/client';
 
 const PUBLIC_IMAGES = [
   '234724.png', '235016.png', '236209.png', '236609.png',

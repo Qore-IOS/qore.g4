@@ -23,13 +23,13 @@ import type { ParsedGeneric, BarcodeFormat } from '@/lib/barcode';
 
 // Hooks
 import { useToast } from "@/hooks/use-toast";
-import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useFirebaseQueries';
+import { useDepots, useProductCodes, useAddressDefinitions, useBarcodeFormatsQuery, useUsers, useDepotSerialIndex, useInvalidateQueries, touchStockMetadata, useDepotCountSessions, useScannedItems, useIrsaliyeFiles } from '@/hooks/useDatabaseQueries';
 import { TrackingMode, resolveDefaultTrackingMode, resolveEffectiveTrackingMode } from '@/lib/tracking';
 import useHidScanner from '@/hooks/useHidScanner';
 import { ScanCommitProbe, ScanPerformanceBadge, useScanPerformance } from '@/hooks/useScanPerformance';
 import { LedStripGlow } from '@/components/ui/led-strip-glow';
 import { useAuth } from '@/contexts/auth-context';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 // UI Components
 import { Button } from '@/components/ui/button';
@@ -48,8 +48,8 @@ import { VirtualizedList } from '@/components/ui/virtualized-list';
 import { Trash2, CheckSquare, PlusCircle, Plus, Minus, Loader2, Search, History, Camera, ScanLine, Package, MapPin, FileText, X, Undo2, AlertTriangle, QrCode, Download, Sparkles, CheckCircle2, Clock, RefreshCw, Zap } from 'lucide-react';
 
 // Firebase
-import { db } from '@/lib/firebase';
-import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit, increment, arrayUnion } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, writeBatch, doc, getDocs, query, where, Timestamp, onSnapshot, orderBy, limit, increment, arrayUnion } from '../lib/data/client';
 import { flushSync } from 'react-dom';
 import { scheduleIdle, cancelIdle, sanitizeFsId, type IdleHandle } from '@/lib/sync/idle-scheduler';
 import { appendSerialEventToBatch, buildSerialLedgerWrites, getSerialLedgerEntries } from '@/lib/serial-ledger/client';

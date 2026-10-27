@@ -3,8 +3,8 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, doc, getDoc, getDocs, serverTimestamp, updateDoc } from '../../../../../lib/data/client';
+import { db } from '../../../../../lib/data/client';
 import type { ProductCode, Currency, MinMaxRule } from '@/lib/types';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -15,7 +15,7 @@ import {
 import { format, isValid } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
-import { useProductCodes } from '@/hooks/useFirebaseQueries';
+import { useProductCodes } from '@/hooks/useDatabaseQueries';
 import { useAuth } from '@/contexts/auth-context';
 import { matchesCompanyScope } from '@/lib/company-scope';
 import { getExchangeRates } from '@/lib/exchange-rates';

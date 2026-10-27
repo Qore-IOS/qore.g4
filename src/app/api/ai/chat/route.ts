@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { aiLogger } from '@/lib/logger';
 import { isApiKeyValid } from '@/lib/ai/config';
 import { smartChat, smartChatStream, type ChatMessage } from '@/lib/ai/chat';
-import { isOpenAIExtensionConfigured } from '@/lib/ai/openaiExtensionClient';
+import { isOpenAIConfigured } from '@/lib/ai/openaiClient';
 import {
   permissionContextFromRequest,
   runEngine,
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Mesaj gerekli' }, { status: 400 });
     }
 
-    if (isOpenAIExtensionConfigured()) {
+    if (isOpenAIConfigured()) {
       const chatHistory = history
         .filter((m): m is ChatMessage => (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
         .map((m) => ({ role: m.role, content: m.content }));
@@ -93,7 +93,7 @@ export async function POST(request: NextRequest) {
     if (!(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY)) {
       aiLogger.error('Gemini API key is not set');
       return NextResponse.json(
-        { error: 'API anahtarı ayarlanmamış', message: 'GEMINI_API_KEY environment variable eksik. ChatGPT Firebase Extension kullanacaksanız OPENAI_EXTENSION_COLLECTION_PATH ayarlayın.' },
+        { error: 'API anahtarı ayarlanmamış', message: 'GEMINI_API_KEY veya OPENAI_API_KEY ortam değişkenini ayarlayın.' },
         { status: 500 },
       );
     }

@@ -3,11 +3,11 @@
 import React from 'react';
 import { Search, X, Plus, BarChart2 } from 'lucide-react';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
+import { db } from '../../../lib/data/client';
 import { createNotification } from '@/lib/notifications';
 import {
   collection, query, where, onSnapshot, addDoc, updateDoc, deleteDoc, doc, serverTimestamp,
-} from 'firebase/firestore';
+} from '../../../lib/data/client';
 import {
   AC, PL_DOW, PL_MON, PL_PRI, PlStyles, PlIconBtn, PlToast, PlCheck, PlModal, PlModalHead, PlBtn, useContainerMode, uid,
   plToday, plParse, plRelative,

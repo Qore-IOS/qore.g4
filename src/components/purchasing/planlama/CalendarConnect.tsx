@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { CalendarClock, Check, X, Loader2, Plug, Unplug, ChevronDown } from 'lucide-react';
-import { getAuth } from 'firebase/auth';
+import { getAuth } from '../../../lib/workspace';
 import type { Accent } from './pl-primitives';
 
 type Provider = 'google' | 'microsoft';

@@ -6,7 +6,7 @@
  * @version 1.0.0
  */
 
-import { Timestamp } from 'firebase/firestore';
+import { Timestamp } from '../data/client';
 import type { ProductCode, DepoStokItem, Depot, AddressDefinition, BarcodeFormat } from '@/lib/types';
 import type { TrackingMode } from '@/lib/tracking';
 

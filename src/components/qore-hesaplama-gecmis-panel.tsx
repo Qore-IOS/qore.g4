@@ -3,7 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Download, Loader2, Table2, Trash2 } from 'lucide-react';
-import { deleteDoc, doc, orderBy } from 'firebase/firestore';
+import { deleteDoc, doc, orderBy } from '../lib/data/client';
 import BackButton from '@/components/BackButton';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -12,11 +12,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useAuth } from '@/contexts/auth-context';
-import { db } from '@/lib/firebase';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { db } from '../lib/data/client';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { exportDataToExcel } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
-import { useTestDefinitions } from '@/hooks/useFirebaseQueries';
+import { useTestDefinitions } from '@/hooks/useDatabaseQueries';
 
 type HistoryKind = 'kumulatif' | 'cihazUstu';
 

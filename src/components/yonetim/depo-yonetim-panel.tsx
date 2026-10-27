@@ -1,8 +1,8 @@
 'use client';
 import React, { useState, useEffect, useCallback } from 'react';
 import type { Depot, ProductCode, AddressDefinition, Hospital, DeviceLabPool } from '@/lib/types';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, setDoc, deleteDoc, doc, writeBatch } from 'firebase/firestore';
+import { db } from '../../lib/data/client';
+import { collection, addDoc, setDoc, deleteDoc, doc, writeBatch } from '../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import MapDefinitionModal from '@/components/MapDefinitionModal';
 import MinMaxSettingsPanel from '@/components/MinMaxSettingsPanel';
 import dynamic from 'next/dynamic';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { filterByCompanyScope, withCompanyScope } from '@/lib/company-scope';
 
 const LocationPicker = dynamic(() => import('@/components/LocationPicker'), {

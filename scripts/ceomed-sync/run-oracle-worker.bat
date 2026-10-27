@@ -39,8 +39,7 @@ if exist .env (
 )
 if not defined ENV_LOADED (
   echo [HATA] set-env.bat veya .env bulunamadi. Ornek .env icerigi:
-  echo   GOOGLE_APPLICATION_CREDENTIALS=C:\Users\btuba\Desktop\firebase-sa.json
-  echo   FIREBASE_PROJECT_ID=invpilot
+  echo   APP_BASE_URL=invpilot
   echo   CEOMED_COMPANY_ID=your-company-id
   echo   ORACLE_DRY_RUN=1
   echo   ORACLE_FILL_ONLY=1
@@ -48,14 +47,11 @@ if not defined ENV_LOADED (
   exit /b 1
 )
 
-if not defined FIREBASE_PROJECT_ID (
-  echo [HATA] FIREBASE_PROJECT_ID tanimli degil. >> oracle-worker.log
+if not defined APP_BASE_URL (
+  echo [HATA] APP_BASE_URL tanimli degil. >> oracle-worker.log
   exit /b 1
 )
-if not defined GOOGLE_APPLICATION_CREDENTIALS (
-  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil. >> oracle-worker.log
-  exit /b 1
-)
+
 if not defined CEOMED_COMPANY_ID (
   echo [HATA] CEOMED_COMPANY_ID tanimli degil - worker hangi firmanin islerini alacagini bilemez. >> oracle-worker.log
   exit /b 1

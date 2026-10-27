@@ -10,9 +10,9 @@ import { PlusCircle, Trash2, Save, Loader2, Clock, History, FileText } from 'luc
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, getDocs, writeBatch, doc, onSnapshot, orderBy, Timestamp, updateDoc } from 'firebase/firestore';
+import { scopedQuery } from '@/lib/document-helpers';
+import { db } from '../../../../lib/data/client';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, writeBatch, doc, onSnapshot, orderBy, Timestamp, updateDoc } from '../../../../lib/data/client';
 import BackButton from '@/components/BackButton';
 import { format, differenceInMinutes, isValid } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogClose } from '@/components/ui/dialog';

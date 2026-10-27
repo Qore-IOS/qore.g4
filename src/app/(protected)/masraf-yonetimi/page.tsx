@@ -11,9 +11,9 @@ import { Upload, Download, Save, PlusCircle, Trash2, Loader2, History } from 'lu
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
-import { db } from '@/lib/firebase';
-import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc, where, onSnapshot, Timestamp } from 'firebase/firestore';
+import { scopedQuery } from '@/lib/document-helpers';
+import { db } from '../../../lib/data/client';
+import { collection, doc, getDocs, orderBy, query, serverTimestamp, setDoc, where, onSnapshot, Timestamp } from '../../../lib/data/client';
 import { exportDataToExcel, readExcelData } from '@/lib/utils';
 import { format, parse } from 'date-fns';
 import { tr } from 'date-fns/locale';

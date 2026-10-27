@@ -11,8 +11,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { collection, getDocs, deleteDoc, doc, writeBatch, setDoc, query, where, orderBy, Timestamp } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { collection, getDocs, deleteDoc, doc, writeBatch, setDoc, query, where, orderBy, Timestamp } from '../../lib/data/client';
+import { db } from '../../lib/data/client';
 import { useToast } from '@/hooks/use-toast';
 import type { ProductCode } from '@/lib/types';
 import { ProductFormatModal } from '@/components/ProductFormatModal';
@@ -23,7 +23,7 @@ import { cn } from '@/lib/utils';
 import debounce from 'lodash.debounce';
 import { Badge } from '../ui/badge';
 import { useAuth } from '@/contexts/auth-context';
-import { getScopedDocs } from '@/lib/firestore-helpers';
+import { getScopedDocs } from '@/lib/document-helpers';
 import { useSafeBarcodeFormats } from '@/hooks/useSafeBarcodeFormats';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Checkbox } from '../ui/checkbox';

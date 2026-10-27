@@ -20,12 +20,9 @@ if not defined ENV_LOADED (
   exit /b 1
 )
 
-if not defined GOOGLE_APPLICATION_CREDENTIALS (
-  echo [HATA] GOOGLE_APPLICATION_CREDENTIALS tanimli degil.
-  exit /b 1
-)
-if not defined FIREBASE_PROJECT_ID (
-  echo [HATA] FIREBASE_PROJECT_ID tanimli degil.
+
+if not defined APP_BASE_URL (
+  echo [HATA] APP_BASE_URL tanimli degil.
   exit /b 1
 )
 if not defined CEOMED_COMPANY_ID (

@@ -11,14 +11,14 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Plus, Trash2, Loader2, ArrowLeft, ListChecks, MapPin, ChevronLeft, ChevronRight, Check, Navigation, Eye, Warehouse, FlaskConical } from 'lucide-react';
-import { db } from '@/lib/firebase';
+import { db } from '../../../../lib/data/client';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 import {
   collection, doc, getDoc, getDocs, onSnapshot, query,
   serverTimestamp, setDoc, Timestamp, updateDoc, where, increment
-} from 'firebase/firestore';
+} from '../../../../lib/data/client';
 import type { Hospital, User as AppUser, Depot } from '@/lib/types';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';

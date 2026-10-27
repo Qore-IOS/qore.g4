@@ -1,7 +1,7 @@
 'use client';
 import { useState, useMemo } from 'react';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, writeBatch, doc, query, where } from 'firebase/firestore';
+import { db } from '../lib/data/client';
+import { collection, getDocs, writeBatch, doc, query, where } from '../lib/data/client';
 import type { Hospital, DepoStokItem } from '@/lib/types';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -9,7 +9,7 @@ import { Loader2, DatabaseZap } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/contexts/auth-context';
 import { filterByCompanyScope } from '@/lib/company-scope';
-import { scopedQuery } from '@/lib/firestore-helpers';
+import { scopedQuery } from '@/lib/document-helpers';
 
 export default function AdminBackfillHedefKurumId() {
   const [busy, setBusy] = useState(false);

@@ -28,8 +28,8 @@ import {
   ListChecks,
   Trash2,
 } from 'lucide-react';
-import { signOut } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { signOut } from '../lib/workspace';
+
 import { useDock } from '@/hooks/use-dock';
 import type { NotificationItem } from '@/hooks/use-dock';
 import { markAsRead, buildHrefForResource } from '@/lib/notifications';
@@ -386,18 +386,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
                 <Gauge className="h-4 w-4" />
                 <span>Performansım</span>
               </button>
-              <button
-                type="button"
-                className="qt-profile-popover__item qt-profile-popover__item--danger"
-                role="menuitem"
-                onClick={() => {
-                  setProfileMenuOpen(false);
-                  handleLogout();
-                }}
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Çıkış Yap</span>
-              </button>
+
             </div>
           )}
           <button
@@ -449,7 +438,7 @@ export default function QoreTechnicShell({ children }: { children: React.ReactNo
         <LiquidGlassSurface radius={18} strength={32} dispersion={0.4} blur={3} bezel={16} zoom={0.18} fallbackBlur={20} shine={false} />
 
         {/* Backdrop for closing popovers */}
-        <div 
+        <div
           className={cn('qt-popover-overlay', expandedMenu && 'qt-popover-overlay--open')}
           onClick={() => setExpandedMenu(null)}
           aria-hidden="true"
@@ -626,20 +615,7 @@ export function QoreTechnicProfileButton({
                 <span className="qt-sheet__item-label">Performansım</span>
                 <ChevronRight className="h-4 w-4 opacity-60" />
               </button>
-              <button
-                type="button"
-                className="qt-sheet__item qt-sheet__item--danger"
-                onClick={() => {
-                  setOpen(false);
-                  handleLogout();
-                }}
-              >
-                <span className="qt-sheet__item-icon">
-                  <LogOut className="h-5 w-5" />
-                </span>
-                <span className="qt-sheet__item-label">Çıkış Yap</span>
-                <ChevronRight className="h-4 w-4 opacity-60" />
-              </button>
+
             </div>
           </div>
         </div>
