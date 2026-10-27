@@ -462,7 +462,7 @@ export function validateManualDeduction(
 ): { success: true; data: ManualDeductionPayload } | { success: false; errors: z.ZodError } {
   const result = ManualDeductionPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    return { success: true, data: { ...result.data, productCode: result.data.productCode, lotNumarasi: result.data.lotNumarasi, miad: result.data.miad, quantity: result.data.quantity, laboratoryId: result.data.laboratoryId } };
   }
   return { success: false, errors: result.error };
 }
@@ -505,7 +505,7 @@ export function validateFaultReport(
 ): { success: true; data: FaultReportPayload } | { success: false; errors: z.ZodError } {
   const result = FaultReportPayloadSchema.safeParse(payload);
   if (result.success) {
-    return { success: true, data: result.data };
+    return { success: true, data: { ...result.data, hospitalId: result.data.hospitalId, labName: result.data.labName, deviceId: result.data.deviceId, model: result.data.model, serial: result.data.serial, faultType: result.data.faultType, openedByUid: result.data.openedByUid, openedByName: result.data.openedByName, openDescription: result.data.openDescription } };
   }
   return { success: false, errors: result.error };
 }

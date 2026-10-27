@@ -1,8 +1,10 @@
 'use client';
 
+import type { Device, DeviceLabPool, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '../../../lib/types';
+
 import React, { useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Device, DeviceLabPool, Hospital, MaintenanceDefinition, MaintenanceLog, MaintenancePlan } from '@/lib/types';
+import type { Hospital } from '@/lib/types';
 import BakimTakipPanel from '@/components/bakim-takip-panel';
 import { useAuth } from '@/contexts/auth-context';
 import { useToast } from '@/hooks/use-toast';

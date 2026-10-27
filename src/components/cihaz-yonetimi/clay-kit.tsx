@@ -191,8 +191,8 @@ function toneBg(tone: Tone | undefined, ac: Accent): string {
 
 // ── Card ────────────────────────────────────────────────────────────────────────
 export function Card({
-  children, tone, style, pad, anim = true,
-}: { children: React.ReactNode; tone?: Tone; style?: React.CSSProperties; pad?: number; anim?: boolean }) {
+  children, tone, style, pad, anim = true, className,
+}: { children: React.ReactNode; tone?: Tone; style?: React.CSSProperties; pad?: number; anim?: boolean; className?: string }) {
   const bg =
     tone === 'ok' ? `linear-gradient(180deg, rgba(111,181,133,0.08), ${C.surface2})`
     : tone === 'amber' ? `linear-gradient(180deg, rgba(224,163,62,0.08), ${C.surface2})`
@@ -200,6 +200,7 @@ export function Card({
     : `linear-gradient(180deg, ${C.surface} 0%, ${C.surface2} 100%)`;
   return (
     <div
+      className={className}
       style={{
         position: 'relative', padding: pad != null ? pad : 18, borderRadius: C.radiusLg,
         background: bg, boxShadow: C.clay, animation: anim ? `cyRise 480ms ${EASE} both` : undefined,

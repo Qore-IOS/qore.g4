@@ -92,6 +92,10 @@ export default function YeniFaturaPage() {
         const taxAmount = lineTotalKdvHaric * l.taxRate;
         return {
           ...l,
+          description: l.description,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          taxRate: l.taxRate,
           lineNo: i + 1,
           taxAmount,
           lineTotal: lineTotalKdvHaric + taxAmount,
@@ -105,6 +109,7 @@ export default function YeniFaturaPage() {
         { companyId: currentCompanyId, isSuperAdmin },
         {
           invoiceNo: values.invoiceNo,
+          createdBy: userId,
           type: values.type as InvoiceType,
           status: "onaylandi", // Basitlik için doğrudan onaylandı kabul ediyoruz (Faz 1)
           cariFirmaId: selectedFirma.id,

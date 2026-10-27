@@ -1,5 +1,7 @@
 'use client';
 
+import type { Device, PurchasingTask, DutyShift, DeviceGroup } from '../lib/types';
+
 /**
  * Optimized Database Queries using TanStack Query
  *
@@ -29,25 +31,7 @@ import { useEffect, useRef } from 'react';
 import { subDays } from 'date-fns';
 import { ACTIVE_DEVICE_FAULT_STATUSES } from '@/lib/device-faults';
 import { useAuth } from '@/contexts/auth-context';
-import type {
-  Hospital,
-  Depot,
-  ProductCode,
-  DepoStokItem,
-  ConsumptionRecord,
-  DailyConsumptionStats,
-  Device,
-  Shipment,
-  LabPool,
-  MinMaxRule,
-  BarcodeFormat,
-  AddressDefinition,
-  User as AppUser,
-  DeviceFaultReport,
-  PurchasingTask,
-  TestDefinitionGlobal,
-  EfficiencyPool
-} from '@/lib/types';
+import type { Hospital, Depot, ProductCode, DepoStokItem, ConsumptionRecord, DailyConsumptionStats, Shipment, LabPool, MinMaxRule, BarcodeFormat, AddressDefinition, User as AppUser, DeviceFaultReport, TestDefinitionGlobal, EfficiencyPool } from '@/lib/types';
 import { DepotStockCountSession } from '@/lib/mal-kabul/types';
 import { SayimSession } from '@/lib/cost-analytics';
 import { filterByCompanyScope } from '@/lib/company-scope';
@@ -1603,7 +1587,7 @@ export function useStockUpdateListener() {
 // DUTY SHIFTS HOOKS
 // ============================================================================
 
-import type { DutyShift } from '@/lib/types';
+
 
 /**
  * Get all active duty shifts (current date is within shift period)

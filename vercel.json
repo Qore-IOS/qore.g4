@@ -3,5 +3,5 @@
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm db:migrate && pnpm build",
-  "crons": [{"path": "/api/jobs", "schedule": "* * * * *"}]
+  "crons": [{"path": "/api/jobs", "schedule": "0 6 * * *"}]
 }

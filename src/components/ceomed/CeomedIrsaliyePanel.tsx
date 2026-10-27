@@ -67,7 +67,7 @@ interface PendingIrsaliye {
   durumAciklama: string;
   itemCount: number;
   items: CeomedItem[];
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'deleted';
   syncedAt?: Timestamp;
   approvedAt?: Timestamp;
 }

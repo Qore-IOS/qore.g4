@@ -48,9 +48,11 @@ SQL işlemi içinde `qore_outbox` tablosuna yazılır; `/api/jobs` kuyruğu işl
 zamanlanmış işleri başlatır. Başarısız olaylar yeniden denenmek üzere tutulur.
 Teslimat en az bir kezdir; dış servis çağrılarında yinelenme ihtimali vardır.
 
-Vercel Cron, bu ucu dakikada bir çağırır. **Dakikalık Cron için uygun Vercel planı
-(örneğin Pro) veya harici zamanlayıcı gerekir.** Hobby planına dağıtılacaksa
-zamanlama ve otomasyon gecikmesi ayrıca uyarlanmalıdır. Cron sadece
+Vercel Cron, Hobby planına uygun `0 6 * * *` zamanlamasıyla bu ucu günde bir kez
+çağırır: 06:00 UTC (Türkiye saatiyle 09:00; Hobby çalıştırma zamanı saat içinde
+kayabilir). Kuyruk işlemleri ve hatırlatmalar bu günlük çağrıya kadar bekleyebilir;
+tek çağrıda işlenemeyen kayıtlar sonraki çalıştırmaya kalır. Daha sık işlem için
+uygun Vercel planı veya harici zamanlayıcı gerekir. Cron sadece
 `Authorization: Bearer <CRON_SECRET>` kabul eder. `CRON_SECRET` uygulama girişi değildir.
 Elle yeniden hesaplama görevleri `POST /api/tasks/recomputeCostSnapshot` ve
 `POST /api/tasks/backfillCompanyStats` üzerinden JSON gövdeyle çağrılabilir.

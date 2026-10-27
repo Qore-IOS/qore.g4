@@ -1,12 +1,14 @@
 
 'use client';
+
+import type { Device, DeviceLabPool, MaintenanceDefinition } from '../lib/types';
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import {
   collection, getDocs, setDoc, doc, deleteDoc, addDoc, serverTimestamp, query, where, Timestamp, updateDoc
 } from '../lib/data/client';
 import { db } from '../lib/data/client';
-import type { Device, Hospital, DeviceLabPool, MaintenanceDefinition, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
+import type { Hospital, MaintenancePlan, MaintenancePeriodUnit, MaintenanceType, ProductCode, PeriodicPartChange, PeriodicPartResponsibility } from '@/lib/types';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from '@/components/ui/table';

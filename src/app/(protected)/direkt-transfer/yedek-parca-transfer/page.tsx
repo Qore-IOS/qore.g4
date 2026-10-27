@@ -1,5 +1,7 @@
 'use client';
 
+import type { PersonalStockItem } from '../../../../lib/types';
+
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { db } from '../../../../lib/data/client';
@@ -19,7 +21,7 @@ import {
   setDoc,
   runTransaction,
 } from '../../../../lib/data/client';
-import type { ProductCode, User, PendingReturn, SparePartTransferRow, PersonalStockItem, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
+import type { ProductCode, User, PendingReturn, SparePartTransferRow, YedekParcaDepoStokItem, Device, Hospital, Depot, DeviceLabPool, PoolWarehouseStockItem } from '@/lib/types';
 import { useAuth } from '@/contexts/auth-context';
 import { withCompanyScope, filterByCompanyScope } from '@/lib/company-scope';
 import { getScopedDocs, scopedQuery } from '@/lib/document-helpers';

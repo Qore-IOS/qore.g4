@@ -1,4 +1,5 @@
 'use client';
+import type {PurchasingTask} from '../../lib/types';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -64,11 +65,11 @@ export function CalendarDockPanel({
 
   // Yalnızca giriş yapan kullanıcının görevleri (oluşturduğu veya atandığı).
   const myTasks = useMemo(() => {
-    if (!uid) return [] as Array<Record<string, unknown> & { _d: Date }>;
-    return (allTasks as Array<Record<string, unknown>>)
+    if (!uid) return [] as Array<PurchasingTask & { _d: Date }>;
+    return allTasks
       .map((t) => ({ ...t, _d: toDate(t.date) }))
       .filter(
-        (t): t is Record<string, unknown> & { _d: Date } =>
+        (t): t is PurchasingTask & { _d: Date } =>
           !!t._d &&
           (t.createdByUid === uid ||
             ((t.assignedPersonnel as Array<{ uid?: string }> | undefined) || []).some(
